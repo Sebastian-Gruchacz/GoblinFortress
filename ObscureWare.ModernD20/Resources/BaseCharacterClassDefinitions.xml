@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ArrayOfBaseCharacterClassDefinition xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <BaseCharacterClassDefinition>
+    <Id>{77540CFC-B23A-4A61-AAD0-A3FDB4F9AC5B}</Id>
+    <ImplementationClassName>ObscureWare.ModernD20.BaseCharacterClasses.StrongHeroBaseClass</ImplementationClassName>
+    <GoverningAbility>Strength</GoverningAbility>
+    <HitDieDescription>1d8</HitDieDescription>
+    <ClassSkills>
+      <guid>{04A56EAD-4734-4CBD-97E5-2598B7AB2C5B}</guid>
+      <guid>{B1B5CADB-BE0C-46DD-8186-2D419F804A80}</guid>
+      <guid>{169C35E5-14F9-4D5C-96AC-08F46621476A}</guid>
+      <guid>{ECE05425-2DCB-4F2B-A804-458F7E4AE95D}</guid>
+      <guid>{13C03AFF-EB0B-41AF-A9CD-72C380CC94D7}</guid>
+      <guid>{AA9807F8-53DD-4FAD-909B-137CE08DE330}</guid>
+      <guid>{5EE6ECAD-4DFA-44BA-B435-4EF61A236376}</guid>
+      <guid>{731FCC23-15DD-4AD3-B4B0-EB450C8F8506}</guid>
+      <guid>{FE4A45BB-8418-4D1C-A760-E824546D3129}</guid>
+      <guid>{71FBB504-04F0-45D5-AE4D-20ECBE9C5287}</guid>
+      <guid>{773CA016-C06F-4308-B42F-C2753F82908E}</guid>
+    </ClassSkills>
+    <BaseCharacterClassTableRows>
+      <BaseCharacterClassTableRow>
+        <ClassLevel>1</ClassLevel><BaseAttackBonus>1</BaseAttackBonus><FortitudeSave>1</FortitudeSave><ReflexSave>0</ReflexSave><WillSave>0</WillSave>
+        <ClassFeatures>Talent</ClassFeatures><DefenseBonus>1</DefenseBonus><ReputationBonus>0</ReputationBonus>
+      </BaseCharacterClassTableRow>
+      <BaseCharacterClassTableRow>
+        <ClassLevel>2</ClassLevel><BaseAttackBonus>2</BaseAttackBonus><FortitudeSave>2</FortitudeSave><ReflexSave>0</ReflexSave><WillSave>0</WillSave>
+        <ClassFeatures>ClassFeature</ClassFeatures><DefenseBonus>2</DefenseBonus><ReputationBonus>0</ReputationBonus>
+      </BaseCharacterClassTableRow>
+    </BaseCharacterClassTableRows>
+  </BaseCharacterClassDefinition>
+</ArrayOfBaseCharacterClassDefinition>

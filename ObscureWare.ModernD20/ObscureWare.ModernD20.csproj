@@ -1,0 +1,206 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{D626923E-0B03-442D-9A5B-80EA55BAE60A}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>ObscureWare.ModernD20</RootNamespace>
+    <AssemblyName>ObscureWare.ModernD20</AssemblyName>
+    <TargetFrameworkVersion>v4.5.2</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <SccProjectName>SAK</SccProjectName>
+    <SccLocalPath>SAK</SccLocalPath>
+    <SccAuxPath>SAK</SccAuxPath>
+    <SccProvider>SAK</SccProvider>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="LiteDB">
+      <HintPath>..\CommonContent\LiteDB.dll</HintPath>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="CharacterCreation\BaseCharacterCreator.cs" />
+    <Compile Include="CharacterCreation\ChildCharacterCreator.cs" />
+    <Compile Include="CharacterCreation\INationProvider.cs" />
+    <Compile Include="Gender.cs" />
+    <Compile Include="CharacterCreation\HeroCharacterCreator.cs" />
+    <Compile Include="CharacterCreation\ICharacterCreator.cs" />
+    <Compile Include="CharacterCreation\OrdinaryCharacterCreator.cs" />
+    <Compile Include="EffectBuilders\CoveringEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\IAbilityBonusTargettedCharacterEffect.cs" />
+    <Compile Include="EffectBuilders\PenalizeAbilityBasedSkillsEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\PenalizeDefenseEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\UnableToActEffectBuilder.cs" />
+    <Compile Include="Engine\AbilitySet.cs" />
+    <Compile Include="EffectBuilders\AbilityDamaged.cs" />
+    <Compile Include="EffectBuilders\AbilityDrained.cs" />
+    <Compile Include="EffectBuilders\BlindedEffect.cs" />
+    <Compile Include="EffectBuilders\DisabledEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\DisabledSkillEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\DyingEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\IAbilityTargettedCharacterEffect.cs" />
+    <Compile Include="Engine\EffectsSet.cs" />
+    <Compile Include="Logic\LogicCore.cs" />
+    <Compile Include="Logic\RestorationLogic.cs" />
+    <Compile Include="Resources\IModernDatabase.cs" />
+    <Compile Include="Resources\ModernDbConnect.cs" />
+    <Compile Include="Resources\INationResourceProvider.cs" />
+    <Compile Include="RestTypeEnum.cs" />
+    <Compile Include="Logic\ActionPointsLogic.cs" />
+    <Compile Include="Builders\BaseCharacterClassBuilder.cs" />
+    <Compile Include="Engine\AppliedCharacterEffect.cs" />
+    <Compile Include="CharacterStatusEnum.cs" />
+    <Compile Include="Logic\DamageLogic.cs" />
+    <Compile Include="Descriptors\BaseCharacterClassDefinition.cs" />
+    <Compile Include="ClassFeature.cs" />
+    <Compile Include="Descriptors\SkillDescriptor.cs" />
+    <Compile Include="Builders\BaseEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\DazedEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\ImprovedDamageThresholdEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\ImmuneToCriticalDamageEffectBuilder.cs" />
+    <Compile Include="EffectBuilders\UnconsciousEffectBuilder.cs" />
+    <Compile Include="Engine\CoreNotifications.cs" />
+    <Compile Include="Engine\GlobalState.cs" />
+    <Compile Include="Localization\ITranslatedResourceProvider.cs" />
+    <Compile Include="Localization\LocalizedDescriptor.cs" />
+    <Compile Include="Feat.cs" />
+    <Compile Include="GlobalDefinitions.cs" />
+    <Compile Include="Localization\CoreTranslationsGroup.cs" />
+    <Compile Include="Localization\TranslatedResourceProvider.cs" />
+    <Compile Include="BaseCharacterClasses\StrongHeroBaseClass.cs" />
+    <Compile Include="BaseCharacterClasses\BaseCharacterClass.cs" />
+    <Compile Include="Descriptors\BaseCharacterClassTableRow.cs" />
+    <Compile Include="Engine\Character.cs" />
+    <Compile Include="Descriptors\AbilityDescriptor.cs" />
+    <Compile Include="Descriptors\BaseClassFeatureSelectEnum.cs" />
+    <Compile Include="Localization\ILocalizedDescriptor.cs" />
+    <Compile Include="GlobalOperators.cs" />
+    <Compile Include="ModernD20Library.cs" />
+    <Compile Include="Occupation.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="SavingThrowEnum.cs" />
+    <Compile Include="Logic\SavingThrowsLogic.cs" />
+    <Compile Include="Skill.cs" />
+    <Compile Include="Builders\BaseSkillBuilder.cs" />
+    <Compile Include="Skills\Balance.cs" />
+    <Compile Include="Skills\Bluff.cs" />
+    <Compile Include="Skills\Climb.cs" />
+    <Compile Include="Skills\ComputerUse.cs" />
+    <Compile Include="Skills\Concentration.cs" />
+    <Compile Include="Skills\Craft.cs" />
+    <Compile Include="Skills\CraftChemical.cs" />
+    <Compile Include="Skills\CraftElectronic.cs" />
+    <Compile Include="Skills\CraftMechanical.cs" />
+    <Compile Include="Skills\CraftPharmaceutical.cs" />
+    <Compile Include="Skills\CraftStructural.cs" />
+    <Compile Include="Skills\CraftVisualArts.cs" />
+    <Compile Include="Skills\CraftWriting.cs" />
+    <Compile Include="Skills\DecipherScript.cs" />
+    <Compile Include="Skills\Demolitions.cs" />
+    <Compile Include="Skills\Diplomacy.cs" />
+    <Compile Include="Skills\DisableDevice.cs" />
+    <Compile Include="Skills\Disguise.cs" />
+    <Compile Include="Skills\Drive.cs" />
+    <Compile Include="Skills\EscapeArtist.cs" />
+    <Compile Include="Skills\Forgery.cs" />
+    <Compile Include="Skills\Gamble.cs" />
+    <Compile Include="Skills\GatherInformation.cs" />
+    <Compile Include="Skills\HandleAnimal.cs" />
+    <Compile Include="Skills\Hide.cs" />
+    <Compile Include="Skills\Intimidate.cs" />
+    <Compile Include="Skills\Investigate.cs" />
+    <Compile Include="Skills\Jump.cs" />
+    <Compile Include="Skills\Knowledge.cs" />
+    <Compile Include="Skills\KnowledgeArcaneLore.cs" />
+    <Compile Include="Skills\KnowledgeArt.cs" />
+    <Compile Include="Skills\KnowledgeBehavioralSciences.cs" />
+    <Compile Include="Skills\KnowledgeBusiness.cs" />
+    <Compile Include="Skills\KnowledgeCivics.cs" />
+    <Compile Include="Skills\KnowledgeCurrentEvents.cs" />
+    <Compile Include="Skills\KnowledgeEarthAndLifeSciences.cs" />
+    <Compile Include="Skills\KnowledgeHistory.cs" />
+    <Compile Include="Skills\KnowledgePhysicalSciences.cs" />
+    <Compile Include="Skills\KnowledgePopularCulture.cs" />
+    <Compile Include="Skills\KnowledgeStreetwise.cs" />
+    <Compile Include="Skills\KnowledgeTactics.cs" />
+    <Compile Include="Skills\KnowledgeTechnology.cs" />
+    <Compile Include="Skills\KnowledgeTheologyAndPhilosophy.cs" />
+    <Compile Include="Skills\Listen.cs" />
+    <Compile Include="Skills\MoveSilently.cs" />
+    <Compile Include="Skills\Navigate.cs" />
+    <Compile Include="Skills\Perform.cs" />
+    <Compile Include="Skills\Pilot.cs" />
+    <Compile Include="Skills\Profession.cs" />
+    <Compile Include="Skills\Repair.cs" />
+    <Compile Include="Skills\Research.cs" />
+    <Compile Include="Skills\Ride.cs" />
+    <Compile Include="Skills\Search.cs" />
+    <Compile Include="Skills\SleightOfHand.cs" />
+    <Compile Include="Skills\Spot.cs" />
+    <Compile Include="Skills\Survival.cs" />
+    <Compile Include="Skills\Swim.cs" />
+    <Compile Include="Skills\TreatInjury.cs" />
+    <Compile Include="Skills\Tumble.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Resources\Names.English.Female.txt" />
+    <Content Include="Resources\Names.English.Male.txt" />
+    <Content Include="Resources\Surnames.English.txt" />
+    <Content Include="Translations\AbilityDescriptors.xml">
+      <SubType>Designer</SubType>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Resources\BaseCharacterClassDefinitions.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Feats\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ObscureWare.Common\ObscureWare.Common.csproj">
+      <Project>{056d4748-9fb1-43e7-813c-368d7138a8e4}</Project>
+      <Name>ObscureWare.Common</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\ObscureWare.D20Common\ObscureWare.D20Common.csproj">
+      <Project>{6406b871-8505-4303-83db-9f763ba3bd48}</Project>
+      <Name>ObscureWare.D20Common</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>

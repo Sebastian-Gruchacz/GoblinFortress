@@ -1,0 +1,155 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ClassDiagram MajorVersion="1" MinorVersion="1">
+  <Class Name="ObscureWare.D20Common.BaseLibrary" BaseTypeListCollapsed="true">
+    <Position X="8" Y="6.5" Width="2" />
+    <TypeIdentifier>
+      <HashCode>AgAAgAAAAAAAAAAAIAAAAAAACAAAAAAgAAAAAAAEAAA=</HashCode>
+      <FileName>BaseLibrary.cs</FileName>
+    </TypeIdentifier>
+    <Lollipop Position="0.2" />
+  </Class>
+  <Class Name="ObscureWare.D20Common.DieRollDescriptor">
+    <Position X="15.75" Y="10" Width="2.75" />
+    <TypeIdentifier>
+      <HashCode>ABAAgAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>DieRollDescriptor.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="ObscureWare.D20Common.GameLanguage" BaseTypeListCollapsed="true">
+    <Position X="3.25" Y="10.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAACAAAAAAAAAAAAgAAAAAQAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>GameLanguage.cs</FileName>
+    </TypeIdentifier>
+    <Lollipop Position="0.2" />
+  </Class>
+  <Class Name="ObscureWare.D20Common.BaseDbConnect" BaseTypeListCollapsed="true">
+    <Position X="11.25" Y="6.5" Width="2.25" />
+    <TypeIdentifier>
+      <HashCode>AAAAgAAAACAAAAAAAAAAAAgAAICAAABAAAgAAAAAAAA=</HashCode>
+      <FileName>ICoreDatabase.cs</FileName>
+    </TypeIdentifier>
+    <Lollipop Position="0.2" />
+  </Class>
+  <Class Name="ObscureWare.D20Common.Generators.BaseAbilityScoreGenerator">
+    <Position X="4" Y="0.5" Width="2" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAQAAA=</HashCode>
+      <FileName>Generators\BaseAbilityScoreGenerator.cs</FileName>
+    </TypeIdentifier>
+    <Lollipop Position="0.2" />
+  </Class>
+  <Class Name="ObscureWare.D20Common.Generators.ClassicAbilityScoresGenerator">
+    <Position X="0.5" Y="2.75" Width="2.25" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAA=</HashCode>
+      <FileName>Generators\ClassicAbilityScoresGenerator.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="ObscureWare.D20Common.Generators.DicePoolAbilityScoresGenerator">
+    <Position X="3" Y="2.75" Width="2.5" />
+    <TypeIdentifier>
+      <HashCode>AAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAA=</HashCode>
+      <FileName>Generators\DicePoolAbilityScoresGenerator.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="ObscureWare.D20Common.Generators.HeroicAbilityScoresGenerator">
+    <Position X="6" Y="2.75" Width="2.25" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAA=</HashCode>
+      <FileName>Generators\HeroicAbilityScoresGenerator.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="ObscureWare.D20Common.Generators.StandardAbilityScoresGenerator">
+    <Position X="8.5" Y="2.75" Width="2.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAA=</HashCode>
+      <FileName>Generators\StandardAbilityScoresGenerator.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="ObscureWare.ModernD20.Resources.VersionInfo">
+    <Position X="9" Y="9.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>IAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>VersionInfo.cs</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Interface Name="ObscureWare.D20Common.IAbilityScoresGenerator" Collapsed="true">
+    <Position X="7" Y="0.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAA=</HashCode>
+      <FileName>IAbilityScoresGenerator.cs</FileName>
+    </TypeIdentifier>
+  </Interface>
+  <Interface Name="ObscureWare.D20Common.ICoreDatabase">
+    <Position X="3.25" Y="5" Width="1.75" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAgAAACAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>ICoreDatabase.cs</FileName>
+    </TypeIdentifier>
+  </Interface>
+  <Interface Name="ObscureWare.D20Common.ICoreDatabaseUpdate">
+    <Position X="0.5" Y="5" Width="1.75" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAA=</HashCode>
+      <FileName>ICoreDatabase.cs</FileName>
+    </TypeIdentifier>
+  </Interface>
+  <Interface Name="ObscureWare.D20Common.ICoreDatabaseEdit">
+    <Position X="0.5" Y="7" Width="2" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>ICoreDatabase.cs</FileName>
+    </TypeIdentifier>
+  </Interface>
+  <Interface Name="ObscureWare.D20Common.ILibrary" Collapsed="true">
+    <Position X="8" Y="5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AgAAAAAAAAAAAAAAAAAAAAAACAAAAAAgAAAAAAAAAAA=</HashCode>
+      <FileName>ILibrary.cs</FileName>
+    </TypeIdentifier>
+  </Interface>
+  <Interface Name="ObscureWare.D20Common.IRoller">
+    <Position X="16.5" Y="8" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAACAgAAAAAAAAAAAAAAAAAAAEAAA=</HashCode>
+      <FileName>IRoller.cs</FileName>
+    </TypeIdentifier>
+  </Interface>
+  <Enum Name="ObscureWare.D20Common.AbilityEnum">
+    <Position X="11.5" Y="0.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAACAAAAAAAAAAEAAAAAAABBAAAAAAAAACAAAACA=</HashCode>
+      <FileName>AbilityEnum.cs</FileName>
+    </TypeIdentifier>
+  </Enum>
+  <Enum Name="ObscureWare.D20Common.DieEnum">
+    <Position X="17.75" Y="5.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAABAAAAAAAAAAAgAAAAQAAAAAAAIAAAAAAEEAAA=</HashCode>
+      <FileName>DieEnum.cs</FileName>
+    </TypeIdentifier>
+  </Enum>
+  <Enum Name="ObscureWare.D20Common.EffectStackModeEnum">
+    <Position X="15.5" Y="0.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACABAAA=</HashCode>
+      <FileName>EffectStackModeEnum.cs</FileName>
+    </TypeIdentifier>
+  </Enum>
+  <Enum Name="ObscureWare.D20Common.EffectTimeFrameEnum">
+    <Position X="13.25" Y="0.5" Width="2" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQIBAAAAAAAAAAA=</HashCode>
+      <FileName>EffectTimeFrameEnum.cs</FileName>
+    </TypeIdentifier>
+  </Enum>
+  <Enum Name="ObscureWare.D20Common.EffectVectorEnum">
+    <Position X="17.25" Y="0.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAACA=</HashCode>
+      <FileName>EffectVectorEnum.cs</FileName>
+    </TypeIdentifier>
+  </Enum>
+  <Font Name="Segoe UI" Size="9" />
+</ClassDiagram>

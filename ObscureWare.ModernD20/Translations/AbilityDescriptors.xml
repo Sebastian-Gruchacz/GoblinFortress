@@ -1,0 +1,54 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ArrayOfAbilityDescriptor>
+  <AbilityDescriptor>
+    <Value>Strength</Value>
+    <Name>Strength</Name>
+    <ShortName>STR</ShortName>
+    <Description>Any creature that can physically manipulate other objects has at least 1 point of Strength.
+      A creature with no Strength score can't exert force, usually because it has no physical body or because it doesn't move. The creature automatically fails Strength checks.
+      If the creature can attack, it applies its Dexterity modifier to its base attack instead of a Strength modifier.
+    </Description>
+  </AbilityDescriptor>
+  <AbilityDescriptor>
+    <Value>Dexterity</Value>
+    <Name>Dexterity</Name>
+    <ShortName>DEX</ShortName>
+    <Description>Any creature that can move has at least 1 point of Dexterity.
+      A creature with no Dexterity score can't move. If it can act, it applies its Intelligence modifier to initiative checks instead of a Dexterity modifier.
+      The creature fails all Reflex saves and Dexterity checks.
+    </Description>
+  </AbilityDescriptor>
+  <AbilityDescriptor>
+    <Value>Constitution</Value>
+    <Name>Constitution</Name>
+    <ShortName>CON</ShortName>
+    <Description>If a character's Constitution changes enough to alter his or her Constitution modifier, his or her hit points also increase or decrease accordingly at the same time.
+      Any living creature has at least 1 point of Constitution.
+      A creature with no Constitution has no body or no metabolism. It is immune to any effect that requires a Fortitude save unless the effect works on objects.
+      The creature is also immune to ability damage, ability drain, energy drain, and massive damage, and always fails Constitution checks.
+    </Description>
+  </AbilityDescriptor>
+  <AbilityDescriptor>
+    <Value>Intelligence</Value>
+    <Name>Intelligence</Name>
+    <ShortName>INT</ShortName>
+    <Description>Any creature that can think, learn, or remember has at least 1 point of Intelligence.
+      A creature with no Intelligence score is an automaton, operating on simple instincts or programmed instructions.
+      It is immune to all mind-influencing effects (charms, compulsions, phantasms, patterns and morale effects) and automatically fails Intelligence checks.
+    </Description>
+  </AbilityDescriptor>
+  <AbilityDescriptor>
+    <Value>Wisdom</Value>
+    <Name>Wisdom</Name>
+    <ShortName>WIS</ShortName>
+    <Description>Any creature that can perceive its environment in any fashion has at least 1 point of Wisdom.
+      Anything with no Wisdom score is an object, not a creature. Anything without a Wisdom score also has no Charisma score, and vice versa.
+    </Description>
+  </AbilityDescriptor>
+  <AbilityDescriptor>
+    <Value>Charisma</Value>
+    <Name>Charisma</Name>
+    <ShortName>CHA</ShortName>
+    <Description>Any creature capable of telling the difference between itself and things that are not itself has at least 1 point of Charisma.</Description>
+  </AbilityDescriptor>
+</ArrayOfAbilityDescriptor>

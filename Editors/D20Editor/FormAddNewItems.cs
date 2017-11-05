@@ -17,7 +17,7 @@ namespace D20Editor
 
         public FormAddNewItems()
         {
-            InitializeComponent();
+            this.InitializeComponent();
         }
 
         private void button5_Click(object sender, EventArgs e)
@@ -29,14 +29,14 @@ namespace D20Editor
 
         public SelectionMode SelectionMode
         {
-            get { return _selectionMode; }
-            set { _selectionMode = value; }
+            get { return this._selectionMode; }
+            set { this._selectionMode = value; }
         }
 
         public string[] Items
         {
-            get { return _items; }
-            private set { _items = value; }
+            get { return this._items; }
+            private set { this._items = value; }
         }
 
         private void button3_Click(object sender, EventArgs e)

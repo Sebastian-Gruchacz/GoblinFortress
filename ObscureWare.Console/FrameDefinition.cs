@@ -18,10 +18,10 @@ namespace ObscureWare.Console
 
         public FrameDefinition(ConsoleFontColor frameColor, ConsoleFontColor textColor, string frameChars, char backgroundFiller)
         {
-            FrameColor = frameColor;
-            TextColor = textColor;
-            BackgroundFiller = backgroundFiller;
-            _frameChars = frameChars.ToCharArray();
+            this.FrameColor = frameColor;
+            this.TextColor = textColor;
+            this.BackgroundFiller = backgroundFiller;
+            this._frameChars = frameChars.ToCharArray();
         }
 
         public ConsoleFontColor FrameColor { get; private set; }
@@ -30,20 +30,20 @@ namespace ObscureWare.Console
 
         public char BackgroundFiller { get; private set; }
 
-        public char TopLeft { get { return _frameChars[(byte)FramePiece.TopLeft]; } }
+        public char TopLeft { get { return this._frameChars[(byte)FramePiece.TopLeft]; } }
 
-        public char Top { get { return _frameChars[(byte)FramePiece.Top]; } }
+        public char Top { get { return this._frameChars[(byte)FramePiece.Top]; } }
 
-        public char TopRight { get { return _frameChars[(byte)FramePiece.TopRight]; } }
+        public char TopRight { get { return this._frameChars[(byte)FramePiece.TopRight]; } }
 
-        public char Left { get { return _frameChars[(byte)FramePiece.Left]; } }
+        public char Left { get { return this._frameChars[(byte)FramePiece.Left]; } }
 
-        public char Right { get { return _frameChars[(byte)FramePiece.Right]; } }
+        public char Right { get { return this._frameChars[(byte)FramePiece.Right]; } }
 
-        public char BottomLeft { get { return _frameChars[(byte)FramePiece.BottomLeft]; } }
+        public char BottomLeft { get { return this._frameChars[(byte)FramePiece.BottomLeft]; } }
 
-        public char Bottom { get { return _frameChars[(byte)FramePiece.Bottom]; } }
+        public char Bottom { get { return this._frameChars[(byte)FramePiece.Bottom]; } }
 
-        public char BottomRight { get { return _frameChars[(byte)FramePiece.BottomRight]; } }
+        public char BottomRight { get { return this._frameChars[(byte)FramePiece.BottomRight]; } }
     }
 }

@@ -7,18 +7,18 @@
 
         public DisplayItem(T skillTuple, string description)
         {
-            _skillTuple = skillTuple;
-            _description = description;
+            this._skillTuple = skillTuple;
+            this._description = description;
         }
 
         public T Value
         {
-            get { return _skillTuple; }
+            get { return this._skillTuple; }
         }
 
         public override string ToString()
         {
-            return _description;
+            return this._description;
         }
     }
 }

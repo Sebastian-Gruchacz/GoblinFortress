@@ -9,7 +9,7 @@ namespace ObscureWare.ModernD20.EffectBuilders
 
         public DazedEffectBuilder(uint lengthInRounds) : base(EffectTimeFrameEnum.Temporary, EffectStackModeEnum.Stackable)
         {
-            _lengthInRounds = lengthInRounds;
+            this._lengthInRounds = lengthInRounds;
         }
 
         public override AppliedCharacterEffect GetCharacterEntry(GlobalState state)

@@ -29,10 +29,10 @@ namespace Obscureware.D20Common.Tests
         {
             int expectedSize = 6; // Enum.GetValues(typeof (AbilityEnum)).Length;
 
-            foreach (var generator in _knownGenerators)
+            foreach (var generator in this._knownGenerators)
             {
-                var testScore = generator.GenerateScores(_testRoller).ToArray();
-                PrintScore(generator.GetType().Name, testScore);
+                var testScore = generator.GenerateScores(this._testRoller).ToArray();
+                this.PrintScore(generator.GetType().Name, testScore);
 
                 Assert.AreEqual(expectedSize, testScore.Length);
             }

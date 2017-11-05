@@ -9,7 +9,7 @@ namespace ObscureWare.Nations
 
         public override Guid Id
         {
-            get { return _id; }
+            get { return this._id; }
         }
 
         public BritishNationProvider(INationResourceProvider resourceProvider) : base(resourceProvider)

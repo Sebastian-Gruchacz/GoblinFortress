@@ -9,17 +9,17 @@ namespace ObscureWare.D20Common
 
         public DefaultRandomizer()
         {
-            _rnd = new Random();
+            this._rnd = new Random();
         }
 
         public DefaultRandomizer(int baseSeed)
         {
-            _rnd = new Random(baseSeed);
+            this._rnd = new Random(baseSeed);
         }
 
         public int NextInt(int minInclusiveValue, int maxInclusiveValue)
         {
-            return _rnd.Next(minInclusiveValue, (int)Math.Min(Int32.MaxValue, (long)maxInclusiveValue + 1));
+            return this._rnd.Next(minInclusiveValue, (int)Math.Min(Int32.MaxValue, (long)maxInclusiveValue + 1));
         }
     }
 }

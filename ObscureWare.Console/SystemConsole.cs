@@ -19,33 +19,33 @@ namespace ObscureWare.Console
         /// </summary>
         public Point WindowSize
         {
-            get { return _windowSize; }
+            get { return this._windowSize; }
         }
 
         public SystemConsole(ConsoleColorsHelper helper)
         {
-            System.Console.OutputEncoding = Encoding.Unicode;
-            System.Console.InputEncoding = Encoding.Unicode;
+            Console.OutputEncoding = Encoding.Unicode;
+            Console.InputEncoding = Encoding.Unicode;
 
-            SetFullScreen();
+            this.SetFullScreen();
             // SG: (-2) On Win8 the only working way to keep borders on the screen :(
             // (-1) required on Win10 though :(
-            _windowSize = new Point(System.Console.LargestWindowWidth - 2, System.Console.LargestWindowHeight - 1);
+            this._windowSize = new Point(Console.LargestWindowWidth - 2, Console.LargestWindowHeight - 1);
 
-            _consoleColorsHelper = helper ?? new ConsoleColorsHelper();
+            this._consoleColorsHelper = helper ?? new ConsoleColorsHelper();
 
             // setting fullscreen
-            System.Console.BufferWidth = _windowSize.X;
-            System.Console.WindowWidth = _windowSize.X;
-            System.Console.BufferHeight = _windowSize.Y;
-            System.Console.WindowHeight = _windowSize.Y;
-            System.Console.SetWindowPosition(0, 0);
+            Console.BufferWidth = this._windowSize.X;
+            Console.WindowWidth = this._windowSize.X;
+            Console.BufferHeight = this._windowSize.Y;
+            Console.WindowHeight = this._windowSize.Y;
+            Console.SetWindowPosition(0, 0);
         }
 
         private void SetFullScreen()
         {
             // http://www.codeproject.com/Articles/4426/Console-Enhancements
-            SetWindowPosition(
+            this.SetWindowPosition(
                 0,
                 0,
                 Screen.PrimaryScreen.WorkingArea.Width - (2 * 16),
@@ -54,40 +54,40 @@ namespace ObscureWare.Console
 
         public void WriteText(int x, int y, string text, Color foreColor, Color bgColor)
         {
-            PositionCursor(x, y);
-            SetColors(foreColor, bgColor);
-            WriteText(text);
+            this.PositionCursor(x, y);
+            this.SetColors(foreColor, bgColor);
+            this.WriteText(text);
         }
 
         public void WriteText(string text)
         {
-            System.Console.Write(text);
+            Console.Write(text);
         }
 
         public void SetColors(Color foreColor, Color bgColor)
         {
-            System.Console.ForegroundColor = _consoleColorsHelper.FindClosestColor(foreColor);
-            System.Console.BackgroundColor = _consoleColorsHelper.FindClosestColor(bgColor);
+            Console.ForegroundColor = this._consoleColorsHelper.FindClosestColor(foreColor);
+            Console.BackgroundColor = this._consoleColorsHelper.FindClosestColor(bgColor);
         }
 
         public void Clear()
         {
-            System.Console.Clear();
+            Console.Clear();
         }
 
         public void PositionCursor(int x, int y)
         {
-            System.Console.SetCursorPosition(x, y);
+            Console.SetCursorPosition(x, y);
         }
 
         public void WriteText(char character)
             {
-            System.Console.Write(character);
+            Console.Write(character);
         }
 
         public void ReplaceConsoleColor(ConsoleColor color, Color rgbColor)
         {
-            _consoleColorsHelper.ReplaceConsoleColor(color, rgbColor);
+            this._consoleColorsHelper.ReplaceConsoleColor(color, rgbColor);
         }
 
         #region PInvoke

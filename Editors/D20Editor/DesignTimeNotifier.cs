@@ -12,7 +12,7 @@ namespace D20Editor
 
         public DesignTimeNotifier(FormMain formMain)
         {
-            _formMain = formMain;
+            this._formMain = formMain;
         }
 
         public void ReportCharacterTakingDamage(Character character, DamageInfo damageInfo)

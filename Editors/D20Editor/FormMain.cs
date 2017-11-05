@@ -28,12 +28,12 @@ namespace D20Editor
 
         public FormMain()
         {
-            _catalog = new AggregateCatalog();
+            this._catalog = new AggregateCatalog();
             //Adds all the parts found in the same assembly as the Program class
-            _catalog.Catalogs.Add(new AssemblyCatalog(typeof(Program).Assembly));
+            this._catalog.Catalogs.Add(new AssemblyCatalog(typeof(Program).Assembly));
 
-            InitializeComponent();
-            CreateLibraries();
+            this.InitializeComponent();
+            this.CreateLibraries();
         }
 
         private void CreateLibraries()
@@ -41,19 +41,19 @@ namespace D20Editor
             string workingDbPath = Path.GetFullPath(@"..\..\..\..\CommonContent\moderngame.db"); // TODO: separate DB per library?
             string futureDbPath = Path.GetFullPath(@"..\..\..\..\CommonContent\futuregame.db"); // TODO: separate DB per library?
 
-            _modernDB = new ModernDbConnect(workingDbPath);
-            _futureDB = new FutureDbConnect(futureDbPath);
+            this._modernDB = new ModernDbConnect(workingDbPath);
+            this._futureDB = new FutureDbConnect(futureDbPath);
 
             // TODO: version upgrading code is something else
 
-            _globalNotifier = new DesignTimeNotifier(this);
-            _modernLib = new ModernD20Library(_globalNotifier, _modernDB);
-            _futureLib = new FutureD20Library(_modernLib, _futureDB);
+            this._globalNotifier = new DesignTimeNotifier(this);
+            this._modernLib = new ModernD20Library(this._globalNotifier, this._modernDB);
+            this._futureLib = new FutureD20Library(this._modernLib, this._futureDB);
         }
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            if (!DbVersionAreCurrent())
+            if (!this.DbVersionAreCurrent())
             {
                 Application.Exit();
                 return;
@@ -61,34 +61,34 @@ namespace D20Editor
 
 
             // ...
-            _modernLib.GlobalDefinitions.LoadSystem("EN");
+            this._modernLib.GlobalDefinitions.LoadSystem("EN");
         }
 
         private bool DbVersionAreCurrent()
         {
-            var modernVer = _modernLib.GetDbVersion();
-            var futureVer = _futureLib.GetDbVersion();
+            var modernVer = this._modernLib.GetDbVersion();
+            var futureVer = this._futureLib.GetDbVersion();
 
-            if (modernVer != _modernLib.LibraryVersion)
+            if (modernVer != this._modernLib.LibraryVersion)
             {
                 if (MessageBox.Show(this, "Modern db version not current. Upgrade?", "DB Version Mismatch",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button1) ==
                     DialogResult.Yes)
                 {
-                    return _modernLib.UpgradeDB();
+                    return this._modernLib.UpgradeDB();
                 }
                 else
                 {
                     return false;
                 }
             }
-            if (futureVer != _futureLib.LibraryVersion)
+            if (futureVer != this._futureLib.LibraryVersion)
             {
                 if (MessageBox.Show(this, "Modern db version not current. Upgrade?", "DB Version Mismatch",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button1) ==
                     DialogResult.Yes)
                 {
-                    return _futureLib.UpgradeDB();
+                    return this._futureLib.UpgradeDB();
                 }
                 else
                 {
@@ -106,29 +106,29 @@ namespace D20Editor
 
         private void skillsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            new FormSkills(_modernLib.GlobalDefinitions).ShowDialog(this);
+            new FormSkills(this._modernLib.GlobalDefinitions).ShowDialog(this);
         }
 
         
 
         private void gameLanguagesToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            new FormEditGameLanguages(_modernLib, _modernDB).ShowDialog(this);
+            new FormEditGameLanguages(this._modernLib, this._modernDB).ShowDialog(this);
         }
 
         private void nationsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            new FormEditNations(_modernLib, _modernDB).ShowDialog(this);
+            new FormEditNations(this._modernLib, this._modernDB).ShowDialog(this);
         }
 
         private void gameLanguagesToolStripMenuItem1_Click(object sender, EventArgs e)
         {
-            new FormEditGameLanguages(_futureLib, _futureDB).ShowDialog(this);
+            new FormEditGameLanguages(this._futureLib, this._futureDB).ShowDialog(this);
         }
 
         private void nationsToolStripMenuItem1_Click(object sender, EventArgs e)
         {
-            new FormEditNations(_futureLib, _futureDB).ShowDialog(this);
+            new FormEditNations(this._futureLib, this._futureDB).ShowDialog(this);
         }
     }
 }

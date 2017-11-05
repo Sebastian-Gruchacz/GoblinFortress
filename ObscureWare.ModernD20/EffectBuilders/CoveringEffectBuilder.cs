@@ -15,21 +15,21 @@ namespace ObscureWare.ModernD20.EffectBuilders
 
         public CoveringEffectBuilder(int penaltyRounds) : base(EffectTimeFrameEnum.Temporary, EffectStackModeEnum.Stackable) // TODO: select bigger stacking?
         {
-            _penaltyRounds = penaltyRounds;
+            this._penaltyRounds = penaltyRounds;
         }
 
         public override AppliedCharacterEffect GetCharacterEntry(GlobalState state)
         {
-            var effectRuntime = new DisableAbilityBonusCharacterEffect(this, AbilityEnum.Dexterity, _penaltyRounds);
-            CreateExtraEffects(effectRuntime, state);
+            var effectRuntime = new DisableAbilityBonusCharacterEffect(this, AbilityEnum.Dexterity, this._penaltyRounds);
+            this.CreateExtraEffects(effectRuntime, state);
 
             return effectRuntime;
         }
 
         private void CreateExtraEffects(AppliedCharacterEffect effectRuntime, GlobalState state)
         {
-            effectRuntime.AddExtraEfect(new UnableToActEffectBuilder(EffectTimeFrameEnum.Temporary, _penaltyRounds).GetCharacterEntry(state));
-            effectRuntime.AddExtraEfect(new PenalizeDefenseEffectBuilder(EffectTimeFrameEnum.Temporary, _penaltyRounds, 2).GetCharacterEntry(state));
+            effectRuntime.AddExtraEfect(new UnableToActEffectBuilder(EffectTimeFrameEnum.Temporary, this._penaltyRounds).GetCharacterEntry(state));
+            effectRuntime.AddExtraEfect(new PenalizeDefenseEffectBuilder(EffectTimeFrameEnum.Temporary, this._penaltyRounds, 2).GetCharacterEntry(state));
         }
 
         public static readonly int DEFAULT_PENALTY_ROUNDS = 10;
@@ -40,8 +40,8 @@ namespace ObscureWare.ModernD20.EffectBuilders
     {
         public DisableAbilityBonusCharacterEffect(BaseEffectBuilder effectBuilder, AbilityEnum affectedAbility, int penaltyRounds) : base(effectBuilder)
         {
-            AffectedAbility = affectedAbility;
-            Value = 0;
+            this.AffectedAbility = affectedAbility;
+            this.Value = 0;
         }
 
         public AbilityEnum AffectedAbility { get; }

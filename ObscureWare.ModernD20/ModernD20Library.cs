@@ -21,18 +21,18 @@ namespace ObscureWare.ModernD20
 
         public ModernD20Library(ICoreNotifications coreNotifications, IModernDatabase database) : base(database)
         {
-            _database = database;
-            CoreNotifications = coreNotifications;
-            GlobalState = new GlobalState(this);
+            this._database = database;
+            this.CoreNotifications = coreNotifications;
+            this.GlobalState = new GlobalState(this);
 
-            FightRoller = new DefaultRoller(new DefaultRandomizer()); // TODO: expand rollers tree -> or move to global state
-            GlobalDefinitions = new GlobalDefinitions(_database);
-            GlobalDefinitions.RegisterLibrary(this.GetType().Assembly);
+            this.FightRoller = new DefaultRoller(new DefaultRandomizer()); // TODO: expand rollers tree -> or move to global state
+            this.GlobalDefinitions = new GlobalDefinitions(this._database);
+            this.GlobalDefinitions.RegisterLibrary(this.GetType().Assembly);
 
-            SavingThrowsLogic = new SavingThrowsLogic(this);
-            ActionPointsLogic = new ActionPointsLogic(this);
+            this.SavingThrowsLogic = new SavingThrowsLogic(this);
+            this.ActionPointsLogic = new ActionPointsLogic(this);
 
-            RestorationLogic = new RestorationLogic(this);
+            this.RestorationLogic = new RestorationLogic(this);
             // DamageLogic = new DamageLogic(this);
         }
 
@@ -52,7 +52,7 @@ namespace ObscureWare.ModernD20
 
         public IModernDatabase Db
         {
-            get { return _database; }
+            get { return this._database; }
         }
 
         

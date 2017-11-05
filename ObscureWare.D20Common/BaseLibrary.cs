@@ -13,18 +13,18 @@ namespace ObscureWare.D20Common
 
         protected BaseLibrary(ICoreDatabase dbConnect)
         {
-            _db = dbConnect;
-            _libraryName = this.GetType().Name;
+            this._db = dbConnect;
+            this._libraryName = this.GetType().Name;
         }
 
         public IList<GameLanguage> GameWorldLanguages
         {
-            get { return _db.GetGameLanguages(_libraryName).OrderBy(l => l.Name).ToList(); }
+            get { return this._db.GetGameLanguages(this._libraryName).OrderBy(l => l.Name).ToList(); }
         }
 
         public string LibraryName
         {
-            get { return _libraryName; }
+            get { return this._libraryName; }
         }
 
         //public void UpdateGameWorldLanguages(IEnumerable<GameLanguage> languages)
@@ -34,7 +34,7 @@ namespace ObscureWare.D20Common
 
         public Version GetDbVersion()
         {
-            return _db.GetLibraryVersion(_libraryName, this.LibraryVersion);
+            return this._db.GetLibraryVersion(this._libraryName, this.LibraryVersion);
         }
     }
 }

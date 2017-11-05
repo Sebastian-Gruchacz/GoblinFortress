@@ -18,8 +18,8 @@ namespace ObscureWare.ModernD20.Resources
 
         public VersionInfo(string target, string version)
         {
-            Version = version;
-            Target = target;
+            this.Version = version;
+            this.Target = target;
         }
 
         [BsonId]

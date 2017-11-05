@@ -51,7 +51,7 @@ namespace ObscureWare.ModernD20.Logic
 
         public uint GetD6ActionPointsRoll(Character character, IRoller roller)
         {
-            uint rollsNumber = GetD6RollsAvailbleForActionPointRoll(character);
+            uint rollsNumber = this.GetD6RollsAvailbleForActionPointRoll(character);
             if (rollsNumber == 1)
             {
                 return roller.Roll(DieEnum.D6);

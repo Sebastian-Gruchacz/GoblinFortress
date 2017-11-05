@@ -16,7 +16,7 @@ namespace ObscureWare.D20Common.Generators
 
         public DicePoolAbilityScoresGenerator(bool useHeroicPoolSize)
         {
-            _poolSize = useHeroicPoolSize ? 28u : 24u;
+            this._poolSize = useHeroicPoolSize ? 28u : 24u;
         }
 
         public override IEnumerable<uint> GenerateScores(IRoller roller)
@@ -24,7 +24,7 @@ namespace ObscureWare.D20Common.Generators
             uint[] numberOfDicesPerScore = new uint[ScoresCount];
             numberOfDicesPerScore.Fill(3u);
 
-            for (uint i = _poolSize - (3*ScoresCount); i <= _poolSize; ++i)
+            for (uint i = this._poolSize - (3*ScoresCount); i <= this._poolSize; ++i)
             {
                 numberOfDicesPerScore[roller.CoreGenerator.NextInt(0, (int) ScoresCount - 1)] += 1;
             }

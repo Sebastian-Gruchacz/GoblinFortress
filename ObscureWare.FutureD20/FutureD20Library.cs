@@ -24,15 +24,15 @@ namespace ObscureWare.FutureD20
 
         public FutureD20Library(ModernD20Library moderLogicRef, IFutureDatabase futureDb) : base (futureDb)
         {
-            _moderLogicRef = moderLogicRef;
-            _futureDb = futureDb;
-            _moderLogicRef.GlobalDefinitions.RegisterLibrary(this.GetType().Assembly);
+            this._moderLogicRef = moderLogicRef;
+            this._futureDb = futureDb;
+            this._moderLogicRef.GlobalDefinitions.RegisterLibrary(this.GetType().Assembly);
         }
 
         /// <summary>
         /// For now, later it might be some decorator class over it
         /// </summary>
-        public GlobalDefinitions GlobalDefinitions { get { return _moderLogicRef.GlobalDefinitions; } }
+        public GlobalDefinitions GlobalDefinitions { get { return this._moderLogicRef.GlobalDefinitions; } }
 
 
 
@@ -44,7 +44,7 @@ namespace ObscureWare.FutureD20
 
         public IList<GameLanguage> WordLanguages
         {
-            get { return _wordLanguages; }
+            get { return this._wordLanguages; }
         }
     }
 }

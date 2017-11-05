@@ -13,14 +13,14 @@ namespace ObscureWare.ModernD20.Localization
 
         public void ApplyTranslationsFile(Stream str)
         {
-            var newLabels = (LocalizedDescriptor[])_serializer.Deserialize(str);
+            var newLabels = (LocalizedDescriptor[]) this._serializer.Deserialize(str);
             foreach (var localizedDescriptor in newLabels)
             {
                 Dictionary<Guid, ILocalizedDescriptor> groupDict;
-                if (!_translations.TryGetValue(localizedDescriptor.TranslationGroupName, out groupDict))
+                if (!this._translations.TryGetValue(localizedDescriptor.TranslationGroupName, out groupDict))
                 {
                     groupDict = new Dictionary<Guid, ILocalizedDescriptor>();
-                    _translations.Add(localizedDescriptor.TranslationGroupName, groupDict);
+                    this._translations.Add(localizedDescriptor.TranslationGroupName, groupDict);
                 }
 
                 groupDict[localizedDescriptor.TranslationId] = localizedDescriptor; // will overwrite! Expected behavior.
@@ -30,7 +30,7 @@ namespace ObscureWare.ModernD20.Localization
         public ILocalizedDescriptor GetDescriptor(string translationsGroup, Guid id)
         {
             Dictionary<Guid, ILocalizedDescriptor> groupDict;
-            if (!_translations.TryGetValue(translationsGroup, out groupDict))
+            if (!this._translations.TryGetValue(translationsGroup, out groupDict))
             {
                 throw new InvalidOperationException("## TranGroup: " + translationsGroup + " ##");
             }

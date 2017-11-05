@@ -14,13 +14,13 @@ namespace ObscureWare.ModernD20.EffectBuilders
 
         public AbilityDrainedEffectBuilder(AbilityEnum affectedAbility, uint newDamagedPoints) : base(EffectTimeFrameEnum.Permanent, EffectStackModeEnum.Stackable)
         {
-            _affectedAbility = affectedAbility;
-            _newDamagedPoints = newDamagedPoints;
+            this._affectedAbility = affectedAbility;
+            this._newDamagedPoints = newDamagedPoints;
         }
 
         public override AppliedCharacterEffect GetCharacterEntry(GlobalState state)
         {
-            return new AbilityDrainedCharacterEffect(this, _affectedAbility, _newDamagedPoints);
+            return new AbilityDrainedCharacterEffect(this, this._affectedAbility, this._newDamagedPoints);
         }
     }
 
@@ -31,13 +31,13 @@ namespace ObscureWare.ModernD20.EffectBuilders
 
         public AbilityDrainedCharacterEffect(BaseEffectBuilder effectBuilder, AbilityEnum affectedAbility, uint newDamagedPoints) : base(effectBuilder)
         {
-            _affectedAbility = affectedAbility;
-            Value = (int)newDamagedPoints;
+            this._affectedAbility = affectedAbility;
+            this.Value = (int)newDamagedPoints;
         }
 
         public AbilityEnum AffectedAbility
         {
-            get { return _affectedAbility; }
+            get { return this._affectedAbility; }
         }
 
         public EffectVectorEnum EffectVector { get { return EffectVectorEnum.Negative; } }

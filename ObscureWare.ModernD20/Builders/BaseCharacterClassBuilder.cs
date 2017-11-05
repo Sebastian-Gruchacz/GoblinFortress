@@ -15,49 +15,49 @@ namespace ObscureWare.ModernD20.Builders
 
         public BaseCharacterClassBuilder(BaseCharacterClassDefinition def, ITranslatedResourceProvider translatedResourceProvider, GlobalDefinitions globals)
         {
-            _def = def;
-            _translatedResourceProvider = translatedResourceProvider;
-            _globals = globals;
+            this._def = def;
+            this._translatedResourceProvider = translatedResourceProvider;
+            this._globals = globals;
         }
 
         public Guid GetId()
         {
-            return _def.Id;
+            return this._def.Id;
         }
 
         public IEnumerable<Skill> GetClassSkillsIdentifiers()
         {
-            return _def.ClassSkills.Select(id => _globals.FindSkill(id));
+            return this._def.ClassSkills.Select(id => this._globals.FindSkill(id));
         }
 
         public ILocalizedDescriptor GetDescriptor()
         {
-            return _translatedResourceProvider.GetDescriptor(CoreTranslationsGroup.BaseCharacterClass.ToString(), _def.Id);
+            return this._translatedResourceProvider.GetDescriptor(CoreTranslationsGroup.BaseCharacterClass.ToString(), this._def.Id);
         }
 
         public DieRollDescriptor GetHitDieDescriptor()
         {
-            return new DieRollDescriptor(_def.HitDieDescription);
+            return new DieRollDescriptor(this._def.HitDieDescription);
         }
 
         public IEnumerable<Feat> GetStartingFeats()
         {
-            return _def.StartingFeats.Select(id => _globals.FindFeat(id));
+            return this._def.StartingFeats.Select(id => this._globals.FindFeat(id));
         }
 
         public IEnumerable<BaseCharacterClassTableRow> GetClassTableRows()
         {
-            return _def.BaseCharacterClassTableRows;
+            return this._def.BaseCharacterClassTableRows;
         }
 
         public IEnumerable<ClassFeature> GetClassFeatures()
         {
-            return _def.ClassFeatures.Select(id => _globals.FindClassFeature(id));
+            return this._def.ClassFeatures.Select(id => this._globals.FindClassFeature(id));
         }
 
         public AbilityEnum GetGoverningAbility()
         {
-            return _def.GoverningAbility;
+            return this._def.GoverningAbility;
         }
 
         public IEnumerable<Guid> GetAvailableTalentTrees()
@@ -67,7 +67,7 @@ namespace ObscureWare.ModernD20.Builders
 
         public IEnumerable<Feat> GetAvailableBonusFeats()
         {
-            return _def.BonusFeats.Select(id => _globals.FindFeat(id));
+            return this._def.BonusFeats.Select(id => this._globals.FindFeat(id));
         }
     }
 }

@@ -12,10 +12,10 @@ namespace ObscureWare.ModernD20.Logic
 
         public DamageLogic(ModernD20Library library) : base(library)
         {
-            _massiveDamageThresholdEffectId = _library.GlobalDefinitions.FindEffectId(typeof(ImprovedDamageThresholdEffectBuilder));
-            _immuneToCriticalDamageEffectId = _library.GlobalDefinitions.FindEffectId(typeof(ImmuneToCriticalDamageEffectBuilder));
-            _disabledEffectId = _library.GlobalDefinitions.FindEffectId(typeof(DisabledEffectBuilder));
-            _dyingEffectId = _library.GlobalDefinitions.FindEffectId(typeof(DyingEffectBuilder));
+            this._massiveDamageThresholdEffectId = this._library.GlobalDefinitions.FindEffectId(typeof(ImprovedDamageThresholdEffectBuilder));
+            this._immuneToCriticalDamageEffectId = this._library.GlobalDefinitions.FindEffectId(typeof(ImmuneToCriticalDamageEffectBuilder));
+            this._disabledEffectId = this._library.GlobalDefinitions.FindEffectId(typeof(DisabledEffectBuilder));
+            this._dyingEffectId = this._library.GlobalDefinitions.FindEffectId(typeof(DyingEffectBuilder));
         }
 
         #region Massive Damage
@@ -32,7 +32,7 @@ namespace ObscureWare.ModernD20.Logic
         public int GetMassiveDamageThreshold(Character character)
         {
             return character.Abilities.GetAbilityModifier(AbilityEnum.Constitution) +
-                   character.Effects.GetAppliedEffectValue(_massiveDamageThresholdEffectId) ?? 0;
+                   character.Effects.GetAppliedEffectValue(this._massiveDamageThresholdEffectId) ?? 0;
         }
 
         /// <summary>
@@ -43,7 +43,7 @@ namespace ObscureWare.ModernD20.Logic
         /// <returns></returns>
         public bool IsAttackMassive(Character character, uint attackScore)
         {
-            return GetMassiveDamageThreshold(character) < attackScore;
+            return this.GetMassiveDamageThreshold(character) < attackScore;
         }
 
         /// <summary>
@@ -56,22 +56,22 @@ namespace ObscureWare.ModernD20.Logic
         /// <remarks>Creatures immune to critical hits are also immune to the effects of massive damage.</remarks>
         private void TryApplyMassiveDamage(Character character, uint attackScore)
         {
-            bool isImmune = character.Effects.GetAppliedEffectValue(_immuneToCriticalDamageEffectId) != null;
+            bool isImmune = character.Effects.GetAppliedEffectValue(this._immuneToCriticalDamageEffectId) != null;
 
             if (!isImmune && attackScore < character.CurrentHitPoints)
             {
-                if (_library.SavingThrowsLogic.TestSavingThrow(SavingThrowEnum.Fortitude, character, MASSIVE_DAMAGE_SAVING_THROW_DC))
+                if (this._library.SavingThrowsLogic.TestSavingThrow(SavingThrowEnum.Fortitude, character, MASSIVE_DAMAGE_SAVING_THROW_DC))
                 {
-                    ApplyNormalDamage(character, attackScore);
+                    this.ApplyNormalDamage(character, attackScore);
                 }
                 else
                 {
-                    ForceCharacterHitPointsValue(character, -1); // force Dying status
+                    this.ForceCharacterHitPointsValue(character, -1); // force Dying status
                 }
             }
             else
             {
-                ApplyNormalDamage(character, attackScore);
+                this.ApplyNormalDamage(character, attackScore);
             }
         }
 
@@ -96,15 +96,15 @@ namespace ObscureWare.ModernD20.Logic
         /// <param name="attackScore"></param>
         public void ApplyNonlethalDamage(Character character, uint attackScore) // expand more on attack type etc... or put it higher
         {
-            if (IsAttackMassive(character, attackScore))
+            if (this.IsAttackMassive(character, attackScore))
             {
-                if (_library.SavingThrowsLogic.TestSavingThrow(SavingThrowEnum.Fortitude, character, NON_LETHAL_DAMAGE_SAVING_THROW_DC))
+                if (this._library.SavingThrowsLogic.TestSavingThrow(SavingThrowEnum.Fortitude, character, NON_LETHAL_DAMAGE_SAVING_THROW_DC))
                 {
-                    ApplyEffect(character, new DazedEffectBuilder(1));
+                    this.ApplyEffect(character, new DazedEffectBuilder(1));
                 }
                 else
                 {
-                    ApplyEffect(character, new UnconsciousEffectBuilder(_library.FightRoller.Roll(DieEnum.D4) + 1));
+                    this.ApplyEffect(character, new UnconsciousEffectBuilder(this._library.FightRoller.Roll(DieEnum.D4) + 1));
                 }
             }
         }
@@ -134,15 +134,15 @@ namespace ObscureWare.ModernD20.Logic
         // SG: No implementation yet, dunno how to extract it from top logic... Probably shall move it there anyway
         public void ApplyDisabledState(Character character)
         {
-            if (!IsDisabled(character)) // already
+            if (!this.IsDisabled(character)) // already
             {
-                ApplyEffect(character, new DisabledEffectBuilder());
+                this.ApplyEffect(character, new DisabledEffectBuilder());
             }
         }
 
         private bool IsDisabled(Character character)
         {
-            return character.Effects.HasEffectApplied(_disabledEffectId);
+            return character.Effects.HasEffectApplied(this._disabledEffectId);
         }
 
         #endregion
@@ -165,15 +165,15 @@ namespace ObscureWare.ModernD20.Logic
 
         public void ApplyDyingState(Character character)
         {
-            if (!IsDying(character)) // already
+            if (!this.IsDying(character)) // already
             {
-                ApplyEffect(character, new DyingEffectBuilder());
+                this.ApplyEffect(character, new DyingEffectBuilder());
             }
         }
 
         private bool IsDying(Character character)
         {
-            return character.Effects.HasEffectApplied(_dyingEffectId);
+            return character.Effects.HasEffectApplied(this._dyingEffectId);
         }
 
         #endregion
@@ -185,13 +185,13 @@ namespace ObscureWare.ModernD20.Logic
         /// <param name="attackScore"></param>
         public void ApplyPhysicalDamage(Character character, uint attackScore) // expand more on attack type etc... or put it higher
         {
-            if (IsAttackMassive(character, attackScore))
+            if (this.IsAttackMassive(character, attackScore))
             {
-                TryApplyMassiveDamage(character, attackScore);
+                this.TryApplyMassiveDamage(character, attackScore);
             }
             else
             {
-                ApplyNormalDamage(character, attackScore);
+                this.ApplyNormalDamage(character, attackScore);
             }
         }
 
@@ -203,25 +203,25 @@ namespace ObscureWare.ModernD20.Logic
         {
             throw new NotImplementedException();
 
-            CheckCharacterCriticalStates(character);
+            this.CheckCharacterCriticalStates(character);
         }
 
         private void ForceCharacterHitPointsValue(Character character, int i)
         {
             throw new NotImplementedException();
 
-            CheckCharacterCriticalStates(character);
+            this.CheckCharacterCriticalStates(character);
         }
 
         private void CheckCharacterCriticalStates(Character character)
         {
             if (character.CurrentHitPoints == 0)
             {
-                ApplyDisabledState(character);
+                this.ApplyDisabledState(character);
             }
             else if (character.CurrentHitPoints < 0)
             {
-                ApplyDyingState(character);
+                this.ApplyDyingState(character);
             }
         }
 

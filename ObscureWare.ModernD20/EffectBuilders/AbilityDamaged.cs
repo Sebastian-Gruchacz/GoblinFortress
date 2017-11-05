@@ -16,13 +16,13 @@ namespace ObscureWare.ModernD20.EffectBuilders
 
         public AbilityDamagedEffectBuilder(AbilityEnum affectedAbility, uint newDamagedPoints) : base(EffectTimeFrameEnum.Restorable, EffectStackModeEnum.Stackable)
         {
-            _affectedAbility = affectedAbility;
-            _newDamagedPoints = newDamagedPoints;
+            this._affectedAbility = affectedAbility;
+            this._newDamagedPoints = newDamagedPoints;
         }
 
         public override AppliedCharacterEffect GetCharacterEntry(GlobalState state)
         {
-            return new AbilityDamagedCharacterEffect(this, _affectedAbility, _newDamagedPoints);
+            return new AbilityDamagedCharacterEffect(this, this._affectedAbility, this._newDamagedPoints);
         }
     }
 
@@ -33,15 +33,15 @@ namespace ObscureWare.ModernD20.EffectBuilders
 
         public AbilityDamagedCharacterEffect(BaseEffectBuilder effectBuilder, AbilityEnum affectedAbility, uint newDamagedPoints) : base(effectBuilder)
         {
-            _affectedAbility = affectedAbility;
+            this._affectedAbility = affectedAbility;
             this.ReplacePrevious = false;
-            Value = (int) newDamagedPoints;
+            this.Value = (int) newDamagedPoints;
 
         }
 
         public AbilityEnum AffectedAbility
         {
-            get { return _affectedAbility; }
+            get { return this._affectedAbility; }
         }
 
         public EffectVectorEnum EffectVector { get { return EffectVectorEnum.Negative; } }
@@ -58,9 +58,9 @@ namespace ObscureWare.ModernD20.EffectBuilders
                 case RestTypeEnum.Single8Hours:
                 case RestTypeEnum.Full24Hours:
                 {
-                    Value--;
-                    environment.CoreNotifications.ReportCharacterAbilityRestored(character, AffectedAbility);
-                    if (Value <= 0)
+                    this.Value--;
+                    environment.CoreNotifications.ReportCharacterAbilityRestored(character, this.AffectedAbility);
+                    if (this.Value <= 0)
                     {
                         environment.RestorationLogic.RemoveEffect(character, this);
                     }

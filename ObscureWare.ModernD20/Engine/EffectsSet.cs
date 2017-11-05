@@ -14,13 +14,13 @@ namespace ObscureWare.ModernD20.Engine
 
         public EffectsSet(Character character)
         {
-            _character = character;
+            this._character = character;
         }
 
         internal int? GetAppliedEffectValue(Guid effectId)
         {
             AppliedCharacterEffect effect;
-            if (_appliedCharacterEffects.TryGetValue(effectId, out effect))
+            if (this._appliedCharacterEffects.TryGetValue(effectId, out effect))
             {
                 return effect.Value;
             }
@@ -30,17 +30,17 @@ namespace ObscureWare.ModernD20.Engine
 
         internal bool HasEffectApplied(Guid effectId)
         {
-            return _appliedCharacterEffects.ContainsKey(effectId);
+            return this._appliedCharacterEffects.ContainsKey(effectId);
         }
 
         internal void ApplyEffect(AppliedCharacterEffect effect)
         {
             AppliedCharacterEffect currentEffect;
-            if (_appliedCharacterEffects.TryGetValue(effect.EffectId, out currentEffect))
+            if (this._appliedCharacterEffects.TryGetValue(effect.EffectId, out currentEffect))
             {
                 if (effect.ReplacePrevious)
                 {
-                    _appliedCharacterEffects[effect.EffectId] = effect;
+                    this._appliedCharacterEffects[effect.EffectId] = effect;
                 }
                 else
                 {
@@ -49,13 +49,13 @@ namespace ObscureWare.ModernD20.Engine
             }
             else
             {
-                _appliedCharacterEffects.Add(effect.EffectId, effect);
+                this._appliedCharacterEffects.Add(effect.EffectId, effect);
             }
         }
 
         internal void RemoveEffect(AppliedCharacterEffect effect)
         {
-            _appliedCharacterEffects.Remove(effect.EffectId);
+            this._appliedCharacterEffects.Remove(effect.EffectId);
         }
 
         internal uint? ApplyEffectsToAbilityScore(AbilityEnum affectedAbility, uint? score)
@@ -67,7 +67,7 @@ namespace ObscureWare.ModernD20.Engine
             }
 
             // 1. find worst replacing effect first, and apply if any
-            var worseReplacingEffect = _appliedCharacterEffects.Values.Where(e =>
+            var worseReplacingEffect = this._appliedCharacterEffects.Values.Where(e =>
                 e.GetType().Implements(typeof (IAbilityTargettedCharacterEffect)) &&
                 ((IAbilityTargettedCharacterEffect) e).AffectedAbility == affectedAbility &&
                 ((IAbilityTargettedCharacterEffect) e).EffectVector == EffectVectorEnum.Replace)
@@ -79,7 +79,7 @@ namespace ObscureWare.ModernD20.Engine
             }
 
             // 2. get all other effects - will sum final efefct later
-            var otherApplyingEffects = _appliedCharacterEffects.Values.Where(e =>
+            var otherApplyingEffects = this._appliedCharacterEffects.Values.Where(e =>
                 e.GetType().Implements(typeof (IAbilityTargettedCharacterEffect)) &&
                 ((IAbilityTargettedCharacterEffect) e).AffectedAbility == affectedAbility &&
                 ((IAbilityTargettedCharacterEffect) e).EffectVector != EffectVectorEnum.Replace);
@@ -102,7 +102,7 @@ namespace ObscureWare.ModernD20.Engine
         internal int ApplyEffectsToAbilityBaseModifier(AbilityEnum ability, int baseModifier)
         {
             // 1. find worst replacing effect first, and apply if any
-            var worseReplacingEffect = _appliedCharacterEffects.Values.Where(e =>
+            var worseReplacingEffect = this._appliedCharacterEffects.Values.Where(e =>
                 e.GetType().Implements(typeof(IAbilityBonusTargettedCharacterEffect)) &&
                 ((IAbilityBonusTargettedCharacterEffect)e).AffectedAbility == ability &&
                 ((IAbilityBonusTargettedCharacterEffect)e).EffectVector == EffectVectorEnum.Replace)
@@ -114,7 +114,7 @@ namespace ObscureWare.ModernD20.Engine
             }
 
             // 2. get all other effects - will sum final efefct later
-            var otherApplyingEffects = _appliedCharacterEffects.Values.Where(e =>
+            var otherApplyingEffects = this._appliedCharacterEffects.Values.Where(e =>
                 e.GetType().Implements(typeof(IAbilityBonusTargettedCharacterEffect)) &&
                 ((IAbilityBonusTargettedCharacterEffect)e).AffectedAbility == ability &&
                 ((IAbilityBonusTargettedCharacterEffect)e).EffectVector != EffectVectorEnum.Replace);

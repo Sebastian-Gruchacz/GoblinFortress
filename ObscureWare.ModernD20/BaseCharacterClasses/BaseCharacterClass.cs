@@ -13,16 +13,16 @@ namespace ObscureWare.ModernD20.BaseCharacterClasses
     {
         protected BaseCharacterClass(BaseCharacterClassBuilder builder)
         {
-            Id = builder.GetId();
-            GoverningAbility = builder.GetGoverningAbility();
-            ClassSkills = builder.GetClassSkillsIdentifiers().ToList();
-            Descriptor = builder.GetDescriptor();
-            HitDie = builder.GetHitDieDescriptor();
-            StartingFeats = builder.GetStartingFeats().ToList();
-            ClassTable = builder.GetClassTableRows().ToList();
-            AvailableClassFeatures = builder.GetClassFeatures().ToList();
-            AvailableTalents = new List<Guid>(builder.GetAvailableTalentTrees());
-            AvailableBonusFeats = builder.GetAvailableBonusFeats().ToList();
+            this.Id = builder.GetId();
+            this.GoverningAbility = builder.GetGoverningAbility();
+            this.ClassSkills = builder.GetClassSkillsIdentifiers().ToList();
+            this.Descriptor = builder.GetDescriptor();
+            this.HitDie = builder.GetHitDieDescriptor();
+            this.StartingFeats = builder.GetStartingFeats().ToList();
+            this.ClassTable = builder.GetClassTableRows().ToList();
+            this.AvailableClassFeatures = builder.GetClassFeatures().ToList();
+            this.AvailableTalents = new List<Guid>(builder.GetAvailableTalentTrees());
+            this.AvailableBonusFeats = builder.GetAvailableBonusFeats().ToList();
         }
 
         /// <summary>
@@ -83,7 +83,7 @@ namespace ObscureWare.ModernD20.BaseCharacterClasses
         /// <returns></returns>
         public virtual uint GetFirstLevelSkillPointsGained(Character character)
         {
-            return GetNextLevelSkillPointsGained(character) * 4;
+            return this.GetNextLevelSkillPointsGained(character) * 4;
         }
 
         /// A character’s Intelligence modifier is applied to determine the total skill points gained each level 

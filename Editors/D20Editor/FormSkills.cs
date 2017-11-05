@@ -20,8 +20,8 @@ namespace D20Editor
 
         public FormSkills(GlobalDefinitions globalDefinitions)
         {
-            _globalDefinitions = globalDefinitions;
-            InitializeComponent();
+            this._globalDefinitions = globalDefinitions;
+            this.InitializeComponent();
         }
 
         private void LoadSkills(GlobalDefinitions globalDefinitions)
@@ -76,7 +76,7 @@ namespace D20Editor
 
         private void FormSkills_Load(object sender, EventArgs e)
         {
-            LoadSkills(_globalDefinitions);
+            this.LoadSkills(this._globalDefinitions);
         }
     }
 
@@ -89,27 +89,27 @@ namespace D20Editor
 
         public SkillTuple(Type type, SkillDescriptor descriptor)
         {
-            _type = type;
-            _descriptor = descriptor ?? new SkillDescriptor();
-            if (_descriptor.Id == Guid.Empty)
+            this._type = type;
+            this._descriptor = descriptor ?? new SkillDescriptor();
+            if (this._descriptor.Id == Guid.Empty)
             {
-                _descriptor.Id = Guid.NewGuid();
+                this._descriptor.Id = Guid.NewGuid();
             }
         }
 
         public string Description
         {
-            get { return _type.Name; }
+            get { return this._type.Name; }
         }
 
         public SkillDescriptor Descriptor
         {
-            get { return _descriptor; }
+            get { return this._descriptor; }
         }
 
         public Type Type
         {
-            get { return _type; }
+            get { return this._type; }
         }
     }
 

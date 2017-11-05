@@ -46,27 +46,27 @@ namespace ObscureWare.ModernD20.Logic
         /// <returns></returns>
         public bool TestSavingThrow(SavingThrowEnum savingThrow, Character character, uint testDifficulity)
         {
-            uint cleanRoll = _library.FightRoller.Roll(DieEnum.D20);
+            uint cleanRoll = this._library.FightRoller.Roll(DieEnum.D20);
             if (cleanRoll == 1)
             {
-                _library.CoreNotifications.ReportCharacterFailedSaveThrow(character, savingThrow, cleanRoll);
+                this._library.CoreNotifications.ReportCharacterFailedSaveThrow(character, savingThrow, cleanRoll);
                 return false;
             }
             else if (cleanRoll == 20)
             {
-                _library.CoreNotifications.ReportCharacterPassedSaveThrow(character, savingThrow, cleanRoll);
+                this._library.CoreNotifications.ReportCharacterPassedSaveThrow(character, savingThrow, cleanRoll);
                 return true;
             }
 
-            bool saved = cleanRoll + SavingThrowBonus(savingThrow, character) >= testDifficulity;
+            bool saved = cleanRoll + this.SavingThrowBonus(savingThrow, character) >= testDifficulity;
 
             if (saved)
             {
-                _library.CoreNotifications.ReportCharacterPassedSaveThrow(character, savingThrow, cleanRoll);
+                this._library.CoreNotifications.ReportCharacterPassedSaveThrow(character, savingThrow, cleanRoll);
             }
             else
             {
-                _library.CoreNotifications.ReportCharacterFailedSaveThrow(character, savingThrow, cleanRoll);
+                this._library.CoreNotifications.ReportCharacterFailedSaveThrow(character, savingThrow, cleanRoll);
             }
 
             return saved;

@@ -26,7 +26,7 @@ namespace ObscureWare.ModernD20.EffectBuilders
         public override AppliedCharacterEffect GetCharacterEntry(GlobalState state)
         {
             var effectRuntime =  new BlindedCharacterEffect(this);
-            CreateExtraEffects(effectRuntime, state);
+            this.CreateExtraEffects(effectRuntime, state);
 
             return effectRuntime;
         }
@@ -48,7 +48,7 @@ namespace ObscureWare.ModernD20.EffectBuilders
     {
         public BlindedCharacterEffect(BaseEffectBuilder effectBuilder) : base(effectBuilder)
         {
-            Value = 3;
+            this.Value = 3;
             
         }
 

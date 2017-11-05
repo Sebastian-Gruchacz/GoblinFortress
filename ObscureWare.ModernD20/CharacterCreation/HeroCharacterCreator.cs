@@ -22,7 +22,7 @@ namespace ObscureWare.ModernD20.CharacterCreation
 
         protected override uint GenerateAge()
         {
-            return (uint)_characterRoller.CoreGenerator.NextInt(MIN_RANDOM_CHARACTER_AGE, MAX_RANDOM_CHARACTER_AGE);
+            return (uint) this._characterRoller.CoreGenerator.NextInt(MIN_RANDOM_CHARACTER_AGE, MAX_RANDOM_CHARACTER_AGE);
         }
 
         protected override int GenerateStartingActionPoints(Character generatedCharacter, BaseCharacterClass charClass)

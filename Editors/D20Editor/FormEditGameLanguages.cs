@@ -15,9 +15,9 @@ namespace D20Editor
 
         public FormEditGameLanguages(ILibrary lib, ICoreDatabaseEdit databaseEdit)
         {
-            _lib = lib;
-            _databaseEdit = databaseEdit;
-            InitializeComponent();
+            this._lib = lib;
+            this._databaseEdit = databaseEdit;
+            this.InitializeComponent();
         }
 
         private void FormEditGameLanguages_Load(object sender, EventArgs e)
@@ -25,10 +25,10 @@ namespace D20Editor
             this.listLanguages.SuspendLayout();
             this.listLanguages.Items.Clear();
 
-            foreach (var gameLanguage in _lib.GameWorldLanguages)
+            foreach (var gameLanguage in this._lib.GameWorldLanguages)
             {
                 this.listLanguages.Items.Add(new DisplayItem<GameLanguage>(gameLanguage, gameLanguage.Name));
-                _languages.Add(gameLanguage);
+                this._languages.Add(gameLanguage);
             }
 
             this.listLanguages.ResumeLayout();
@@ -41,7 +41,7 @@ namespace D20Editor
 
         private void button3_Click(object sender, EventArgs e)
         {
-            _databaseEdit.UpdateGameLanguages(_lib.LibraryName, _languages);
+            this._databaseEdit.UpdateGameLanguages(this._lib.LibraryName, this._languages);
             this.DialogResult = DialogResult.OK;
         }
 
@@ -53,10 +53,10 @@ namespace D20Editor
                 foreach (string item in editForm.Items)
                 {
                     var gameLanguage = new GameLanguage { Id = Guid.NewGuid(), Name = item};
-                    if (!_languages.Contains(gameLanguage))
+                    if (!this._languages.Contains(gameLanguage))
                     {
                         this.listLanguages.Items.Add(new DisplayItem<GameLanguage>(gameLanguage, gameLanguage.Name));
-                        _languages.Add(gameLanguage);
+                        this._languages.Add(gameLanguage);
                     }
                 }
             };

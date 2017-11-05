@@ -27,25 +27,25 @@ namespace ObscureWare.ModernD20
         /// </summary>
         public AbilitySet(Character character)
         {
-            _character = character;
-            _scoreArray = new uint?[ABILITY_SCORE_ARRAY_LENGTH];
+            this._character = character;
+            this._scoreArray = new uint?[ABILITY_SCORE_ARRAY_LENGTH];
         }
 
         public AbilitySet(Character character, uint?[] scoreArray)
         {
-            _character = character;
+            this._character = character;
             Debug.Assert(scoreArray.Length == ABILITY_SCORE_ARRAY_LENGTH);
             this._scoreArray = (uint?[])scoreArray.Clone();
         }
 
         public uint? Strength
         {
-            get { return _character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Strength, _scoreArray[(int)AbilityEnum.Strength]); }
+            get { return this._character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Strength, this._scoreArray[(int)AbilityEnum.Strength]); }
         }
 
         public uint? Dexterity
         {
-            get { return _character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Dexterity, _scoreArray[(int)AbilityEnum.Dexterity]); }
+            get { return this._character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Dexterity, this._scoreArray[(int)AbilityEnum.Dexterity]); }
         }
 
         /// <summary>
@@ -53,22 +53,22 @@ namespace ObscureWare.ModernD20
         /// </summary>
         public uint? Constitution
         {
-            get { return _character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Constitution, _scoreArray[(int)AbilityEnum.Constitution]); }
+            get { return this._character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Constitution, this._scoreArray[(int)AbilityEnum.Constitution]); }
         }
 
         public uint? Intelligence
         {
-            get { return _character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Intelligence, _scoreArray[(int)AbilityEnum.Intelligence]); }
+            get { return this._character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Intelligence, this._scoreArray[(int)AbilityEnum.Intelligence]); }
         }
 
         public uint? Wisdom
         {
-            get { return _character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Wisdom, _scoreArray[(int)AbilityEnum.Wisdom]); }
+            get { return this._character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Wisdom, this._scoreArray[(int)AbilityEnum.Wisdom]); }
         }
 
         public uint? Charisma
         {
-            get { return _character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Charisma, _scoreArray[(int)AbilityEnum.Charisma]); }
+            get { return this._character.Effects.ApplyEffectsToAbilityScore(AbilityEnum.Charisma, this._scoreArray[(int)AbilityEnum.Charisma]); }
         }
 
         /// <summary>
@@ -77,7 +77,7 @@ namespace ObscureWare.ModernD20
         /// <returns></returns>
         public bool CanMove()
         {
-            return _scoreArray.Any(score => score != null && score.Value > 0);
+            return this._scoreArray.Any(score => score != null && score.Value > 0);
         }
 
         /// <summary>
@@ -86,8 +86,8 @@ namespace ObscureWare.ModernD20
         /// <returns></returns>
         public bool IsAlive()
         {
-            return Constitution == null // TODO: Robots?
-                   || Constitution > 0;
+            return this.Constitution == null // TODO: Robots?
+                   || this.Constitution > 0;
         }
 
         /// <summary>
@@ -102,7 +102,7 @@ namespace ObscureWare.ModernD20
         public int GetCoreAbilityModifier(AbilityEnum ability)
         {
             // even cybernetics only give effects, though "permanent")
-            return GlobalOperators.Round((_scoreArray[(int) ability] ?? 0) / 2m - 5m);
+            return GlobalOperators.Round((this._scoreArray[(int) ability] ?? 0) / 2m - 5m);
         }
 
         /// <summary>
@@ -116,7 +116,7 @@ namespace ObscureWare.ModernD20
         public int GetAbilityModifier(AbilityEnum ability)
         {
             // TODO: take into account also temporary effects
-            return _character.Effects.ApplyEffectsToAbilityBaseModifier(ability, GlobalOperators.Round((_scoreArray[(int)ability] ?? 0) / 2m - 5m));
+            return this._character.Effects.ApplyEffectsToAbilityBaseModifier(ability, GlobalOperators.Round((this._scoreArray[(int)ability] ?? 0) / 2m - 5m));
         }
 
         //public AbilitySet Clone()

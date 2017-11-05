@@ -1,14 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.24720.0
+VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dwarfs", "Dwarfs\Dwarfs.csproj", "{7AEA0230-1108-40D0-8B52-7D2AFFF4D744}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Dwarfs!", "Dwarfs!", "{D8710B4F-C362-485F-BBD9-D2BBC744550A}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataTypes", "Dwarfs\DataTypes\DataTypes.csproj", "{25E7D0BD-86D4-4B89-A13B-C76A537D0127}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Gnomes", "Gnomes", "{332DB499-647A-424D-BA6C-77F8F13133BD}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gnomoria", "Gnomoria\Gnomoria.csproj", "{3E061575-978B-49DA-B3EA-F4EAD7F01867}"
@@ -64,16 +58,6 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{7AEA0230-1108-40D0-8B52-7D2AFFF4D744}.Debug|Any CPU.ActiveCfg = Debug|x86
-		{7AEA0230-1108-40D0-8B52-7D2AFFF4D744}.Debug|x86.ActiveCfg = Debug|x86
-		{7AEA0230-1108-40D0-8B52-7D2AFFF4D744}.Release|Any CPU.ActiveCfg = Release|x86
-		{7AEA0230-1108-40D0-8B52-7D2AFFF4D744}.Release|x86.ActiveCfg = Release|x86
-		{7AEA0230-1108-40D0-8B52-7D2AFFF4D744}.Release|x86.Build.0 = Release|x86
-		{25E7D0BD-86D4-4B89-A13B-C76A537D0127}.Debug|Any CPU.ActiveCfg = Debug|x86
-		{25E7D0BD-86D4-4B89-A13B-C76A537D0127}.Debug|x86.ActiveCfg = Debug|x86
-		{25E7D0BD-86D4-4B89-A13B-C76A537D0127}.Release|Any CPU.ActiveCfg = Release|x86
-		{25E7D0BD-86D4-4B89-A13B-C76A537D0127}.Release|x86.ActiveCfg = Release|x86
-		{25E7D0BD-86D4-4B89-A13B-C76A537D0127}.Release|x86.Build.0 = Release|x86
 		{3E061575-978B-49DA-B3EA-F4EAD7F01867}.Debug|Any CPU.ActiveCfg = Debug|x86
 		{3E061575-978B-49DA-B3EA-F4EAD7F01867}.Debug|x86.ActiveCfg = Debug|x86
 		{3E061575-978B-49DA-B3EA-F4EAD7F01867}.Release|Any CPU.ActiveCfg = Release|x86
@@ -187,8 +171,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{7AEA0230-1108-40D0-8B52-7D2AFFF4D744} = {D8710B4F-C362-485F-BBD9-D2BBC744550A}
-		{25E7D0BD-86D4-4B89-A13B-C76A537D0127} = {D8710B4F-C362-485F-BBD9-D2BBC744550A}
 		{3E061575-978B-49DA-B3EA-F4EAD7F01867} = {332DB499-647A-424D-BA6C-77F8F13133BD}
 		{663CDB6B-A96E-4A37-9BF5-512A8F254012} = {332DB499-647A-424D-BA6C-77F8F13133BD}
 		{CFB16C5C-EE36-4ACE-9513-0AD18DFF9D00} = {1F539C27-3EE1-4B08-AF7D-4BC08B50F97E}
@@ -196,114 +178,5 @@ Global
 		{15F0872F-3DF9-4C4D-995A-9982689C64F7} = {1B45DEBB-3839-4928-8446-F885819E92C2}
 		{BD6CBDC1-A671-4DB6-BDCB-0D7707BE8459} = {5640D941-549C-4DE3-9B15-537FADDDB828}
 		{8F558866-27B5-45AA-9D76-CB7923C09356} = {1F539C27-3EE1-4B08-AF7D-4BC08B50F97E}
-	EndGlobalSection
-	GlobalSection(TeamFoundationVersionControl) = preSolution
-		SccNumberOfProjects = 18
-		SccEnterpriseProvider = {4CA58AB2-18FA-4F8D-95D4-32DDF27D184C}
-		SccTeamFoundationServer = https://obscureware.visualstudio.com/defaultcollection
-		SccLocalPath0 = .
-		SccProjectUniqueName1 = ObscureWare.Common\\ObscureWare.Common.csproj
-		SccProjectName1 = ObscureWare.Common
-		SccLocalPath1 = ObscureWare.Common
-		SccProjectUniqueName2 = ObscureWare.D20Common\\ObscureWare.D20Common.csproj
-		SccProjectName2 = ObscureWare.D20Common
-		SccLocalPath2 = ObscureWare.D20Common
-		SccProjectUniqueName3 = ObscureWare.ModernD20\\ObscureWare.ModernD20.csproj
-		SccProjectName3 = ObscureWare.ModernD20
-		SccLocalPath3 = ObscureWare.ModernD20
-		SccProjectUniqueName4 = Dwarfs\\DataTypes\\DataTypes.csproj
-		SccProjectTopLevelParentUniqueName4 = Goblin\u0020Fortress.sln
-		SccProjectName4 = Dwarfs/DataTypes
-		SccLocalPath4 = Dwarfs\\DataTypes
-		SccProjectUniqueName5 = Dwarfs\\Dwarfs.csproj
-		SccProjectTopLevelParentUniqueName5 = Goblin\u0020Fortress.sln
-		SccProjectName5 = Dwarfs
-		SccLocalPath5 = Dwarfs
-		SccProjectUniqueName6 = Gnomoria\\LIB\\gnomorialib.csproj
-		SccProjectTopLevelParentUniqueName6 = Goblin\u0020Fortress.sln
-		SccProjectName6 = Gnomoria/LIB
-		SccLocalPath6 = Gnomoria\\LIB
-		SccProjectUniqueName7 = Gnomoria\\Gnomoria.csproj
-		SccProjectTopLevelParentUniqueName7 = Goblin\u0020Fortress.sln
-		SccProjectName7 = Gnomoria
-		SccLocalPath7 = Gnomoria
-		SccProjectUniqueName8 = GoblinFortress\\GoblinFortressContent\\GoblinFortressContent.contentproj
-		SccProjectName8 = GoblinFortress/GoblinFortressContent
-		SccLocalPath8 = GoblinFortress\\GoblinFortressContent
-		SccProjectUniqueName9 = GoblinFortress\\GoblinFortress\\GoblinFortress.csproj
-		SccProjectName9 = GoblinFortress/GoblinFortress
-		SccLocalPath9 = GoblinFortress\\GoblinFortress
-		SccProjectUniqueName10 = ObscureWare.Console\\ObscureWare.Console.csproj
-		SccProjectName10 = ObscureWare.Console
-		SccLocalPath10 = ObscureWare.Console
-		SccProjectUniqueName11 = ConsoleApplication1\\ConsoleTests.csproj
-		SccProjectTopLevelParentUniqueName11 = Goblin\u0020Fortress.sln
-		SccProjectName11 = ConsoleApplication1
-		SccLocalPath11 = ConsoleApplication1
-		SccProjectUniqueName12 = ObscureWare.TileGameTools\\ObscureWare.TileGameTools.csproj
-		SccProjectName12 = ObscureWare.TileGameTools
-		SccLocalPath12 = ObscureWare.TileGameTools
-		SccProjectUniqueName13 = ObscureWare.FutureD20\\ObscureWare.FutureD20.csproj
-		SccProjectName13 = ObscureWare.FutureD20
-		SccLocalPath13 = ObscureWare.FutureD20
-		SccProjectUniqueName14 = D20SerializationTests\\D20SerializationTests.csproj
-		SccProjectTopLevelParentUniqueName14 = Goblin\u0020Fortress.sln
-		SccProjectName14 = D20SerializationTests
-		SccLocalPath14 = D20SerializationTests
-		SccProjectUniqueName15 = ObscureWare.Nations\\ObscureWare.Nations.csproj
-		SccProjectTopLevelParentUniqueName15 = Goblin\u0020Fortress.sln
-		SccProjectName15 = ObscureWare.Nations
-		SccLocalPath15 = ObscureWare.Nations
-		SccProjectUniqueName16 = Editors\\D20Editor\\D20Editor.csproj
-		SccProjectTopLevelParentUniqueName16 = Goblin\u0020Fortress.sln
-		SccProjectName16 = Editors/D20Editor
-		SccLocalPath16 = Editors\\D20Editor
-		SccProjectUniqueName17 = Obscureware.D20Common.Tests\\Obscureware.D20Common.Tests.csproj
-		SccProjectTopLevelParentUniqueName17 = Goblin\u0020Fortress.sln
-		SccProjectName17 = Obscureware.D20Common.Tests
-		SccLocalPath17 = Obscureware.D20Common.Tests
-	EndGlobalSection
-	GlobalSection(TeamFoundationVersionControl) = preSolution
-		SccNumberOfProjects = 13
-		SccEnterpriseProvider = {4CA58AB2-18FA-4F8D-95D4-32DDF27D184C}
-		SccTeamFoundationServer = https://obscureware.visualstudio.com/defaultcollection
-		SccLocalPath0 = .
-		SccProjectUniqueName1 = ConsoleApplication1\\ConsoleTests.csproj
-		SccProjectName1 = ConsoleApplication1
-		SccLocalPath1 = ConsoleApplication1
-		SccProjectUniqueName2 = GoblinFortress\\GoblinFortress\\GoblinFortress.csproj
-		SccProjectName2 = GoblinFortress/GoblinFortress
-		SccLocalPath2 = GoblinFortress\\GoblinFortress
-		SccProjectUniqueName3 = GoblinFortress\\GoblinFortressContent\\GoblinFortressContent.contentproj
-		SccProjectName3 = GoblinFortress/GoblinFortressContent
-		SccLocalPath3 = GoblinFortress\\GoblinFortressContent
-		SccProjectUniqueName4 = ObscureWare.Console\\ObscureWare.Console.csproj
-		SccProjectName4 = ObscureWare.Console
-		SccLocalPath4 = ObscureWare.Console
-		SccProjectUniqueName5 = Gnomoria\\Gnomoria.csproj
-		SccProjectTopLevelParentUniqueName5 = Goblin\u0020Fortress.sln
-		SccProjectName5 = Gnomoria
-		SccLocalPath5 = Gnomoria
-		SccProjectUniqueName6 = Gnomoria\\LIB\\gnomorialib.csproj
-		SccProjectTopLevelParentUniqueName6 = Goblin\u0020Fortress.sln
-		SccProjectName6 = Gnomoria/LIB
-		SccLocalPath6 = Gnomoria\\LIB
-		SccProjectUniqueName7 = Dwarfs\\DataTypes\\DataTypes.csproj
-		SccProjectTopLevelParentUniqueName7 = Goblin\u0020Fortress.sln
-		SccProjectName7 = Dwarfs/DataTypes
-		SccLocalPath7 = Dwarfs\\DataTypes
-		SccProjectUniqueName8 = Dwarfs\\Dwarfs.csproj
-		SccProjectTopLevelParentUniqueName8 = Goblin\u0020Fortress.sln
-		SccProjectName8 = Dwarfs
-		SccLocalPath8 = Dwarfs
-		SccProjectUniqueName9 = ObscureWare.TileGameTools\\ObscureWare.TileGameTools.csproj
-		SccProjectName9 = ObscureWare.TileGameTools
-		SccLocalPath9 = ObscureWare.TileGameTools
-		SccProjectUniqueName10 = ObscureWare.FutureD20\\ObscureWare.FutureD20.csproj
-		SccProjectName10 = ObscureWare.FutureD20
-		SccLocalPath10 = ObscureWare.FutureD20
-		SccProjectUniqueName11 = D20SerializationTests\\D20SerializationTests.csproj
-		SccProjectName11 = D20SerializationTests
-		SccLocalPath11 = D20SerializationTests
 	EndGlobalSection
 EndGlobal

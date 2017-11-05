@@ -32,23 +32,23 @@ namespace ObscureWare.D20Common
             if (String.IsNullOrWhiteSpace(dbPath))
                 throw new ArgumentException("Argument is null or whitespace", nameof(dbPath));
 
-            _dbPath = dbPath;
-            _db = new LiteDatabase(_dbPath);
+            this._dbPath = dbPath;
+            this._db = new LiteDatabase(this._dbPath);
         }
 
         public void Dispose()
         {
-            _db?.Dispose();
+            this._db?.Dispose();
         }
 
         public string DbPath
         {
-            get { return _dbPath; }
+            get { return this._dbPath; }
         }
 
         public Version GetLibraryVersion(string libraryName, Version currentLibraryVersion)
         {
-            var versioning = _db.GetCollection<VersionInfo>(@"VERSIONS");
+            var versioning = this._db.GetCollection<VersionInfo>(@"VERSIONS");
             VersionInfo v = versioning.FindOne(version => version.Target == libraryName);
             if (v == null)
             {
@@ -60,12 +60,12 @@ namespace ObscureWare.D20Common
 
         public IEnumerable<GameLanguage> GetGameLanguages(string libraryName)
         {
-            return _db.GetCollection<GameLanguage>(typeof(GameLanguage).Name + "_" + libraryName).FindAll();
+            return this._db.GetCollection<GameLanguage>(typeof(GameLanguage).Name + "_" + libraryName).FindAll();
         }
 
         public void UpdateGameLanguages(string libraryName, IEnumerable<GameLanguage> languages)
         {
-            var collection = _db.GetCollection<GameLanguage>(typeof(GameLanguage).Name + "_" + libraryName);
+            var collection = this._db.GetCollection<GameLanguage>(typeof(GameLanguage).Name + "_" + libraryName);
             foreach (var lang in collection.FindAll())
             {
                 collection.Delete((gl) => gl.Id == lang.Id);

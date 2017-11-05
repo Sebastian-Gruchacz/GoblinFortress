@@ -7,8 +7,8 @@ namespace ObscureWare.D20Common
 
         public DieRollDescriptor(int dieCount, DieEnum d8)
         {
-            _dieCount = dieCount;
-            _d8 = d8;
+            this._dieCount = dieCount;
+            this._d8 = d8;
         }
 
         public DieRollDescriptor(string hitDieDescription)

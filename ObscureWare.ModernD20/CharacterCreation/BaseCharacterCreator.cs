@@ -16,7 +16,7 @@ namespace ObscureWare.ModernD20.CharacterCreation
 
         protected BaseCharacterCreator(IRoller characterRoller)
         {
-            _characterRoller = characterRoller;
+            this._characterRoller = characterRoller;
         }
 
         public Character CreateRandom()
@@ -38,7 +38,7 @@ namespace ObscureWare.ModernD20.CharacterCreation
 
         protected virtual uint GenerateAge()
         {
-            return (uint)_characterRoller.CoreGenerator.NextInt(MIN_RANDOM_CHARACTER_AGE, MAX_RANDOM_CHARACTER_AGE);
+            return (uint) this._characterRoller.CoreGenerator.NextInt(MIN_RANDOM_CHARACTER_AGE, MAX_RANDOM_CHARACTER_AGE);
         }
 
         /// <summary>
@@ -47,7 +47,7 @@ namespace ObscureWare.ModernD20.CharacterCreation
         /// <returns></returns>
         protected virtual Gender GenerateGender()
         {
-            return _characterRoller.Roll(DieEnum.D4) > 2 ? Gender.Male : Gender.Female;
+            return this._characterRoller.Roll(DieEnum.D4) > 2 ? Gender.Male : Gender.Female;
         }
 
         protected virtual string GenerateFirstName(Gender gender, Guid nationalityId)
@@ -96,7 +96,7 @@ namespace ObscureWare.ModernD20.CharacterCreation
         protected virtual uint[] GenerateAbilityScoresArray(BaseCharacterClass charClass)
         {
             uint[] array = new uint[] {15, 14, 13, 12, 10, 8};
-            array.Shuffle(_characterRoller.CoreGenerator);
+            array.Shuffle(this._characterRoller.CoreGenerator);
             return array;
         }
 

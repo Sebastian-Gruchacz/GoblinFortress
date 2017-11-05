@@ -12,8 +12,8 @@ namespace ObscureWare.ModernD20.EffectBuilders
 
         protected BaseEffectBuilder(EffectTimeFrameEnum effectTimeFrame, EffectStackModeEnum stackable)
         {
-            Stackable = stackable;
-            EffectTimeFrame = effectTimeFrame;
+            this.Stackable = stackable;
+            this.EffectTimeFrame = effectTimeFrame;
 
             // TODO: obtain ID and translations from global context
         }

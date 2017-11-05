@@ -6,8 +6,8 @@ namespace ObscureWare.Console
     {
         public ConsoleFontColor(Color foreColor, Color bgColor)
         {
-            BgColor = bgColor;
-            ForeColor = foreColor;
+            this.BgColor = bgColor;
+            this.ForeColor = foreColor;
         }
 
         public Color ForeColor { get; private set; }

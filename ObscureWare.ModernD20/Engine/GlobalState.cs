@@ -6,7 +6,7 @@ namespace ObscureWare.ModernD20.Engine
 
         public GlobalState(ModernD20Library modernD20Library)
         {
-            _modernD20Library = modernD20Library;
+            this._modernD20Library = modernD20Library;
         }
     }
 }

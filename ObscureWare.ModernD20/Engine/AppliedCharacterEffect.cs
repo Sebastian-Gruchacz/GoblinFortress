@@ -9,7 +9,7 @@ namespace ObscureWare.ModernD20.Engine
     {
         protected AppliedCharacterEffect(BaseEffectBuilder effectBuilder)
         {
-            EffectId = effectBuilder.Id;
+            this.EffectId = effectBuilder.Id;
             this.RemovedMessage = effectBuilder.GetRemovedMessage();
         }
 
@@ -70,7 +70,7 @@ namespace ObscureWare.ModernD20.Engine
 
         public bool IsInfinite
         {
-            get { return ApplyForManyRounds == null; } // temporary
+            get { return this.ApplyForManyRounds == null; } // temporary
         }
 
         #region Updating

@@ -32,32 +32,32 @@ namespace ObscureWare.ModernD20.Resources
 
         public NationInfoPOCO(Guid id)
         {
-            Id = id;
-            _officialLanguages = new List<Guid>();
+            this.Id = id;
+            this._officialLanguages = new List<Guid>();
         }
 
         public Guid MainLanguageId
         {
-            get { return _mainLanguageId; }
-            set { _mainLanguageId = value; }
+            get { return this._mainLanguageId; }
+            set { this._mainLanguageId = value; }
         }
 
         public List<Guid> OfficialLanguages
         {
-            get { return _officialLanguages; }
-            set { _officialLanguages = value; }
+            get { return this._officialLanguages; }
+            set { this._officialLanguages = value; }
         }
 
         public Guid Id
         {
-            get { return _id; }
-            set { _id = value; }
+            get { return this._id; }
+            set { this._id = value; }
         }
 
         public string NationResourceName
         {
-            get { return _nationResourceName; }
-            set { _nationResourceName = value; }
+            get { return this._nationResourceName; }
+            set { this._nationResourceName = value; }
         }
     }
 }

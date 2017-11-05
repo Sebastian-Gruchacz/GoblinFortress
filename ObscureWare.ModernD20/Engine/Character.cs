@@ -4,8 +4,8 @@
     {
         public Character()
         {
-            Abilities = new AbilitySet(this);
-            Effects = new EffectsSet(this);
+            this.Abilities = new AbilitySet(this);
+            this.Effects = new EffectsSet(this);
         }
 
         /// <summary>
@@ -34,7 +34,7 @@
         /// <returns></returns>
         public int BaseSavingThrowBonus(SavingThrowEnum throwType)
         {
-            return _savingThrowBonuses[(int) throwType];
+            return this._savingThrowBonuses[(int) throwType];
         }
 
         public uint MaxHitPoints { get; }
@@ -43,7 +43,7 @@
 
         public bool CanMove()
         {
-            if (!Abilities.CanMove())
+            if (!this.Abilities.CanMove())
             {
                 return false;
             }
@@ -55,7 +55,7 @@
 
         public bool IsAlive()
         {
-            return Abilities.IsAlive() && CurrentHitPoints > -10;
+            return this.Abilities.IsAlive() && this.CurrentHitPoints > -10;
 
             // TODO: check other conditions ?
         }

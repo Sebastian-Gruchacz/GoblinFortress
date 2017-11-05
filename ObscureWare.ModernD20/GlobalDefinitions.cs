@@ -30,36 +30,36 @@ namespace ObscureWare.ModernD20
         /// <param name="db"></param>
         public GlobalDefinitions(IModernDatabase db)
         {
-            _db = db;
-            _skillDefinitions = new Dictionary<Guid, Skill>();
-            _baseCharacterClassDefinitions = new Dictionary<Guid, BaseCharacterClass>();
-            _featDefinitions = new Dictionary<Guid, Feat>();
-            _classFeatureDefinitions = new Dictionary<Guid, ClassFeature>();
+            this._db = db;
+            this._skillDefinitions = new Dictionary<Guid, Skill>();
+            this._baseCharacterClassDefinitions = new Dictionary<Guid, BaseCharacterClass>();
+            this._featDefinitions = new Dictionary<Guid, Feat>();
+            this._classFeatureDefinitions = new Dictionary<Guid, ClassFeature>();
         }
 
         public Skill FindSkill(Guid id)
         {
             Skill skill;
-            return _skillDefinitions.TryGetValue(id, out skill) ? skill : null;
+            return this._skillDefinitions.TryGetValue(id, out skill) ? skill : null;
             // TODO: exception + stack trace?
         }
 
         public BaseCharacterClass FindBaseCharacterClass(Guid id)
         {
             BaseCharacterClass characterClass;
-            return _baseCharacterClassDefinitions.TryGetValue(id, out characterClass) ? characterClass : null;
+            return this._baseCharacterClassDefinitions.TryGetValue(id, out characterClass) ? characterClass : null;
         }
 
         public Feat FindFeat(Guid id)
         {
             Feat feat;
-            return _featDefinitions.TryGetValue(id, out feat) ? feat : null;
+            return this._featDefinitions.TryGetValue(id, out feat) ? feat : null;
         }
 
         public ClassFeature FindClassFeature(Guid id)
         {
             ClassFeature classFeature;
-            return _classFeatureDefinitions.TryGetValue(id, out classFeature) ? classFeature : null;
+            return this._classFeatureDefinitions.TryGetValue(id, out classFeature) ? classFeature : null;
         }
 
         #region Static
@@ -83,12 +83,12 @@ namespace ObscureWare.ModernD20
 
         public IEnumerable<Assembly> GetRegistredLibraryAssemblies()
         {
-            return _assemblies;
+            return this._assemblies;
         }
 
         public void RegisterLibrary(Assembly assembly)
         {
-            _assemblies.Add(assembly);
+            this._assemblies.Add(assembly);
         }
 
         public void LoadSystem(string languageIdentifier)

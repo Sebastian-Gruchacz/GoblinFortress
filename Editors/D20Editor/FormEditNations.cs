@@ -20,9 +20,9 @@ namespace D20Editor
 
         public FormEditNations(ILibrary library, ICoreDatabaseEdit dbEdit)
         {
-            _library = library;
-            _dbEdit = dbEdit;
-            InitializeComponent();
+            this._library = library;
+            this._dbEdit = dbEdit;
+            this.InitializeComponent();
         }
 
         private void FormEditNations_Load(object sender, EventArgs e)

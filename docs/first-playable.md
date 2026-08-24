@@ -74,6 +74,7 @@ The generated map contains:
 
 - solid ground, mud, shallow water and deep water;
 - fertility, moisture and traversal cost;
+- habitat-driven berries, mushrooms, edible roots and fish shoals in larger connected wetlands;
 - clearings, dense vegetation and natural obstacles;
 - a goblin spawning area;
 - one human village with usable access to water and local resources;
@@ -144,6 +145,8 @@ Initial jobs are:
 - rest, eat and seek safety;
 - tend a weakened goblin or a basic living bud.
 
+The first expedition structure is a physical 2×2 field camp costing six wood. It must be placed within reach of shallow water, counts as a rest shelter and creates a food buffer with capacity 48. Its pull target is at least 24 food and grows with the current tribe, so a larger war band budgets both carried rations and meals consumed while assembling.
+
 The first skill set is:
 
 - foraging;
@@ -169,7 +172,7 @@ Every detailed person-like actor initially tracks only needs that produce useful
 
 Needs create priorities and penalties rather than binary permission checks. A hungry goblin can continue hauling, but eventually abandons work, performs worse or takes dangerous food-seeking actions.
 
-Moisture is initially an environmental requirement of fungal beds and budding rather than another constantly draining personal meter.
+Moisture remains an environmental requirement of fungal beds and budding. Individual goblins also track thirst and carry a small personal water reserve; the first prototype refills primitive containers from reachable shallow water before contamination, boiling and finite water volumes are modeled.
 
 ### Community needs
 
@@ -184,11 +187,13 @@ Community needs are derived pressures, not an invisible second creature with its
 
 These values drive alerts, work priorities, budding permission and coarse decisions made by non-player settlements. They are calculated from physical state so the UI can explain every shortage.
 
+Work-area dragging is a selection query, not a persistent rectangular job. On release, the simulation records only concrete matching targets such as individual berry bushes or loose brushwood stacks. Empty cells disappear from the overlay, new objects entering the former rectangle are not enrolled automatically, and several target sets or work kinds may overlap. Repeating the same work kind over the same object does not duplicate the target.
+
 ### Human village
 
-The human village initially runs as a coarse settlement simulation even though its persistent structures occupy the generated map:
+The human village uses one community dispatcher, but every inhabitant and structure inside the active chunk is materialized. Cohorts are reserved for distant unloaded chunks:
 
-- population by household or work cohort;
+- individual local inhabitants grouped into households and work crews for planning;
 - food stock, wood stock and a small number of goods;
 - seasonal gathering or farming output;
 - consumption and storage;
@@ -198,7 +203,13 @@ The human village initially runs as a coarse settlement simulation even though i
 
 It must produce value over time. Destroying it in a later milestone therefore removes future food, trade goods and potential knowledge while increasing the chance of retaliation.
 
-The coarse state is authoritative. Detailed actors are a temporary expansion of part of that state, not a second simulation that can silently diverge from it.
+At a chunk boundary, the remote record is authoritative until materialization completes. Inside the active chunk, concrete actors, inventories, jobs, terrain and spatial structures are authoritative. Dematerialization must reconcile that state atomically; it may not silently discard an inconvenient death, stolen tool, unfinished building or depleted field.
+
+The first village dispatcher uses population and expected yield to plan field area. Workers draw water from the well, clear nearby land with wooden axes and accumulate timber; farmers sow, tend and harvest with wooden hoes. Food is stored as grain-equivalent and daily consumption abstracts milling and baking flatbread. A field needs 120 simulation days from sowing to ripeness, provisionally giving two harvest opportunities in a 240-day temperate year. Crop calendars, temperature, rainfall, frost, soil exhaustion and climate regions remain an ecology slice rather than hidden random modifiers. Any capacity added locally must come from a constructed spatial object; the initial human storehouse is a physical 3×3 building rather than an aggregate bonus.
+
+Ordinary cohorts remain within the village activity radius. Emergency berry gathering may extend four cells farther when grain reserves are low. Encounters first produce an assessment: civilians flee and guards defend only when their local strength is sufficient or a raid is already under way. Goblins may scout or pass nearby without automatically attacking; a village raid is an explicit player command.
+
+That command requires a reachable field camp. The dispatcher first enters a preparation phase: known supplies are hauled into the camp buffer, goblins refill their two-meal and two-drink personal reserves, eat, drink, rest and gather at the camp. The attack becomes authorized only when the whole current party is ready, at which point it enters the marching phase. Save/load preserves the phase and rally point. Construction still consumes available wood immediately in this prototype; construction sites and physical material delivery remain a later slice.
 
 ## Milestone 1 completion criteria
 
@@ -225,11 +236,13 @@ No requirement in this milestone depends on final graphics. After the headless s
 2. **World mutations:** layered cell state, plant depletion and renewal, construction occupancy, change versions and dirty regions.
 3. **Stocks:** physical resources, inventories, hauling and storage zones.
 4. **Survival:** goblin needs, autonomous jobs, shelter and basic budding.
-5. **Ecology:** plant renewal, simple animals, habitats, seasons and deaths.
+5. **Ecology:** plant renewal, simple animals, habitats, climate regions, seasons, weather-sensitive crop calendars and deaths.
 6. **Visibility:** exploration, line of sight and unknown/remembered/visible state.
-7. **Neighbor:** human village stocks, cohorts, production and materialization records.
+7. **Neighbor:** materialized human villagers, physical stocks and production, plus remote cohort records for chunk transitions.
 8. **Season run:** save/load, reports and a deterministic headless season.
 9. **Presentation probe:** Godot camera, chunked world view, fog, actor inspection and pause/normal/accelerated controls.
+
+The current neighbor slice is transitional: fields and structures are spatial, but human residents are still presented by local cohort markers. Before the neighbor slice can be called complete, those markers must be replaced by materialized villagers owned by the same dispatcher, with physical tools, inventories, needs and job progress. Cohort records then move exclusively to unloaded chunks and traveling groups outside the active area.
 
 Each slice must add a playable or inspectable behavior and its deterministic tests. Later slices may extend earlier data, but they should not require replacing its ownership model.
 

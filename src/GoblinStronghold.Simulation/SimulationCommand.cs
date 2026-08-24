@@ -10,6 +10,19 @@ public enum SimulationCommandKind
     PickUp = 3,
     StoreCarried = 4,
     Move = 5,
+    Build = 6,
+    DesignateWork = 7,
+    ClearWorkDesignations = 8,
+    ConfigureStoragePull = 9,
+    AttackHumanVillage = 10,
+}
+
+public enum ConstructionKind : byte
+{
+    FoodStorage = 1,
+    WoodenWalkway = 2,
+    WoodStorage = 3,
+    GoblinFieldCamp = 4,
 }
 
 public readonly record struct SimulationCommand(
@@ -19,9 +32,35 @@ public readonly record struct SimulationCommand(
     EntityId Subject,
     EntityId Target,
     GridPosition Position,
+    GridPosition EndPosition,
+    ConstructionKind Construction,
     ResourceKind Resource,
     int Amount)
 {
+    public static IReadOnlyList<GridPosition> GetWalkwayCells(
+        GridPosition start,
+        GridPosition end)
+    {
+        if (start.Z != end.Z)
+        {
+            throw new ArgumentException("A walkway must remain on one height level.");
+        }
+
+        var cells = new List<GridPosition> { start };
+        var current = start;
+        while (current != end)
+        {
+            var remainingX = Math.Abs(end.X - current.X);
+            var remainingY = Math.Abs(end.Y - current.Y);
+            current = remainingX >= remainingY && remainingX > 0
+                ? current with { X = current.X + Math.Sign(end.X - current.X) }
+                : current with { Y = current.Y + Math.Sign(end.Y - current.Y) };
+            cells.Add(current);
+        }
+
+        return cells;
+    }
+
     public static SimulationCommand Forage(
         SimulationTick executeAt,
         ulong sequence,
@@ -33,6 +72,8 @@ public readonly record struct SimulationCommand(
             SimulationCommandKind.Forage,
             subject,
             EntityId.None,
+            default,
+            default,
             default,
             ResourceKind.Food,
             effort);
@@ -50,6 +91,8 @@ public readonly record struct SimulationCommand(
             EntityId.None,
             EntityId.None,
             position,
+            position,
+            default,
             acceptedResource,
             capacity);
 
@@ -66,6 +109,8 @@ public readonly record struct SimulationCommand(
             actor,
             itemStack,
             default,
+            default,
+            default,
             ResourceKind.Any,
             quantity);
 
@@ -80,6 +125,8 @@ public readonly record struct SimulationCommand(
             SimulationCommandKind.StoreCarried,
             actor,
             storageZone,
+            default,
+            default,
             default,
             ResourceKind.Any,
             Amount: 0);
@@ -96,6 +143,140 @@ public readonly record struct SimulationCommand(
             actor,
             EntityId.None,
             destination,
+            destination,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand BuildFoodStorage(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.FoodStorage,
+            ResourceKind.Wood,
+            Amount: 2);
+
+    public static SimulationCommand BuildWalkway(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            ConstructionKind.WoodenWalkway,
+            ResourceKind.Wood,
+            Amount: 1);
+
+    public static SimulationCommand BuildWoodStorage(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.WoodStorage,
+            ResourceKind.Wood,
+            Amount: 2);
+
+    public static SimulationCommand BuildGoblinFieldCamp(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position with { X = position.X + 1, Y = position.Y + 1 },
+            ConstructionKind.GoblinFieldCamp,
+            ResourceKind.Wood,
+            Amount: 6);
+
+    public static SimulationCommand DesignateWork(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end,
+        ResourceKind resource) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            resource,
+            Amount: 0);
+
+    public static SimulationCommand ClearWorkDesignations(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ClearWorkDesignations,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ConfigureStoragePull(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZone,
+        int desiredQuantity) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStoragePull,
+            EntityId.None,
+            storageZone,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            desiredQuantity);
+
+    public static SimulationCommand AttackHumanVillage(
+        SimulationTick executeAt,
+        ulong sequence) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.AttackHumanVillage,
+            EntityId.None,
+            EntityId.None,
+            default,
+            default,
+            default,
             ResourceKind.Any,
             Amount: 0);
 }

@@ -7,6 +7,36 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class PhysicalStockTests
 {
     [Fact]
+    public void SmallFoodStorageLimitsOneFoodKindToOneStackOfThirtyTwo()
+    {
+        var seed = new WorldSeed(0x534C4F5453UL);
+        var map = SwampMapGenerator.Generate(seed, width: 32, height: 32);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 40);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1),
+            sequence: 1,
+            map.GoblinSpawn,
+            ResourceKind.Food,
+            SimulationDefinitions.Foundation.Storage.SmallFoodCapacity));
+
+        engine.AdvanceTicks(160);
+
+        var snapshot = engine.CreateSnapshot();
+        var zone = Assert.Single(snapshot.StorageZones);
+        Assert.Equal(32, zone.StoredQuantity);
+        Assert.Equal(1, zone.UsedTypeSlots);
+        var stored = Assert.Single(snapshot.ItemStacks.Where(stack =>
+            stack.Location.Kind == ItemLocationKind.StorageZone));
+        Assert.Equal(FoodKind.DriedRations, stored.FoodKind);
+        Assert.Equal(32, stored.Quantity);
+    }
+
+    [Fact]
     public void PartialStackCanMoveThroughInventoryIntoStorage()
     {
         var engine = CreateStockScenario(initialFood: 7);

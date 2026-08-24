@@ -10,7 +10,7 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
-    private const int SaveFormatVersion = 15;
+    private const int SaveFormatVersion = 24;
     private const int DefaultMapDimension = 32;
 
     private static readonly JsonSerializerOptions SaveOptions = new()
@@ -22,10 +22,13 @@ public sealed partial class SimulationEngine
     private readonly SortedDictionary<EntityId, ActorState> _actors = [];
     private readonly SortedDictionary<EntityId, ItemStackState> _itemStacks = [];
     private readonly SortedDictionary<EntityId, StorageZoneState> _storageZones = [];
+    private readonly SortedDictionary<EntityId, WorkDesignationSnapshot> _workDesignations = [];
     private readonly SortedDictionary<CommandKey, SimulationCommand> _pendingCommands = [];
     private readonly List<SimulationEvent> _undeliveredEvents = [];
     private readonly List<WorldChangeEvent> _undeliveredWorldChanges = [];
     private HumanVillageState _humanVillage;
+    private GoblinRaidPhase _raidPhase;
+    private GridPosition _raidRallyPoint;
     private ulong _nextEntityId = 1;
     private ulong _nextEventSequence = 1;
     private long _ticksExecuted;
@@ -65,7 +68,9 @@ public sealed partial class SimulationEngine
         int initialGoblinCount,
         int initialFoodStock,
         int initialHunger = 0,
-        int? initialHealth = null) =>
+        int? initialHealth = null,
+        int initialWoodStock = 0,
+        bool scatterInitialBrushwood = false) =>
         Create(
             worldSeed,
             definitions,
@@ -73,7 +78,9 @@ public sealed partial class SimulationEngine
             initialGoblinCount,
             initialFoodStock,
             initialHunger,
-            initialHealth);
+            initialHealth,
+            initialWoodStock,
+            scatterInitialBrushwood);
 
     public static SimulationEngine Create(
         WorldSeed worldSeed,
@@ -82,12 +89,15 @@ public sealed partial class SimulationEngine
         int initialGoblinCount,
         int initialFoodStock,
         int initialHunger = 0,
-        int? initialHealth = null)
+        int? initialHealth = null,
+        int initialWoodStock = 0,
+        bool scatterInitialBrushwood = false)
     {
         ArgumentNullException.ThrowIfNull(definitions);
         ArgumentNullException.ThrowIfNull(map);
         ArgumentOutOfRangeException.ThrowIfNegative(initialGoblinCount);
         ArgumentOutOfRangeException.ThrowIfNegative(initialFoodStock);
+        ArgumentOutOfRangeException.ThrowIfNegative(initialWoodStock);
         ArgumentOutOfRangeException.ThrowIfNegative(initialHunger);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(initialHunger, definitions.MaximumHunger);
         var actorHealth = initialHealth ?? definitions.MaximumHealth;
@@ -112,6 +122,19 @@ public sealed partial class SimulationEngine
                 ResourceKind.Food,
                 initialFoodStock,
                 ItemLocation.OnGround(map.GoblinSpawn));
+        }
+
+        if (initialWoodStock > 0)
+        {
+            engine.AllocateItemStack(
+                ResourceKind.Wood,
+                initialWoodStock,
+                ItemLocation.OnGround(map.GoblinSpawn));
+        }
+
+        if (scatterInitialBrushwood)
+        {
+            engine.ScatterInitialBrushwood();
         }
 
         engine.UpdateVisibility();
@@ -155,6 +178,8 @@ public sealed partial class SimulationEngine
             CurrentTick = new SimulationTick(save.CurrentTick),
             _nextEntityId = save.NextEntityId,
             _nextEventSequence = save.NextEventSequence,
+            _raidPhase = save.RaidPhase,
+            _raidRallyPoint = new GridPosition(save.RaidRallyX, save.RaidRallyY, save.RaidRallyZ),
         };
 
         engine.World = WorldMapState.Restore(
@@ -181,8 +206,11 @@ public sealed partial class SimulationEngine
             save.HumanVillage,
             definitions,
             engine.CurrentTick);
+        engine.ValidateLoadedRaidState();
         engine.LoadStorageZones(save.StorageZones);
+        engine.LoadWorkDesignations(save.WorkDesignations);
         engine.LoadItemStacks(save.ItemStacks);
+        engine.ValidateLoadedWorkDesignations();
         engine.LoadActors(save.Actors);
         engine.ValidateLoadedOwnership();
         engine.ValidateLoadedJobReservations();
@@ -221,12 +249,21 @@ public sealed partial class SimulationEngine
         var actors = _actors.Values
             .Select(actor => new ActorSnapshot(
                 actor.Id,
+                actor.Name,
+                actor.KnownSkills,
+                actor.KnownTraits,
+                actor.Equipment,
+                new GoblinExperienceSnapshot(
+                    actor.ForagingExperience,
+                    actor.HaulingExperience,
+                    actor.BuildingExperience),
                 actor.Position,
                 actor.Hunger,
                 actor.Fatigue,
                 actor.Health,
                 actor.Thirst,
                 actor.PersonalFood,
+                actor.PersonalFoodKind,
                 actor.PersonalWater,
                 actor.CarriedStackId,
                 new ActorJobSnapshot(
@@ -237,10 +274,14 @@ public sealed partial class SimulationEngine
                     actor.RemainingWorkTicks,
                     actor.SourceStackId,
                     actor.DestinationZoneId,
-                    actor.ReservedQuantity)))
+                    actor.ReservedQuantity,
+                    actor.RemainingRoute.Count,
+                    actor.SuspendedJobKind,
+                    actor.SuspendedJobTarget)))
             .ToArray();
         var itemStacks = _itemStacks.Values
-            .Select(stack => new ItemStackSnapshot(stack.Id, stack.Resource, stack.Quantity, stack.Location))
+            .Select(stack => new ItemStackSnapshot(
+                stack.Id, stack.Resource, stack.FoodKind, stack.Quantity, stack.Location))
             .ToArray();
         var storageZones = _storageZones.Values
             .Select(zone => new StorageZoneSnapshot(
@@ -248,8 +289,13 @@ public sealed partial class SimulationEngine
                 zone.Position,
                 zone.AcceptedResource,
                 zone.Capacity,
-                GetStoredQuantity(zone.Id)))
+                GetStoredQuantity(zone.Id),
+                zone.DesiredQuantity,
+                UsesSmallFoodSlotRules(zone) ? Definitions.Storage.SmallFoodTypeSlots : 0,
+                UsesSmallFoodSlotRules(zone) ? Definitions.Storage.SmallStackCapacity : zone.Capacity,
+                GetUsedTypeSlots(zone.Id)))
             .ToArray();
+        var workDesignations = _workDesignations.Values.ToArray();
         var plantPatches = World.CreatePlantSnapshot().ToArray();
         var worldObjects = World.CreateWorldObjectSnapshot().ToArray();
         var humanVillage = _humanVillage.CreateSnapshot();
@@ -262,9 +308,12 @@ public sealed partial class SimulationEngine
             actors,
             itemStacks,
             storageZones,
+            workDesignations,
             plantPatches,
             worldObjects,
             humanVillage,
+            _raidPhase,
+            _raidRallyPoint,
             visibility,
             World.Version,
             Map.GeneratorVersion,
@@ -327,6 +376,10 @@ public sealed partial class SimulationEngine
             NextEntityId = _nextEntityId,
             NextEventSequence = _nextEventSequence,
             WorldVersion = World.Version,
+            RaidPhase = _raidPhase,
+            RaidRallyX = _raidRallyPoint.X,
+            RaidRallyY = _raidRallyPoint.Y,
+            RaidRallyZ = _raidRallyPoint.Z,
             PlantPatches = World.CreatePlantSnapshot().Select(patch => new PlantPatchSaveModel
             {
                 X = patch.Position.X,
@@ -360,6 +413,16 @@ public sealed partial class SimulationEngine
             Actors = _actors.Values.Select(ToSaveModel).ToList(),
             ItemStacks = _itemStacks.Values.Select(ToSaveModel).ToList(),
             StorageZones = _storageZones.Values.Select(ToSaveModel).ToList(),
+            WorkDesignations = _workDesignations.Values.Select(designation =>
+                new WorkDesignationSaveModel
+                {
+                    Id = designation.Id.Value,
+                    Kind = designation.Kind,
+                    TargetX = designation.Target.X,
+                    TargetY = designation.Target.Y,
+                    TargetZ = designation.Target.Z,
+                    TargetEntityId = designation.TargetEntityId.Value,
+                }).ToList(),
             PendingCommands = _pendingCommands.Values.Select(ToSaveModel).ToList(),
             UndeliveredEvents = _undeliveredEvents.Select(ToSaveModel).ToList(),
             UndeliveredWorldChanges = _undeliveredWorldChanges.Select(change =>
@@ -387,6 +450,8 @@ public sealed partial class SimulationEngine
         Append(canonical, Map.GeneratorVersion);
         Append(canonical, Map.ComputeFingerprint());
         Append(canonical, World.Version);
+        Append(canonical, (int)_raidPhase);
+        Append(canonical, _raidRallyPoint);
         var plantPatches = World.CreatePlantSnapshot();
         Append(canonical, plantPatches.Count);
         foreach (var patch in plantPatches)
@@ -421,6 +486,11 @@ public sealed partial class SimulationEngine
         Append(canonical, humanVillage.FoodStock);
         Append(canonical, humanVillage.WoodStock);
         Append(canonical, humanVillage.GoodsStock);
+        Append(canonical, humanVillage.WaterStock);
+        Append(canonical, humanVillage.PlannedFieldCount);
+        Append(canonical, humanVillage.StorehouseCount);
+        Append(canonical, humanVillage.FoodCapacity);
+        Append(canonical, humanVillage.GoblinAttackOrdered ? 1 : 0);
         Append(canonical, humanVillage.Hostility);
         Append(canonical, humanVillage.LastIntruderSeenTick);
         Append(canonical, humanVillage.GuardHitPoints);
@@ -432,6 +502,17 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)cohort.Role);
             Append(canonical, cohort.Population);
             Append(canonical, cohort.Position);
+            Append(canonical, (int)cohort.Task);
+            Append(canonical, cohort.SkillLevel);
+            Append(canonical, (int)cohort.Tools);
+        }
+        Append(canonical, humanVillage.Fields.Count);
+        foreach (var field in humanVillage.Fields)
+        {
+            Append(canonical, field.Id);
+            Append(canonical, field.Position);
+            Append(canonical, (int)field.Phase);
+            Append(canonical, field.GrowthDays);
         }
 
         var visibility = Visibility.CreateSnapshot();
@@ -449,12 +530,20 @@ public sealed partial class SimulationEngine
         foreach (var actor in _actors.Values)
         {
             Append(canonical, actor.Id.Value);
+            Append(canonical, actor.Name);
+            Append(canonical, (int)actor.KnownSkills);
+            Append(canonical, (int)actor.KnownTraits);
+            Append(canonical, (int)actor.Equipment);
+            Append(canonical, actor.ForagingExperience);
+            Append(canonical, actor.HaulingExperience);
+            Append(canonical, actor.BuildingExperience);
             Append(canonical, actor.Position);
             Append(canonical, actor.Hunger);
             Append(canonical, actor.Fatigue);
             Append(canonical, actor.Health);
             Append(canonical, actor.Thirst);
             Append(canonical, actor.PersonalFood);
+            Append(canonical, (int)actor.PersonalFoodKind);
             Append(canonical, actor.PersonalWater);
             Append(canonical, actor.CarriedStackId.Value);
             Append(canonical, (int)actor.JobKind);
@@ -470,6 +559,8 @@ public sealed partial class SimulationEngine
             {
                 Append(canonical, position);
             }
+            Append(canonical, (int)actor.SuspendedJobKind);
+            Append(canonical, actor.SuspendedJobTarget);
         }
 
         Append(canonical, _itemStacks.Count);
@@ -477,6 +568,7 @@ public sealed partial class SimulationEngine
         {
             Append(canonical, stack.Id.Value);
             Append(canonical, (int)stack.Resource);
+            Append(canonical, (int)stack.FoodKind);
             Append(canonical, stack.Quantity);
             Append(canonical, (int)stack.Location.Kind);
             Append(canonical, stack.Location.Position);
@@ -490,6 +582,16 @@ public sealed partial class SimulationEngine
             Append(canonical, zone.Position);
             Append(canonical, (int)zone.AcceptedResource);
             Append(canonical, zone.Capacity);
+            Append(canonical, zone.DesiredQuantity);
+        }
+
+        Append(canonical, _workDesignations.Count);
+        foreach (var designation in _workDesignations.Values)
+        {
+            Append(canonical, designation.Id.Value);
+            Append(canonical, (int)designation.Kind);
+            Append(canonical, designation.Target);
+            Append(canonical, designation.TargetEntityId.Value);
         }
 
         Append(canonical, _pendingCommands.Count);
@@ -501,6 +603,8 @@ public sealed partial class SimulationEngine
             Append(canonical, command.Subject.Value);
             Append(canonical, command.Target.Value);
             Append(canonical, command.Position);
+            Append(canonical, command.EndPosition);
+            Append(canonical, (int)command.Construction);
             Append(canonical, (int)command.Resource);
             Append(canonical, command.Amount);
         }
@@ -543,12 +647,29 @@ public sealed partial class SimulationEngine
             var id = new EntityId(actorModel.Id);
             var position = new GridPosition(actorModel.X, actorModel.Y, actorModel.Z);
             if (id == EntityId.None ||
+                string.IsNullOrWhiteSpace(actorModel.Name) ||
+                !HasOnlyKnownFlags(actorModel.KnownSkills, GoblinSkill.Building) ||
+                !HasOnlyKnownFlags(actorModel.KnownTraits, GoblinTrait.Nimble) ||
+                !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.BoneKnife) ||
+                actorModel.ForagingExperience < 0 ||
+                actorModel.HaulingExperience < 0 ||
+                actorModel.BuildingExperience < 0 ||
                 actorModel.Hunger < 0 || actorModel.Hunger > Definitions.MaximumHunger ||
                 actorModel.Fatigue < 0 || actorModel.Fatigue > Definitions.MaximumFatigue ||
                 actorModel.Health <= 0 || actorModel.Health > Definitions.MaximumHealth ||
                 actorModel.Thirst < 0 || actorModel.Thirst > Definitions.MaximumThirst ||
                 actorModel.PersonalFood < 0 || actorModel.PersonalFood > Definitions.PersonalFoodCapacity ||
+                !IsValidPersonalFood(actorModel.PersonalFood, actorModel.PersonalFoodKind) ||
                 actorModel.PersonalWater < 0 || actorModel.PersonalWater > Definitions.PersonalWaterCapacity ||
+                !Enum.IsDefined(actorModel.SuspendedJobKind) ||
+                (actorModel.SuspendedJobKind == ActorJobKind.None &&
+                 (actorModel.SuspendedTargetX != 0 || actorModel.SuspendedTargetY != 0 ||
+                  actorModel.SuspendedTargetZ != 0)) ||
+                (actorModel.SuspendedJobKind != ActorJobKind.None &&
+                 !Map.IsWithin(new GridPosition(
+                     actorModel.SuspendedTargetX,
+                     actorModel.SuspendedTargetY,
+                     actorModel.SuspendedTargetZ))) ||
                 !World.IsSurfaceTraversable(position))
             {
                 throw new InvalidDataException("The save contains an invalid actor.");
@@ -556,11 +677,19 @@ public sealed partial class SimulationEngine
 
             var actor = new ActorState(id, position, actorModel.Hunger)
             {
+                Name = actorModel.Name,
+                KnownSkills = actorModel.KnownSkills,
+                KnownTraits = actorModel.KnownTraits,
+                Equipment = actorModel.Equipment,
+                ForagingExperience = actorModel.ForagingExperience,
+                HaulingExperience = actorModel.HaulingExperience,
+                BuildingExperience = actorModel.BuildingExperience,
                 CarriedStackId = new EntityId(actorModel.CarriedStackId),
                 Fatigue = actorModel.Fatigue,
                 Health = actorModel.Health,
                 Thirst = actorModel.Thirst,
                 PersonalFood = actorModel.PersonalFood,
+                PersonalFoodKind = actorModel.PersonalFoodKind,
                 PersonalWater = actorModel.PersonalWater,
                 JobKind = actorModel.JobKind,
                 JobPhase = actorModel.JobPhase,
@@ -573,6 +702,11 @@ public sealed partial class SimulationEngine
                 SourceStackId = new EntityId(actorModel.SourceStackId),
                 DestinationZoneId = new EntityId(actorModel.DestinationZoneId),
                 ReservedQuantity = actorModel.ReservedQuantity,
+                SuspendedJobKind = actorModel.SuspendedJobKind,
+                SuspendedJobTarget = new GridPosition(
+                    actorModel.SuspendedTargetX,
+                    actorModel.SuspendedTargetY,
+                    actorModel.SuspendedTargetZ),
             };
 
             actor.RemainingRoute.AddRange(actorModel.RemainingRoute.Select(routePosition =>
@@ -595,6 +729,8 @@ public sealed partial class SimulationEngine
             if (id == EntityId.None ||
                 !World.IsSurfaceTraversable(position) ||
                 zoneModel.Capacity <= 0 ||
+                zoneModel.DesiredQuantity < 0 ||
+                zoneModel.DesiredQuantity > zoneModel.Capacity ||
                 !IsStorableResource(zoneModel.AcceptedResource))
             {
                 throw new InvalidDataException("The save contains an invalid storage zone.");
@@ -606,9 +742,32 @@ public sealed partial class SimulationEngine
                         id,
                         position,
                         zoneModel.AcceptedResource,
-                        zoneModel.Capacity)))
+                        zoneModel.Capacity,
+                        zoneModel.DesiredQuantity)))
             {
                 throw new InvalidDataException($"The save contains duplicate storage zone {id}.");
+            }
+        }
+    }
+
+    private void LoadWorkDesignations(IEnumerable<WorkDesignationSaveModel> models)
+    {
+        foreach (var model in models.OrderBy(item => item.Id))
+        {
+            var id = new EntityId(model.Id);
+            var target = new GridPosition(model.TargetX, model.TargetY, model.TargetZ);
+            var targetEntityId = new EntityId(model.TargetEntityId);
+            if (id == EntityId.None ||
+                !Enum.IsDefined(model.Kind) ||
+                target.Z != 0 || !Map.IsWithin(target) ||
+                (model.Kind is WorkDesignationKind.GatherFood or WorkDesignationKind.UprootBerryBush &&
+                 targetEntityId != EntityId.None) ||
+                (model.Kind == WorkDesignationKind.GatherBrushwood && targetEntityId == EntityId.None) ||
+                !_workDesignations.TryAdd(
+                    id,
+                    new WorkDesignationSnapshot(id, model.Kind, target, targetEntityId)))
+            {
+                throw new InvalidDataException("The save contains an invalid work designation.");
             }
         }
     }
@@ -630,6 +789,7 @@ public sealed partial class SimulationEngine
 
             if (id == EntityId.None ||
                 !IsStorableResource(stackModel.Resource) ||
+                !IsValidFoodKind(stackModel.Resource, stackModel.FoodKind) ||
                 stackModel.Quantity <= 0)
             {
                 throw new InvalidDataException("The save contains an invalid item stack.");
@@ -637,9 +797,31 @@ public sealed partial class SimulationEngine
 
             if (!_itemStacks.TryAdd(
                     id,
-                    new ItemStackState(id, stackModel.Resource, stackModel.Quantity, location)))
+                    new ItemStackState(
+                        id, stackModel.Resource, stackModel.FoodKind, stackModel.Quantity, location)))
             {
                 throw new InvalidDataException($"The save contains duplicate item stack {id}.");
+            }
+        }
+    }
+
+    private void ValidateLoadedWorkDesignations()
+    {
+        foreach (var designation in _workDesignations.Values)
+        {
+            var valid = designation.Kind switch
+            {
+                WorkDesignationKind.GatherFood => World.GetPlantPatch(designation.Target) is not null,
+                WorkDesignationKind.UprootBerryBush =>
+                    World.GetPlantPatch(designation.Target) is { Kind: PlantKind.BerryBush },
+                WorkDesignationKind.GatherBrushwood =>
+                    _itemStacks.TryGetValue(designation.TargetEntityId, out var stack) &&
+                    stack.Resource == ResourceKind.Wood,
+                _ => false,
+            };
+            if (!valid)
+            {
+                throw new InvalidDataException("A work designation references a missing target object.");
             }
         }
     }
@@ -707,6 +889,7 @@ public sealed partial class SimulationEngine
         var maximumId = _actors.Keys
             .Concat(_itemStacks.Keys)
             .Concat(_storageZones.Keys)
+            .Concat(_workDesignations.Keys)
             .Select(id => id.Value)
             .DefaultIfEmpty(0UL)
             .Max();
@@ -728,6 +911,8 @@ public sealed partial class SimulationEngine
                 new EntityId(model.Subject),
                 new EntityId(model.Target),
                 new GridPosition(model.X, model.Y, model.Z),
+                new GridPosition(model.EndX, model.EndY, model.EndZ),
+                model.Construction,
                 model.Resource,
                 model.Amount);
 
@@ -869,8 +1054,259 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.PickUp => TryExecutePickUp(command),
         SimulationCommandKind.StoreCarried => TryExecuteStoreCarried(command),
         SimulationCommandKind.Move => TryExecuteMove(command),
+        SimulationCommandKind.Build => TryExecuteBuild(command),
+        SimulationCommandKind.DesignateWork => TryExecuteDesignateWork(command),
+        SimulationCommandKind.ClearWorkDesignations => TryExecuteClearWork(command),
+        SimulationCommandKind.ConfigureStoragePull => TryExecuteConfigureStoragePull(command),
+        SimulationCommandKind.AttackHumanVillage => TryExecuteAttackHumanVillage(),
         _ => false,
     };
+
+    private bool TryExecuteAttackHumanVillage()
+    {
+        if (_humanVillage.GoblinAttackOrdered || _raidPhase != GoblinRaidPhase.None)
+        {
+            return false;
+        }
+
+        var rally = World.CreateWorldObjectSnapshot()
+            .Where(item =>
+                item.Kind == WorldObjectKind.GoblinFieldCamp &&
+                item.Owner == WorldObjectOwner.GoblinTribe)
+            .Select(item => item.Anchor)
+            .Where(World.IsSurfaceTraversable)
+            .Select(position => new
+            {
+                Position = position,
+                Route = World.FindSurfacePath(position, Map.HumanVillage),
+            })
+            .Where(item => item.Route is not null)
+            .OrderBy(item => item.Route!.Count)
+            .ThenBy(item => item.Position.Y)
+            .ThenBy(item => item.Position.X)
+            .FirstOrDefault();
+        if (rally is null)
+        {
+            return false;
+        }
+
+        _raidPhase = GoblinRaidPhase.Preparing;
+        _raidRallyPoint = rally.Position;
+        foreach (var actor in _actors.Values)
+        {
+            if (actor.CarriedStackId == EntityId.None && actor.JobKind != ActorJobKind.Haul)
+            {
+                actor.ClearJob();
+            }
+        }
+        Publish(SimulationEventKind.RaidPreparationStarted, EntityId.None, EntityId.None, _actors.Count);
+        return true;
+    }
+
+    private void ValidateLoadedRaidState()
+    {
+        if (!Enum.IsDefined(_raidPhase) ||
+            (_raidPhase == GoblinRaidPhase.None && _raidRallyPoint != default) ||
+            (_raidPhase != GoblinRaidPhase.None &&
+             (!Map.IsWithin(_raidRallyPoint) ||
+              !World.GetWorldObjectsAt(_raidRallyPoint).Any(item =>
+                  item.Kind == WorldObjectKind.GoblinFieldCamp &&
+                  item.Owner == WorldObjectOwner.GoblinTribe))) ||
+            (_raidPhase == GoblinRaidPhase.Marching && !_humanVillage.GoblinAttackOrdered) ||
+            (_raidPhase == GoblinRaidPhase.Preparing && _humanVillage.GoblinAttackOrdered))
+        {
+            throw new InvalidDataException("The save contains invalid goblin raid state.");
+        }
+    }
+
+    private bool TryExecuteDesignateWork(SimulationCommand command)
+    {
+        var kind = command.Resource switch
+        {
+            ResourceKind.Food => WorkDesignationKind.GatherFood,
+            ResourceKind.Wood => WorkDesignationKind.GatherBrushwood,
+            ResourceKind.Vegetation => WorkDesignationKind.UprootBerryBush,
+            _ => default,
+        };
+        if (kind == default)
+        {
+            return false;
+        }
+
+        var (minimum, maximum) = NormalizeArea(command.Position, command.EndPosition);
+        var targets = kind switch
+        {
+            WorkDesignationKind.GatherFood => World.CreatePlantSnapshot()
+                .Where(plant => plant.Biomass > 0 && IsInside(plant.Position, minimum, maximum) &&
+                    Visibility.Get(plant.Position) == CellVisibility.Visible)
+                .Select(plant => (plant.Position, EntityId.None)),
+            WorkDesignationKind.GatherBrushwood => _itemStacks.Values
+                .Where(stack => stack.Resource == ResourceKind.Wood &&
+                    stack.Location.Kind == ItemLocationKind.Ground &&
+                    IsInside(stack.Location.Position, minimum, maximum) &&
+                    Visibility.Get(stack.Location.Position) == CellVisibility.Visible)
+                .Select(stack => (stack.Location.Position, stack.Id)),
+            WorkDesignationKind.UprootBerryBush => World.CreatePlantSnapshot()
+                .Where(plant => plant.Kind == PlantKind.BerryBush &&
+                    IsInside(plant.Position, minimum, maximum) &&
+                    Visibility.Get(plant.Position) == CellVisibility.Visible)
+                .Select(plant => (plant.Position, EntityId.None)),
+            _ => [],
+        };
+        foreach (var (position, targetEntityId) in targets
+                     .OrderBy(item => item.Position.Y)
+                     .ThenBy(item => item.Position.X)
+                     .ThenBy(item => item.Item2))
+        {
+            if (_workDesignations.Values.Any(item =>
+                    item.Kind == kind && item.Target == position && item.TargetEntityId == targetEntityId))
+            {
+                continue;
+            }
+            var id = AllocateEntityId();
+            _workDesignations.Add(id, new WorkDesignationSnapshot(id, kind, position, targetEntityId));
+            Publish(SimulationEventKind.WorkDesignationCreated, EntityId.None, id, (int)kind);
+        }
+        return true;
+    }
+
+    private bool TryExecuteClearWork(SimulationCommand command)
+    {
+        var (minimum, maximum) = NormalizeArea(command.Position, command.EndPosition);
+        var removed = _workDesignations.Values
+            .Where(designation => IsInside(designation.Target, minimum, maximum))
+            .Select(designation => designation.Id)
+            .ToArray();
+        foreach (var id in removed)
+        {
+            _workDesignations.Remove(id);
+            Publish(SimulationEventKind.WorkDesignationRemoved, EntityId.None, id, 0);
+        }
+
+        CancelJobsInClearedArea(minimum, maximum);
+        return true;
+    }
+
+    private bool TryExecuteConfigureStoragePull(SimulationCommand command)
+    {
+        if (!_storageZones.TryGetValue(command.Target, out var zone) ||
+            command.Amount < 0 || command.Amount > zone.Capacity)
+        {
+            return false;
+        }
+
+        zone.DesiredQuantity = command.Amount;
+        Publish(
+            SimulationEventKind.StoragePullConfigured,
+            EntityId.None,
+            zone.Id,
+            command.Amount);
+        return true;
+    }
+
+    private bool TryExecuteBuild(SimulationCommand command)
+    {
+        if (command.Construction == ConstructionKind.GoblinFieldCamp)
+        {
+            if (!World.CanBuildGoblinFieldCamp(command.Position) ||
+                _storageZones.Values.Any(zone => zone.Position == command.Position) ||
+                GetAvailableResourceQuantity(ResourceKind.Wood) < command.Amount)
+            {
+                return false;
+            }
+
+            var builder = FindNearestBuilder(command.Position);
+            var gatheredDirectly = ConsumeResource(ResourceKind.Wood, command.Amount);
+            _undeliveredWorldChanges.Add(World.BuildGoblinFieldCamp(command.Position, CurrentTick));
+            const int campProvisionCapacity = 48;
+            var campProvisionTarget = Math.Min(
+                campProvisionCapacity,
+                Math.Max(24, _actors.Count * (Definitions.PersonalFoodCapacity + 3)));
+            var provisions = AllocateStorageZone(
+                command.Position,
+                ResourceKind.Food,
+                capacity: campProvisionCapacity,
+                desiredQuantity: campProvisionTarget);
+            if (builder is not null)
+            {
+                if (gatheredDirectly > 0)
+                {
+                    GainForagingExperience(builder, gatheredDirectly);
+                }
+                GainBuildingExperience(builder, 25);
+            }
+            Publish(
+                SimulationEventKind.ConstructionCompleted,
+                builder?.Id ?? EntityId.None,
+                provisions.Id,
+                command.Amount);
+            return true;
+        }
+
+        if (command.Construction is ConstructionKind.FoodStorage or ConstructionKind.WoodStorage)
+        {
+            if (!World.IsSurfaceTraversable(command.Position) ||
+                _storageZones.Values.Any(zone => zone.Position == command.Position) ||
+                GetAvailableResourceQuantity(ResourceKind.Wood) < 2)
+            {
+                return false;
+            }
+
+            var builder = FindNearestBuilder(command.Position);
+            var gatheredDirectly = ConsumeResource(ResourceKind.Wood, 2);
+            var acceptedResource = command.Construction == ConstructionKind.FoodStorage
+                ? ResourceKind.Food
+                : ResourceKind.Wood;
+            var capacity = acceptedResource == ResourceKind.Food
+                ? Definitions.Storage.SmallFoodCapacity
+                : 64;
+            var zone = AllocateStorageZone(command.Position, acceptedResource, capacity);
+            if (builder is not null)
+            {
+                if (gatheredDirectly > 0)
+                {
+                    GainForagingExperience(builder, gatheredDirectly);
+                }
+                GainBuildingExperience(builder, 10);
+            }
+            Publish(
+                SimulationEventKind.ConstructionCompleted,
+                builder?.Id ?? EntityId.None,
+                zone.Id,
+                2);
+            return true;
+        }
+
+        if (command.Construction == ConstructionKind.WoodenWalkway)
+        {
+            var cells = SimulationCommand.GetWalkwayCells(command.Position, command.EndPosition);
+            if (!World.CanBuildWalkway(cells) ||
+                GetAvailableResourceQuantity(ResourceKind.Wood) < cells.Count)
+            {
+                return false;
+            }
+
+            var builder = FindNearestBuilder(command.Position);
+            var gatheredDirectly = ConsumeResource(ResourceKind.Wood, cells.Count);
+            _undeliveredWorldChanges.Add(World.BuildWalkway(cells, CurrentTick));
+            if (builder is not null)
+            {
+                if (gatheredDirectly > 0)
+                {
+                    GainForagingExperience(builder, gatheredDirectly);
+                }
+                GainBuildingExperience(builder, Math.Max(5, cells.Count * 3));
+            }
+            Publish(
+                SimulationEventKind.ConstructionCompleted,
+                builder?.Id ?? EntityId.None,
+                EntityId.None,
+                cells.Count);
+            return true;
+        }
+
+        return false;
+    }
 
     private bool TryExecuteMove(SimulationCommand command)
     {
@@ -931,9 +1367,12 @@ public sealed partial class SimulationEngine
         }
 
         _undeliveredWorldChanges.Add(worldChange);
-        var stack = FindMergeableGroundStack(ResourceKind.Food, actor.Position)
-            ?? AllocateItemStack(ResourceKind.Food, quantity: 0, ItemLocation.OnGround(actor.Position));
+        var foodKind = FoodKindFor(World.GetPlantPatch(actor.Position)!.Value.Kind);
+        var stack = FindMergeableGroundStack(ResourceKind.Food, actor.Position, foodKind)
+            ?? AllocateItemStack(
+                ResourceKind.Food, quantity: 0, ItemLocation.OnGround(actor.Position), foodKind);
         stack.Quantity = checked(stack.Quantity + gathered);
+        GainForagingExperience(actor, Math.Max(1, gathered * 2));
         Publish(SimulationEventKind.FoodGathered, actor.Id, stack.Id, gathered);
         return true;
     }
@@ -946,7 +1385,11 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var zone = AllocateStorageZone(command.Position, command.Resource, command.Amount);
+        var zone = AllocateStorageZone(
+            command.Position,
+            command.Resource,
+            command.Amount,
+            desiredQuantity: command.Amount);
         Publish(SimulationEventKind.StorageZoneCreated, EntityId.None, zone.Id, zone.Capacity);
         return true;
     }
@@ -982,7 +1425,8 @@ public sealed partial class SimulationEngine
             carried = AllocateItemStack(
                 source.Resource,
                 command.Amount,
-                ItemLocation.CarriedBy(actor.Id));
+                ItemLocation.CarriedBy(actor.Id),
+                source.FoodKind);
         }
 
         actor.Position = sourcePosition;
@@ -998,8 +1442,7 @@ public sealed partial class SimulationEngine
             actor.CarriedStackId == EntityId.None ||
             !_itemStacks.TryGetValue(actor.CarriedStackId, out var carried) ||
             !_storageZones.TryGetValue(command.Target, out var zone) ||
-            !ZoneAccepts(zone, carried.Resource) ||
-            GetStoredQuantity(zone.Id) + carried.Quantity > zone.Capacity ||
+            !CanStoreStack(zone, carried, carried.Quantity) ||
             !World.HasSurfacePath(actor.Position, zone.Position))
         {
             return false;
@@ -1008,8 +1451,8 @@ public sealed partial class SimulationEngine
         actor.Position = zone.Position;
         actor.CarriedStackId = EntityId.None;
         actor.ClearJob();
-        carried.Location = ItemLocation.StoredIn(zone.Id, zone.Position);
-        Publish(SimulationEventKind.ItemStored, actor.Id, carried.Id, carried.Quantity);
+        var stored = StoreStackInZone(carried, zone);
+        Publish(SimulationEventKind.ItemStored, actor.Id, stored.Id, carried.Quantity);
         return true;
     }
 
@@ -1044,7 +1487,13 @@ public sealed partial class SimulationEngine
                 if (actor.PersonalFood > 0)
                 {
                     actor.PersonalFood--;
-                    actor.Hunger = Math.Max(0, actor.Hunger - Definitions.FoodNutrition);
+                    actor.Hunger = Math.Max(
+                        0,
+                        actor.Hunger - Definitions.Food.GetSatiety(actor.PersonalFoodKind));
+                    if (actor.PersonalFood == 0)
+                    {
+                        actor.PersonalFoodKind = FoodKind.None;
+                    }
                     Publish(SimulationEventKind.ActorAte, actor.Id, EntityId.None, 1);
                 }
                 else
@@ -1087,10 +1536,18 @@ public sealed partial class SimulationEngine
         }
         if (actor.PersonalFood > 0)
         {
-            var provisions = FindMergeableGroundStack(ResourceKind.Food, actor.Position)
-                ?? AllocateItemStack(ResourceKind.Food, quantity: 0, ItemLocation.OnGround(actor.Position));
+            var provisions = FindMergeableGroundStack(
+                    ResourceKind.Food,
+                    actor.Position,
+                    actor.PersonalFoodKind)
+                ?? AllocateItemStack(
+                    ResourceKind.Food,
+                    quantity: 0,
+                    ItemLocation.OnGround(actor.Position),
+                    actor.PersonalFoodKind);
             provisions.Quantity = checked(provisions.Quantity + actor.PersonalFood);
             actor.PersonalFood = 0;
+            actor.PersonalFoodKind = FoodKind.None;
         }
 
         _actors.Remove(actor.Id);
@@ -1123,7 +1580,7 @@ public sealed partial class SimulationEngine
         }
 
         foodStack.Quantity--;
-        actor.Hunger = Math.Max(0, actor.Hunger - Definitions.FoodNutrition);
+        actor.Hunger = Math.Max(0, actor.Hunger - Definitions.Food.GetSatiety(foodStack.FoodKind));
         if (actor.JobKind == ActorJobKind.Haul &&
             actor.JobStage == ActorJobStage.Delivering &&
             actor.CarriedStackId == foodStack.Id)
@@ -1233,6 +1690,70 @@ public sealed partial class SimulationEngine
                 }
 
                 break;
+            case SimulationCommandKind.Build:
+                if (!Enum.IsDefined(command.Construction) ||
+                    command.Resource != ResourceKind.Wood ||
+                    !Map.IsWithin(command.Position) ||
+                    !Map.IsWithin(command.EndPosition))
+                {
+                    throw new ArgumentException("Construction command is invalid.", nameof(command));
+                }
+
+                if ((command.Construction is ConstructionKind.FoodStorage or ConstructionKind.WoodStorage) &&
+                    (command.Position != command.EndPosition || command.Amount != 2))
+                {
+                    throw new ArgumentException("Food storage construction is invalid.", nameof(command));
+                }
+
+                if (command.Construction == ConstructionKind.WoodenWalkway &&
+                    (command.Amount != 1 || command.Position.Z != command.EndPosition.Z))
+                {
+                    throw new ArgumentException("Walkway construction is invalid.", nameof(command));
+                }
+
+                if (command.Construction == ConstructionKind.GoblinFieldCamp &&
+                    (command.Amount != 6 ||
+                     command.EndPosition != command.Position with
+                     {
+                         X = command.Position.X + 1,
+                         Y = command.Position.Y + 1,
+                     }))
+                {
+                    throw new ArgumentException("Field-camp construction is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.DesignateWork:
+                if (command.Resource is not (ResourceKind.Food or ResourceKind.Wood or ResourceKind.Vegetation) ||
+                    !IsValidArea(command.Position, command.EndPosition))
+                {
+                    throw new ArgumentException("Work designation command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ClearWorkDesignations:
+                if (command.Resource != ResourceKind.Any ||
+                    !IsValidArea(command.Position, command.EndPosition))
+                {
+                    throw new ArgumentException("Clear-work command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureStoragePull:
+                if (!_storageZones.TryGetValue(command.Target, out var zone) ||
+                    command.Amount < 0 || command.Amount > zone.Capacity)
+                {
+                    throw new ArgumentException("Storage pull command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.AttackHumanVillage:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    command.Amount != 0)
+                {
+                    throw new ArgumentException("Human-village attack command is invalid.", nameof(command));
+                }
+                break;
         }
     }
 
@@ -1252,6 +1773,10 @@ public sealed partial class SimulationEngine
         var id = AllocateEntityId();
         var actor = new ActorState(id, position, hunger)
         {
+            Name = CreateGoblinName(id),
+            KnownSkills = CreateGoblinSkills(id),
+            KnownTraits = CreateGoblinTraits(id),
+            Equipment = CreateGoblinEquipment(id),
             Health = health ?? Definitions.MaximumHealth,
             PersonalWater = Definitions.PersonalWaterCapacity,
         };
@@ -1262,10 +1787,16 @@ public sealed partial class SimulationEngine
     private ItemStackState AllocateItemStack(
         ResourceKind resource,
         int quantity,
-        ItemLocation location)
+        ItemLocation location,
+        FoodKind foodKind = FoodKind.None)
     {
+        if (resource == ResourceKind.Food && foodKind == FoodKind.None)
+        {
+            foodKind = FoodKind.DriedRations;
+        }
+
         var id = AllocateEntityId();
-        var stack = new ItemStackState(id, resource, quantity, location);
+        var stack = new ItemStackState(id, resource, foodKind, quantity, location);
         _itemStacks.Add(id, stack);
         return stack;
     }
@@ -1273,10 +1804,16 @@ public sealed partial class SimulationEngine
     private StorageZoneState AllocateStorageZone(
         GridPosition position,
         ResourceKind acceptedResource,
-        int capacity)
+        int capacity,
+        int desiredQuantity = 0)
     {
         var id = AllocateEntityId();
-        var zone = new StorageZoneState(id, position, acceptedResource, capacity);
+        var zone = new StorageZoneState(
+            id,
+            position,
+            acceptedResource,
+            capacity,
+            desiredQuantity);
         _storageZones.Add(id, zone);
         return zone;
     }
@@ -1290,9 +1827,12 @@ public sealed partial class SimulationEngine
 
     private ItemStackState? FindMergeableGroundStack(
         ResourceKind resource,
-        GridPosition position) =>
+        GridPosition position,
+        FoodKind foodKind = FoodKind.None) =>
         _itemStacks.Values.FirstOrDefault(stack =>
             stack.Resource == resource &&
+            (resource != ResourceKind.Food || stack.FoodKind ==
+                (foodKind == FoodKind.None ? FoodKind.DriedRations : foodKind)) &&
             stack.Location == ItemLocation.OnGround(position));
 
     private int GetTotalResourceQuantity(ResourceKind resource) => checked(
@@ -1303,12 +1843,388 @@ public sealed partial class SimulationEngine
             ? _actors.Values.Sum(actor => actor.PersonalFood)
             : 0));
 
+    private string CreateGoblinName(EntityId id)
+    {
+        string[] beginnings = ["Gr", "Kr", "Sn", "Br", "Zg", "Tr", "Gl", "Wrz"];
+        string[] endings = ["uk", "ak", "iz", "og", "yn", "ek", "usz", "ag"];
+        var beginning = DeterministicRandom.NextInt(
+            WorldSeed,
+            RandomDomain.GoblinIdentity,
+            id,
+            SimulationTick.Zero,
+            sampleKey: 1,
+            minimumInclusive: 0,
+            maximumExclusive: beginnings.Length);
+        var ending = DeterministicRandom.NextInt(
+            WorldSeed,
+            RandomDomain.GoblinIdentity,
+            id,
+            SimulationTick.Zero,
+            sampleKey: 2,
+            minimumInclusive: 0,
+            maximumExclusive: endings.Length);
+        var candidate = beginnings[beginning] + endings[ending];
+        return _actors.Values.Any(actor => StringComparer.Ordinal.Equals(actor.Name, candidate))
+            ? $"{candidate}-{id.Value}"
+            : candidate;
+    }
+
+    private GoblinSkill CreateGoblinSkills(EntityId id)
+    {
+        var primary = DeterministicRandom.NextInt(
+            WorldSeed,
+            RandomDomain.GoblinIdentity,
+            id,
+            SimulationTick.Zero,
+            sampleKey: 3,
+            minimumInclusive: 0,
+            maximumExclusive: 5);
+        var secondary = DeterministicRandom.NextInt(
+            WorldSeed,
+            RandomDomain.GoblinIdentity,
+            id,
+            SimulationTick.Zero,
+            sampleKey: 4,
+            minimumInclusive: 0,
+            maximumExclusive: 5);
+        return (GoblinSkill)(1 << primary) | (GoblinSkill)(1 << secondary);
+    }
+
+    private GoblinTrait CreateGoblinTraits(EntityId id)
+    {
+        var first = DeterministicRandom.NextInt(
+            WorldSeed,
+            RandomDomain.GoblinIdentity,
+            id,
+            SimulationTick.Zero,
+            sampleKey: 5,
+            minimumInclusive: 0,
+            maximumExclusive: 5);
+        var second = DeterministicRandom.NextInt(
+            WorldSeed,
+            RandomDomain.GoblinIdentity,
+            id,
+            SimulationTick.Zero,
+            sampleKey: 6,
+            minimumInclusive: 0,
+            maximumExclusive: 5);
+        return (GoblinTrait)(1 << first) | (GoblinTrait)(1 << second);
+    }
+
+    private PersonalEquipment CreateGoblinEquipment(EntityId id)
+    {
+        var equipment = PersonalEquipment.RagClothes | PersonalEquipment.PrimitiveWaterskin;
+        var hasKnife = DeterministicRandom.NextInt(
+            WorldSeed,
+            RandomDomain.GoblinIdentity,
+            id,
+            SimulationTick.Zero,
+            sampleKey: 7,
+            minimumInclusive: 0,
+            maximumExclusive: 2) == 1;
+        return hasKnife ? equipment | PersonalEquipment.BoneKnife : equipment;
+    }
+
+    private void ScatterInitialBrushwood()
+    {
+        for (var y = 0; y < Map.Height; y++)
+        {
+            for (var x = 0; x < Map.Width; x++)
+            {
+                var position = new GridPosition(x, y);
+                var cell = Map.GetCell(position);
+                if (cell.Terrain is not (TerrainKind.SolidGround or TerrainKind.Mud) ||
+                    cell.Fertility < 45 ||
+                    !World.IsSurfaceTraversable(position))
+                {
+                    continue;
+                }
+
+                var subject = new EntityId(checked((ulong)(y * Map.Width + x) + 1));
+                var occurrence = DeterministicRandom.NextInt(
+                    WorldSeed,
+                    RandomDomain.Brushwood,
+                    subject,
+                    SimulationTick.Zero,
+                    sampleKey: 1,
+                    minimumInclusive: 0,
+                    maximumExclusive: 100);
+                if (occurrence >= 3)
+                {
+                    continue;
+                }
+
+                var quantity = DeterministicRandom.NextInt(
+                    WorldSeed,
+                    RandomDomain.Brushwood,
+                    subject,
+                    SimulationTick.Zero,
+                    sampleKey: 2,
+                    minimumInclusive: 1,
+                    maximumExclusive: 4);
+                AllocateItemStack(ResourceKind.Wood, quantity, ItemLocation.OnGround(position));
+            }
+        }
+
+        var nearbyBrushwood = _itemStacks.Values
+            .Where(stack =>
+            stack.Resource == ResourceKind.Wood &&
+            stack.Location.Kind == ItemLocationKind.Ground &&
+            ManhattanDistance(stack.Location.Position, Map.GoblinSpawn) <= Definitions.VisionRadius)
+            .Sum(stack => stack.Quantity);
+        if (nearbyBrushwood >= 4)
+        {
+            return;
+        }
+
+        var fallback = Enumerable.Range(0, Map.Height)
+            .SelectMany(y => Enumerable.Range(0, Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(position =>
+                Map.GetCell(position).Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
+                World.IsSurfaceTraversable(position))
+            .OrderBy(position => ManhattanDistance(position, Map.GoblinSpawn))
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .First();
+        AllocateItemStack(
+            ResourceKind.Wood,
+            4 - nearbyBrushwood,
+            ItemLocation.OnGround(fallback));
+    }
+
+    private ActorState? FindNearestBuilder(GridPosition position) =>
+        _actors.Values
+            .OrderBy(actor => ManhattanDistance(actor.Position, position))
+            .ThenBy(actor => actor.Id)
+            .FirstOrDefault();
+
+    private static void GainForagingExperience(ActorState actor, int amount)
+    {
+        actor.KnownSkills |= GoblinSkill.Foraging;
+        actor.ForagingExperience = checked(actor.ForagingExperience + amount);
+    }
+
+    private static void GainHaulingExperience(ActorState actor, int amount)
+    {
+        actor.KnownSkills |= GoblinSkill.Hauling;
+        actor.HaulingExperience = checked(actor.HaulingExperience + amount);
+    }
+
+    private static void GainBuildingExperience(ActorState actor, int amount)
+    {
+        actor.KnownSkills |= GoblinSkill.Building;
+        actor.BuildingExperience = checked(actor.BuildingExperience + amount);
+    }
+
+    private static int ManhattanDistance(GridPosition first, GridPosition second) =>
+        Math.Abs(first.X - second.X) + Math.Abs(first.Y - second.Y) + Math.Abs(first.Z - second.Z);
+
+    private bool IsValidArea(GridPosition first, GridPosition second) =>
+        first.Z == 0 && second.Z == 0 && Map.IsWithin(first) && Map.IsWithin(second);
+
+    private static (GridPosition Minimum, GridPosition Maximum) NormalizeArea(
+        GridPosition first,
+        GridPosition second) =>
+        (new GridPosition(Math.Min(first.X, second.X), Math.Min(first.Y, second.Y), first.Z),
+         new GridPosition(Math.Max(first.X, second.X), Math.Max(first.Y, second.Y), first.Z));
+
+    private static bool IsInside(
+        GridPosition position,
+        GridPosition minimum,
+        GridPosition maximum) =>
+        position.Z == minimum.Z &&
+        position.X >= minimum.X && position.X <= maximum.X &&
+        position.Y >= minimum.Y && position.Y <= maximum.Y;
+
+    private bool IsWorkDesignated(WorkDesignationKind kind, GridPosition position) =>
+        _workDesignations.Values.Any(designation =>
+            designation.Kind == kind && designation.Matches(position));
+
+    private bool IsWorkDesignated(
+        WorkDesignationKind kind,
+        EntityId targetEntityId,
+        GridPosition position) =>
+        _workDesignations.Values.Any(designation =>
+            designation.Kind == kind && designation.Target == position &&
+            designation.TargetEntityId == targetEntityId);
+
+    private void CancelJobsInClearedArea(GridPosition minimum, GridPosition maximum)
+    {
+        foreach (var actor in _actors.Values)
+        {
+            var targetWasCleared = actor.JobTarget.X >= minimum.X && actor.JobTarget.X <= maximum.X &&
+                actor.JobTarget.Y >= minimum.Y && actor.JobTarget.Y <= maximum.Y &&
+                actor.JobTarget.Z == minimum.Z;
+            var sourceWasCleared = actor.SourceStackId != EntityId.None &&
+                _itemStacks.TryGetValue(actor.SourceStackId, out var source) &&
+                source.Location.Kind == ItemLocationKind.Ground &&
+                source.Location.Position.X >= minimum.X && source.Location.Position.X <= maximum.X &&
+                source.Location.Position.Y >= minimum.Y && source.Location.Position.Y <= maximum.Y &&
+                source.Location.Position.Z == minimum.Z;
+            if ((actor.JobKind is ActorJobKind.Forage or ActorJobKind.ClearVegetation && targetWasCleared) ||
+                (actor.JobKind == ActorJobKind.Haul &&
+                 actor.JobStage == ActorJobStage.Collecting &&
+                 sourceWasCleared))
+            {
+                actor.ClearJob();
+            }
+        }
+    }
+
+    private static bool HasOnlyKnownFlags<T>(T value, T highestFlag)
+        where T : struct, Enum
+    {
+        var numericValue = Convert.ToUInt64(value, CultureInfo.InvariantCulture);
+        var allFlags = (Convert.ToUInt64(highestFlag, CultureInfo.InvariantCulture) << 1) - 1;
+        return (numericValue & ~allFlags) == 0;
+    }
+
     private int GetStoredQuantity(EntityId zoneId) =>
         _itemStacks.Values
             .Where(stack =>
                 stack.Location.Kind == ItemLocationKind.StorageZone &&
                 stack.Location.OwnerId == zoneId)
             .Sum(stack => stack.Quantity);
+
+    private ItemStackState StoreStackInZone(ItemStackState stack, StorageZoneState zone)
+    {
+        var existing = _itemStacks.Values.FirstOrDefault(item =>
+            item.Id != stack.Id &&
+            item.Resource == stack.Resource &&
+            item.FoodKind == stack.FoodKind &&
+            item.Location.Kind == ItemLocationKind.StorageZone &&
+            item.Location.OwnerId == zone.Id);
+        if (existing is null)
+        {
+            stack.Location = ItemLocation.StoredIn(zone.Id, zone.Position);
+            return stack;
+        }
+
+        existing.Quantity = checked(existing.Quantity + stack.Quantity);
+        _itemStacks.Remove(stack.Id);
+        return existing;
+    }
+
+    private int GetUsedTypeSlots(EntityId zoneId) =>
+        _itemStacks.Values
+            .Where(stack => stack.Location.Kind == ItemLocationKind.StorageZone &&
+                stack.Location.OwnerId == zoneId)
+            .Select(stack => stack.Resource == ResourceKind.Food
+                ? (int)stack.FoodKind
+                : (int)stack.Resource)
+            .Distinct()
+            .Count();
+
+    private bool CanStoreStack(StorageZoneState zone, ItemStackState stack, int quantity)
+    {
+        if (!ZoneAccepts(zone, stack.Resource) || GetStoredQuantity(zone.Id) + quantity > zone.Capacity)
+        {
+            return false;
+        }
+
+        if (!UsesSmallFoodSlotRules(zone) || stack.Resource != ResourceKind.Food)
+        {
+            return true;
+        }
+
+        var storedOfKind = _itemStacks.Values
+            .Where(item => item.Location.Kind == ItemLocationKind.StorageZone &&
+                item.Location.OwnerId == zone.Id && item.FoodKind == stack.FoodKind)
+            .Sum(item => item.Quantity);
+        var alreadyUsesSlot = storedOfKind > 0;
+        return storedOfKind + quantity <= Definitions.Storage.SmallStackCapacity &&
+            (alreadyUsesSlot || GetUsedTypeSlots(zone.Id) < Definitions.Storage.SmallFoodTypeSlots);
+    }
+
+    private int GetAvailableStorageQuantity(StorageZoneState zone, ItemStackState stack)
+    {
+        var totalAvailable = Math.Max(0, zone.Capacity - GetStoredQuantity(zone.Id));
+        if (!UsesSmallFoodSlotRules(zone) || stack.Resource != ResourceKind.Food)
+        {
+            return totalAvailable;
+        }
+
+        var storedOfKind = _itemStacks.Values
+            .Where(item => item.Location.Kind == ItemLocationKind.StorageZone &&
+                item.Location.OwnerId == zone.Id && item.FoodKind == stack.FoodKind)
+            .Sum(item => item.Quantity);
+        if (storedOfKind == 0 && GetUsedTypeSlots(zone.Id) >= Definitions.Storage.SmallFoodTypeSlots)
+        {
+            return 0;
+        }
+
+        return Math.Min(totalAvailable, Definitions.Storage.SmallStackCapacity - storedOfKind);
+    }
+
+    private bool UsesSmallFoodSlotRules(StorageZoneState zone) =>
+        zone.AcceptedResource == ResourceKind.Food &&
+        zone.Capacity == Definitions.Storage.SmallFoodCapacity;
+
+    private static bool IsValidFoodKind(ResourceKind resource, FoodKind foodKind) =>
+        resource == ResourceKind.Food
+            ? Enum.IsDefined(foodKind) && foodKind != FoodKind.None
+            : foodKind == FoodKind.None;
+
+    private static bool IsValidPersonalFood(int quantity, FoodKind foodKind) =>
+        quantity == 0
+            ? foodKind == FoodKind.None
+            : Enum.IsDefined(foodKind) && foodKind != FoodKind.None;
+
+    private static FoodKind FoodKindFor(PlantKind kind) => kind switch
+    {
+        PlantKind.BerryBush => FoodKind.Berries,
+        PlantKind.MushroomCluster => FoodKind.Mushrooms,
+        PlantKind.EdibleRoots => FoodKind.EdibleRoots,
+        PlantKind.FishShoal => FoodKind.Fish,
+        _ => FoodKind.DriedRations,
+    };
+
+    private int GetAvailableResourceQuantity(ResourceKind resource) =>
+        _itemStacks.Values
+            .Where(stack =>
+                stack.Resource == resource &&
+                IsAvailableForConstruction(stack))
+            .Sum(stack => stack.Quantity);
+
+    private bool IsAvailableForConstruction(ItemStackState stack) =>
+        stack.Location.Kind == ItemLocationKind.StorageZone ||
+        (stack.Location.Kind == ItemLocationKind.Ground &&
+         Visibility.Get(stack.Location.Position) == CellVisibility.Visible);
+
+    private int ConsumeResource(ResourceKind resource, int quantity)
+    {
+        var remaining = quantity;
+        var gatheredDirectly = 0;
+        foreach (var stack in _itemStacks.Values
+                     .Where(stack =>
+                         stack.Resource == resource &&
+                         IsAvailableForConstruction(stack))
+                     .OrderBy(stack => stack.Location.Kind == ItemLocationKind.StorageZone ? 0 : 1)
+                     .ThenBy(stack => stack.Id)
+                     .ToArray())
+        {
+            var consumed = Math.Min(remaining, stack.Quantity);
+            if (stack.Location.Kind == ItemLocationKind.Ground)
+            {
+                gatheredDirectly = checked(gatheredDirectly + consumed);
+            }
+            stack.Quantity -= consumed;
+            remaining -= consumed;
+            if (stack.Quantity == 0)
+            {
+                _itemStacks.Remove(stack.Id);
+                Publish(SimulationEventKind.ItemStackDepleted, EntityId.None, stack.Id, 0);
+            }
+
+            if (remaining == 0)
+            {
+                return gatheredDirectly;
+            }
+        }
+
+        throw new InvalidOperationException("Validated construction resources disappeared.");
+    }
 
     private static bool ZoneAccepts(StorageZoneState zone, ResourceKind resource) =>
         zone.AcceptedResource is ResourceKind.Any || zone.AcceptedResource == resource;
@@ -1319,11 +2235,19 @@ public sealed partial class SimulationEngine
     private static ActorSaveModel ToSaveModel(ActorState actor) => new()
     {
         Id = actor.Id.Value,
+        Name = actor.Name,
+        KnownSkills = actor.KnownSkills,
+        KnownTraits = actor.KnownTraits,
+        Equipment = actor.Equipment,
+        ForagingExperience = actor.ForagingExperience,
+        HaulingExperience = actor.HaulingExperience,
+        BuildingExperience = actor.BuildingExperience,
         Hunger = actor.Hunger,
         Fatigue = actor.Fatigue,
         Health = actor.Health,
         Thirst = actor.Thirst,
         PersonalFood = actor.PersonalFood,
+        PersonalFoodKind = actor.PersonalFoodKind,
         PersonalWater = actor.PersonalWater,
         X = actor.Position.X,
         Y = actor.Position.Y,
@@ -1339,6 +2263,10 @@ public sealed partial class SimulationEngine
         SourceStackId = actor.SourceStackId.Value,
         DestinationZoneId = actor.DestinationZoneId.Value,
         ReservedQuantity = actor.ReservedQuantity,
+        SuspendedJobKind = actor.SuspendedJobKind,
+        SuspendedTargetX = actor.SuspendedJobTarget.X,
+        SuspendedTargetY = actor.SuspendedJobTarget.Y,
+        SuspendedTargetZ = actor.SuspendedJobTarget.Z,
         RemainingRoute = actor.RemainingRoute.Select(position => new GridPositionSaveModel
         {
             X = position.X,
@@ -1351,6 +2279,7 @@ public sealed partial class SimulationEngine
     {
         Id = stack.Id.Value,
         Resource = stack.Resource,
+        FoodKind = stack.FoodKind,
         Quantity = stack.Quantity,
         LocationKind = stack.Location.Kind,
         X = stack.Location.Position.X,
@@ -1367,6 +2296,7 @@ public sealed partial class SimulationEngine
         Z = zone.Position.Z,
         AcceptedResource = zone.AcceptedResource,
         Capacity = zone.Capacity,
+        DesiredQuantity = zone.DesiredQuantity,
     };
 
     private static CommandSaveModel ToSaveModel(SimulationCommand command) => new()
@@ -1379,6 +2309,10 @@ public sealed partial class SimulationEngine
         X = command.Position.X,
         Y = command.Position.Y,
         Z = command.Position.Z,
+        EndX = command.EndPosition.X,
+        EndY = command.EndPosition.Y,
+        EndZ = command.EndPosition.Z,
+        Construction = command.Construction,
         Resource = command.Resource,
         Amount = command.Amount,
     };
@@ -1424,6 +2358,20 @@ public sealed partial class SimulationEngine
     {
         public EntityId Id { get; } = id;
 
+        public string Name { get; set; } = string.Empty;
+
+        public GoblinSkill KnownSkills { get; set; }
+
+        public GoblinTrait KnownTraits { get; set; }
+
+        public PersonalEquipment Equipment { get; set; }
+
+        public int ForagingExperience { get; set; }
+
+        public int HaulingExperience { get; set; }
+
+        public int BuildingExperience { get; set; }
+
         public GridPosition Position { get; set; } = position;
 
         public int Hunger { get; set; } = hunger;
@@ -1435,6 +2383,8 @@ public sealed partial class SimulationEngine
         public int Thirst { get; set; }
 
         public int PersonalFood { get; set; }
+
+        public FoodKind PersonalFoodKind { get; set; }
 
         public int PersonalWater { get; set; }
 
@@ -1458,6 +2408,28 @@ public sealed partial class SimulationEngine
 
         public List<GridPosition> RemainingRoute { get; } = [];
 
+        public ActorJobKind SuspendedJobKind { get; set; }
+
+        public GridPosition SuspendedJobTarget { get; set; }
+
+        public void SuspendCurrentJob()
+        {
+            if (JobKind is ActorJobKind.Move or ActorJobKind.Explore or ActorJobKind.Forage or
+                ActorJobKind.ClearVegetation or ActorJobKind.Rest)
+            {
+                SuspendedJobKind = JobKind;
+                SuspendedJobTarget = JobTarget;
+            }
+
+            ClearJob();
+        }
+
+        public void ClearSuspendedJob()
+        {
+            SuspendedJobKind = ActorJobKind.None;
+            SuspendedJobTarget = default;
+        }
+
         public void ClearJob()
         {
             JobKind = ActorJobKind.None;
@@ -1475,12 +2447,15 @@ public sealed partial class SimulationEngine
     private sealed class ItemStackState(
         EntityId id,
         ResourceKind resource,
+        FoodKind foodKind,
         int quantity,
         ItemLocation location)
     {
         public EntityId Id { get; } = id;
 
         public ResourceKind Resource { get; } = resource;
+
+        public FoodKind FoodKind { get; } = foodKind;
 
         public int Quantity { get; set; } = quantity;
 
@@ -1491,7 +2466,8 @@ public sealed partial class SimulationEngine
         EntityId id,
         GridPosition position,
         ResourceKind acceptedResource,
-        int capacity)
+        int capacity,
+        int desiredQuantity = 0)
     {
         public EntityId Id { get; } = id;
 
@@ -1500,5 +2476,7 @@ public sealed partial class SimulationEngine
         public ResourceKind AcceptedResource { get; } = acceptedResource;
 
         public int Capacity { get; } = capacity;
+
+        public int DesiredQuantity { get; set; } = desiredQuantity;
     }
 }

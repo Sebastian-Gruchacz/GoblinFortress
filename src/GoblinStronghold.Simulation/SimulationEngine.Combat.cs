@@ -9,7 +9,12 @@ public sealed partial class SimulationEngine
         var intruders = _actors.Values
             .Select(actor => new HumanIntruderSnapshot(actor.Id, actor.Position))
             .ToArray();
-        if (_humanVillage.Update(CurrentTick, WorldSeed, World, Definitions, intruders))
+        var result = _humanVillage.Update(CurrentTick, WorldSeed, World, Definitions, intruders);
+        foreach (var worldChange in result.WorldChanges)
+        {
+            _undeliveredWorldChanges.Add(worldChange);
+        }
+        if (result.Alerted)
         {
             Publish(
                 SimulationEventKind.HumanVillageAlerted,
@@ -27,7 +32,7 @@ public sealed partial class SimulationEngine
         }
 
         var guards = _humanVillage.GetGuardSnapshot();
-        if (guards.Population == 0)
+        if (guards.Population == 0 || guards.Task != HumanCohortTask.Guard)
         {
             return;
         }

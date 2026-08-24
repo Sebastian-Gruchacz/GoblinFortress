@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Resources;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -46,6 +47,7 @@ public sealed class ActorJobTests
 
         var food = Assert.Single(engine.CreateSnapshot().ItemStacks);
         Assert.True(food.Quantity >= SimulationDefinitions.Foundation.BaseForageYield);
+        Assert.NotEqual(FoodKind.None, food.FoodKind);
         Assert.Contains(
             engine.DrainEvents(),
             simulationEvent => simulationEvent.Kind == SimulationEventKind.FoodGathered);
@@ -76,11 +78,18 @@ public sealed class ActorJobTests
     {
         var seed = new WorldSeed(0x4A4F4253UL);
         var map = SwampMapGenerator.Generate(seed, width: 32, height: 32);
-        return SimulationEngine.Create(
+        var engine = SimulationEngine.Create(
             seed,
             SimulationDefinitions.Foundation,
             map,
             initialGoblinCount: goblinCount,
             initialFoodStock: 0);
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            new SimulationTick(1),
+            sequence: 1,
+            new GridPosition(0, 0),
+            new GridPosition(map.Width - 1, map.Height - 1),
+            ResourceKind.Food));
+        return engine;
     }
 }

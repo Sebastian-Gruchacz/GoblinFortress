@@ -1,20 +1,62 @@
 namespace GoblinStronghold.Simulation;
 
+public sealed record SimulationClockSettings(int TicksPerDay);
+
+public sealed record ActorNeedSettings(
+    int MaximumHunger,
+    int HungerPerTick,
+    int EatThreshold,
+    int FoodSeekThreshold,
+    int CriticalHungerThreshold,
+    int StarvationHungerThreshold,
+    int StarvationDamagePerTick,
+    int MaximumThirst,
+    int ThirstPerTick,
+    int DrinkThreshold,
+    int DehydrationThirstThreshold,
+    int DehydrationDamagePerTick,
+    int MaximumFatigue,
+    int FatiguePerTick,
+    int RestThreshold);
+
+public sealed record StorageSettings(int SmallFoodTypeSlots, int SmallStackCapacity)
+{
+    public int SmallFoodCapacity => checked(SmallFoodTypeSlots * SmallStackCapacity);
+}
+
+public sealed record FoodNutritionSettings(
+    int DriedRations,
+    int Berries,
+    int Mushrooms,
+    int EdibleRoots,
+    int Fish)
+{
+    public int GetSatiety(Resources.FoodKind kind) => kind switch
+    {
+        Resources.FoodKind.DriedRations => DriedRations,
+        Resources.FoodKind.Berries => Berries,
+        Resources.FoodKind.Mushrooms => Mushrooms,
+        Resources.FoodKind.EdibleRoots => EdibleRoots,
+        Resources.FoodKind.Fish => Fish,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown food kind."),
+    };
+}
+
 public sealed class SimulationDefinitions
 {
     public static SimulationDefinitions Foundation { get; } = new(
-        id: "foundation-v13",
+        id: "foundation-v25",
         ticksPerDay: 240,
         maximumHunger: 10_000,
-        hungerPerTick: 25,
-        eatThreshold: 5_000,
-        foodNutrition: 4_000,
-        foodSeekThreshold: 6_500,
-        criticalHungerThreshold: 8_000,
+        hungerPerTick: 8,
+        eatThreshold: 3_200,
+        foodNutrition: 3_600,
+        foodSeekThreshold: 4_000,
+        criticalHungerThreshold: 7_500,
         eatWorkTicks: 10,
         maximumHealth: 10_000,
-        starvationHungerThreshold: 9_000,
-        starvationDamagePerTick: 40,
+        starvationHungerThreshold: 9_500,
+        starvationDamagePerTick: 8,
         baseForageYield: 2,
         forageVariance: 3,
         actorCarryCapacity: 10,
@@ -22,8 +64,8 @@ public sealed class SimulationDefinitions
         forageWorkTicks: 30,
         haulHandlingTicks: 10,
         maximumFatigue: 10_000,
-        fatiguePerTick: 10,
-        restThreshold: 2_500,
+        fatiguePerTick: 5,
+        restThreshold: 2_000,
         restRecoveryPerTick: 75,
         visionRadius: 4,
         maximumExplorers: 1,
@@ -39,14 +81,18 @@ public sealed class SimulationDefinitions
         goblinMinimumDamage: 260,
         goblinDamageVariance: 160,
         maximumThirst: 10_000,
-        thirstPerTick: 25,
-        drinkThreshold: 5_000,
-        waterHydration: 4_000,
-        dehydrationThirstThreshold: 9_000,
-        dehydrationDamagePerTick: 60,
+        thirstPerTick: 10,
+        drinkThreshold: 3_000,
+        waterHydration: 3_500,
+        dehydrationThirstThreshold: 9_500,
+        dehydrationDamagePerTick: 12,
         personalFoodCapacity: 2,
         personalWaterCapacity: 2,
-        resupplyWorkTicks: 10);
+        resupplyWorkTicks: 10,
+        berriesNutrition: 1_800,
+        mushroomsNutrition: 2_200,
+        edibleRootsNutrition: 2_800,
+        fishNutrition: 3_200);
 
     public SimulationDefinitions(
         string id,
@@ -92,7 +138,11 @@ public sealed class SimulationDefinitions
         int dehydrationDamagePerTick,
         int personalFoodCapacity,
         int personalWaterCapacity,
-        int resupplyWorkTicks)
+        int resupplyWorkTicks,
+        int berriesNutrition = 1_800,
+        int mushroomsNutrition = 2_200,
+        int edibleRootsNutrition = 2_800,
+        int fishNutrition = 3_200)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ticksPerDay);
@@ -145,6 +195,10 @@ public sealed class SimulationDefinitions
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(personalFoodCapacity);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(personalWaterCapacity);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(resupplyWorkTicks);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(berriesNutrition);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(mushroomsNutrition);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(edibleRootsNutrition);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fishNutrition);
 
         Id = id;
         TicksPerDay = ticksPerDay;
@@ -190,9 +244,31 @@ public sealed class SimulationDefinitions
         PersonalFoodCapacity = personalFoodCapacity;
         PersonalWaterCapacity = personalWaterCapacity;
         ResupplyWorkTicks = resupplyWorkTicks;
+        Clock = new(TicksPerDay);
+        Needs = new(
+            MaximumHunger, HungerPerTick, EatThreshold, FoodSeekThreshold,
+            CriticalHungerThreshold, StarvationHungerThreshold, StarvationDamagePerTick,
+            MaximumThirst, ThirstPerTick, DrinkThreshold,
+            DehydrationThirstThreshold, DehydrationDamagePerTick,
+            MaximumFatigue, FatiguePerTick, RestThreshold);
+        Storage = new(SmallFoodTypeSlots: 3, SmallStackCapacity: 32);
+        Food = new(
+            DriedRations: FoodNutrition,
+            Berries: berriesNutrition,
+            Mushrooms: mushroomsNutrition,
+            EdibleRoots: edibleRootsNutrition,
+            Fish: fishNutrition);
     }
 
     public string Id { get; }
+
+    public SimulationClockSettings Clock { get; }
+
+    public ActorNeedSettings Needs { get; }
+
+    public StorageSettings Storage { get; }
+
+    public FoodNutritionSettings Food { get; }
 
     public int TicksPerDay { get; }
 

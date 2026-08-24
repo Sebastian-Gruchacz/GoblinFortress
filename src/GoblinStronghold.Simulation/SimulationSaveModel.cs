@@ -24,6 +24,14 @@ internal sealed class SimulationSaveModel
 
     public ulong WorldVersion { get; set; }
 
+    public GoblinRaidPhase RaidPhase { get; set; }
+
+    public int RaidRallyX { get; set; }
+
+    public int RaidRallyY { get; set; }
+
+    public int RaidRallyZ { get; set; }
+
     public List<PlantPatchSaveModel> PlantPatches { get; set; } = [];
 
     public List<WorldObjectSaveModel> WorldObjects { get; set; } = [];
@@ -37,6 +45,8 @@ internal sealed class SimulationSaveModel
     public List<ItemStackSaveModel> ItemStacks { get; set; } = [];
 
     public List<StorageZoneSaveModel> StorageZones { get; set; } = [];
+
+    public List<WorkDesignationSaveModel> WorkDesignations { get; set; } = [];
 
     public List<CommandSaveModel> PendingCommands { get; set; } = [];
 
@@ -55,6 +65,12 @@ internal sealed class HumanVillageSaveModel
 
     public int GoodsStock { get; set; }
 
+    public int WaterStock { get; set; }
+
+    public int StorehouseCount { get; set; }
+
+    public bool GoblinAttackOrdered { get; set; }
+
     public int Hostility { get; set; }
 
     public long LastIntruderSeenTick { get; set; }
@@ -62,6 +78,8 @@ internal sealed class HumanVillageSaveModel
     public int GuardHitPoints { get; set; }
 
     public List<HumanCohortSaveModel> Cohorts { get; set; } = [];
+
+    public List<HumanFieldSaveModel> Fields { get; set; } = [];
 }
 
 internal sealed class HumanCohortSaveModel
@@ -77,6 +95,22 @@ internal sealed class HumanCohortSaveModel
     public int Y { get; set; }
 
     public int Z { get; set; }
+
+    public HumanCohortTask Task { get; set; }
+
+    public int SkillLevel { get; set; }
+
+    public HumanTool Tools { get; set; }
+}
+
+internal sealed class HumanFieldSaveModel
+{
+    public int Id { get; set; }
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Z { get; set; }
+    public HumanFieldPhase Phase { get; set; }
+    public int GrowthDays { get; set; }
 }
 
 internal sealed class PlantPatchSaveModel
@@ -130,6 +164,20 @@ internal sealed class ActorSaveModel
 {
     public ulong Id { get; set; }
 
+    public string Name { get; set; } = string.Empty;
+
+    public GoblinSkill KnownSkills { get; set; }
+
+    public GoblinTrait KnownTraits { get; set; }
+
+    public PersonalEquipment Equipment { get; set; }
+
+    public int ForagingExperience { get; set; }
+
+    public int HaulingExperience { get; set; }
+
+    public int BuildingExperience { get; set; }
+
     public int Hunger { get; set; }
 
     public int Fatigue { get; set; }
@@ -139,6 +187,8 @@ internal sealed class ActorSaveModel
     public int Thirst { get; set; }
 
     public int PersonalFood { get; set; }
+
+    public Resources.FoodKind PersonalFoodKind { get; set; }
 
     public int PersonalWater { get; set; }
 
@@ -171,6 +221,14 @@ internal sealed class ActorSaveModel
     public int ReservedQuantity { get; set; }
 
     public List<GridPositionSaveModel> RemainingRoute { get; set; } = [];
+
+    public ActorJobKind SuspendedJobKind { get; set; }
+
+    public int SuspendedTargetX { get; set; }
+
+    public int SuspendedTargetY { get; set; }
+
+    public int SuspendedTargetZ { get; set; }
 }
 
 internal sealed class GridPositionSaveModel
@@ -187,6 +245,8 @@ internal sealed class ItemStackSaveModel
     public ulong Id { get; set; }
 
     public Resources.ResourceKind Resource { get; set; }
+
+    public Resources.FoodKind FoodKind { get; set; }
 
     public int Quantity { get; set; }
 
@@ -214,6 +274,23 @@ internal sealed class StorageZoneSaveModel
     public Resources.ResourceKind AcceptedResource { get; set; }
 
     public int Capacity { get; set; }
+
+    public int DesiredQuantity { get; set; }
+}
+
+internal sealed class WorkDesignationSaveModel
+{
+    public ulong Id { get; set; }
+
+    public WorkDesignationKind Kind { get; set; }
+
+    public int TargetX { get; set; }
+
+    public int TargetY { get; set; }
+
+    public int TargetZ { get; set; }
+
+    public ulong TargetEntityId { get; set; }
 }
 
 internal sealed class CommandSaveModel
@@ -233,6 +310,14 @@ internal sealed class CommandSaveModel
     public int Y { get; set; }
 
     public int Z { get; set; }
+
+    public int EndX { get; set; }
+
+    public int EndY { get; set; }
+
+    public int EndZ { get; set; }
+
+    public ConstructionKind Construction { get; set; }
 
     public Resources.ResourceKind Resource { get; set; }
 

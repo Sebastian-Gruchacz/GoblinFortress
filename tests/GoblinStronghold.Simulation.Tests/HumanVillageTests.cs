@@ -33,9 +33,50 @@ public sealed class HumanVillageTests
 
         engine.AdvanceTicks(1);
         var afterDayBoundary = engine.CreateSnapshot().HumanVillage;
-        Assert.Equal(52, afterDayBoundary.FoodStock);
-        Assert.Equal(28, afterDayBoundary.WoodStock);
-        Assert.Equal(5, afterDayBoundary.GoodsStock);
+        Assert.Equal(36, afterDayBoundary.FoodStock);
+        Assert.Equal(42, afterDayBoundary.WaterStock);
+        Assert.Equal(24, afterDayBoundary.WoodStock);
+        Assert.Equal(4, afterDayBoundary.GoodsStock);
+        Assert.All(afterDayBoundary.Fields, field => Assert.Equal(1, field.GrowthDays));
+    }
+
+    [Fact]
+    public void DispatcherClearsEnoughFieldsForPopulationAndCropsNeedHalfAYear()
+    {
+        var engine = CreateEngine();
+        var initial = engine.CreateSnapshot().HumanVillage;
+        Assert.Equal(4, initial.Fields.Count);
+        Assert.Equal(8, initial.PlannedFieldCount);
+        Assert.All(initial.Fields, field => Assert.Null(engine.World.GetPlantPatch(field.Position)));
+
+        engine.AdvanceTicks(engine.Definitions.TicksPerDay * 20);
+        var expanded = engine.CreateSnapshot().HumanVillage;
+        Assert.Equal(expanded.PlannedFieldCount, expanded.Fields.Count);
+        Assert.True(expanded.WoodStock > initial.WoodStock);
+        Assert.DoesNotContain(expanded.Fields, field => field.Phase == HumanFieldPhase.Ripe);
+        Assert.All(expanded.Fields, field => Assert.Null(engine.World.GetPlantPatch(field.Position)));
+
+        engine.AdvanceTicks(engine.Definitions.TicksPerDay * 100);
+        Assert.Contains(engine.CreateSnapshot().HumanVillage.Fields,
+            field => field.Phase == HumanFieldPhase.Ripe);
+
+        engine.AdvanceTicks(engine.Definitions.TicksPerDay);
+        var harvested = engine.CreateSnapshot();
+        Assert.Equal(1, harvested.HumanVillage.StorehouseCount);
+        var storehouse = Assert.Single(harvested.WorldObjects,
+            item => item.Kind == WorldObjectKind.HumanStorehouse);
+        Assert.Equal(WorldObjectOwner.HumanVillage, storehouse.Owner);
+        Assert.Equal(9, storehouse.Parts.Count(item => item.Kind == WorldObjectPartKind.Floor));
+        Assert.Contains(storehouse.Parts, item => item.Kind == WorldObjectPartKind.Door);
+        Assert.Equal(480, harvested.HumanVillage.FoodCapacity);
+        var door = storehouse.GetAbsoluteParts()
+            .Single(item => item.Part.Kind == WorldObjectPartKind.Door).Position;
+        Assert.True(engine.World.HasSurfacePath(engine.Map.HumanVillage, door));
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Single(restored.CreateSnapshot().WorldObjects,
+            item => item.Kind == WorldObjectKind.HumanStorehouse);
     }
 
     [Fact]

@@ -17,6 +17,9 @@ public enum WorldObjectKind : byte
     HumanCottage = 2,
     HumanBarn = 3,
     HumanWell = 4,
+    WoodenWalkway = 5,
+    HumanStorehouse = 6,
+    GoblinFieldCamp = 7,
 }
 
 public enum WorldObjectOwner : byte
@@ -49,6 +52,7 @@ public enum WorldObjectPartKind : byte
     Roof = 4,
     WellRim = 5,
     WellShaft = 6,
+    Walkway = 7,
 }
 
 public readonly record struct WorldObjectPartSnapshot(

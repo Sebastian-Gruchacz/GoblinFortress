@@ -2,11 +2,11 @@ namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public const int MinimumDimension = 16;
     public const int MaximumDimension = 2_048;
 
-    public static bool SupportsVersion(int version) => version is 1 or CurrentVersion;
+    public static bool SupportsVersion(int version) => version is 1 or 2 or CurrentVersion;
 
     public static GeneratedMap Generate(
         WorldSeed seed,
@@ -30,7 +30,7 @@ public static class SwampMapGenerator
             for (var x = 0; x < width; x++)
             {
                 var index = checked((y * width) + x);
-                cells[index] = GenerateCell(seed, index);
+                cells[index] = GenerateCell(seed, index, generatorVersion);
             }
         }
 
@@ -86,7 +86,7 @@ public static class SwampMapGenerator
         return map;
     }
 
-    private static MapCell GenerateCell(WorldSeed seed, int index)
+    private static MapCell GenerateCell(WorldSeed seed, int index, int generatorVersion)
     {
         var subject = new EntityId(checked((ulong)index + 1));
         var moisture = DeterministicRandom.NextInt(
@@ -120,7 +120,12 @@ public static class SwampMapGenerator
 
         return waterScore switch
         {
-            >= 86 => new MapCell(TerrainKind.DeepWater, moistureByte, fertility, TraversalCost: 0),
+            >= 86 => new MapCell(
+                TerrainKind.DeepWater,
+                moistureByte,
+                fertility,
+                TraversalCost: 0,
+                FloorLevel: generatorVersion >= 3 ? (sbyte)-1 : (sbyte)0),
             >= 70 => new MapCell(TerrainKind.ShallowWater, moistureByte, fertility, TraversalCost: 4),
             >= 38 => new MapCell(TerrainKind.Mud, moistureByte, fertility, TraversalCost: 3),
             _ => new MapCell(TerrainKind.SolidGround, moistureByte, fertility, TraversalCost: 1),

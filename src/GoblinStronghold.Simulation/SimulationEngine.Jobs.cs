@@ -8,7 +8,7 @@ public sealed partial class SimulationEngine
     private void UpdateActorJobs()
     {
         var reservedForageTargets = _actors.Values
-            .Where(actor => actor.JobKind == ActorJobKind.Forage)
+            .Where(actor => actor.JobKind is ActorJobKind.Forage or ActorJobKind.ClearVegetation)
             .Select(actor => actor.JobTarget)
             .ToHashSet();
         var reservedSourceQuantities = CreateHaulReservations(sourceReservations: true);
@@ -22,8 +22,13 @@ public sealed partial class SimulationEngine
                 reservedForageTargets,
                 reservedSourceQuantities,
                 reservedDestinationQuantities);
-            TryInterruptForCriticalHunger(
+            TryInterruptForHunger(
                 actor,
+                reservedSourceQuantities,
+                reservedDestinationQuantities);
+            TryInterruptForFatigue(
+                actor,
+                reservedForageTargets,
                 reservedSourceQuantities,
                 reservedDestinationQuantities);
 
@@ -31,7 +36,15 @@ public sealed partial class SimulationEngine
             {
                 var needsFood = actor.Hunger >= Definitions.FoodSeekThreshold;
                 var needsWater = actor.Thirst >= Definitions.DrinkThreshold && actor.PersonalWater == 0;
-                if (needsWater && TryPlanWaterResupply(actor))
+                if (_raidPhase == GoblinRaidPhase.Preparing &&
+                    TryPlanRaidPreparation(
+                        actor,
+                        reservedSourceQuantities,
+                        reservedDestinationQuantities))
+                {
+                    // The expedition assembles only after every member is rested and provisioned.
+                }
+                else if (needsWater && TryPlanWaterResupply(actor))
                 {
                     // Water outranks cargo and ordinary work once the carried supply is empty.
                 }
@@ -43,7 +56,10 @@ public sealed partial class SimulationEngine
                 {
                     // A reachable meal outranks fatigue and settlement work.
                 }
-                else if (needsFood && TryPlanForageJob(actor, reservedForageTargets))
+                else if (needsFood && TryPlanForageJob(
+                             actor,
+                             reservedForageTargets,
+                             requireDesignation: false))
                 {
                     // With no prepared food, gathering becomes survival work.
                 }
@@ -66,6 +82,10 @@ public sealed partial class SimulationEngine
                 {
                     // Primitive containers are refilled at accessible shallow water.
                 }
+                else if (TryPlanClearVegetationJob(actor, reservedForageTargets))
+                {
+                    // Deliberate site clearance removes a renewable food source permanently.
+                }
                 else if (activeExplorers < Definitions.MaximumExplorers &&
                          TryPlanExploreJob(actor))
                 {
@@ -73,7 +93,10 @@ public sealed partial class SimulationEngine
                 }
                 else
                 {
-                    TryPlanForageJob(actor, reservedForageTargets);
+                    TryPlanForageJob(
+                        actor,
+                        reservedForageTargets,
+                        requireDesignation: true);
                 }
             }
 
@@ -100,8 +123,122 @@ public sealed partial class SimulationEngine
                 case ActorJobKind.Resupply:
                     UpdateResupplyJob(actor);
                     break;
+                case ActorJobKind.ClearVegetation:
+                    UpdateClearVegetationJob(actor);
+                    break;
             }
         }
+
+        TryLaunchPreparedRaid();
+        RemoveExhaustedWorkDesignations();
+    }
+
+    private bool TryPlanRaidPreparation(
+        ActorState actor,
+        Dictionary<EntityId, int> sourceReservations,
+        Dictionary<EntityId, int> destinationReservations)
+    {
+        if (actor.CarriedStackId != EntityId.None)
+        {
+            TryPlanHaulDelivery(actor, destinationReservations);
+            return true;
+        }
+        var isAtRally = actor.Position == _raidRallyPoint;
+        var isInRallyArea = Distance(actor.Position, _raidRallyPoint) <= 4;
+        var foodTarget = Definitions.PersonalFoodCapacity;
+        var waterTarget = Definitions.PersonalWaterCapacity;
+        if (!isInRallyArea && actor.Hunger >= Definitions.FoodSeekThreshold &&
+            TryPlanEatJob(actor, sourceReservations))
+        {
+            return true;
+        }
+        if (!isInRallyArea && actor.PersonalFood < foodTarget &&
+            TryPlanFoodResupply(actor, sourceReservations))
+        {
+            return true;
+        }
+
+        if (actor.Hunger >= Definitions.FoodSeekThreshold &&
+            TryPlanEatJob(actor, sourceReservations, isInRallyArea ? _raidRallyPoint : null))
+        {
+            return true;
+        }
+        if (actor.PersonalFood < foodTarget &&
+            TryPlanFoodResupply(actor, sourceReservations, isInRallyArea ? _raidRallyPoint : null))
+        {
+            return true;
+        }
+        if (actor.PersonalWater < waterTarget && TryPlanWaterResupply(actor))
+        {
+            return true;
+        }
+        if (actor.Fatigue >= Definitions.RestThreshold && TryPlanRestJob(actor))
+        {
+            return true;
+        }
+        var campZone = _storageZones.Values.FirstOrDefault(zone =>
+            zone.Position == _raidRallyPoint && zone.AcceptedResource == ResourceKind.Food);
+        var outstandingPartyFood = _actors.Values.Sum(candidate =>
+            Math.Max(0, foodTarget - candidate.PersonalFood) +
+            (candidate.Hunger >= Definitions.FoodSeekThreshold ? 1 : 0));
+        var requiredCampStock = outstandingPartyFood;
+        if (campZone is not null &&
+            GetStoredQuantity(campZone.Id) + destinationReservations.GetValueOrDefault(campZone.Id) <
+                requiredCampStock &&
+            TryPlanHaulCollection(
+                actor,
+                sourceReservations,
+                destinationReservations,
+                campZone.Id))
+        {
+            return true;
+        }
+        if (!isAtRally)
+        {
+            var route = World.FindSurfacePath(actor.Position, _raidRallyPoint);
+            if (route is { Count: > 0 })
+            {
+                actor.JobKind = ActorJobKind.Move;
+                actor.JobPhase = ActorJobPhase.Traveling;
+                actor.JobTarget = _raidRallyPoint;
+                actor.RemainingRoute.AddRange(route);
+            }
+        }
+        return true;
+    }
+
+    private void TryLaunchPreparedRaid()
+    {
+        if (_raidPhase != GoblinRaidPhase.Preparing || _actors.Count == 0 ||
+            _actors.Values.Any(actor =>
+                actor.Position != _raidRallyPoint ||
+                actor.JobKind != ActorJobKind.None ||
+                actor.CarriedStackId != EntityId.None ||
+                actor.PersonalFood < Definitions.PersonalFoodCapacity ||
+                actor.PersonalWater < Definitions.PersonalWaterCapacity ||
+                actor.Hunger >= Definitions.FoodSeekThreshold ||
+                actor.Thirst > Definitions.DrinkThreshold / 2 ||
+                actor.Fatigue >= Definitions.RestThreshold))
+        {
+            return;
+        }
+
+        _raidPhase = GoblinRaidPhase.Marching;
+        _humanVillage.OrderGoblinAttack();
+        foreach (var actor in _actors.Values)
+        {
+            var route = World.FindSurfacePath(actor.Position, Map.HumanVillage);
+            if (route is not { Count: > 0 })
+            {
+                continue;
+            }
+            actor.JobKind = ActorJobKind.Move;
+            actor.JobPhase = ActorJobPhase.Traveling;
+            actor.JobTarget = Map.HumanVillage;
+            actor.RemainingRoute.AddRange(route);
+            Publish(SimulationEventKind.MoveOrdered, actor.Id, EntityId.None, route.Count);
+        }
+        Publish(SimulationEventKind.RaidDeparted, EntityId.None, EntityId.None, _actors.Count);
     }
 
     private bool TryPlanExploreJob(ActorState actor)
@@ -172,16 +309,14 @@ public sealed partial class SimulationEngine
         }
     }
 
-    private void TryInterruptForCriticalHunger(
+    private void TryInterruptForHunger(
         ActorState actor,
         Dictionary<EntityId, int> itemReservations,
         Dictionary<EntityId, int> destinationReservations)
     {
-        if (actor.Hunger < Definitions.CriticalHungerThreshold ||
+        if (actor.Hunger < Definitions.FoodSeekThreshold ||
             actor.CarriedStackId != EntityId.None ||
-            (actor.JobKind != ActorJobKind.Rest &&
-             actor.JobKind != ActorJobKind.Move &&
-             (actor.JobKind != ActorJobKind.Haul || actor.JobStage != ActorJobStage.Collecting)))
+            actor.JobKind is ActorJobKind.None or ActorJobKind.Eat or ActorJobKind.Resupply)
         {
             return;
         }
@@ -209,7 +344,52 @@ public sealed partial class SimulationEngine
                 actor.ReservedQuantity);
         }
 
-        actor.ClearJob();
+        actor.SuspendCurrentJob();
+    }
+
+    private void TryInterruptForFatigue(
+        ActorState actor,
+        ISet<GridPosition> forageTargets,
+        Dictionary<EntityId, int> itemReservations,
+        Dictionary<EntityId, int> destinationReservations)
+    {
+        if (actor.Fatigue < Definitions.RestThreshold ||
+            actor.CarriedStackId != EntityId.None ||
+            actor.JobKind is ActorJobKind.None or ActorJobKind.Rest or ActorJobKind.Eat or
+                ActorJobKind.Resupply ||
+            !World.CreateWorldObjectSnapshot()
+                .Where(worldObject =>
+                    (worldObject.Kind is WorldObjectKind.GoblinHut or
+                        WorldObjectKind.GoblinFieldCamp) &&
+                    worldObject.Owner == WorldObjectOwner.GoblinTribe)
+                .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+                .Any(item =>
+                    item.Position.Z == 0 &&
+                    item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door &&
+                    World.IsSurfaceTraversable(item.Position) &&
+                    World.HasSurfacePath(actor.Position, item.Position)))
+        {
+            return;
+        }
+
+        if (actor.JobKind is ActorJobKind.Forage or ActorJobKind.ClearVegetation)
+        {
+            forageTargets.Remove(actor.JobTarget);
+        }
+        else if (actor.JobKind == ActorJobKind.Haul)
+        {
+            if (actor.JobStage == ActorJobStage.Collecting)
+            {
+                ReduceReservation(itemReservations, actor.SourceStackId, actor.ReservedQuantity);
+            }
+
+            ReduceReservation(
+                destinationReservations,
+                actor.DestinationZoneId,
+                actor.ReservedQuantity);
+        }
+
+        actor.SuspendCurrentJob();
     }
 
     private void TryInterruptForWater(
@@ -250,7 +430,7 @@ public sealed partial class SimulationEngine
                 actor.ReservedQuantity);
         }
 
-        actor.ClearJob();
+        actor.SuspendCurrentJob();
     }
 
     private static void ReduceReservation(
@@ -273,7 +453,7 @@ public sealed partial class SimulationEngine
     {
         var best = World.CreateWorldObjectSnapshot()
             .Where(worldObject =>
-                worldObject.Kind == WorldObjectKind.GoblinHut &&
+                (worldObject.Kind is WorldObjectKind.GoblinHut or WorldObjectKind.GoblinFieldCamp) &&
                 worldObject.Owner == WorldObjectOwner.GoblinTribe)
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(item =>
@@ -326,6 +506,67 @@ public sealed partial class SimulationEngine
         if (actor.Fatigue == 0)
         {
             actor.ClearJob();
+            TryResumeSuspendedJob(actor);
+        }
+    }
+
+    private bool TryResumeSuspendedJob(ActorState actor)
+    {
+        var kind = actor.SuspendedJobKind;
+        var target = actor.SuspendedJobTarget;
+        actor.ClearSuspendedJob();
+
+        if (kind == ActorJobKind.None || !Map.IsWithin(target))
+        {
+            return false;
+        }
+
+        var route = World.FindSurfacePath(actor.Position, target);
+        if (route is null)
+        {
+            return false;
+        }
+
+        switch (kind)
+        {
+            case ActorJobKind.Move:
+                if (route.Count == 0)
+                {
+                    return false;
+                }
+                actor.JobKind = kind;
+                actor.JobTarget = target;
+                BeginJobLeg(actor, route, workTicks: 0);
+                return true;
+            case ActorJobKind.Explore:
+                if (route.Count == 0 || Visibility.Get(target) != CellVisibility.Unknown)
+                {
+                    return false;
+                }
+                actor.JobKind = kind;
+                actor.JobTarget = target;
+                BeginJobLeg(actor, route, workTicks: 0);
+                return true;
+            case ActorJobKind.Forage:
+                if (World.GetPlantPatch(target) is not { Biomass: > 0 })
+                {
+                    return false;
+                }
+                actor.JobKind = kind;
+                actor.JobTarget = target;
+                BeginJobLeg(actor, route, Definitions.ForageWorkTicks);
+                return true;
+            case ActorJobKind.ClearVegetation:
+                if (World.GetPlantPatch(target) is not { Kind: PlantKind.BerryBush })
+                {
+                    return false;
+                }
+                actor.JobKind = kind;
+                actor.JobTarget = target;
+                BeginJobLeg(actor, route, GetClearVegetationWorkTicks());
+                return true;
+            default:
+                return false;
         }
     }
 
@@ -364,7 +605,8 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanFoodResupply(
         ActorState actor,
-        Dictionary<EntityId, int> itemReservations)
+        Dictionary<EntityId, int> itemReservations,
+        GridPosition? requiredPosition = null)
     {
         if (actor.PersonalFood >= Definitions.PersonalFoodCapacity)
         {
@@ -374,7 +616,9 @@ public sealed partial class SimulationEngine
         var best = _itemStacks.Values
             .Where(stack =>
                 stack.Resource == ResourceKind.Food &&
+                (actor.PersonalFood == 0 || stack.FoodKind == actor.PersonalFoodKind) &&
                 stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
+                (requiredPosition is null || stack.Location.Position == requiredPosition.Value) &&
                 stack.Quantity - itemReservations.GetValueOrDefault(stack.Id) > 0)
             .Select(stack => new
             {
@@ -488,6 +732,7 @@ public sealed partial class SimulationEngine
             actor.PersonalFood < Definitions.PersonalFoodCapacity &&
             _itemStacks.TryGetValue(actor.SourceStackId, out var food) &&
             food.Resource == ResourceKind.Food &&
+            (actor.PersonalFood == 0 || food.FoodKind == actor.PersonalFoodKind) &&
             food.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
             food.Location.Position == actor.JobTarget &&
             food.Quantity >= actor.ReservedQuantity,
@@ -504,6 +749,10 @@ public sealed partial class SimulationEngine
         {
             var food = _itemStacks[actor.SourceStackId];
             food.Quantity--;
+            if (actor.PersonalFood == 0)
+            {
+                actor.PersonalFoodKind = food.FoodKind;
+            }
             actor.PersonalFood++;
             Publish(SimulationEventKind.ActorProvisionedFood, actor.Id, food.Id, 1);
             if (food.Quantity == 0)
@@ -519,16 +768,19 @@ public sealed partial class SimulationEngine
         }
 
         actor.ClearJob();
+        TryResumeSuspendedJob(actor);
     }
 
     private bool TryPlanEatJob(
         ActorState actor,
-        Dictionary<EntityId, int> itemReservations)
+        Dictionary<EntityId, int> itemReservations,
+        GridPosition? requiredPosition = null)
     {
         var best = _itemStacks.Values
             .Where(stack =>
                 stack.Resource == ResourceKind.Food &&
                 stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
+                (requiredPosition is null || stack.Location.Position == requiredPosition.Value) &&
                 stack.Quantity - itemReservations.GetValueOrDefault(stack.Id) > 0)
             .Select(stack => new
             {
@@ -587,7 +839,7 @@ public sealed partial class SimulationEngine
     private void CompleteMeal(ActorState actor, ItemStackState food)
     {
         food.Quantity--;
-        actor.Hunger = Math.Max(0, actor.Hunger - Definitions.FoodNutrition);
+        actor.Hunger = Math.Max(0, actor.Hunger - Definitions.Food.GetSatiety(food.FoodKind));
         Publish(SimulationEventKind.ActorAte, actor.Id, food.Id, 1);
         if (food.Quantity == 0)
         {
@@ -596,6 +848,7 @@ public sealed partial class SimulationEngine
         }
 
         actor.ClearJob();
+        TryResumeSuspendedJob(actor);
     }
 
     private void UpdateForageJob(ActorState actor)
@@ -624,9 +877,18 @@ public sealed partial class SimulationEngine
         }
     }
 
-    private bool TryPlanForageJob(ActorState actor, ISet<GridPosition> reservedTargets)
+    private bool TryPlanForageJob(
+        ActorState actor,
+        ISet<GridPosition> reservedTargets,
+        bool requireDesignation)
     {
-        var route = World.FindNearestHarvestablePlantPath(actor.Position, reservedTargets);
+        var route = World.FindNearestHarvestablePlantPath(
+            actor.Position,
+            reservedTargets,
+            position =>
+                Visibility.Get(position) != CellVisibility.Unknown &&
+                (!requireDesignation ||
+                 IsWorkDesignated(WorkDesignationKind.GatherFood, position)));
         if (route is null)
         {
             return false;
@@ -639,16 +901,80 @@ public sealed partial class SimulationEngine
         return true;
     }
 
+    private bool TryPlanClearVegetationJob(
+        ActorState actor,
+        ISet<GridPosition> reservedTargets)
+    {
+        var route = World.FindNearestBerryBushPath(
+            actor.Position,
+            reservedTargets,
+            position =>
+                Visibility.Get(position) != CellVisibility.Unknown &&
+                IsWorkDesignated(WorkDesignationKind.UprootBerryBush, position));
+        if (route is null)
+        {
+            return false;
+        }
+
+        actor.JobKind = ActorJobKind.ClearVegetation;
+        actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+        BeginJobLeg(actor, route, GetClearVegetationWorkTicks());
+        reservedTargets.Add(actor.JobTarget);
+        return true;
+    }
+
+    private void UpdateClearVegetationJob(ActorState actor)
+    {
+        if (actor.CarriedStackId != EntityId.None ||
+            World.GetPlantPatch(actor.JobTarget) is not { Kind: PlantKind.BerryBush })
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        if (actor.JobPhase == ActorJobPhase.Traveling)
+        {
+            AdvanceTravel(actor);
+        }
+
+        if (actor.JobPhase != ActorJobPhase.Working)
+        {
+            return;
+        }
+
+        actor.RemainingWorkTicks--;
+        if (actor.RemainingWorkTicks > 0)
+        {
+            return;
+        }
+
+        if (World.TryUprootBerryBush(actor.Position, CurrentTick, out var change))
+        {
+            _undeliveredWorldChanges.Add(change);
+            GainBuildingExperience(actor, 15);
+        }
+
+        actor.ClearJob();
+    }
+
     private bool TryPlanHaulCollection(
         ActorState actor,
         Dictionary<EntityId, int> sourceReservations,
-        Dictionary<EntityId, int> destinationReservations)
+        Dictionary<EntityId, int> destinationReservations,
+        EntityId? requiredDestination = null)
     {
         HaulPlan? best = null;
         foreach (var source in _itemStacks.Values.Where(stack =>
-                     stack.Location.Kind == ItemLocationKind.Ground))
+                     stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
+                     Visibility.Get(stack.Location.Position) != CellVisibility.Unknown))
         {
-            var availableSource = source.Quantity - sourceReservations.GetValueOrDefault(source.Id);
+            var protectedAtSource = source.Location.Kind == ItemLocationKind.StorageZone &&
+                _storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone)
+                    ? Math.Max(0, sourceZone.DesiredQuantity -
+                        (GetStoredQuantity(sourceZone.Id) - source.Quantity))
+                    : 0;
+            var availableSource = source.Quantity - protectedAtSource -
+                sourceReservations.GetValueOrDefault(source.Id);
             if (availableSource <= 0)
             {
                 continue;
@@ -660,11 +986,36 @@ public sealed partial class SimulationEngine
                 continue;
             }
 
-            foreach (var zone in _storageZones.Values.Where(zone => ZoneAccepts(zone, source.Resource)))
+            foreach (var zone in _storageZones.Values.Where(zone =>
+                         ZoneAccepts(zone, source.Resource) &&
+                         CanStoreStack(zone, source, 1) &&
+                         (requiredDestination is null || zone.Id == requiredDestination.Value)))
             {
-                var availableDestination = zone.Capacity -
-                    GetStoredQuantity(zone.Id) -
-                    destinationReservations.GetValueOrDefault(zone.Id);
+                if (source.Location.Kind == ItemLocationKind.StorageZone &&
+                    source.Location.OwnerId == zone.Id)
+                {
+                    continue;
+                }
+                var stored = GetStoredQuantity(zone.Id);
+                var reservedDestination = destinationReservations.GetValueOrDefault(zone.Id);
+                var isDesignatedBrushwood = source.Location.Kind == ItemLocationKind.Ground &&
+                    source.Resource == ResourceKind.Wood &&
+                    IsWorkDesignated(
+                        WorkDesignationKind.GatherBrushwood,
+                        source.Id,
+                        source.Location.Position);
+                var isPulledByStorage = zone.DesiredQuantity > stored + reservedDestination;
+                if (!isDesignatedBrushwood && !isPulledByStorage)
+                {
+                    continue;
+                }
+
+                var destinationLimit = isDesignatedBrushwood
+                    ? zone.Capacity
+                    : Math.Min(zone.Capacity, zone.DesiredQuantity);
+                var availableDestination = Math.Min(
+                    destinationLimit - stored - reservedDestination,
+                    GetAvailableStorageQuantity(zone, source));
                 if (availableDestination <= 0)
                 {
                     continue;
@@ -712,6 +1063,31 @@ public sealed partial class SimulationEngine
         return true;
     }
 
+    private void RemoveExhaustedWorkDesignations()
+    {
+        var plants = World.CreatePlantSnapshot();
+        var completed = _workDesignations.Values
+            .Where(designation => designation.Kind switch
+            {
+                WorkDesignationKind.GatherFood => !plants.Any(plant =>
+                    plant.Biomass > 0 && designation.Matches(plant.Position)),
+                WorkDesignationKind.GatherBrushwood =>
+                    !_itemStacks.TryGetValue(designation.TargetEntityId, out var stack) ||
+                    stack.Resource != ResourceKind.Wood ||
+                    stack.Location.Kind != ItemLocationKind.Ground,
+                WorkDesignationKind.UprootBerryBush => !plants.Any(plant =>
+                    plant.Kind == PlantKind.BerryBush && designation.Matches(plant.Position)),
+                _ => false,
+            })
+            .Select(designation => designation.Id)
+            .ToArray();
+        foreach (var id in completed)
+        {
+            _workDesignations.Remove(id);
+            Publish(SimulationEventKind.WorkDesignationRemoved, EntityId.None, id, 0);
+        }
+    }
+
     private bool TryPlanHaulDelivery(
         ActorState actor,
         Dictionary<EntityId, int> destinationReservations)
@@ -723,7 +1099,7 @@ public sealed partial class SimulationEngine
 
         var best = _storageZones.Values
             .Where(zone =>
-                ZoneAccepts(zone, carried.Resource) &&
+                CanStoreStack(zone, carried, carried.Quantity) &&
                 zone.Capacity - GetStoredQuantity(zone.Id) -
                     destinationReservations.GetValueOrDefault(zone.Id) >= carried.Quantity)
             .Select(zone => new
@@ -793,9 +1169,9 @@ public sealed partial class SimulationEngine
         {
             return actor.CarriedStackId == EntityId.None &&
                 _itemStacks.TryGetValue(actor.SourceStackId, out var source) &&
-                source.Location.Kind == ItemLocationKind.Ground &&
+                source.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
                 source.Quantity >= actor.ReservedQuantity &&
-                ZoneAccepts(zone, source.Resource);
+                CanStoreStack(zone, source, actor.ReservedQuantity);
         }
 
         return actor.JobStage == ActorJobStage.Delivering &&
@@ -804,7 +1180,7 @@ public sealed partial class SimulationEngine
             _itemStacks.TryGetValue(actor.CarriedStackId, out var carried) &&
             carried.Location == ItemLocation.CarriedBy(actor.Id) &&
             carried.Quantity == actor.ReservedQuantity &&
-            ZoneAccepts(zone, carried.Resource);
+            CanStoreStack(zone, carried, actor.ReservedQuantity);
     }
 
     private void CompleteHaulCollection(ActorState actor)
@@ -822,10 +1198,15 @@ public sealed partial class SimulationEngine
             carried = AllocateItemStack(
                 source.Resource,
                 actor.ReservedQuantity,
-                ItemLocation.CarriedBy(actor.Id));
+                ItemLocation.CarriedBy(actor.Id),
+                source.FoodKind);
         }
 
         actor.CarriedStackId = carried.Id;
+        if (carried.Resource == ResourceKind.Wood)
+        {
+            GainForagingExperience(actor, Math.Max(1, carried.Quantity));
+        }
         actor.SourceStackId = EntityId.None;
         actor.JobStage = ActorJobStage.Delivering;
         var destination = _storageZones[actor.DestinationZoneId];
@@ -845,15 +1226,17 @@ public sealed partial class SimulationEngine
     {
         if (!_itemStacks.TryGetValue(actor.CarriedStackId, out var carried) ||
             !_storageZones.TryGetValue(actor.DestinationZoneId, out var zone) ||
-            GetStoredQuantity(zone.Id) + carried.Quantity > zone.Capacity)
+            !CanStoreStack(zone, carried, carried.Quantity))
         {
             actor.ClearJob();
             return;
         }
 
         actor.CarriedStackId = EntityId.None;
-        carried.Location = ItemLocation.StoredIn(zone.Id, zone.Position);
-        Publish(SimulationEventKind.ItemStored, actor.Id, carried.Id, carried.Quantity);
+        var deliveredQuantity = carried.Quantity;
+        var stored = StoreStackInZone(carried, zone);
+        GainHaulingExperience(actor, Math.Max(1, deliveredQuantity * 2));
+        Publish(SimulationEventKind.ItemStored, actor.Id, stored.Id, deliveredQuantity);
         actor.ClearJob();
     }
 
@@ -942,12 +1325,15 @@ public sealed partial class SimulationEngine
                 out var worldChange))
         {
             _undeliveredWorldChanges.Add(worldChange);
-            var stack = FindMergeableGroundStack(ResourceKind.Food, actor.Position)
+            var foodKind = FoodKindFor(World.GetPlantPatch(actor.Position)!.Value.Kind);
+            var stack = FindMergeableGroundStack(ResourceKind.Food, actor.Position, foodKind)
                 ?? AllocateItemStack(
                     ResourceKind.Food,
                     quantity: 0,
-                    ItemLocation.OnGround(actor.Position));
+                    ItemLocation.OnGround(actor.Position),
+                    foodKind);
             stack.Quantity = checked(stack.Quantity + gathered);
+            GainForagingExperience(actor, Math.Max(1, gathered * 2));
             Publish(SimulationEventKind.FoodGathered, actor.Id, stack.Id, gathered);
         }
 
@@ -1008,6 +1394,9 @@ public sealed partial class SimulationEngine
             case ActorJobKind.Resupply:
                 ValidateLoadedResupplyJob(actor);
                 break;
+            case ActorJobKind.ClearVegetation:
+                ValidateLoadedClearVegetationJob(actor);
+                break;
             default:
                 throw new InvalidDataException("The save contains an unsupported actor job.");
         }
@@ -1028,6 +1417,19 @@ public sealed partial class SimulationEngine
         }
     }
 
+    private void ValidateLoadedClearVegetationJob(ActorState actor)
+    {
+        if (actor.JobStage != ActorJobStage.None ||
+            actor.CarriedStackId != EntityId.None ||
+            actor.SourceStackId != EntityId.None ||
+            actor.DestinationZoneId != EntityId.None ||
+            actor.ReservedQuantity != 0 ||
+            World.GetPlantPatch(actor.JobTarget) is not { Kind: PlantKind.BerryBush })
+        {
+            throw new InvalidDataException("The save contains an invalid vegetation-clearing job.");
+        }
+    }
+
     private void ValidateLoadedHaulJob(ActorState actor)
     {
         if (actor.ReservedQuantity <= 0 ||
@@ -1041,10 +1443,10 @@ public sealed partial class SimulationEngine
         {
             if (actor.CarriedStackId != EntityId.None ||
                 !_itemStacks.TryGetValue(actor.SourceStackId, out var source) ||
-                source.Location.Kind != ItemLocationKind.Ground ||
+                source.Location.Kind is not (ItemLocationKind.Ground or ItemLocationKind.StorageZone) ||
                 source.Quantity < actor.ReservedQuantity ||
                 actor.JobTarget != source.Location.Position ||
-                !ZoneAccepts(zone, source.Resource))
+                !CanStoreStack(zone, source, actor.ReservedQuantity))
             {
                 throw new InvalidDataException("The save contains an invalid haul collection state.");
             }
@@ -1056,7 +1458,7 @@ public sealed partial class SimulationEngine
                 carried.Location != ItemLocation.CarriedBy(actor.Id) ||
                 carried.Quantity != actor.ReservedQuantity ||
                 actor.JobTarget != zone.Position ||
-                !ZoneAccepts(zone, carried.Resource))
+                !CanStoreStack(zone, carried, actor.ReservedQuantity))
             {
                 throw new InvalidDataException("The save contains an invalid haul delivery state.");
             }
@@ -1142,6 +1544,7 @@ public sealed partial class SimulationEngine
             ActorJobKind.Rest => GetMaximumRestWorkTicks(),
             ActorJobKind.Eat => Definitions.EatWorkTicks,
             ActorJobKind.Resupply => Definitions.ResupplyWorkTicks,
+            ActorJobKind.ClearVegetation => GetClearVegetationWorkTicks(),
             _ => 0,
         };
         if (actor.JobPhase == ActorJobPhase.Working)
@@ -1214,6 +1617,7 @@ public sealed partial class SimulationEngine
         ActorJobKind.Rest => GetRestWorkTicks(actor),
         ActorJobKind.Eat => Definitions.EatWorkTicks,
         ActorJobKind.Resupply => Definitions.ResupplyWorkTicks,
+        ActorJobKind.ClearVegetation => GetClearVegetationWorkTicks(),
         _ => throw new InvalidOperationException("An idle actor cannot begin work."),
     };
 
@@ -1225,9 +1629,11 @@ public sealed partial class SimulationEngine
         (Definitions.MaximumFatigue + Definitions.RestRecoveryPerTick - 1) /
         Definitions.RestRecoveryPerTick;
 
+    private int GetClearVegetationWorkTicks() => checked(Definitions.ForageWorkTicks * 2);
+
     private bool IsRestLocation(GridPosition position) =>
         World.GetWorldObjectsAt(position).Any(worldObject =>
-            worldObject.Kind == WorldObjectKind.GoblinHut &&
+            (worldObject.Kind is WorldObjectKind.GoblinHut or WorldObjectKind.GoblinFieldCamp) &&
             worldObject.Owner == WorldObjectOwner.GoblinTribe &&
             worldObject.GetAbsoluteParts().Any(item =>
                 item.Position == position &&

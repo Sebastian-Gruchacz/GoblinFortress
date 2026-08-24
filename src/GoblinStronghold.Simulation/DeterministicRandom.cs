@@ -8,6 +8,8 @@ public enum RandomDomain : ulong
     Combat = 4,
     KnowledgeTransfer = 5,
     HumanVillage = 6,
+    GoblinIdentity = 7,
+    Brushwood = 8,
 }
 
 public static class DeterministicRandom

@@ -64,6 +64,29 @@ public static class SwampMapValidator
             errors.Add("The swamp does not contain every foundational terrain type.");
         }
 
+        if (map.GeneratorVersion >= 3)
+        {
+            for (var y = 0; y < map.Height; y++)
+            {
+                for (var x = 0; x < map.Width; x++)
+                {
+                    var cell = map.GetCell(new GridPosition(x, y));
+                    if (cell.Terrain == TerrainKind.DeepWater &&
+                        (cell.FloorLevel >= 0 || cell.IsTraversable))
+                    {
+                        errors.Add("Deep water must expose a submerged lower-level floor and be impassable.");
+                        return new MapValidationReport(errors);
+                    }
+
+                    if (cell.Terrain != TerrainKind.DeepWater && cell.FloorLevel != 0)
+                    {
+                        errors.Add("Surface terrain and shallow water must keep their floor on the surface level.");
+                        return new MapValidationReport(errors);
+                    }
+                }
+            }
+        }
+
         return new MapValidationReport(errors);
     }
 
@@ -80,7 +103,7 @@ public static class SwampMapValidator
                 }
 
                 var terrain = map.GetCell(position).Terrain;
-                if (terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater)
+                if (terrain == TerrainKind.ShallowWater)
                 {
                     return true;
                 }

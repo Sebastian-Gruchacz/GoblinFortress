@@ -136,14 +136,15 @@ public sealed class GeneratedMap
         AppendPosition(hash, GoblinSpawn);
         AppendPosition(hash, HumanVillage);
 
-        Span<byte> cellBuffer = stackalloc byte[4];
+        Span<byte> cellBuffer = stackalloc byte[5];
         foreach (var cell in _cells)
         {
             cellBuffer[0] = (byte)cell.Terrain;
             cellBuffer[1] = cell.Moisture;
             cellBuffer[2] = cell.Fertility;
             cellBuffer[3] = cell.TraversalCost;
-            hash.AppendData(cellBuffer);
+            cellBuffer[4] = unchecked((byte)cell.FloorLevel);
+            hash.AppendData(GeneratorVersion >= 3 ? cellBuffer : cellBuffer[..4]);
         }
 
         return Convert.ToHexString(hash.GetHashAndReset());

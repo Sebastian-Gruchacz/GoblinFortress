@@ -8,7 +8,7 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class HumanCombatTests
 {
     [Fact]
-    public void ExplorerAlertsVillageAndTradesDamageWithGuards()
+    public void AccidentalEncounterCanBecomeFightWithoutBecomingRaidOrder()
     {
         var engine = CreateEncounterEngine();
 
@@ -16,14 +16,28 @@ public sealed class HumanCombatTests
 
         var snapshot = engine.CreateSnapshot();
         var events = engine.DrainEvents();
-        Assert.Equal(100, snapshot.HumanVillage.Hostility);
+        Assert.False(snapshot.HumanVillage.GoblinAttackOrdered);
         Assert.InRange(snapshot.HumanVillage.LastIntruderSeenTick, 0, snapshot.Tick.Value);
         Assert.True(snapshot.HumanVillage.GuardHitPoints < snapshot.HumanVillage.MaximumGuardHitPoints);
-        Assert.True(snapshot.Actors.Count < 8);
         Assert.Contains(events, item => item.Kind == SimulationEventKind.HumanVillageAlerted);
         Assert.Contains(events, item => item.Kind == SimulationEventKind.HumanGuardHitGoblin);
         Assert.Contains(events, item => item.Kind == SimulationEventKind.GoblinHitHumanGuard);
-        Assert.Contains(events, item => item.Kind == SimulationEventKind.ActorDied);
+    }
+
+    [Fact]
+    public void ExplicitRaidOrderStagesAndSendsTribe()
+    {
+        var engine = CreateEncounterEngine(orderRaid: true);
+
+        engine.AdvanceTicks(1_600);
+
+        var snapshot = engine.CreateSnapshot();
+        var events = engine.DrainEvents();
+        Assert.True(snapshot.HumanVillage.GoblinAttackOrdered,
+            $"Raid phase: {snapshot.RaidPhase}; rally: {snapshot.RaidRallyPoint}; storages: {string.Join("; ", snapshot.StorageZones.Select(zone => $"{zone.Id}@{zone.Position} {zone.StoredQuantity}/{zone.DesiredQuantity}"))}; ground: {string.Join("; ", snapshot.ItemStacks.Select(stack => $"{stack.Id}:{stack.Resource}={stack.Quantity}@{stack.Location.Kind}/{stack.Location.Position}"))}; actors: {string.Join("; ", snapshot.Actors.Select(actor => $"{actor.Id}@{actor.Position} f{actor.PersonalFood} w{actor.PersonalWater} h{actor.Hunger} t{actor.Thirst} z{actor.Fatigue} {actor.Job.Kind}/{actor.Job.Stage}->{actor.Job.Target}"))}");
+        Assert.Equal(GoblinRaidPhase.Marching, snapshot.RaidPhase);
+        Assert.Equal(100, snapshot.HumanVillage.Hostility);
+        Assert.Contains(events, item => item.Kind == SimulationEventKind.RaidDeparted);
     }
 
     [Fact]
@@ -75,7 +89,7 @@ public sealed class HumanCombatTests
         throw new Xunit.Sdk.XunitException("The explorer did not alert the village in time.");
     }
 
-    private static SimulationEngine CreateEncounterEngine()
+    private static SimulationEngine CreateEncounterEngine(bool orderRaid = false)
     {
         var seed = new WorldSeed(0x474F424C494EUL);
         var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
@@ -84,18 +98,46 @@ public sealed class HumanCombatTests
             SimulationDefinitions.Foundation,
             map,
             initialGoblinCount: 8,
-            initialFoodStock: 12);
-        engine.QueueCommand(SimulationCommand.CreateStorageZone(
-            new SimulationTick(1),
-            sequence: 1,
-            map.HumanVillage,
-            ResourceKind.Food,
-            capacity: 20));
+            initialFoodStock: orderRaid ? 160 : 12,
+            initialWoodStock: orderRaid ? 10 : 0);
+        if (!orderRaid)
+        {
+            engine.QueueCommand(SimulationCommand.CreateStorageZone(
+                new SimulationTick(1),
+                sequence: 1,
+                map.HumanVillage,
+                ResourceKind.Food,
+                capacity: 20));
+        }
+        if (orderRaid)
+        {
+            var route = engine.World.FindSurfacePath(map.GoblinSpawn, map.HumanVillage)
+                ?? throw new InvalidOperationException("Encounter map has no village route.");
+            var midpoint = route[route.Count / 2];
+            var camp = Enumerable.Range(0, map.Height)
+                .SelectMany(y => Enumerable.Range(0, map.Width)
+                    .Select(x => new GridPosition(x, y)))
+                .Where(engine.World.CanBuildGoblinFieldCamp)
+                .OrderBy(position => Math.Abs(position.X - midpoint.X) +
+                    Math.Abs(position.Y - midpoint.Y))
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X)
+                .First();
+            engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
+                new SimulationTick(1), sequence: 998, camp));
+            engine.QueueCommand(SimulationCommand.AttackHumanVillage(
+                new SimulationTick(2), sequence: 999));
+        }
         engine.AdvanceTicks(1);
+
+        if (orderRaid)
+        {
+            return engine;
+        }
 
         var setup = engine.CreateSnapshot();
         var food = setup.ItemStacks.Single(stack => stack.Resource == ResourceKind.Food);
-        var storage = setup.StorageZones.Single();
+        var storage = setup.StorageZones.Single(zone => zone.Position == map.HumanVillage);
         engine.QueueCommand(SimulationCommand.PickUp(
             new SimulationTick(2),
             sequence: 2,

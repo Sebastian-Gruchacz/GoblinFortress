@@ -69,6 +69,8 @@ Console.WriteLine(
     $"Human village: {acceleratedSnapshot.HumanVillage.Population} people, " +
     $"food {acceleratedSnapshot.HumanVillage.FoodStock}, " +
     $"wood {acceleratedSnapshot.HumanVillage.WoodStock}, " +
+    $"water {acceleratedSnapshot.HumanVillage.WaterStock}, " +
+    $"fields {acceleratedSnapshot.HumanVillage.Fields.Count}/{acceleratedSnapshot.HumanVillage.PlannedFieldCount}, " +
     $"goods {acceleratedSnapshot.HumanVillage.GoodsStock}, " +
     $"hostility {acceleratedSnapshot.HumanVillage.Hostility}, " +
     $"guard health {acceleratedSnapshot.HumanVillage.GuardHitPoints}/" +
@@ -76,6 +78,11 @@ Console.WriteLine(
 Console.WriteLine($"Physical stacks: {acceleratedSnapshot.ItemStacks.Count}");
 Console.WriteLine($"Storage zones: {acceleratedSnapshot.StorageZones.Count}");
 Console.WriteLine($"Plant patches: {acceleratedSnapshot.PlantPatches.Count}");
+Console.WriteLine(
+    $"Food sources: berries {CountSources(PlantKind.BerryBush)}, " +
+    $"mushrooms {CountSources(PlantKind.MushroomCluster)}, " +
+    $"roots {CountSources(PlantKind.EdibleRoots)}, " +
+    $"fish shoals {CountSources(PlantKind.FishShoal)}");
 Console.WriteLine($"Generated structures: {acceleratedSnapshot.WorldObjects.Count}");
 Console.WriteLine($"World version: {acceleratedSnapshot.WorldVersion}");
 Console.WriteLine($"Terrain baseline: {map.Width}x{map.Height}x{map.LevelCount}");
@@ -92,6 +99,9 @@ Console.WriteLine($"Ticks after reload: {metrics.TicksExecuted}");
 Console.WriteLine($"State hash: {acceleratedSnapshot.StateHash}");
 Console.WriteLine("Normal, accelerated and unthrottled execution agree.");
 return 0;
+
+int CountSources(PlantKind kind) =>
+    acceleratedSnapshot.PlantPatches.Count(source => source.Kind == kind);
 
 static SimulationEngine CreateScenario(SimulationDefinitions definitions, GeneratedMap map)
 {

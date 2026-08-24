@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Resources;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -8,6 +9,223 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class SimulationEngineTests
 {
     private static readonly SimulationTick FinalTick = new(480);
+
+    [Fact]
+    public void GoblinProfilesAreDeterministicAndSurviveSaveLoad()
+    {
+        var first = SimulationEngine.Create(
+            new WorldSeed(991),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 8,
+            initialFoodStock: 0);
+        var second = SimulationEngine.Create(
+            new WorldSeed(991),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 8,
+            initialFoodStock: 0);
+
+        Assert.Equal(first.CreateSnapshot().Actors, second.CreateSnapshot().Actors);
+        Assert.Equal(8, first.CreateSnapshot().Actors.Select(actor => actor.Name).Distinct().Count());
+        Assert.All(first.CreateSnapshot().Actors, actor =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(actor.Name));
+            Assert.NotEqual(GoblinSkill.None, actor.KnownSkills);
+            Assert.NotEqual(GoblinTrait.None, actor.KnownTraits);
+        });
+
+        var restored = SimulationEngine.Load(first.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(first.CreateSnapshot().Actors, restored.CreateSnapshot().Actors);
+        Assert.Equal(first.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void InitialBrushwoodIsDeterministicPhysicalWoodOnLand()
+    {
+        var seed = new WorldSeed(995);
+        var first = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            scatterInitialBrushwood: true);
+        var second = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            scatterInitialBrushwood: true);
+        var brushwood = first.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .ToArray();
+
+        Assert.NotEmpty(brushwood);
+        Assert.Equal(brushwood, second.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood));
+        Assert.All(brushwood, stack =>
+        {
+            Assert.Equal(ItemLocationKind.Ground, stack.Location.Kind);
+            Assert.True(first.Map.GetCell(stack.Location.Position).Terrain is
+                TerrainKind.SolidGround or TerrainKind.Mud);
+        });
+        Assert.Contains(brushwood, stack =>
+            Math.Abs(stack.Location.Position.X - first.Map.GoblinSpawn.X) +
+            Math.Abs(stack.Location.Position.Y - first.Map.GoblinSpawn.Y) <= 6);
+    }
+
+    [Fact]
+    public void WoodStockpileCausesBrushwoodHaulingAndExperienceGain()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(996),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 6);
+        var zonePosition = engine.Map.GetCardinalNeighbors(engine.Map.GoblinSpawn)
+            .First(engine.World.IsSurfaceTraversable);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1),
+            sequence: 1,
+            zonePosition,
+            ResourceKind.Wood,
+            capacity: 64));
+
+        engine.AdvanceTicks(160);
+
+        var snapshot = engine.CreateSnapshot();
+        var zone = Assert.Single(snapshot.StorageZones);
+        Assert.True(zone.StoredQuantity > 0);
+        var actor = Assert.Single(snapshot.Actors);
+        Assert.True(actor.Experience.Foraging > 0);
+        Assert.True(actor.Experience.Hauling > 0);
+        Assert.True(actor.KnownSkills.HasFlag(GoblinSkill.Foraging));
+        Assert.True(actor.KnownSkills.HasFlag(GoblinSkill.Hauling));
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(actor.Experience, Assert.Single(restored.CreateSnapshot().Actors).Experience);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void BuildingFoodStorageConsumesExactlyTwoWood()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(992),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 5);
+        var position = engine.Map.GoblinSpawn;
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            position));
+
+        engine.AdvanceTicks(1);
+
+        var foodStorage = Assert.Single(engine.CreateSnapshot().StorageZones, zone =>
+            zone.Position == position);
+        Assert.Equal(96, foodStorage.Capacity);
+        Assert.Equal(3, foodStorage.TypeSlotCount);
+        Assert.Equal(32, foodStorage.StackCapacity);
+        Assert.Equal(3, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity));
+        Assert.Contains(engine.DrainEvents(), item =>
+            item.Kind == SimulationEventKind.ConstructionCompleted && item.Amount == 2);
+        var builder = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.True(builder.Experience.Building > 0);
+        Assert.True(builder.Experience.Foraging > 0);
+        Assert.True(builder.KnownSkills.HasFlag(GoblinSkill.Building));
+    }
+
+
+    [Fact]
+    public void BuildingWoodStorageConsumesTwoWoodAndAcceptsWood()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(997),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 5);
+        engine.QueueCommand(SimulationCommand.BuildWoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            engine.Map.GoblinSpawn));
+
+        engine.AdvanceTicks(1);
+
+        var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
+        Assert.Equal(ResourceKind.Wood, zone.AcceptedResource);
+        Assert.Equal(3, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity));
+    }
+
+    [Fact]
+    public void ConstructionWithoutEnoughWoodIsRejectedWithoutPartialMutation()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(993),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 1);
+        var before = engine.CreateSnapshot();
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            engine.Map.GoblinSpawn));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Equal(before.StorageZones.Count, engine.CreateSnapshot().StorageZones.Count);
+        Assert.Equal(1, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity));
+        Assert.Contains(engine.DrainEvents(), item =>
+            item.Kind == SimulationEventKind.CommandRejected &&
+            item.Amount == (int)SimulationCommandKind.Build);
+    }
+
+    [Fact]
+    public void WalkwayMakesWaterTraversableAndSurvivesSaveLoad()
+    {
+        var seed = new WorldSeed(994);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var water = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width).Select(x => new GridPosition(x, y)))
+            .First(position => !map.GetCell(position).IsTraversable &&
+                map.GetCardinalNeighbors(position).Any(neighbor => map.GetCell(neighbor).IsTraversable));
+        var land = map.GetCardinalNeighbors(water).First(neighbor => map.GetCell(neighbor).IsTraversable);
+        var cells = SimulationCommand.GetWalkwayCells(land, water);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 10);
+        engine.QueueCommand(SimulationCommand.BuildWalkway(
+            new SimulationTick(1),
+            sequence: 1,
+            land,
+            water));
+
+        engine.AdvanceTicks(1);
+
+        Assert.True(engine.World.IsSurfaceTraversable(water));
+        Assert.Contains(engine.CreateSnapshot().WorldObjects, item =>
+            item.Kind == WorldObjectKind.WoodenWalkway && item.Parts.Count == cells.Count);
+        Assert.Equal(10 - cells.Count, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity));
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.True(restored.World.IsSurfaceTraversable(water));
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
 
     [Theory]
     [InlineData(SimulationSpeed.Double)]

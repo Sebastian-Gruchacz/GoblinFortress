@@ -7,6 +7,38 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class ActiveEatingTests
 {
+    [Theory]
+    [InlineData(FoodKind.Berries, 1_800)]
+    [InlineData(FoodKind.Mushrooms, 2_200)]
+    [InlineData(FoodKind.EdibleRoots, 2_800)]
+    [InlineData(FoodKind.Fish, 3_200)]
+    [InlineData(FoodKind.DriedRations, 3_600)]
+    public void FoodKindsRestoreTheirConfiguredSatiety(FoodKind foodKind, int expectedSatiety)
+    {
+        var engine = CreateEngine(goblinCount: 1, initialFood: 1, initialHunger: 6_500);
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["itemStacks"]![0]!["foodKind"] = (int)foodKind;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        Assert.Equal(expectedSatiety, engine.Definitions.Food.GetSatiety(foodKind));
+        for (var tick = 0; tick < engine.Definitions.EatWorkTicks + 2; tick++)
+        {
+            var hungerBefore = Assert.Single(engine.CreateSnapshot().Actors).Hunger;
+            engine.AdvanceTicks(1);
+            if (engine.DrainEvents().Any(item => item.Kind == SimulationEventKind.ActorAte))
+            {
+                var hungerAfter = Assert.Single(engine.CreateSnapshot().Actors).Hunger;
+                Assert.Equal(
+                    expectedSatiety,
+                    hungerBefore + engine.Definitions.HungerPerTick - hungerAfter);
+                return;
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException("The goblin did not finish the meal in time.");
+    }
+
     [Fact]
     public void HungryGoblinsReserveOnlyAvailablePortions()
     {

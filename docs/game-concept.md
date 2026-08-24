@@ -58,6 +58,8 @@ Destroying a settlement removes future crops, goods, travelers and knowledge sou
 
 Presentation remains clean top-down 2D. The simulation is vertically structured even though the renderer does not need fully three-dimensional art. Cutaways, shadows, layer separation and optional parallax may communicate height without making tile selection ambiguous.
 
+Water occupies a column rather than replacing the elevation model. Puddles and shallow water have their bottom on the currently viewed level and can be waded through. Deep water means that the surface-level floor has dropped away: its known submerged bottom is at least one discrete level lower and may continue into not-yet-generated depth farther from shore. Goblins and humans do not swim by default. They require a walkway, bridge, boat or a later learned swimming capability to cross deep water.
+
 ### The map is living state
 
 **Decision:** World generation creates initial conditions, not permanent scenery. Crops and trees grow and are harvested, animals establish or abandon habitats, structures are built, damaged, burned and demolished, and earthworks expose or remove terrain. Later mining creates excavated spaces, supports, collapses and connections between height levels.
@@ -72,6 +74,8 @@ The authoritative world separates several concerns rather than encoding every co
 - derived navigation, visibility, room, support and rendering data that can be invalidated and rebuilt.
 
 Every mutation identifies affected cells or regions and advances the relevant topology or visual version. Systems consume compact change records instead of rescanning the whole map every tick. Rendering rebuilds dirty chunks, while navigation and visibility invalidate only caches whose assumptions changed.
+
+Early wild food already follows habitat rather than a single generic forage roll: berries prefer fertile damp ground, mushrooms prefer very wet soil, edible roots prefer fertile land, and fish shoals occupy only the traversable shallows of sufficiently large connected water bodies. Each source has local biomass and capacity. Harvesting a berry bush removes its current fruit but leaves the perennial bush in place; fruit can regrow during its active growing season. The foundation sandbox is season-locked to summer, so its interval growth is always active. Uprooting is a distinct, deliberately destructive clearance job used by goblins and by human construction planning. This remains a renewable prototype rather than a final ecosystem; a full calendar, population spread, overharvesting and competing animal consumers come later.
 
 Save data records the generator version and authoritative mutations or current overlays. Derived caches are never required to restore the world. A generator update must not reinterpret an existing save as a different landscape. Supported historical generator versions remain callable for unexplored regions in older saves; migration must materialize enough baseline data before support for one can be removed.
 
@@ -271,6 +275,10 @@ The stockpile interface must support reusable policies, copying, multi-editing, 
 
 This full system is a later milestone. The survival foundation establishes physical ownership, reachability, capacity and deterministic reservations without committing the UI to the initial single-cell storage prototype.
 
+A primitive field camp is the first concrete staging buffer. It is a physical 2×2 shelter built near reachable shallow water, provides a place to rest and requests a food reserve sized for at least a small expedition. Haulers may act on the remembered location of player-owned or previously discovered stock after it leaves current sight; the presentation must still distinguish remembered quantities from live observations. Camp demand competes with other storage demand through the same reservations rather than conjuring expedition supplies.
+
+Area tools for gathering and later cutting, mining or clearing are selectors. Confirming an area resolves it into stable object targets; the rectangle itself is discarded. Empty cells are not jobs, newly appearing objects are not implicitly added, and target sets of different kinds may overlap. Persistent overlays use thin category-specific outlines around the selected bushes, trees, loose items, rocks or deposits rather than painting every tile in the original rectangle.
+
 The initial ecology is intentionally small. It must generate renewable and depletable opportunities without pretending to be a complete ecosystem. More species are valuable when they introduce a new behavior, resource, hazard or biological unlock.
 
 ## Observation and fog of war
@@ -286,6 +294,10 @@ The player can mark a reported target, investigate notable figures or ignore rec
 ## External societies and consequences
 
 The first human village produces food, wood and basic goods over seasons. Its inhabitants include workers, guards, travelers and potentially valuable skill carriers.
+
+Its coarse dispatcher plans fields from population, reserve targets and predicted yield rather than granting fixed daily production. A temperate baseline provisionally has a 240-day year and two long crop cycles; later climate regions alter sowing windows, growth, water demand, frost risk and harvest reliability. Residents normally stay close to the settlement, with shortage-driven gathering as a bounded exception. Spotting a goblin is not itself permission for the tribe to raid: goblin aggression against the village requires an explicit player order, while either side may still flee or defend itself after comparing local strength.
+
+An explicit raid order is an expedition plan, not an immediate destination override. It selects a reachable field camp nearest the target, requests its provisions, lets members eat, refill personal food and water, rest and assemble there, and only then changes the tribe to marching state. This makes a closer camp materially useful while keeping each consumed ration, refill and journey physical and inspectable.
 
 The tribe can eventually scavenge, steal, trade, ambush, capture, raid or destroy. These actions have different costs:
 
@@ -484,6 +496,16 @@ Candidate workloads include:
 - region-level ecology.
 
 Systems exchange results at explicit phase barriers. Each mutable data set has one owner during a phase. Determinism and debugging must not depend on thread scheduling.
+
+### Simulation detail and chunk materialization
+
+**Decision:** Every society, military group, creature and construction inside a loaded active chunk is simulated as material world state. Community dispatchers may group planning, reservations and work assignment, but they do not replace local people with population counters. A local villager still has a position, needs, equipment, inventory, current task and physical access to the field, well, workshop or stockpile being used.
+
+Buildings in active chunks always have spatial objects, footprints, construction state and physical contents. A dispatcher cannot create virtual storage capacity, food or production while goblins can walk into the same location. This applies equally to human, goblin and later external settlements.
+
+Distant unloaded chunks may use cohorts, aggregate inventories, scheduled projects and lower-frequency ecology. Each remote society or traveling group owns a deterministic random stream and a coarse dispatcher. Crossing the materialization boundary converts those records into concrete actors, items, jobs and structures without rerolling outcomes. Leaving an active chunk folds eligible detail back into cohorts only after reconciling casualties, needs, inventories, project progress and terrain changes.
+
+The eventual active area is substantially larger than the current presentation probe. Most local activity is expected to cluster around societies and a limited number of surface-adjacent Z levels, so the primary load is hundreds of detailed actors organized under a few dispatchers rather than hundreds of thousands of unrelated agents.
 
 ### Navigation
 

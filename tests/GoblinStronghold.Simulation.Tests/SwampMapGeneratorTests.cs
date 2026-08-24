@@ -89,6 +89,56 @@ public sealed class SwampMapGeneratorTests
     }
 
     [Fact]
+    public void ShallowsAreWadeableButDeepWaterDropsToTheLowerLevel()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(456), width: 64, height: 64);
+        var shallows = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => map.GetCell(new GridPosition(x, y))))
+            .Where(cell => cell.Terrain == TerrainKind.ShallowWater)
+            .ToArray();
+        var deepWater = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => map.GetCell(new GridPosition(x, y))))
+            .Where(cell => cell.Terrain == TerrainKind.DeepWater)
+            .ToArray();
+
+        Assert.NotEmpty(shallows);
+        Assert.All(shallows, cell =>
+        {
+            Assert.True(cell.IsTraversable);
+            Assert.True(cell.HasFloorAtSurface);
+            Assert.Equal(0, cell.FloorLevel);
+            Assert.Equal(0, cell.WaterDepthLevels);
+        });
+        Assert.NotEmpty(deepWater);
+        Assert.All(deepWater, cell =>
+        {
+            Assert.False(cell.IsTraversable);
+            Assert.False(cell.HasFloorAtSurface);
+            Assert.Equal(-1, cell.FloorLevel);
+            Assert.Equal(1, cell.WaterDepthLevels);
+        });
+    }
+
+    [Fact]
+    public void HistoricalGeneratorKeepsLegacyDeepWaterRepresentation()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(456),
+            width: 64,
+            height: 64,
+            generatorVersion: 2);
+        var deepWater = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => map.GetCell(new GridPosition(x, y))))
+            .First(cell => cell.Terrain == TerrainKind.DeepWater);
+
+        Assert.Equal(0, deepWater.FloorLevel);
+        Assert.False(deepWater.IsTraversable);
+    }
+
+    [Fact]
     public void PositionsOutsideSurfaceAreRejected()
     {
         var map = SwampMapGenerator.Generate(new WorldSeed(456), width: 32, height: 32);

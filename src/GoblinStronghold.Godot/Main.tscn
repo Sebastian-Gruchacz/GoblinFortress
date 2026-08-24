@@ -27,19 +27,28 @@ theme_override_constants/separation = 8
 text = "GOBLIN STRONGHOLD  •  LIVING SWAMP PROBE"
 
 [node name="Pause" type="Button" parent="Interface/TopBar/Controls"]
-text = "⏸"
+custom_minimum_size = Vector2(42, 42)
 
 [node name="Speed1" type="Button" parent="Interface/TopBar/Controls"]
-text = "1×"
+custom_minimum_size = Vector2(42, 42)
 
 [node name="Speed2" type="Button" parent="Interface/TopBar/Controls"]
-text = "2×"
+custom_minimum_size = Vector2(42, 42)
 
 [node name="Speed4" type="Button" parent="Interface/TopBar/Controls"]
-text = "4×"
+custom_minimum_size = Vector2(42, 42)
 
 [node name="Speed8" type="Button" parent="Interface/TopBar/Controls"]
-text = "8×"
+custom_minimum_size = Vector2(42, 42)
+
+[node name="Build" type="Button" parent="Interface/TopBar/Controls"]
+custom_minimum_size = Vector2(42, 42)
+
+[node name="Work" type="Button" parent="Interface/TopBar/Controls"]
+custom_minimum_size = Vector2(42, 42)
+
+[node name="Raid" type="Button" parent="Interface/TopBar/Controls"]
+custom_minimum_size = Vector2(42, 42)
 
 [node name="Status" type="Label" parent="Interface/TopBar/Controls"]
 text = "Tick 0"
@@ -51,5 +60,118 @@ offset_right = 760.0
 offset_bottom = 876.0
 
 [node name="Text" type="Label" parent="Interface/Inspector"]
-text = "LPM goblin: wybór • LPM teren: odznacz • PPM z wyborem: marsz • PPM bez wyboru: skład • WASD/strzałki: kamera • kółko: zoom • Spacja: pauza\nIkona nad głową: zamiar • żółta kropka: w drodze • biała kropka: pracuje"
+text = "LPM goblin: wybór i karta • LPM skład: ustawienia • Buduj/Praca: narzędzia • PPM z wyborem: marsz • Najazd wymaga obozowiska, zapasów i zbiórki • WASD/strzałki: kamera • kółko: zoom • Spacja: pauza\nObszary pracy i pomost: przeciągnij LPM od początku do końca • Esc: anuluj narzędzie"
 autowrap_mode = 2
+
+[node name="BuildMenu" type="PopupPanel" parent="."]
+size = Vector2i(164, 164)
+
+[node name="Margin" type="MarginContainer" parent="BuildMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Grid" type="GridContainer" parent="BuildMenu/Margin"]
+columns = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+
+[node name="WorkMenu" type="PopupPanel" parent="."]
+size = Vector2i(164, 164)
+
+[node name="Margin" type="MarginContainer" parent="WorkMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Grid" type="GridContainer" parent="WorkMenu/Margin"]
+columns = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+
+[node name="GoblinDetails" type="Window" parent="."]
+title = "Goblin"
+initial_position = 1
+size = Vector2i(430, 520)
+min_size = Vector2i(320, 280)
+visible = false
+
+[node name="Scroll" type="ScrollContainer" parent="GoblinDetails"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Content" type="VBoxContainer" parent="GoblinDetails/Scroll"]
+custom_minimum_size = Vector2(390, 0)
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="Needs" type="GridContainer" parent="GoblinDetails/Scroll/Content"]
+columns = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 4
+
+[node name="Inventory" type="HBoxContainer" parent="GoblinDetails/Scroll/Content"]
+custom_minimum_size = Vector2(0, 58)
+theme_override_constants/separation = 6
+
+[node name="Text" type="Label" parent="GoblinDetails/Scroll/Content"]
+size_flags_horizontal = 3
+text = "Goblin"
+autowrap_mode = 2
+
+[node name="StorageDetails" type="Window" parent="."]
+title = "Ustawienia składu"
+initial_position = 1
+size = Vector2i(390, 240)
+min_size = Vector2i(330, 210)
+visible = false
+
+[node name="Margin" type="MarginContainer" parent="StorageDetails"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 14.0
+offset_top = 14.0
+offset_right = -14.0
+offset_bottom = -14.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Controls" type="VBoxContainer" parent="StorageDetails/Margin"]
+theme_override_constants/separation = 10
+
+[node name="Summary" type="Label" parent="StorageDetails/Margin/Controls"]
+text = "Skład"
+autowrap_mode = 2
+
+[node name="PullLoose" type="CheckButton" parent="StorageDetails/Margin/Controls"]
+text = "Żądaj luźnych zasobów"
+
+[node name="TargetRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/TargetRow"]
+text = "Docelowa ilość:"
+
+[node name="Target" type="SpinBox" parent="StorageDetails/Margin/Controls/TargetRow"]
+max_value = 64.0
+value = 64.0
+allow_greater = false
+allow_lesser = false
+
+[node name="Apply" type="Button" parent="StorageDetails/Margin/Controls"]
+text = "Zastosuj"

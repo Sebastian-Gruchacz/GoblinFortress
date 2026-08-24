@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Resources;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -15,7 +16,10 @@ public sealed class PersonalSupplyTests
 
         var snapshot = engine.CreateSnapshot();
         Assert.All(snapshot.Actors, actor =>
-            Assert.Equal(SimulationDefinitions.Foundation.PersonalFoodCapacity, actor.PersonalFood));
+        {
+            Assert.Equal(SimulationDefinitions.Foundation.PersonalFoodCapacity, actor.PersonalFood);
+            Assert.Equal(FoodKind.DriedRations, actor.PersonalFoodKind);
+        });
         Assert.Empty(snapshot.ItemStacks);
         Assert.Equal(4, snapshot.FoodStock);
         Assert.Contains(engine.DrainEvents(), item =>

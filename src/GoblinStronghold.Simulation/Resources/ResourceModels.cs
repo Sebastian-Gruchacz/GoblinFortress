@@ -10,6 +10,17 @@ public enum ResourceKind : byte
     Reeds = 3,
     Stone = 4,
     Bone = 5,
+    Vegetation = 6,
+}
+
+public enum FoodKind : byte
+{
+    None = 0,
+    DriedRations = 1,
+    Berries = 2,
+    Mushrooms = 3,
+    EdibleRoots = 4,
+    Fish = 5,
 }
 
 public enum ItemLocationKind : byte
@@ -47,6 +58,7 @@ public readonly record struct ItemLocation
 public readonly record struct ItemStackSnapshot(
     EntityId Id,
     ResourceKind Resource,
+    FoodKind FoodKind,
     int Quantity,
     ItemLocation Location);
 
@@ -55,4 +67,8 @@ public readonly record struct StorageZoneSnapshot(
     GridPosition Position,
     ResourceKind AcceptedResource,
     int Capacity,
-    int StoredQuantity);
+    int StoredQuantity,
+    int DesiredQuantity,
+    int TypeSlotCount,
+    int StackCapacity,
+    int UsedTypeSlots);

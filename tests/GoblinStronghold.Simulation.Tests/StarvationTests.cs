@@ -13,9 +13,9 @@ public sealed class StarvationTests
         var engine = CreateEngine(initialHunger: 10_000, initialHealth: 100);
 
         engine.AdvanceTicks(1);
-        Assert.Equal(60, Assert.Single(engine.CreateSnapshot().Actors).Health);
+        Assert.Equal(92, Assert.Single(engine.CreateSnapshot().Actors).Health);
 
-        engine.AdvanceTicks(2);
+        engine.AdvanceTicks(12);
 
         Assert.Empty(engine.CreateSnapshot().Actors);
         Assert.Contains(
@@ -26,7 +26,7 @@ public sealed class StarvationTests
     [Fact]
     public void DeathCancelsFutureCommandsAndLeavesLoadableState()
     {
-        var engine = CreateEngine(initialHunger: 10_000, initialHealth: 20);
+        var engine = CreateEngine(initialHunger: 10_000, initialHealth: 8);
         engine.QueueCommand(SimulationCommand.Forage(
             new SimulationTick(10),
             sequence: 1,
@@ -47,7 +47,7 @@ public sealed class StarvationTests
     }
 
     [Fact]
-    public void CriticalHungerInterruptsHaulCollectionForReachableMeal()
+    public void HungerInterruptsHaulCollectionForReachableMeal()
     {
         var engine = CreateEngine(initialHunger: 0, initialHealth: 10_000, initialFood: 3);
         engine.QueueCommand(SimulationCommand.CreateStorageZone(
@@ -70,6 +70,40 @@ public sealed class StarvationTests
         Assert.Equal(ActorJobKind.Eat, actor.Job.Kind);
         Assert.Equal(1, actor.Job.ReservedQuantity);
         Assert.Equal(EntityId.None, actor.Job.DestinationZoneId);
+    }
+
+    [Fact]
+    public void MealInterruptionResumesOrderedMove()
+    {
+        var engine = CreateEngine(initialHunger: 0, initialHealth: 10_000, initialFood: 3);
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        engine.QueueCommand(SimulationCommand.Move(
+            new SimulationTick(1),
+            sequence: 1,
+            actor.Id,
+            engine.Map.HumanVillage));
+        engine.AdvanceTicks(SimulationDefinitions.Foundation.ActorMovementIntervalTicks);
+        var moving = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(ActorJobKind.Move, moving.Job.Kind);
+        Assert.NotEqual(engine.Map.GoblinSpawn, moving.Position);
+
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["actors"]![0]!["hunger"] = SimulationDefinitions.Foundation.CriticalHungerThreshold;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        var ate = false;
+        for (var tick = 0; tick < 80 && !ate; tick++)
+        {
+            engine.AdvanceTicks(1);
+            ate = engine.DrainEvents().Any(item => item.Kind == SimulationEventKind.ActorAte);
+        }
+
+        Assert.True(ate);
+        var resumed = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(ActorJobKind.Move, resumed.Job.Kind);
+        Assert.Equal(engine.Map.HumanVillage, resumed.Job.Target);
+        Assert.Equal(ActorJobKind.None, resumed.Job.SuspendedKind);
     }
 
     private static SimulationEngine CreateEngine(

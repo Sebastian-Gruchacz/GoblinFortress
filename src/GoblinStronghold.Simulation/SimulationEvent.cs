@@ -19,6 +19,12 @@ public enum SimulationEventKind
     ActorProvisionedFood = 15,
     ActorCollectedWater = 16,
     ActorDrank = 17,
+    ConstructionCompleted = 18,
+    WorkDesignationCreated = 19,
+    WorkDesignationRemoved = 20,
+    StoragePullConfigured = 21,
+    RaidPreparationStarted = 22,
+    RaidDeparted = 23,
 }
 
 public readonly record struct SimulationEvent(

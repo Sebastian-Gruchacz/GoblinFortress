@@ -91,7 +91,9 @@ public sealed class AutonomousHaulingTests
             SimulationDefinitions.Foundation,
             map,
             initialGoblinCount: 1,
-            initialFoodStock: 10);
+            initialFoodStock: 10,
+            initialHunger: SimulationDefinitions.Foundation.EatThreshold -
+                (SimulationDefinitions.Foundation.HungerPerTick * 200));
         engine.QueueCommand(SimulationCommand.CreateStorageZone(
             new SimulationTick(1),
             sequence: 1,

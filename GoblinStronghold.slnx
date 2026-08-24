@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/GoblinStronghold.Headless/GoblinStronghold.Headless.csproj" />
+  <Project Path="src/GoblinStronghold.Simulation/GoblinStronghold.Simulation.csproj" />
+  <Project Path="tests/GoblinStronghold.Simulation.Tests/GoblinStronghold.Simulation.Tests.csproj" />
+</Solution>

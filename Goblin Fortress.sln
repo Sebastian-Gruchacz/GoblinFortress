@@ -1,14 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio Version 17
+VisualStudioVersion = 17.4.33205.214
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Gnomes", "Gnomes", "{332DB499-647A-424D-BA6C-77F8F13133BD}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gnomoria", "Gnomoria\Gnomoria.csproj", "{3E061575-978B-49DA-B3EA-F4EAD7F01867}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "gnomorialib", "Gnomoria\LIB\gnomorialib.csproj", "{663CDB6B-A96E-4A37-9BF5-512A8F254012}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoblinFortress", "GoblinFortress\GoblinFortress\GoblinFortress.csproj", "{CE90F130-C194-4C15-AAF3-4FD6E398E17F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoblinFortressContent", "GoblinFortress\GoblinFortressContent\GoblinFortressContent.contentproj", "{27D25B1D-F026-4209-8E09-FC4B191422D8}"
@@ -58,16 +52,6 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{3E061575-978B-49DA-B3EA-F4EAD7F01867}.Debug|Any CPU.ActiveCfg = Debug|x86
-		{3E061575-978B-49DA-B3EA-F4EAD7F01867}.Debug|x86.ActiveCfg = Debug|x86
-		{3E061575-978B-49DA-B3EA-F4EAD7F01867}.Release|Any CPU.ActiveCfg = Release|x86
-		{3E061575-978B-49DA-B3EA-F4EAD7F01867}.Release|x86.ActiveCfg = Release|x86
-		{3E061575-978B-49DA-B3EA-F4EAD7F01867}.Release|x86.Build.0 = Release|x86
-		{663CDB6B-A96E-4A37-9BF5-512A8F254012}.Debug|Any CPU.ActiveCfg = Debug|x86
-		{663CDB6B-A96E-4A37-9BF5-512A8F254012}.Debug|x86.ActiveCfg = Debug|x86
-		{663CDB6B-A96E-4A37-9BF5-512A8F254012}.Release|Any CPU.ActiveCfg = Release|x86
-		{663CDB6B-A96E-4A37-9BF5-512A8F254012}.Release|x86.ActiveCfg = Release|x86
-		{663CDB6B-A96E-4A37-9BF5-512A8F254012}.Release|x86.Build.0 = Release|x86
 		{CE90F130-C194-4C15-AAF3-4FD6E398E17F}.Debug|Any CPU.ActiveCfg = Debug|x86
 		{CE90F130-C194-4C15-AAF3-4FD6E398E17F}.Debug|x86.ActiveCfg = Debug|x86
 		{CE90F130-C194-4C15-AAF3-4FD6E398E17F}.Release|Any CPU.ActiveCfg = Release|x86
@@ -171,12 +155,13 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{3E061575-978B-49DA-B3EA-F4EAD7F01867} = {332DB499-647A-424D-BA6C-77F8F13133BD}
-		{663CDB6B-A96E-4A37-9BF5-512A8F254012} = {332DB499-647A-424D-BA6C-77F8F13133BD}
 		{CFB16C5C-EE36-4ACE-9513-0AD18DFF9D00} = {1F539C27-3EE1-4B08-AF7D-4BC08B50F97E}
 		{2FA72F9A-0F25-4A28-AB2E-FBDFA3AEAAB0} = {1F539C27-3EE1-4B08-AF7D-4BC08B50F97E}
 		{15F0872F-3DF9-4C4D-995A-9982689C64F7} = {1B45DEBB-3839-4928-8446-F885819E92C2}
 		{BD6CBDC1-A671-4DB6-BDCB-0D7707BE8459} = {5640D941-549C-4DE3-9B15-537FADDDB828}
 		{8F558866-27B5-45AA-9D76-CB7923C09356} = {1F539C27-3EE1-4B08-AF7D-4BC08B50F97E}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A0115768-AD0E-416C-9A86-5FD1CA1D0AC5}
 	EndGlobalSection
 EndGlobal

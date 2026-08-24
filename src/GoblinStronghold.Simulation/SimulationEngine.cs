@@ -10,7 +10,7 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
-    private const int SaveFormatVersion = 24;
+    private const int SaveFormatVersion = 25;
     private const int DefaultMapDimension = 32;
 
     private static readonly JsonSerializerOptions SaveOptions = new()
@@ -22,6 +22,7 @@ public sealed partial class SimulationEngine
     private readonly SortedDictionary<EntityId, ActorState> _actors = [];
     private readonly SortedDictionary<EntityId, ItemStackState> _itemStacks = [];
     private readonly SortedDictionary<EntityId, StorageZoneState> _storageZones = [];
+    private readonly SortedDictionary<EntityId, ConstructionSiteState> _constructionSites = [];
     private readonly SortedDictionary<EntityId, WorkDesignationSnapshot> _workDesignations = [];
     private readonly SortedDictionary<CommandKey, SimulationCommand> _pendingCommands = [];
     private readonly List<SimulationEvent> _undeliveredEvents = [];
@@ -41,10 +42,12 @@ public sealed partial class SimulationEngine
     private SimulationEngine(
         WorldSeed worldSeed,
         SimulationDefinitions definitions,
-        GeneratedMap map)
+        GeneratedMap map,
+        SimulationDebugSettings debugSettings)
     {
         WorldSeed = worldSeed;
         Definitions = definitions;
+        DebugSettings = debugSettings;
         World = WorldMapState.CreateInitial(map);
         Visibility = WorldVisibilityState.Create(map);
         _humanVillage = HumanVillageState.CreateInitial(World, definitions);
@@ -53,6 +56,8 @@ public sealed partial class SimulationEngine
     public WorldSeed WorldSeed { get; }
 
     public SimulationDefinitions Definitions { get; }
+
+    public SimulationDebugSettings DebugSettings { get; }
 
     public GeneratedMap Map => World.Baseline;
 
@@ -70,7 +75,8 @@ public sealed partial class SimulationEngine
         int initialHunger = 0,
         int? initialHealth = null,
         int initialWoodStock = 0,
-        bool scatterInitialBrushwood = false) =>
+        bool scatterInitialBrushwood = false,
+        SimulationDebugSettings? debugSettings = null) =>
         Create(
             worldSeed,
             definitions,
@@ -80,7 +86,8 @@ public sealed partial class SimulationEngine
             initialHunger,
             initialHealth,
             initialWoodStock,
-            scatterInitialBrushwood);
+            scatterInitialBrushwood,
+            debugSettings);
 
     public static SimulationEngine Create(
         WorldSeed worldSeed,
@@ -91,7 +98,8 @@ public sealed partial class SimulationEngine
         int initialHunger = 0,
         int? initialHealth = null,
         int initialWoodStock = 0,
-        bool scatterInitialBrushwood = false)
+        bool scatterInitialBrushwood = false,
+        SimulationDebugSettings? debugSettings = null)
     {
         ArgumentNullException.ThrowIfNull(definitions);
         ArgumentNullException.ThrowIfNull(map);
@@ -109,7 +117,11 @@ public sealed partial class SimulationEngine
             throw new ArgumentException("Map seed must match the simulation world seed.", nameof(map));
         }
 
-        var engine = new SimulationEngine(worldSeed, definitions, map);
+        var engine = new SimulationEngine(
+            worldSeed,
+            definitions,
+            map,
+            debugSettings ?? SimulationDebugSettings.Disabled);
 
         for (var index = 0; index < initialGoblinCount; index++)
         {
@@ -142,7 +154,10 @@ public sealed partial class SimulationEngine
         return engine;
     }
 
-    public static SimulationEngine Load(string saveJson, SimulationDefinitions definitions)
+    public static SimulationEngine Load(
+        string saveJson,
+        SimulationDefinitions definitions,
+        SimulationDebugSettings? debugSettings = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(saveJson);
         ArgumentNullException.ThrowIfNull(definitions);
@@ -173,7 +188,11 @@ public sealed partial class SimulationEngine
                 "The saved map fingerprint does not match the current deterministic generator.");
         }
 
-        var engine = new SimulationEngine(worldSeed, definitions, map)
+        var engine = new SimulationEngine(
+            worldSeed,
+            definitions,
+            map,
+            debugSettings ?? SimulationDebugSettings.Disabled)
         {
             CurrentTick = new SimulationTick(save.CurrentTick),
             _nextEntityId = save.NextEntityId,
@@ -210,6 +229,7 @@ public sealed partial class SimulationEngine
         engine.LoadStorageZones(save.StorageZones);
         engine.LoadWorkDesignations(save.WorkDesignations);
         engine.LoadItemStacks(save.ItemStacks);
+        engine.LoadConstructionSites(save.ConstructionSites);
         engine.ValidateLoadedWorkDesignations();
         engine.LoadActors(save.Actors);
         engine.ValidateLoadedOwnership();
@@ -296,6 +316,9 @@ public sealed partial class SimulationEngine
                 GetUsedTypeSlots(zone.Id)))
             .ToArray();
         var workDesignations = _workDesignations.Values.ToArray();
+        var constructionSites = _constructionSites.Values
+            .Select(site => site.ToSnapshot())
+            .ToArray();
         var plantPatches = World.CreatePlantSnapshot().ToArray();
         var worldObjects = World.CreateWorldObjectSnapshot().ToArray();
         var humanVillage = _humanVillage.CreateSnapshot();
@@ -308,6 +331,7 @@ public sealed partial class SimulationEngine
             actors,
             itemStacks,
             storageZones,
+            constructionSites,
             workDesignations,
             plantPatches,
             worldObjects,
@@ -413,6 +437,25 @@ public sealed partial class SimulationEngine
             Actors = _actors.Values.Select(ToSaveModel).ToList(),
             ItemStacks = _itemStacks.Values.Select(ToSaveModel).ToList(),
             StorageZones = _storageZones.Values.Select(ToSaveModel).ToList(),
+            ConstructionSites = _constructionSites.Values.Select(site =>
+                new ConstructionSiteSaveModel
+                {
+                    Id = site.Id.Value,
+                    Kind = site.Kind,
+                    AnchorX = site.Anchor.X,
+                    AnchorY = site.Anchor.Y,
+                    AnchorZ = site.Anchor.Z,
+                    EndX = site.End.X,
+                    EndY = site.End.Y,
+                    EndZ = site.End.Z,
+                    RequiredWood = site.RequiredWood,
+                    DeliveredWood = site.DeliveredWood,
+                    RemainingWorkTicks = site.RemainingWorkTicks,
+                    TotalWorkTicks = site.TotalWorkTicks,
+                    RequiredSkills = site.Capabilities.RequiredSkills,
+                    MinimumBuildingLevel = site.Capabilities.MinimumBuildingLevel,
+                    RequiredEquipment = site.Capabilities.RequiredEquipment,
+                }).ToList(),
             WorkDesignations = _workDesignations.Values.Select(designation =>
                 new WorkDesignationSaveModel
                 {
@@ -594,6 +637,22 @@ public sealed partial class SimulationEngine
             Append(canonical, designation.TargetEntityId.Value);
         }
 
+        Append(canonical, _constructionSites.Count);
+        foreach (var site in _constructionSites.Values)
+        {
+            Append(canonical, site.Id.Value);
+            Append(canonical, (int)site.Kind);
+            Append(canonical, site.Anchor);
+            Append(canonical, site.End);
+            Append(canonical, site.RequiredWood);
+            Append(canonical, site.DeliveredWood);
+            Append(canonical, site.RemainingWorkTicks);
+            Append(canonical, site.TotalWorkTicks);
+            Append(canonical, (int)site.Capabilities.RequiredSkills);
+            Append(canonical, site.Capabilities.MinimumBuildingLevel);
+            Append(canonical, (int)site.Capabilities.RequiredEquipment);
+        }
+
         Append(canonical, _pendingCommands.Count);
         foreach (var command in _pendingCommands.Values)
         {
@@ -772,6 +831,59 @@ public sealed partial class SimulationEngine
         }
     }
 
+    private void LoadConstructionSites(IEnumerable<ConstructionSiteSaveModel> models)
+    {
+        foreach (var model in models.OrderBy(item => item.Id))
+        {
+            var id = new EntityId(model.Id);
+            var anchor = new GridPosition(model.AnchorX, model.AnchorY, model.AnchorZ);
+            var end = new GridPosition(model.EndX, model.EndY, model.EndZ);
+            if (id == EntityId.None ||
+                !Enum.IsDefined(model.Kind) ||
+                !Map.IsWithin(anchor) || !Map.IsWithin(end) ||
+                model.RequiredWood <= 0 ||
+                model.DeliveredWood < 0 || model.DeliveredWood > model.RequiredWood ||
+                model.TotalWorkTicks <= 0 ||
+                model.RemainingWorkTicks <= 0 ||
+                model.RemainingWorkTicks > model.TotalWorkTicks ||
+                !HasOnlyKnownFlags(model.RequiredSkills, GoblinSkill.Building) ||
+                model.MinimumBuildingLevel < 0 ||
+                !HasOnlyKnownFlags(model.RequiredEquipment, PersonalEquipment.BoneKnife))
+            {
+                throw new InvalidDataException("The save contains an invalid construction site.");
+            }
+
+            var expected = ConstructionBlueprintCatalog.CreateSite(id, model.Kind, anchor, end);
+            if (expected.RequiredWood != model.RequiredWood ||
+                expected.TotalWorkTicks != model.TotalWorkTicks ||
+                expected.Capabilities != new ConstructionCapabilityRequirements(
+                    model.RequiredSkills,
+                    model.MinimumBuildingLevel,
+                    model.RequiredEquipment))
+            {
+                throw new InvalidDataException("The saved construction site does not match its blueprint.");
+            }
+
+            var site = new ConstructionSiteState(
+                id,
+                model.Kind,
+                anchor,
+                end,
+                model.RequiredWood,
+                model.DeliveredWood,
+                model.RemainingWorkTicks,
+                model.TotalWorkTicks,
+                expected.Capabilities);
+            if (site.GetFootprint().Any(position => !Map.IsWithin(position)) ||
+                _constructionSites.Values.Any(other =>
+                    other.GetFootprint().Intersect(site.GetFootprint()).Any()) ||
+                !_constructionSites.TryAdd(id, site))
+            {
+                throw new InvalidDataException("The save contains overlapping construction sites.");
+            }
+        }
+    }
+
     private void LoadItemStacks(IEnumerable<ItemStackSaveModel> stackModels)
     {
         foreach (var stackModel in stackModels.OrderBy(stack => stack.Id))
@@ -890,6 +1002,7 @@ public sealed partial class SimulationEngine
             .Concat(_itemStacks.Keys)
             .Concat(_storageZones.Keys)
             .Concat(_workDesignations.Keys)
+            .Concat(_constructionSites.Keys)
             .Select(id => id.Value)
             .DefaultIfEmpty(0UL)
             .Max();
@@ -1012,9 +1125,13 @@ public sealed partial class SimulationEngine
 
     private void UpdateVisibility()
     {
-        Visibility.Reveal(
-            _actors.Values.Select(actor => actor.Position),
-            Definitions.VisionRadius);
+        IEnumerable<GridPosition> observers = _actors.Values.Select(actor => actor.Position);
+        if (DebugSettings.RevealFogFromNonPlayerUnits)
+        {
+            observers = observers.Concat(_humanVillage.GetLivingCohortPositions());
+        }
+
+        Visibility.Reveal(observers, Definitions.VisionRadius);
         foreach (var actor in _actors.Values.Where(actor =>
                      actor.JobKind == ActorJobKind.Explore &&
                      Visibility.Get(actor.JobTarget) != CellVisibility.Unknown))
@@ -1138,18 +1255,18 @@ public sealed partial class SimulationEngine
         {
             WorkDesignationKind.GatherFood => World.CreatePlantSnapshot()
                 .Where(plant => plant.Biomass > 0 && IsInside(plant.Position, minimum, maximum) &&
-                    Visibility.Get(plant.Position) == CellVisibility.Visible)
+                    Visibility.Get(plant.Position) != CellVisibility.Unknown)
                 .Select(plant => (plant.Position, EntityId.None)),
             WorkDesignationKind.GatherBrushwood => _itemStacks.Values
                 .Where(stack => stack.Resource == ResourceKind.Wood &&
                     stack.Location.Kind == ItemLocationKind.Ground &&
                     IsInside(stack.Location.Position, minimum, maximum) &&
-                    Visibility.Get(stack.Location.Position) == CellVisibility.Visible)
+                    Visibility.Get(stack.Location.Position) != CellVisibility.Unknown)
                 .Select(stack => (stack.Location.Position, stack.Id)),
             WorkDesignationKind.UprootBerryBush => World.CreatePlantSnapshot()
                 .Where(plant => plant.Kind == PlantKind.BerryBush &&
                     IsInside(plant.Position, minimum, maximum) &&
-                    Visibility.Get(plant.Position) == CellVisibility.Visible)
+                    Visibility.Get(plant.Position) != CellVisibility.Unknown)
                 .Select(plant => (plant.Position, EntityId.None)),
             _ => [],
         };
@@ -1206,106 +1323,117 @@ public sealed partial class SimulationEngine
 
     private bool TryExecuteBuild(SimulationCommand command)
     {
-        if (command.Construction == ConstructionKind.GoblinFieldCamp)
+        var footprint = GetConstructionFootprint(
+            command.Construction,
+            command.Position,
+            command.EndPosition);
+        if (!CanPlaceConstruction(command.Construction, command.Position, footprint) ||
+            _constructionSites.Values.Any(site =>
+                site.GetFootprint().Intersect(footprint).Any()))
         {
-            if (!World.CanBuildGoblinFieldCamp(command.Position) ||
-                _storageZones.Values.Any(zone => zone.Position == command.Position) ||
-                GetAvailableResourceQuantity(ResourceKind.Wood) < command.Amount)
-            {
-                return false;
-            }
-
-            var builder = FindNearestBuilder(command.Position);
-            var gatheredDirectly = ConsumeResource(ResourceKind.Wood, command.Amount);
-            _undeliveredWorldChanges.Add(World.BuildGoblinFieldCamp(command.Position, CurrentTick));
-            const int campProvisionCapacity = 48;
-            var campProvisionTarget = Math.Min(
-                campProvisionCapacity,
-                Math.Max(24, _actors.Count * (Definitions.PersonalFoodCapacity + 3)));
-            var provisions = AllocateStorageZone(
-                command.Position,
-                ResourceKind.Food,
-                capacity: campProvisionCapacity,
-                desiredQuantity: campProvisionTarget);
-            if (builder is not null)
-            {
-                if (gatheredDirectly > 0)
-                {
-                    GainForagingExperience(builder, gatheredDirectly);
-                }
-                GainBuildingExperience(builder, 25);
-            }
-            Publish(
-                SimulationEventKind.ConstructionCompleted,
-                builder?.Id ?? EntityId.None,
-                provisions.Id,
-                command.Amount);
-            return true;
+            return false;
         }
 
-        if (command.Construction is ConstructionKind.FoodStorage or ConstructionKind.WoodStorage)
-        {
-            if (!World.IsSurfaceTraversable(command.Position) ||
-                _storageZones.Values.Any(zone => zone.Position == command.Position) ||
-                GetAvailableResourceQuantity(ResourceKind.Wood) < 2)
-            {
-                return false;
-            }
+        var id = AllocateEntityId();
+        var site = ConstructionBlueprintCatalog.CreateSite(
+            id,
+            command.Construction,
+            command.Position,
+            command.EndPosition);
+        _constructionSites.Add(id, site);
+        Publish(SimulationEventKind.ConstructionOrdered, EntityId.None, id, site.RequiredWood);
+        return true;
+    }
 
-            var builder = FindNearestBuilder(command.Position);
-            var gatheredDirectly = ConsumeResource(ResourceKind.Wood, 2);
-            var acceptedResource = command.Construction == ConstructionKind.FoodStorage
-                ? ResourceKind.Food
-                : ResourceKind.Wood;
-            var capacity = acceptedResource == ResourceKind.Food
-                ? Definitions.Storage.SmallFoodCapacity
-                : 64;
-            var zone = AllocateStorageZone(command.Position, acceptedResource, capacity);
-            if (builder is not null)
-            {
-                if (gatheredDirectly > 0)
-                {
-                    GainForagingExperience(builder, gatheredDirectly);
-                }
-                GainBuildingExperience(builder, 10);
-            }
-            Publish(
-                SimulationEventKind.ConstructionCompleted,
-                builder?.Id ?? EntityId.None,
-                zone.Id,
-                2);
-            return true;
+    private IReadOnlyList<GridPosition> GetConstructionFootprint(
+        ConstructionKind kind,
+        GridPosition anchor,
+        GridPosition end) => kind switch
+    {
+        ConstructionKind.WoodenWalkway => SimulationCommand.GetWalkwayCells(anchor, end),
+        ConstructionKind.GoblinFieldCamp =>
+        [
+            anchor,
+            anchor with { X = anchor.X + 1 },
+            anchor with { Y = anchor.Y + 1 },
+            anchor with { X = anchor.X + 1, Y = anchor.Y + 1 },
+        ],
+        _ => [anchor],
+    };
+
+    private bool CanPlaceConstruction(
+        ConstructionKind kind,
+        GridPosition anchor,
+        IReadOnlyList<GridPosition> footprint)
+    {
+        if (footprint.Any(position => !Map.IsWithin(position)) ||
+            _storageZones.Values.Any(zone => footprint.Contains(zone.Position)))
+        {
+            return false;
         }
 
-        if (command.Construction == ConstructionKind.WoodenWalkway)
+        return kind switch
         {
-            var cells = SimulationCommand.GetWalkwayCells(command.Position, command.EndPosition);
-            if (!World.CanBuildWalkway(cells) ||
-                GetAvailableResourceQuantity(ResourceKind.Wood) < cells.Count)
-            {
-                return false;
-            }
+            ConstructionKind.FoodStorage or ConstructionKind.WoodStorage =>
+                World.IsSurfaceTraversable(anchor),
+            ConstructionKind.WoodenWalkway => World.CanBuildWalkway(footprint),
+            ConstructionKind.GoblinFieldCamp => World.CanBuildGoblinFieldCamp(anchor),
+            _ => false,
+        };
+    }
 
-            var builder = FindNearestBuilder(command.Position);
-            var gatheredDirectly = ConsumeResource(ResourceKind.Wood, cells.Count);
-            _undeliveredWorldChanges.Add(World.BuildWalkway(cells, CurrentTick));
-            if (builder is not null)
-            {
-                if (gatheredDirectly > 0)
-                {
-                    GainForagingExperience(builder, gatheredDirectly);
-                }
-                GainBuildingExperience(builder, Math.Max(5, cells.Count * 3));
-            }
-            Publish(
-                SimulationEventKind.ConstructionCompleted,
-                builder?.Id ?? EntityId.None,
-                EntityId.None,
-                cells.Count);
-            return true;
+    private bool CompleteConstruction(ActorState builder, ConstructionSiteState site)
+    {
+        if (!CanPlaceConstruction(site.Kind, site.Anchor, site.GetFootprint()))
+        {
+            return false;
         }
 
-        return false;
+        EntityId completedTarget;
+        var experience = 10;
+        switch (site.Kind)
+        {
+            case ConstructionKind.FoodStorage:
+            case ConstructionKind.WoodStorage:
+                var acceptedResource = site.Kind == ConstructionKind.FoodStorage
+                    ? ResourceKind.Food
+                    : ResourceKind.Wood;
+                var capacity = acceptedResource == ResourceKind.Food
+                    ? Definitions.Storage.SmallFoodCapacity
+                    : 64;
+                completedTarget = AllocateStorageZone(site.Anchor, acceptedResource, capacity).Id;
+                break;
+            case ConstructionKind.WoodenWalkway:
+                var cells = site.GetFootprint();
+                _undeliveredWorldChanges.Add(World.BuildWalkway(cells, CurrentTick));
+                completedTarget = EntityId.None;
+                experience = Math.Max(5, cells.Count * 3);
+                break;
+            case ConstructionKind.GoblinFieldCamp:
+                _undeliveredWorldChanges.Add(World.BuildGoblinFieldCamp(site.Anchor, CurrentTick));
+                const int campProvisionCapacity = 48;
+                var campProvisionTarget = Math.Min(
+                    campProvisionCapacity,
+                    Math.Max(24, _actors.Count * (Definitions.PersonalFoodCapacity + 3)));
+                completedTarget = AllocateStorageZone(
+                    site.Anchor,
+                    ResourceKind.Food,
+                    campProvisionCapacity,
+                    campProvisionTarget).Id;
+                experience = 25;
+                break;
+            default:
+                throw new InvalidOperationException("Unsupported construction blueprint.");
+        }
+
+        _constructionSites.Remove(site.Id);
+        GainBuildingExperience(builder, experience);
+        Publish(
+            SimulationEventKind.ConstructionCompleted,
+            builder.Id,
+            completedTarget,
+            site.RequiredWood);
+        return true;
     }
 
     private bool TryExecuteMove(SimulationCommand command)

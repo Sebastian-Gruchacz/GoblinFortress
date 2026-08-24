@@ -15,6 +15,8 @@ public enum ActorJobKind : byte
     Move = 6,
     Resupply = 7,
     ClearVegetation = 8,
+    SupplyConstruction = 9,
+    BuildConstruction = 10,
 }
 
 public enum ActorJobStage : byte
@@ -244,6 +246,7 @@ public sealed class SimulationSnapshot
         ActorSnapshot[] actors,
         ItemStackSnapshot[] itemStacks,
         StorageZoneSnapshot[] storageZones,
+        ConstructionSiteSnapshot[] constructionSites,
         WorkDesignationSnapshot[] workDesignations,
         PlantPatchSnapshot[] plantPatches,
         WorldObjectSnapshot[] worldObjects,
@@ -262,6 +265,7 @@ public sealed class SimulationSnapshot
         Actors = new ReadOnlyCollection<ActorSnapshot>(actors);
         ItemStacks = new ReadOnlyCollection<ItemStackSnapshot>(itemStacks);
         StorageZones = new ReadOnlyCollection<StorageZoneSnapshot>(storageZones);
+        ConstructionSites = new ReadOnlyCollection<ConstructionSiteSnapshot>(constructionSites);
         WorkDesignations = new ReadOnlyCollection<WorkDesignationSnapshot>(workDesignations);
         PlantPatches = new ReadOnlyCollection<PlantPatchSnapshot>(plantPatches);
         WorldObjects = new ReadOnlyCollection<WorldObjectSnapshot>(worldObjects);
@@ -286,6 +290,8 @@ public sealed class SimulationSnapshot
     public IReadOnlyList<ItemStackSnapshot> ItemStacks { get; }
 
     public IReadOnlyList<StorageZoneSnapshot> StorageZones { get; }
+
+    public IReadOnlyList<ConstructionSiteSnapshot> ConstructionSites { get; }
 
     public IReadOnlyList<WorkDesignationSnapshot> WorkDesignations { get; }
 

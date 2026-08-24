@@ -46,6 +46,8 @@ internal sealed class SimulationSaveModel
 
     public List<StorageZoneSaveModel> StorageZones { get; set; } = [];
 
+    public List<ConstructionSiteSaveModel> ConstructionSites { get; set; } = [];
+
     public List<WorkDesignationSaveModel> WorkDesignations { get; set; } = [];
 
     public List<CommandSaveModel> PendingCommands { get; set; } = [];
@@ -291,6 +293,39 @@ internal sealed class WorkDesignationSaveModel
     public int TargetZ { get; set; }
 
     public ulong TargetEntityId { get; set; }
+}
+
+internal sealed class ConstructionSiteSaveModel
+{
+    public ulong Id { get; set; }
+
+    public ConstructionKind Kind { get; set; }
+
+    public int AnchorX { get; set; }
+
+    public int AnchorY { get; set; }
+
+    public int AnchorZ { get; set; }
+
+    public int EndX { get; set; }
+
+    public int EndY { get; set; }
+
+    public int EndZ { get; set; }
+
+    public int RequiredWood { get; set; }
+
+    public int DeliveredWood { get; set; }
+
+    public int RemainingWorkTicks { get; set; }
+
+    public int TotalWorkTicks { get; set; }
+
+    public GoblinSkill RequiredSkills { get; set; }
+
+    public int MinimumBuildingLevel { get; set; }
+
+    public PersonalEquipment RequiredEquipment { get; set; }
 }
 
 internal sealed class CommandSaveModel

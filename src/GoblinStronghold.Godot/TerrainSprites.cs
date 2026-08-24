@@ -2,45 +2,45 @@ using Godot;
 
 namespace GoblinStronghold.GodotClient;
 
-internal enum EnvironmentSprite
+internal enum TerrainSprite
 {
-    TreeTrunk,
-    TreeCrown,
-    FruitingBerryBush,
-    BareBerryBush,
-    MushroomCluster,
-    EdibleRoots,
-    Reeds,
-    FishShoal,
+    Meadow,
+    DeciduousForestFloor,
+    ConiferForestFloor,
+    BogGround,
     ClearedField,
     SownField,
     GrowingField,
     RipeField,
-    GoblinHutGround,
-    GoblinHutRoof,
-    FieldCampGround,
-    FieldCampRoof,
+    ShallowWaterA,
+    ShallowWaterB,
+    DeepWaterA,
+    DeepWaterB,
+    MuddyWaterA,
+    MuddyWaterB,
+    FishShadowsA,
+    FishShadowsB,
 }
 
-internal static class EnvironmentSprites
+internal static class TerrainSprites
 {
     private const int Columns = 4;
     private const int Rows = 4;
-    private const int SourcePadding = 4;
-    private const string AtlasPath = "res://Assets/World/environment-atlas-v1.png";
+    private const int SourcePadding = 2;
+    private const string AtlasPath = "res://Assets/World/terrain-water-atlas-v1.png";
 
     public static Texture2D LoadAtlas()
     {
         var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(AtlasPath));
         if (image is null || image.IsEmpty())
         {
-            throw new InvalidOperationException($"Cannot load environment atlas: {AtlasPath}");
+            throw new InvalidOperationException($"Cannot load terrain atlas: {AtlasPath}");
         }
 
         return ImageTexture.CreateFromImage(image);
     }
 
-    public static Rect2 GetRegion(Texture2D atlas, EnvironmentSprite sprite)
+    public static Rect2 GetRegion(Texture2D atlas, TerrainSprite sprite)
     {
         var index = (int)sprite;
         var column = index % Columns;

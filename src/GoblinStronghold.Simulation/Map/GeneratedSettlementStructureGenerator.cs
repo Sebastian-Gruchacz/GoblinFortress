@@ -74,7 +74,146 @@ internal static class GeneratedSettlementStructureGenerator
                 height: 3);
         }
 
+        if (map.GeneratorVersion >= 4)
+        {
+            AddNaturalVegetation(objects, reservedCells, map, ref nextId);
+        }
+
         return objects;
+    }
+
+    private static void AddNaturalVegetation(
+        List<WorldObjectSnapshot> objects,
+        HashSet<GridPosition> reservedCells,
+        GeneratedMap map,
+        ref ulong nextId)
+    {
+        var forestOuterRadius = Math.Max(10d, Math.Min(map.Width, map.Height) * 0.38d);
+        var forestInnerRadius = Math.Max(5d, Math.Min(map.Width, map.Height) * 0.1d);
+        for (var y = 1; y < map.Height - 1; y++)
+        {
+            for (var x = 1; x < map.Width - 1; x++)
+            {
+                var position = new GridPosition(x, y);
+                var distance = Distance(position, map.HumanVillage);
+                if (x < map.Width * 0.42d || y > map.Height * 0.62d ||
+                    distance < forestInnerRadius || distance > forestOuterRadius ||
+                    !CanPlaceTree(map, position, reservedCells) ||
+                    SamplePercent(map, position, sampleKey: 31_001) >= 78)
+                {
+                    continue;
+                }
+
+                AddTree(objects, reservedCells, new WorldObjectId(nextId++), position);
+            }
+        }
+
+        for (var y = 0; y < map.Height; y++)
+        {
+            for (var x = 0; x < map.Width; x++)
+            {
+                var position = new GridPosition(x, y);
+                var inSwampRegion = x <= map.Width * 0.42d || y >= map.Height * 0.64d;
+                if (!inSwampRegion || reservedCells.Contains(position) ||
+                    map.GetCell(position).Terrain != TerrainKind.Mud ||
+                    SamplePercent(map, position, sampleKey: 31_002) >= 5)
+                {
+                    continue;
+                }
+
+                AddStump(objects, reservedCells, new WorldObjectId(nextId++), position);
+            }
+        }
+    }
+
+    private static bool CanPlaceTree(
+        GeneratedMap map,
+        GridPosition anchor,
+        HashSet<GridPosition> reservedCells)
+    {
+        for (var y = -1; y <= 1; y++)
+        {
+            for (var x = -1; x <= 1; x++)
+            {
+                var position = new GridPosition(anchor.X + x, anchor.Y + y);
+                if (!map.IsWithin(position) || reservedCells.Contains(position) ||
+                    map.GetCell(position).Terrain != TerrainKind.SolidGround)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static void AddTree(
+        List<WorldObjectSnapshot> objects,
+        HashSet<GridPosition> reservedCells,
+        WorldObjectId id,
+        GridPosition anchor)
+    {
+        var parts = new List<WorldObjectPartSnapshot>
+        {
+            new(default, SpatialOccupancyChannel.Solid, WorldObjectPartKind.TreeTrunk),
+        };
+        for (var y = -1; y <= 1; y++)
+        {
+            for (var x = -1; x <= 1; x++)
+            {
+                parts.Add(new WorldObjectPartSnapshot(
+                    new GridPosition(x, y, 1),
+                    SpatialOccupancyChannel.Overhead,
+                    WorldObjectPartKind.TreeCrown));
+            }
+        }
+
+        var tree = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.Tree,
+            WorldObjectOwner.Nature,
+            anchor,
+            CardinalOrientation.North,
+            parts);
+        ReserveFootprint(tree, reservedCells);
+        objects.Add(tree);
+    }
+
+    private static void AddStump(
+        List<WorldObjectSnapshot> objects,
+        HashSet<GridPosition> reservedCells,
+        WorldObjectId id,
+        GridPosition anchor)
+    {
+        var stump = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.DeadTreeStump,
+            WorldObjectOwner.Nature,
+            anchor,
+            CardinalOrientation.North,
+            [new(default, SpatialOccupancyChannel.Solid, WorldObjectPartKind.TreeStump)]);
+        ReserveFootprint(stump, reservedCells);
+        objects.Add(stump);
+    }
+
+    private static int SamplePercent(GeneratedMap map, GridPosition position, ulong sampleKey)
+    {
+        var subject = new EntityId(checked((ulong)((position.Y * map.Width) + position.X) + 1));
+        return DeterministicRandom.NextInt(
+            map.Seed,
+            RandomDomain.MapGeneration,
+            subject,
+            SimulationTick.Zero,
+            sampleKey,
+            minimumInclusive: 0,
+            maximumExclusive: 100);
+    }
+
+    private static double Distance(GridPosition first, GridPosition second)
+    {
+        var deltaX = first.X - second.X;
+        var deltaY = first.Y - second.Y;
+        return Math.Sqrt((deltaX * deltaX) + (deltaY * deltaY));
     }
 
     private static void ReserveSettlementAccess(

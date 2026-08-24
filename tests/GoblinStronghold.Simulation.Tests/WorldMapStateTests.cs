@@ -32,6 +32,39 @@ public sealed class WorldMapStateTests
     }
 
     [Fact]
+    public void RegionalMapPlacesForestNearVillageAndDeadwoodInSwamp()
+    {
+        var seed = new WorldSeed(0x464F52455354UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+
+        var objects = engine.World.CreateWorldObjectSnapshot();
+        var trees = objects.Where(item => item.Kind == WorldObjectKind.Tree).ToArray();
+        var stumps = objects.Where(item => item.Kind == WorldObjectKind.DeadTreeStump).ToArray();
+
+        Assert.NotEmpty(trees);
+        Assert.All(trees, tree =>
+        {
+            Assert.Equal(WorldObjectOwner.Nature, tree.Owner);
+            Assert.Contains(tree.Parts, part => part.Kind == WorldObjectPartKind.TreeTrunk);
+            Assert.Equal(9, tree.Parts.Count(part => part.Kind == WorldObjectPartKind.TreeCrown));
+            Assert.True(tree.Anchor.X >= map.Width * 0.42);
+            Assert.True(tree.Anchor.Y <= map.Height * 0.62);
+        });
+        Assert.NotEmpty(stumps);
+        Assert.All(stumps, stump =>
+        {
+            Assert.Equal(TerrainKind.Mud, map.GetCell(stump.Anchor).Terrain);
+            Assert.True(stump.Anchor.X <= map.Width * 0.42 || stump.Anchor.Y >= map.Height * 0.64);
+        });
+    }
+
+    [Fact]
     public void FishShoalsOnlyOccupyShallowsInLargerConnectedWaterBodies()
     {
         var seed = new WorldSeed(0x474F424C494EUL);

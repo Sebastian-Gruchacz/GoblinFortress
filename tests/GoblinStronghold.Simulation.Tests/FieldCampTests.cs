@@ -16,6 +16,10 @@ public sealed class FieldCampTests
 
         engine.AdvanceTicks(1);
 
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.GoblinFieldCamp, site.Kind);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
         var snapshot = engine.CreateSnapshot();
         var camp = Assert.Single(snapshot.WorldObjects,
             item => item.Kind == WorldObjectKind.GoblinFieldCamp);
@@ -45,9 +49,11 @@ public sealed class FieldCampTests
         var position = FindCampPosition(engine);
         engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
             new SimulationTick(2), sequence: 2, position));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
         engine.QueueCommand(SimulationCommand.AttackHumanVillage(
-            new SimulationTick(3), sequence: 3));
-        engine.AdvanceTicks(2);
+            engine.CurrentTick.Next(), sequence: 3));
+        engine.AdvanceTicks(1);
 
         var preparing = engine.CreateSnapshot();
         Assert.Equal(GoblinRaidPhase.Preparing, preparing.RaidPhase);

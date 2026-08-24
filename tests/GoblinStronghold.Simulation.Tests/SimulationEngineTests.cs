@@ -123,6 +123,13 @@ public sealed class SimulationEngineTests
 
         engine.AdvanceTicks(1);
 
+        var ordered = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.FoodStorage, ordered.Kind);
+        Assert.Equal(2, Assert.Single(ordered.Materials).MissingQuantity);
+        Assert.Empty(engine.CreateSnapshot().StorageZones);
+
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
         var foodStorage = Assert.Single(engine.CreateSnapshot().StorageZones, zone =>
             zone.Position == position);
         Assert.Equal(96, foodStorage.Capacity);
@@ -135,7 +142,7 @@ public sealed class SimulationEngineTests
             item.Kind == SimulationEventKind.ConstructionCompleted && item.Amount == 2);
         var builder = Assert.Single(engine.CreateSnapshot().Actors);
         Assert.True(builder.Experience.Building > 0);
-        Assert.True(builder.Experience.Foraging > 0);
+        Assert.True(builder.Experience.Hauling > 0);
         Assert.True(builder.KnownSkills.HasFlag(GoblinSkill.Building));
     }
 
@@ -156,6 +163,9 @@ public sealed class SimulationEngineTests
 
         engine.AdvanceTicks(1);
 
+        Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
         var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
         Assert.Equal(ResourceKind.Wood, zone.AcceptedResource);
         Assert.Equal(3, engine.CreateSnapshot().ItemStacks
@@ -164,7 +174,7 @@ public sealed class SimulationEngineTests
     }
 
     [Fact]
-    public void ConstructionWithoutEnoughWoodIsRejectedWithoutPartialMutation()
+    public void ConstructionWithoutEnoughWoodRemainsAsUnsatisfiedBlueprint()
     {
         var engine = SimulationEngine.Create(
             new WorldSeed(993),
@@ -172,7 +182,6 @@ public sealed class SimulationEngineTests
             initialGoblinCount: 1,
             initialFoodStock: 0,
             initialWoodStock: 1);
-        var before = engine.CreateSnapshot();
         engine.QueueCommand(SimulationCommand.BuildFoodStorage(
             new SimulationTick(1),
             sequence: 1,
@@ -180,13 +189,78 @@ public sealed class SimulationEngineTests
 
         engine.AdvanceTicks(1);
 
-        Assert.Equal(before.StorageZones.Count, engine.CreateSnapshot().StorageZones.Count);
+        var snapshot = engine.CreateSnapshot();
+        Assert.Empty(snapshot.StorageZones);
+        var site = Assert.Single(snapshot.ConstructionSites);
+        Assert.Equal(ConstructionKind.FoodStorage, site.Kind);
+        Assert.Equal(2, Assert.Single(site.Materials).RequiredQuantity);
+        Assert.Equal(0, Assert.Single(site.Materials).DeliveredQuantity);
+        Assert.Equal(2, Assert.Single(site.Materials).MissingQuantity);
         Assert.Equal(1, engine.CreateSnapshot().ItemStacks
             .Where(stack => stack.Resource == ResourceKind.Wood)
             .Sum(stack => stack.Quantity));
         Assert.Contains(engine.DrainEvents(), item =>
-            item.Kind == SimulationEventKind.CommandRejected &&
-            item.Amount == (int)SimulationCommandKind.Build);
+            item.Kind == SimulationEventKind.ConstructionOrdered && item.Target == site.Id);
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void ConstructionOrderDoesNotRequireAvailableMaterialsOrBuilder()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x42554C44UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 0,
+            initialFoodStock: 0,
+            initialWoodStock: 0);
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            engine.Map.GoblinSpawn));
+
+        engine.AdvanceTicks(1);
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.Empty(snapshot.Actors);
+        Assert.Empty(snapshot.StorageZones);
+        var site = Assert.Single(snapshot.ConstructionSites);
+        Assert.Equal(2, Assert.Single(site.Materials).MissingQuantity);
+        Assert.Equal(site.TotalWorkTicks, site.RemainingWorkTicks);
+    }
+
+    [Fact]
+    public void ActiveConstructionDeliveryAndWorkSurviveSaveLoadDeterministically()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x53495445UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 20,
+            initialWoodStock: 5);
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            engine.Map.GoblinSpawn));
+
+        for (var tick = 0; tick < 500 &&
+             engine.CreateSnapshot().Actors.Single().Job.Kind != ActorJobKind.BuildConstruction; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        Assert.Equal(
+            ActorJobKind.BuildConstruction,
+            engine.CreateSnapshot().Actors.Single().Job.Kind);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+
+        engine.AdvanceTicks(200);
+        restored.AdvanceTicks(200);
+
+        Assert.Empty(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
 
     [Fact]
@@ -194,12 +268,6 @@ public sealed class SimulationEngineTests
     {
         var seed = new WorldSeed(994);
         var map = SwampMapGenerator.Generate(seed, 64, 64);
-        var water = Enumerable.Range(0, map.Height)
-            .SelectMany(y => Enumerable.Range(0, map.Width).Select(x => new GridPosition(x, y)))
-            .First(position => !map.GetCell(position).IsTraversable &&
-                map.GetCardinalNeighbors(position).Any(neighbor => map.GetCell(neighbor).IsTraversable));
-        var land = map.GetCardinalNeighbors(water).First(neighbor => map.GetCell(neighbor).IsTraversable);
-        var cells = SimulationCommand.GetWalkwayCells(land, water);
         var engine = SimulationEngine.Create(
             seed,
             SimulationDefinitions.Foundation,
@@ -207,6 +275,20 @@ public sealed class SimulationEngineTests
             initialGoblinCount: 1,
             initialFoodStock: 0,
             initialWoodStock: 10);
+        var crossing = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width).Select(x => new GridPosition(x, y)))
+            .Where(position => !map.GetCell(position).IsTraversable &&
+                map.GetCardinalNeighbors(position).Any(neighbor => map.GetCell(neighbor).IsTraversable))
+            .SelectMany(water => map.GetCardinalNeighbors(water)
+                .Where(neighbor => map.GetCell(neighbor).IsTraversable)
+                .Select(land => new { Land = land, Water = water }))
+            .Where(candidate => engine.World.CanBuildWalkway([candidate.Land, candidate.Water]))
+            .OrderBy(candidate => Math.Abs(candidate.Water.X - map.GoblinSpawn.X) +
+                Math.Abs(candidate.Water.Y - map.GoblinSpawn.Y))
+            .First();
+        var water = crossing.Water;
+        var land = crossing.Land;
+        var cells = SimulationCommand.GetWalkwayCells(land, water);
         engine.QueueCommand(SimulationCommand.BuildWalkway(
             new SimulationTick(1),
             sequence: 1,
@@ -214,6 +296,9 @@ public sealed class SimulationEngineTests
             water));
 
         engine.AdvanceTicks(1);
+
+        Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
 
         Assert.True(engine.World.IsSurfaceTraversable(water));
         Assert.Contains(engine.CreateSnapshot().WorldObjects, item =>

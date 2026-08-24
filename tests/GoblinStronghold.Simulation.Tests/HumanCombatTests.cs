@@ -111,27 +111,26 @@ public sealed class HumanCombatTests
         }
         if (orderRaid)
         {
-            var route = engine.World.FindSurfacePath(map.GoblinSpawn, map.HumanVillage)
-                ?? throw new InvalidOperationException("Encounter map has no village route.");
-            var midpoint = route[route.Count / 2];
             var camp = Enumerable.Range(0, map.Height)
                 .SelectMany(y => Enumerable.Range(0, map.Width)
                     .Select(x => new GridPosition(x, y)))
                 .Where(engine.World.CanBuildGoblinFieldCamp)
-                .OrderBy(position => Math.Abs(position.X - midpoint.X) +
-                    Math.Abs(position.Y - midpoint.Y))
+                .OrderBy(position => Math.Abs(position.X - map.GoblinSpawn.X) +
+                    Math.Abs(position.Y - map.GoblinSpawn.Y))
                 .ThenBy(position => position.Y)
                 .ThenBy(position => position.X)
                 .First();
             engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
                 new SimulationTick(1), sequence: 998, camp));
-            engine.QueueCommand(SimulationCommand.AttackHumanVillage(
-                new SimulationTick(2), sequence: 999));
         }
         engine.AdvanceTicks(1);
 
         if (orderRaid)
         {
+            SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+            engine.QueueCommand(SimulationCommand.AttackHumanVillage(
+                engine.CurrentTick.Next(), sequence: 999));
+            engine.AdvanceTicks(1);
             return engine;
         }
 

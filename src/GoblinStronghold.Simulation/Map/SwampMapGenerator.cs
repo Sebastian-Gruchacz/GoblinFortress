@@ -2,11 +2,11 @@ namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
     public const int MinimumDimension = 16;
     public const int MaximumDimension = 2_048;
 
-    public static bool SupportsVersion(int version) => version is 1 or 2 or CurrentVersion;
+    public static bool SupportsVersion(int version) => version is 1 or 2 or 3 or CurrentVersion;
 
     public static GeneratedMap Generate(
         WorldSeed seed,
@@ -30,31 +30,37 @@ public static class SwampMapGenerator
             for (var x = 0; x < width; x++)
             {
                 var index = checked((y * width) + x);
-                cells[index] = GenerateCell(seed, index, generatorVersion);
+                cells[index] = generatorVersion >= 4
+                    ? GenerateRegionalCell(seed, x, y, width, height)
+                    : GenerateLegacyCell(seed, index, generatorVersion);
             }
         }
 
-        var goblinSpawn = new GridPosition(
-            Math.Max(2, width / 6),
-            DeterministicRandom.NextInt(
-                seed,
-                RandomDomain.MapGeneration,
-                EntityId.None,
-                SimulationTick.Zero,
-                sampleKey: 10_001,
-                minimumInclusive: 2,
-                maximumExclusive: height - 2));
+        var goblinSpawn = generatorVersion >= 4
+            ? CreateRegionalSettlementPosition(seed, width, height, human: false)
+            : new GridPosition(
+                Math.Max(2, width / 6),
+                DeterministicRandom.NextInt(
+                    seed,
+                    RandomDomain.MapGeneration,
+                    EntityId.None,
+                    SimulationTick.Zero,
+                    sampleKey: 10_001,
+                    minimumInclusive: 2,
+                    maximumExclusive: height - 2));
 
-        var humanVillage = new GridPosition(
-            Math.Min(width - 3, width - (width / 6) - 1),
-            DeterministicRandom.NextInt(
-                seed,
-                RandomDomain.MapGeneration,
-                EntityId.None,
-                SimulationTick.Zero,
-                sampleKey: 10_002,
-                minimumInclusive: 2,
-                maximumExclusive: height - 2));
+        var humanVillage = generatorVersion >= 4
+            ? CreateRegionalSettlementPosition(seed, width, height, human: true)
+            : new GridPosition(
+                Math.Min(width - 3, width - (width / 6) - 1),
+                DeterministicRandom.NextInt(
+                    seed,
+                    RandomDomain.MapGeneration,
+                    EntityId.None,
+                    SimulationTick.Zero,
+                    sampleKey: 10_002,
+                    minimumInclusive: 2,
+                    maximumExclusive: height - 2));
 
         if (generatorVersion >= 2)
         {
@@ -67,6 +73,10 @@ public static class SwampMapGenerator
         SetCell(cells, width, humanVillage, CreateGround(moisture: 48, fertility: 68));
         SetCell(cells, width, goblinSpawn with { Y = goblinSpawn.Y + 1 }, CreateShallowWater());
         SetCell(cells, width, humanVillage with { Y = humanVillage.Y + 1 }, CreateShallowWater());
+        if (generatorVersion >= 4)
+        {
+            SetCell(cells, width, new GridPosition(width - 1, height - 1), CreateDeepWater());
+        }
 
         var map = new GeneratedMap(
             width,
@@ -86,7 +96,7 @@ public static class SwampMapGenerator
         return map;
     }
 
-    private static MapCell GenerateCell(WorldSeed seed, int index, int generatorVersion)
+    private static MapCell GenerateLegacyCell(WorldSeed seed, int index, int generatorVersion)
     {
         var subject = new EntityId(checked((ulong)index + 1));
         var moisture = DeterministicRandom.NextInt(
@@ -131,6 +141,152 @@ public static class SwampMapGenerator
             _ => new MapCell(TerrainKind.SolidGround, moistureByte, fertility, TraversalCost: 1),
         };
     }
+
+    private static MapCell GenerateRegionalCell(
+        WorldSeed seed,
+        int x,
+        int y,
+        int width,
+        int height)
+    {
+        var normalizedX = width == 1 ? 0d : x / (double)(width - 1);
+        var normalizedY = height == 1 ? 0d : y / (double)(height - 1);
+        var terrainNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 20_000);
+        var moistureNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 21_000);
+        var riverMeander = (FractalValueNoise(seed, normalizedX, 0.5d, sampleKey: 22_000) - 0.5d) * 0.11d;
+        var riverCenterY = 0.82d - (0.64d * normalizedX) + riverMeander;
+        var riverHalfWidth = Math.Max(1.5d, Math.Min(width, height) * 0.035d);
+        var riverDistance = Math.Abs(normalizedY - riverCenterY) * height;
+
+        if (riverDistance <= riverHalfWidth * 0.48d)
+        {
+            return CreateDeepWater();
+        }
+
+        if (riverDistance <= riverHalfWidth)
+        {
+            return CreateShallowWater();
+        }
+
+        var leftSwamp = Math.Clamp((0.48d - normalizedX) / 0.48d, 0d, 1d);
+        var bottomSwamp = Math.Clamp((normalizedY - 0.58d) / 0.42d, 0d, 1d);
+        var swampInfluence = Math.Max(leftSwamp, bottomSwamp);
+        var wetness = (swampInfluence * 0.68d) + (moistureNoise * 0.32d);
+        var moisture = checked((byte)Math.Clamp(
+            (int)Math.Round(35d + (swampInfluence * 48d) + (moistureNoise * 17d)),
+            0,
+            100));
+        var fertility = checked((byte)Math.Clamp(
+            (int)Math.Round(46d + (moistureNoise * 30d) + (terrainNoise * 18d)),
+            0,
+            100));
+
+        if (swampInfluence > 0.62d && wetness > 0.72d && terrainNoise > 0.76d)
+        {
+            return new MapCell(
+                TerrainKind.DeepWater,
+                moisture,
+                fertility,
+                TraversalCost: 0,
+                FloorLevel: -1);
+        }
+
+        if (swampInfluence > 0.45d && wetness > 0.68d)
+        {
+            return new MapCell(TerrainKind.ShallowWater, moisture, fertility, TraversalCost: 4);
+        }
+
+        if (swampInfluence > 0.18d || wetness > 0.56d)
+        {
+            return CreateMud(moisture, fertility);
+        }
+
+        return CreateGround(moisture, fertility);
+    }
+
+    private static GridPosition CreateRegionalSettlementPosition(
+        WorldSeed seed,
+        int width,
+        int height,
+        bool human)
+    {
+        var jitterX = DeterministicRandom.NextInt(
+            seed,
+            RandomDomain.MapGeneration,
+            EntityId.None,
+            SimulationTick.Zero,
+            sampleKey: human ? 23_001UL : 23_003UL,
+            minimumInclusive: -1,
+            maximumExclusive: 2);
+        var jitterY = DeterministicRandom.NextInt(
+            seed,
+            RandomDomain.MapGeneration,
+            EntityId.None,
+            SimulationTick.Zero,
+            sampleKey: human ? 23_002UL : 23_004UL,
+            minimumInclusive: -1,
+            maximumExclusive: 2);
+        var normalizedX = human ? 0.82d : 0.16d;
+        var normalizedY = human ? 0.2d : 0.76d;
+        return new GridPosition(
+            Math.Clamp((int)Math.Round((width - 1) * normalizedX) + jitterX, 2, width - 3),
+            Math.Clamp((int)Math.Round((height - 1) * normalizedY) + jitterY, 2, height - 3));
+    }
+
+    private static double FractalValueNoise(
+        WorldSeed seed,
+        double x,
+        double y,
+        ulong sampleKey)
+    {
+        var value = 0d;
+        var amplitude = 1d;
+        var amplitudeSum = 0d;
+        var frequency = 3d;
+        for (var octave = 0; octave < 4; octave++)
+        {
+            value += ValueNoise(seed, x * frequency, y * frequency, sampleKey + (ulong)octave) * amplitude;
+            amplitudeSum += amplitude;
+            amplitude *= 0.5d;
+            frequency *= 2d;
+        }
+
+        return value / amplitudeSum;
+    }
+
+    private static double ValueNoise(WorldSeed seed, double x, double y, ulong sampleKey)
+    {
+        var minimumX = (int)Math.Floor(x);
+        var minimumY = (int)Math.Floor(y);
+        var blendX = Smooth(x - minimumX);
+        var blendY = Smooth(y - minimumY);
+        var top = Lerp(
+            SampleLattice(seed, minimumX, minimumY, sampleKey),
+            SampleLattice(seed, minimumX + 1, minimumY, sampleKey),
+            blendX);
+        var bottom = Lerp(
+            SampleLattice(seed, minimumX, minimumY + 1, sampleKey),
+            SampleLattice(seed, minimumX + 1, minimumY + 1, sampleKey),
+            blendX);
+        return Lerp(top, bottom, blendY);
+    }
+
+    private static double SampleLattice(WorldSeed seed, int x, int y, ulong sampleKey)
+    {
+        var packed = ((ulong)(uint)x << 32) | (uint)y;
+        var sample = DeterministicRandom.Sample(
+            seed,
+            RandomDomain.MapGeneration,
+            new EntityId(packed),
+            SimulationTick.Zero,
+            sampleKey);
+        return (sample >> 11) * (1d / (1UL << 53));
+    }
+
+    private static double Smooth(double value) => value * value * (3d - (2d * value));
+
+    private static double Lerp(double start, double end, double amount) =>
+        start + ((end - start) * amount);
 
     private static void CarveSettlementAccess(
         MapCell[] cells,
@@ -198,6 +354,9 @@ public static class SwampMapGenerator
 
     private static MapCell CreateShallowWater() =>
         new(TerrainKind.ShallowWater, Moisture: 100, Fertility: 45, TraversalCost: 4);
+
+    private static MapCell CreateDeepWater() =>
+        new(TerrainKind.DeepWater, Moisture: 100, Fertility: 52, TraversalCost: 0, FloorLevel: -1);
 
     private static void ValidateDimensions(int width, int height)
     {

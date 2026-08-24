@@ -25,6 +25,8 @@ public enum SimulationEventKind
     StoragePullConfigured = 21,
     RaidPreparationStarted = 22,
     RaidDeparted = 23,
+    ConstructionOrdered = 24,
+    ConstructionMaterialDelivered = 25,
 }
 
 public readonly record struct SimulationEvent(

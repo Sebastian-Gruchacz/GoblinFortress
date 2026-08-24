@@ -13,6 +13,7 @@ public sealed partial class SimulationEngine
             .ToHashSet();
         var reservedSourceQuantities = CreateHaulReservations(sourceReservations: true);
         var reservedDestinationQuantities = CreateHaulReservations(sourceReservations: false);
+        var reservedConstructionQuantities = CreateConstructionReservations();
         var activeExplorers = _actors.Values.Count(actor => actor.JobKind == ActorJobKind.Explore);
 
         foreach (var actor in _actors.Values)
@@ -50,7 +51,12 @@ public sealed partial class SimulationEngine
                 }
                 else if (actor.CarriedStackId != EntityId.None)
                 {
-                    TryPlanHaulDelivery(actor, reservedDestinationQuantities);
+                    if (!TryPlanCarriedConstructionDelivery(
+                            actor,
+                            reservedConstructionQuantities))
+                    {
+                        TryPlanHaulDelivery(actor, reservedDestinationQuantities);
+                    }
                 }
                 else if (needsFood && TryPlanEatJob(actor, reservedSourceQuantities))
                 {
@@ -66,6 +72,17 @@ public sealed partial class SimulationEngine
                 else if (actor.Fatigue >= Definitions.RestThreshold && TryPlanRestJob(actor))
                 {
                     // Survival work outranks gathering once the current job has ended.
+                }
+                else if (TryPlanConstructionSupply(
+                             actor,
+                             reservedSourceQuantities,
+                             reservedConstructionQuantities))
+                {
+                    // Blueprint material demand outranks ordinary stockpile pulling.
+                }
+                else if (TryPlanConstructionWork(actor))
+                {
+                    // Any currently capable goblin may finish a supplied primitive blueprint.
                 }
                 else if (TryPlanHaulCollection(
                              actor,
@@ -125,6 +142,12 @@ public sealed partial class SimulationEngine
                     break;
                 case ActorJobKind.ClearVegetation:
                     UpdateClearVegetationJob(actor);
+                    break;
+                case ActorJobKind.SupplyConstruction:
+                    UpdateConstructionSupplyJob(actor);
+                    break;
+                case ActorJobKind.BuildConstruction:
+                    UpdateConstructionBuildJob(actor);
                     break;
             }
         }
@@ -400,6 +423,7 @@ public sealed partial class SimulationEngine
     {
         if (actor.Thirst < Definitions.DrinkThreshold ||
             actor.PersonalWater > 0 ||
+            actor.CarriedStackId != EntityId.None ||
             (actor.JobKind == ActorJobKind.Resupply &&
              actor.JobStage == ActorJobStage.ProvisioningWater) ||
             FindNearestShallowWaterPath(actor.Position) is null)
@@ -579,6 +603,15 @@ public sealed partial class SimulationEngine
                 (actor.JobKind == ActorJobKind.Eat ||
                  (actor.JobKind == ActorJobKind.Resupply &&
                   actor.JobStage == ActorJobStage.ProvisioningFood)))
+            {
+                reservations[actor.SourceStackId] = checked(
+                    reservations.GetValueOrDefault(actor.SourceStackId) + actor.ReservedQuantity);
+                continue;
+            }
+
+            if (sourceReservations &&
+                actor.JobKind == ActorJobKind.SupplyConstruction &&
+                actor.JobStage == ActorJobStage.Collecting)
             {
                 reservations[actor.SourceStackId] = checked(
                     reservations.GetValueOrDefault(actor.SourceStackId) + actor.ReservedQuantity);
@@ -956,6 +989,324 @@ public sealed partial class SimulationEngine
 
         actor.ClearJob();
     }
+
+    private Dictionary<EntityId, int> CreateConstructionReservations()
+    {
+        var reservations = new Dictionary<EntityId, int>();
+        foreach (var actor in _actors.Values.Where(actor =>
+                     actor.JobKind == ActorJobKind.SupplyConstruction))
+        {
+            reservations[actor.DestinationZoneId] = checked(
+                reservations.GetValueOrDefault(actor.DestinationZoneId) + actor.ReservedQuantity);
+        }
+
+        return reservations;
+    }
+
+    private bool TryPlanConstructionSupply(
+        ActorState actor,
+        Dictionary<EntityId, int> sourceReservations,
+        Dictionary<EntityId, int> constructionReservations)
+    {
+        HaulPlan? best = null;
+        foreach (var site in _constructionSites.Values.Where(site =>
+                     site.MissingWood - constructionReservations.GetValueOrDefault(site.Id) > 0))
+        {
+            foreach (var source in _itemStacks.Values.Where(stack =>
+                         stack.Resource == ResourceKind.Wood &&
+                         stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone))
+            {
+                var availableSource = source.Quantity -
+                    sourceReservations.GetValueOrDefault(source.Id);
+                if (availableSource <= 0)
+                {
+                    continue;
+                }
+
+                var routeToSource = World.FindSurfacePath(actor.Position, source.Location.Position);
+                var routeToSite = FindConstructionAccessPath(source.Location.Position, site);
+                if (routeToSource is null || routeToSite is null)
+                {
+                    continue;
+                }
+
+                var missing = site.MissingWood - constructionReservations.GetValueOrDefault(site.Id);
+                var quantity = Math.Min(
+                    Definitions.ActorCarryCapacity,
+                    Math.Min(availableSource, missing));
+                var candidate = new HaulPlan(
+                    source.Id,
+                    site.Id,
+                    quantity,
+                    routeToSource,
+                    checked(routeToSource.Count + routeToSite.Count));
+                if (best is null || IsBetter(candidate, best.Value))
+                {
+                    best = candidate;
+                }
+            }
+        }
+
+        if (best is null)
+        {
+            return false;
+        }
+
+        var plan = best.Value;
+        actor.JobKind = ActorJobKind.SupplyConstruction;
+        actor.JobStage = ActorJobStage.Collecting;
+        actor.SourceStackId = plan.SourceStackId;
+        actor.DestinationZoneId = plan.DestinationZoneId;
+        actor.ReservedQuantity = plan.Quantity;
+        actor.JobTarget = _itemStacks[plan.SourceStackId].Location.Position;
+        BeginJobLeg(actor, plan.Route, Definitions.HaulHandlingTicks);
+        sourceReservations[plan.SourceStackId] = checked(
+            sourceReservations.GetValueOrDefault(plan.SourceStackId) + plan.Quantity);
+        constructionReservations[plan.DestinationZoneId] = checked(
+            constructionReservations.GetValueOrDefault(plan.DestinationZoneId) + plan.Quantity);
+        return true;
+    }
+
+    private bool TryPlanCarriedConstructionDelivery(
+        ActorState actor,
+        Dictionary<EntityId, int> constructionReservations)
+    {
+        if (!_itemStacks.TryGetValue(actor.CarriedStackId, out var carried) ||
+            carried.Resource != ResourceKind.Wood)
+        {
+            return false;
+        }
+
+        var best = _constructionSites.Values
+            .Where(site => site.MissingWood - constructionReservations.GetValueOrDefault(site.Id) >=
+                carried.Quantity)
+            .Select(site => new
+            {
+                Site = site,
+                Route = FindConstructionAccessPath(actor.Position, site),
+            })
+            .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .ThenBy(candidate => candidate.Site.Id)
+            .FirstOrDefault();
+        if (best is null)
+        {
+            return false;
+        }
+
+        actor.JobKind = ActorJobKind.SupplyConstruction;
+        actor.JobStage = ActorJobStage.Delivering;
+        actor.SourceStackId = EntityId.None;
+        actor.DestinationZoneId = best.Site.Id;
+        actor.ReservedQuantity = carried.Quantity;
+        actor.JobTarget = best.Route!.Count == 0 ? actor.Position : best.Route[^1];
+        BeginJobLeg(actor, best.Route, Definitions.HaulHandlingTicks);
+        constructionReservations[best.Site.Id] = checked(
+            constructionReservations.GetValueOrDefault(best.Site.Id) + carried.Quantity);
+        return true;
+    }
+
+    private void UpdateConstructionSupplyJob(ActorState actor)
+    {
+        if (!_constructionSites.TryGetValue(actor.DestinationZoneId, out var site) ||
+            actor.ReservedQuantity <= 0 ||
+            site.MissingWood < actor.ReservedQuantity)
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        if (actor.JobStage == ActorJobStage.Collecting)
+        {
+            if (actor.CarriedStackId != EntityId.None ||
+                !_itemStacks.TryGetValue(actor.SourceStackId, out var source) ||
+                source.Resource != ResourceKind.Wood ||
+                source.Location.Kind is not (ItemLocationKind.Ground or ItemLocationKind.StorageZone) ||
+                source.Quantity < actor.ReservedQuantity ||
+                source.Location.Position != actor.JobTarget)
+            {
+                actor.ClearJob();
+                return;
+            }
+        }
+        else if (actor.JobStage == ActorJobStage.Delivering)
+        {
+            if (!_itemStacks.TryGetValue(actor.CarriedStackId, out var carried) ||
+                carried.Resource != ResourceKind.Wood ||
+                carried.Quantity != actor.ReservedQuantity ||
+                carried.Location != ItemLocation.CarriedBy(actor.Id))
+            {
+                actor.ClearJob();
+                return;
+            }
+        }
+        else
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        if (actor.JobPhase == ActorJobPhase.Traveling)
+        {
+            AdvanceTravel(actor);
+        }
+        if (actor.JobKind != ActorJobKind.SupplyConstruction ||
+            actor.JobPhase != ActorJobPhase.Working)
+        {
+            return;
+        }
+
+        actor.RemainingWorkTicks--;
+        if (actor.RemainingWorkTicks > 0)
+        {
+            return;
+        }
+
+        if (actor.JobStage == ActorJobStage.Collecting)
+        {
+            CompleteConstructionCollection(actor, site);
+        }
+        else
+        {
+            CompleteConstructionDelivery(actor, site);
+        }
+    }
+
+    private void CompleteConstructionCollection(ActorState actor, ConstructionSiteState site)
+    {
+        var source = _itemStacks[actor.SourceStackId];
+        ItemStackState carried;
+        if (source.Quantity == actor.ReservedQuantity)
+        {
+            carried = source;
+        }
+        else
+        {
+            source.Quantity -= actor.ReservedQuantity;
+            carried = AllocateItemStack(
+                source.Resource,
+                actor.ReservedQuantity,
+                ItemLocation.CarriedBy(actor.Id),
+                source.FoodKind);
+        }
+
+        carried.Location = ItemLocation.CarriedBy(actor.Id);
+        actor.CarriedStackId = carried.Id;
+        actor.SourceStackId = EntityId.None;
+        actor.JobStage = ActorJobStage.Delivering;
+        var route = FindConstructionAccessPath(actor.Position, site);
+        if (route is null)
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+        BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
+        Publish(SimulationEventKind.ItemPickedUp, actor.Id, carried.Id, carried.Quantity);
+    }
+
+    private void CompleteConstructionDelivery(ActorState actor, ConstructionSiteState site)
+    {
+        var carried = _itemStacks[actor.CarriedStackId];
+        var delivered = carried.Quantity;
+        _itemStacks.Remove(carried.Id);
+        actor.CarriedStackId = EntityId.None;
+        site.DeliveredWood = checked(site.DeliveredWood + delivered);
+        GainHaulingExperience(actor, Math.Max(1, delivered * 2));
+        Publish(SimulationEventKind.ConstructionMaterialDelivered, actor.Id, site.Id, delivered);
+        actor.ClearJob();
+    }
+
+    private bool TryPlanConstructionWork(ActorState actor)
+    {
+        var reservedSites = _actors.Values
+            .Where(candidate => candidate.JobKind == ActorJobKind.BuildConstruction)
+            .Select(candidate => candidate.DestinationZoneId)
+            .ToHashSet();
+        var best = _constructionSites.Values
+            .Where(site => site.HasAllMaterials &&
+                !reservedSites.Contains(site.Id) &&
+                CanActorBuild(actor, site))
+            .Select(site => new
+            {
+                Site = site,
+                Route = FindConstructionAccessPath(actor.Position, site),
+            })
+            .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .ThenBy(candidate => candidate.Site.Id)
+            .FirstOrDefault();
+        if (best is null)
+        {
+            return false;
+        }
+
+        actor.JobKind = ActorJobKind.BuildConstruction;
+        actor.DestinationZoneId = best.Site.Id;
+        actor.JobTarget = best.Route!.Count == 0 ? actor.Position : best.Route[^1];
+        BeginJobLeg(actor, best.Route, best.Site.RemainingWorkTicks);
+        return true;
+    }
+
+    private void UpdateConstructionBuildJob(ActorState actor)
+    {
+        if (!_constructionSites.TryGetValue(actor.DestinationZoneId, out var site) ||
+            !site.HasAllMaterials ||
+            !CanActorBuild(actor, site))
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        if (actor.JobPhase == ActorJobPhase.Traveling)
+        {
+            AdvanceTravel(actor);
+        }
+        if (actor.JobKind != ActorJobKind.BuildConstruction ||
+            actor.JobPhase != ActorJobPhase.Working)
+        {
+            return;
+        }
+
+        actor.RemainingWorkTicks--;
+        site.RemainingWorkTicks--;
+        if (site.RemainingWorkTicks > 0)
+        {
+            return;
+        }
+
+        if (!CompleteConstruction(actor, site))
+        {
+            site.RemainingWorkTicks = 1;
+        }
+        actor.ClearJob();
+    }
+
+    private bool CanActorBuild(ActorState actor, ConstructionSiteState site) =>
+        (actor.KnownSkills & site.Capabilities.RequiredSkills) == site.Capabilities.RequiredSkills &&
+        (actor.Equipment & site.Capabilities.RequiredEquipment) ==
+            site.Capabilities.RequiredEquipment &&
+        GoblinExperienceSnapshot.GetLevel(actor.BuildingExperience) >=
+            site.Capabilities.MinimumBuildingLevel;
+
+    private IReadOnlyList<GridPosition>? FindConstructionAccessPath(
+        GridPosition start,
+        ConstructionSiteState site) => site.GetFootprint()
+        .SelectMany(position => Map.GetCardinalNeighbors(position).Append(position))
+        .Where(World.IsSurfaceTraversable)
+        .Distinct()
+        .Select(position => new
+        {
+            Position = position,
+            Route = World.FindSurfacePath(start, position),
+        })
+        .Where(candidate => candidate.Route is not null)
+        .OrderBy(candidate => candidate.Route!.Count)
+        .ThenBy(candidate => candidate.Position.Y)
+        .ThenBy(candidate => candidate.Position.X)
+        .Select(candidate => candidate.Route)
+        .FirstOrDefault();
 
     private bool TryPlanHaulCollection(
         ActorState actor,
@@ -1397,6 +1748,12 @@ public sealed partial class SimulationEngine
             case ActorJobKind.ClearVegetation:
                 ValidateLoadedClearVegetationJob(actor);
                 break;
+            case ActorJobKind.SupplyConstruction:
+                ValidateLoadedConstructionSupplyJob(actor);
+                break;
+            case ActorJobKind.BuildConstruction:
+                ValidateLoadedConstructionBuildJob(actor);
+                break;
             default:
                 throw new InvalidDataException("The save contains an unsupported actor job.");
         }
@@ -1482,6 +1839,61 @@ public sealed partial class SimulationEngine
         }
     }
 
+    private void ValidateLoadedConstructionSupplyJob(ActorState actor)
+    {
+        if (actor.ReservedQuantity <= 0 ||
+            actor.ReservedQuantity > Definitions.ActorCarryCapacity ||
+            !_constructionSites.TryGetValue(actor.DestinationZoneId, out var site) ||
+            site.MissingWood < actor.ReservedQuantity)
+        {
+            throw new InvalidDataException("The save contains an invalid construction delivery.");
+        }
+
+        if (actor.JobStage == ActorJobStage.Collecting)
+        {
+            if (actor.CarriedStackId != EntityId.None ||
+                !_itemStacks.TryGetValue(actor.SourceStackId, out var source) ||
+                source.Resource != ResourceKind.Wood ||
+                source.Location.Kind is not (ItemLocationKind.Ground or ItemLocationKind.StorageZone) ||
+                source.Quantity < actor.ReservedQuantity ||
+                actor.JobTarget != source.Location.Position)
+            {
+                throw new InvalidDataException("The save contains an invalid construction collection.");
+            }
+        }
+        else if (actor.JobStage == ActorJobStage.Delivering)
+        {
+            if (actor.SourceStackId != EntityId.None ||
+                !_itemStacks.TryGetValue(actor.CarriedStackId, out var carried) ||
+                carried.Resource != ResourceKind.Wood ||
+                carried.Quantity != actor.ReservedQuantity ||
+                carried.Location != ItemLocation.CarriedBy(actor.Id))
+            {
+                throw new InvalidDataException("The save contains invalid carried construction material.");
+            }
+        }
+        else
+        {
+            throw new InvalidDataException("The save contains an invalid construction delivery stage.");
+        }
+    }
+
+    private void ValidateLoadedConstructionBuildJob(ActorState actor)
+    {
+        if (actor.JobStage != ActorJobStage.None ||
+            actor.CarriedStackId != EntityId.None ||
+            actor.SourceStackId != EntityId.None ||
+            actor.ReservedQuantity != 0 ||
+            !_constructionSites.TryGetValue(actor.DestinationZoneId, out var site) ||
+            !site.HasAllMaterials ||
+            !CanActorBuild(actor, site) ||
+            (actor.JobPhase == ActorJobPhase.Working &&
+             actor.RemainingWorkTicks != site.RemainingWorkTicks))
+        {
+            throw new InvalidDataException("The save contains an invalid construction work job.");
+        }
+    }
+
     private void ValidateLoadedEatJob(ActorState actor)
     {
         if (actor.JobStage != ActorJobStage.None ||
@@ -1545,6 +1957,10 @@ public sealed partial class SimulationEngine
             ActorJobKind.Eat => Definitions.EatWorkTicks,
             ActorJobKind.Resupply => Definitions.ResupplyWorkTicks,
             ActorJobKind.ClearVegetation => GetClearVegetationWorkTicks(),
+            ActorJobKind.SupplyConstruction => Definitions.HaulHandlingTicks,
+            ActorJobKind.BuildConstruction when
+                _constructionSites.TryGetValue(actor.DestinationZoneId, out var site) =>
+                site.TotalWorkTicks,
             _ => 0,
         };
         if (actor.JobPhase == ActorJobPhase.Working)
@@ -1601,6 +2017,25 @@ public sealed partial class SimulationEngine
                 throw new InvalidDataException("Haul jobs over-reserve storage capacity.");
             }
         }
+
+        var constructionReservations = CreateConstructionReservations();
+        foreach (var reservation in constructionReservations)
+        {
+            if (!_constructionSites.TryGetValue(reservation.Key, out var site) ||
+                reservation.Value > site.MissingWood)
+            {
+                throw new InvalidDataException("Jobs over-reserve construction material demand.");
+            }
+        }
+
+        var duplicateBuilders = _actors.Values
+            .Where(actor => actor.JobKind == ActorJobKind.BuildConstruction)
+            .GroupBy(actor => actor.DestinationZoneId)
+            .Any(group => group.Count() > 1);
+        if (duplicateBuilders)
+        {
+            throw new InvalidDataException("Multiple builders reserve one construction site.");
+        }
     }
 
     private static bool IsBetter(HaulPlan candidate, HaulPlan current) =>
@@ -1618,6 +2053,10 @@ public sealed partial class SimulationEngine
         ActorJobKind.Eat => Definitions.EatWorkTicks,
         ActorJobKind.Resupply => Definitions.ResupplyWorkTicks,
         ActorJobKind.ClearVegetation => GetClearVegetationWorkTicks(),
+        ActorJobKind.SupplyConstruction => Definitions.HaulHandlingTicks,
+        ActorJobKind.BuildConstruction when
+            _constructionSites.TryGetValue(actor.DestinationZoneId, out var site) =>
+            site.RemainingWorkTicks,
         _ => throw new InvalidOperationException("An idle actor cannot begin work."),
     };
 

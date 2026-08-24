@@ -7,6 +7,16 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class VisibilityTests
 {
     [Fact]
+    public void CurrentBuildVisibilityAidIsDisabledForRelease()
+    {
+#if DEBUG
+        Assert.True(SimulationDebugSettings.ForCurrentBuild.RevealFogFromNonPlayerUnits);
+#else
+        Assert.False(SimulationDebugSettings.ForCurrentBuild.RevealFogFromNonPlayerUnits);
+#endif
+    }
+
+    [Fact]
     public void InitialVisibilityRevealsSpawnButNotDistantVillage()
     {
         var engine = CreateEngine();
@@ -18,6 +28,31 @@ public sealed class VisibilityTests
             snapshot.Visibility.Count(state => state == CellVisibility.Visible),
             1,
             snapshot.Visibility.Count - 1);
+    }
+
+    [Fact]
+    public void DebugVisibilityAlsoRevealsAroundNonPlayerUnits()
+    {
+        var seed = new WorldSeed(0x4445425547UL);
+        var map = SwampMapGenerator.Generate(seed, width: 32, height: 32);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            debugSettings: new SimulationDebugSettings(
+                RevealFogFromNonPlayerUnits: true));
+
+        var snapshot = engine.CreateSnapshot();
+
+        Assert.Equal(
+            CellVisibility.Visible,
+            snapshot.GetVisibility(engine.Map.HumanVillage, engine.Map.Width));
+        Assert.All(snapshot.HumanVillage.Cohorts.Where(cohort => cohort.Population > 0), cohort =>
+            Assert.Equal(
+                CellVisibility.Visible,
+                snapshot.GetVisibility(cohort.Position, engine.Map.Width)));
     }
 
     [Fact]

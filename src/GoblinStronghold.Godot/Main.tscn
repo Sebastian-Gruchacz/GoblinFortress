@@ -60,7 +60,7 @@ offset_right = 760.0
 offset_bottom = 876.0
 
 [node name="Text" type="Label" parent="Interface/Inspector"]
-text = "LPM goblin: wybór i karta • LPM skład: ustawienia • Buduj/Praca: narzędzia • PPM z wyborem: marsz • Najazd wymaga obozowiska, zapasów i zbiórki • WASD/strzałki: kamera • kółko: zoom • Spacja: pauza\nObszary pracy i pomost: przeciągnij LPM od początku do końca • Esc: anuluj narzędzie"
+text = "LPM: wybór i narzędzia • Buduj/Praca: menu działań • PPM klik: anuluj lub odznacz • PPM przeciągnięty: kamera • PPM na oknie: zamknij • WASD/strzałki: kamera • kółko: zoom • ~: pauza • 1–4: prędkość • Spacja: pauza/wznów • Alt+Enter: pełny ekran\nObszary pracy i pomost: przeciągnij LPM • można oznaczać teren odkryty, choć aktualnie niewidoczny • Esc: anuluj narzędzie"
 autowrap_mode = 2
 
 [node name="BuildMenu" type="PopupPanel" parent="."]

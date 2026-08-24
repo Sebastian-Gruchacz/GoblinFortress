@@ -89,6 +89,38 @@ public sealed class SwampMapGeneratorTests
     }
 
     [Fact]
+    public void RegionalGeneratorCreatesDirectedGeographyAndDiagonalRiver()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x524547494F4EUL), 64, 64);
+
+        Assert.True(map.GoblinSpawn.X < map.Width * 0.35);
+        Assert.True(map.GoblinSpawn.Y > map.Height * 0.55);
+        Assert.True(map.HumanVillage.X > map.Width * 0.65);
+        Assert.True(map.HumanVillage.Y < map.Height * 0.35);
+
+        var swampCells = Positions(map)
+            .Where(position => position.X < map.Width * 0.3 || position.Y > map.Height * 0.75)
+            .Select(map.GetCell)
+            .ToArray();
+        var upperRightCells = Positions(map)
+            .Where(position => position.X > map.Width * 0.62 && position.Y < map.Height * 0.42)
+            .Select(map.GetCell)
+            .ToArray();
+        Assert.True(
+            swampCells.Count(IsWetTerrain) > upperRightCells.Count(IsWetTerrain) * 2,
+            $"wet swamp={swampCells.Count(IsWetTerrain)}, wet upper-right={upperRightCells.Count(IsWetTerrain)}");
+
+        for (var x = 4; x < map.Width - 4; x += 8)
+        {
+            var expectedY = (int)Math.Round((0.82 - (0.64 * x / (map.Width - 1d))) * map.Height);
+            Assert.Contains(
+                Enumerable.Range(Math.Max(0, expectedY - 7), Math.Min(map.Height, expectedY + 8) - Math.Max(0, expectedY - 7)),
+                y => map.GetCell(new GridPosition(x, y)).Terrain is
+                    TerrainKind.ShallowWater or TerrainKind.DeepWater);
+        }
+    }
+
+    [Fact]
     public void ShallowsAreWadeableButDeepWaterDropsToTheLowerLevel()
     {
         var map = SwampMapGenerator.Generate(new WorldSeed(456), width: 64, height: 64);
@@ -161,4 +193,11 @@ public sealed class SwampMapGeneratorTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             SwampMapGenerator.Generate(new WorldSeed(1), width, height));
     }
+
+    private static IEnumerable<GridPosition> Positions(GeneratedMap map) =>
+        Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width).Select(x => new GridPosition(x, y)));
+
+    private static bool IsWetTerrain(MapCell cell) =>
+        cell.Terrain is TerrainKind.Mud or TerrainKind.ShallowWater or TerrainKind.DeepWater;
 }

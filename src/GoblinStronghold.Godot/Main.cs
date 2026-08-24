@@ -40,6 +40,8 @@ public partial class Main : Node
     private WorkMode _workMode;
     private bool _isDraggingWorkArea;
     private GridPosition _workAreaStart;
+    private bool _isPanningCamera;
+    private float _rightDragDistance;
     private Window _storageDetails = null!;
     private Label _storageSummary = null!;
     private CheckButton _storagePullLoose = null!;
@@ -73,7 +75,8 @@ public partial class Main : Node
             map,
             initialGoblinCount: 8,
             initialFoodStock: 16,
-            scatterInitialBrushwood: true);
+            scatterInitialBrushwood: true,
+            debugSettings: SimulationDebugSettings.ForCurrentBuild);
         _engine.QueueCommand(SimulationCommand.CreateStorageZone(
             new SimulationTick(1),
             _commandSequence++,
@@ -113,11 +116,19 @@ public partial class Main : Node
             "Usuń zlecenia\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.Clear));
         CreateNeedIndicators();
         _goblinDetails.CloseRequested += _goblinDetails.Hide;
+        _goblinDetails.GetNode<Control>("Scroll").GuiInput += inputEvent =>
+            CloseWindowOnSecondaryInput(inputEvent, _goblinDetails);
         _storageDetails = GetNode<Window>("StorageDetails");
         _storageSummary = GetNode<Label>("StorageDetails/Margin/Controls/Summary");
         _storagePullLoose = GetNode<CheckButton>("StorageDetails/Margin/Controls/PullLoose");
         _storageTarget = GetNode<SpinBox>("StorageDetails/Margin/Controls/TargetRow/Target");
         _storageDetails.CloseRequested += _storageDetails.Hide;
+        _storageDetails.GetNode<Control>("Margin").GuiInput += inputEvent =>
+            CloseWindowOnSecondaryInput(inputEvent, _storageDetails);
+        _buildMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
+            CloseWindowOnSecondaryInput(inputEvent, _buildMenu);
+        _workMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
+            CloseWindowOnSecondaryInput(inputEvent, _workMenu);
         _storagePullLoose.Toggled += enabled => _storageTarget.Editable = enabled;
         GetNode<Button>("StorageDetails/Margin/Controls/Apply").Pressed += ApplyStorageSettings;
         _worldView.SetWorld(_engine);
@@ -129,11 +140,12 @@ public partial class Main : Node
         BindButton("Speed2", 2);
         BindButton("Speed4", 4);
         BindButton("Speed8", 8);
-        ConfigureActionButton("Pause", UiIcon.Pause, "Pauza • Spacja");
-        ConfigureActionButton("Speed1", UiIcon.Play, "Normalna prędkość • 1×");
-        ConfigureActionButton("Speed2", UiIcon.Faster, "Przyspieszenie • 2×");
-        ConfigureActionButton("Speed4", UiIcon.Fastest, "Przyspieszenie • 4×");
-        ConfigureActionButton("Speed8", UiIcon.Fastest, "Maksymalne przyspieszenie • 8×");
+        ConfigureActionButton("Pause", UiIcon.Pause, "Pauza • ~ lub Spacja");
+        ConfigureActionButton("Speed1", UiIcon.Play, "Normalna prędkość • klawisz 1 • 1×");
+        ConfigureActionButton("Speed2", UiIcon.Faster, "Przyspieszenie • klawisz 2 • 2×");
+        ConfigureActionButton("Speed4", UiIcon.Fastest, "Przyspieszenie • klawisz 3 • 4×");
+        ConfigureActionButton("Speed8", UiIcon.Fastest, "Maksymalne przyspieszenie • klawisz 4 • 8×");
+        GetNode<Button>("Interface/TopBar/Controls/Speed8").Icon = UiIcons.LoadSpeed8Texture();
         ConfigureActionButton("Build", UiIcon.Build, "Budowanie");
         ConfigureActionButton("Work", UiIcon.Work, "Zlecenia pracy");
         ConfigureActionButton("Raid", UiIcon.Expedition, "Przygotuj najazd na wieś");
@@ -142,6 +154,7 @@ public partial class Main : Node
         GetNode<Button>("Interface/TopBar/Controls/Work").Pressed += () =>
             ShowWorkMenu(GetViewport().GetMousePosition());
         GetNode<Button>("Interface/TopBar/Controls/Raid").Pressed += OrderVillageRaid;
+        UpdateSpeedButtons();
         UpdateStatus();
     }
 
@@ -174,8 +187,18 @@ public partial class Main : Node
     {
         switch (inputEvent)
         {
+            case InputEventKey key when key.Pressed && !key.Echo && key.AltPressed &&
+                key.Keycode is Key.Enter or Key.KpEnter:
+                ToggleFullscreen();
+                GetViewport().SetInputAsHandled();
+                break;
             case InputEventKey key when key.Pressed && key.Keycode == Key.Space:
                 SetSpeed(_speed == 0 ? 1 : 0);
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo &&
+                TryResolveSpeedShortcut(key.Keycode, out var shortcutSpeed):
+                SetSpeed(shortcutSpeed);
                 GetViewport().SetInputAsHandled();
                 break;
             case InputEventKey key when key.Pressed && key.Keycode == Key.Pageup:
@@ -199,6 +222,11 @@ public partial class Main : Node
                 _camera.Zoom = (_camera.Zoom / 1.15f).Clamp(
                     new Vector2(0.35f, 0.35f),
                     new Vector2(3.5f, 3.5f));
+                break;
+            case InputEventMouseMotion mouse when _isPanningCamera:
+                _camera.Position -= mouse.Relative / _camera.Zoom;
+                _rightDragDistance += mouse.Relative.Length();
+                GetViewport().SetInputAsHandled();
                 break;
             case InputEventMouseMotion mouse when _buildMode != BuildMode.None:
                 UpdateBuildPreview(mouse.Position);
@@ -228,40 +256,63 @@ public partial class Main : Node
                 when _isDraggingWorkArea:
                 FinishWorkArea(mouse.Position);
                 break;
-            case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right } mouse:
-                HandleSecondaryAction(mouse.Position);
+            case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right }:
+                if (_buildMode != BuildMode.None || _workMode != WorkMode.None)
+                {
+                    CancelActiveTool();
+                }
+                else
+                {
+                    _isPanningCamera = true;
+                    _rightDragDistance = 0f;
+                }
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventMouseButton { Pressed: false, ButtonIndex: MouseButton.Right }:
+                if (_isPanningCamera && _rightDragDistance < 4f)
+                {
+                    ClearSelection();
+                }
+                _isPanningCamera = false;
+                GetViewport().SetInputAsHandled();
                 break;
         }
     }
 
-    private void HandleSecondaryAction(Vector2 screenPosition)
+    private void ToggleFullscreen()
     {
-        var snapshot = _engine.CreateSnapshot();
-        if (_selectedActorId != EntityId.None &&
-            snapshot.Actors.Any(actor => actor.Id == _selectedActorId))
-        {
-            OrderSelectedActorToMove(screenPosition);
-            return;
-        }
-
-        SelectActor(EntityId.None);
-        ShowBuildMenu(screenPosition);
+        var currentMode = DisplayServer.WindowGetMode();
+        var isFullscreen = currentMode is DisplayServer.WindowMode.Fullscreen or
+            DisplayServer.WindowMode.ExclusiveFullscreen;
+        DisplayServer.WindowSetMode(isFullscreen
+            ? DisplayServer.WindowMode.Windowed
+            : DisplayServer.WindowMode.Fullscreen);
+        _inspector.Text = isFullscreen
+            ? "Tryb okienkowy • Alt+Enter przełącza pełny ekran."
+            : "Pełny ekran w aktualnej rozdzielczości monitora • Alt+Enter wraca do okna.";
     }
 
-    private void OrderSelectedActorToMove(Vector2 screenPosition)
+    private void CloseWindowOnSecondaryInput(InputEvent inputEvent, Window window)
     {
-        var destination = ScreenToCell(screenPosition);
-        if (!_engine.Map.IsWithin(destination))
+        if (inputEvent is not InputEventMouseButton
+            {
+                Pressed: true,
+                ButtonIndex: MouseButton.Right,
+            })
         {
             return;
         }
 
-        _engine.QueueCommand(SimulationCommand.Move(
-            _engine.CurrentTick.Next(),
-            _commandSequence++,
-            _selectedActorId,
-            destination));
-        _inspector.Text = $"{_selectedActorId} • rozkaz marszu → {destination}";
+        window.Hide();
+        GetViewport().SetInputAsHandled();
+    }
+
+    private void ClearSelection()
+    {
+        SelectActor(EntityId.None);
+        _selectedStorageId = EntityId.None;
+        _storageDetails.Hide();
+        _inspector.Text = "Zaznaczenie wyczyszczone. PPM przeciągnięty przesuwa mapę.";
     }
 
     private void ShowBuildMenu(Vector2 screenPosition)
@@ -510,6 +561,9 @@ public partial class Main : Node
         var cells = _isDraggingWorkArea
             ? GetAreaCells(_workAreaStart, cell)
             : new[] { cell };
+        var snapshot = _engine.CreateSnapshot();
+        cells = cells.Where(position =>
+            snapshot.GetVisibility(position, _engine.Map.Width) != CellVisibility.Unknown).ToArray();
         _worldView.SetWorkPreview(ToDesignationKind(_workMode), cells);
         if (_isDraggingWorkArea)
         {
@@ -632,7 +686,7 @@ public partial class Main : Node
         var capacity = resource == ResourceKind.Food
             ? _engine.Definitions.Storage.SmallFoodCapacity
             : 64;
-        _inspector.Text = $"{cell} • zlecono skład {DescribeResource(resource)} 0/{capacity} • koszt 2 drewna";
+        _inspector.Text = $"{cell} • wyznaczono plac pod skład {DescribeResource(resource)} 0/{capacity} • blueprint żąda 2 drewna";
     }
 
     private void HandleEvents(IReadOnlyList<SimulationEvent> events)
@@ -666,19 +720,36 @@ public partial class Main : Node
         }
 
         var constructionEvent = events.LastOrDefault(item =>
-            item.Kind == SimulationEventKind.ConstructionCompleted ||
+            item.Kind is SimulationEventKind.ConstructionOrdered or
+                SimulationEventKind.ConstructionMaterialDelivered or
+                SimulationEventKind.ConstructionCompleted ||
             (item.Kind == SimulationEventKind.CommandRejected &&
              item.Amount == (int)SimulationCommandKind.Build));
         if (constructionEvent.Kind == SimulationEventKind.CommandRejected)
         {
-            _inspector.Text = "Budowa odrzucona: brak drewna albo miejsce jest już zajęte.";
+            _inspector.Text = "Nie można wyznaczyć placu budowy: teren jest niedostępny albo zajęty.";
+        }
+        else if (constructionEvent.Kind is SimulationEventKind.ConstructionOrdered or
+                 SimulationEventKind.ConstructionMaterialDelivered)
+        {
+            var site = _engine.CreateSnapshot().ConstructionSites
+                .FirstOrDefault(item => item.Id == constructionEvent.Target);
+            if (site is not null)
+            {
+                _inspector.Text = DescribeConstructionSite(site);
+            }
         }
         else if (constructionEvent.Kind == SimulationEventKind.ConstructionCompleted)
         {
-            var zone = _engine.CreateSnapshot().StorageZones
+            var snapshot = _engine.CreateSnapshot();
+            var zone = snapshot.StorageZones
                 .FirstOrDefault(item => item.Id == constructionEvent.Target);
+            var completedCamp = zone.Id != EntityId.None && snapshot.WorldObjects.Any(item =>
+                item.Kind == WorldObjectKind.GoblinFieldCamp && item.Anchor == zone.Position);
             _inspector.Text = constructionEvent.Target == EntityId.None
                 ? $"Pomost ukończony • zużyto {constructionEvent.Amount} drewna"
+                : completedCamp
+                    ? $"Obóz wypadowy ukończony • zużyto {constructionEvent.Amount} drewna"
                 : $"Skład {DescribeResource(zone.AcceptedResource)} ukończony • " +
                   $"zużyto {constructionEvent.Amount} drewna";
         }
@@ -762,6 +833,9 @@ public partial class Main : Node
             .Select(actor => snapshot.ItemStacks.Single(stack => stack.Id == actor.CarriedStackId))
             .ToArray();
         var zones = snapshot.StorageZones.Where(zone => zone.Position == cell).ToArray();
+        var constructionSites = snapshot.ConstructionSites
+            .Where(site => site.Footprint.Contains(cell))
+            .ToArray();
         SelectActor(actors.OrderBy(actor => actor.Id).FirstOrDefault().Id);
         if (actors.Length == 0 && zones.Length > 0)
         {
@@ -793,6 +867,9 @@ public partial class Main : Node
             (zones.Length == 0
                 ? string.Empty
                 : $" • skład: {string.Join(", ", zones.Select(zone => $"{DescribeResource(zone.AcceptedResource)} {zone.StoredQuantity}/{zone.Capacity}"))}") +
+            (constructionSites.Length == 0
+                ? string.Empty
+                : $" • {string.Join(" • ", constructionSites.Select(DescribeConstructionSite))}") +
             (actors.Length == 0
                 ? string.Empty
                 : $" • gobliny ×{actors.Length}, nasycenie " +
@@ -888,6 +965,17 @@ public partial class Main : Node
             $"niesie ×{job.ReservedQuantity}",
         ActorJobKind.Haul when job.Stage == ActorJobStage.Delivering =>
             $"rozładowuje ×{job.ReservedQuantity} ({job.RemainingWorkTicks})",
+        ActorJobKind.SupplyConstruction when job.Stage == ActorJobStage.Collecting &&
+            job.Phase == ActorJobPhase.Traveling => $"idzie po materiał budowlany ×{job.ReservedQuantity}",
+        ActorJobKind.SupplyConstruction when job.Stage == ActorJobStage.Collecting =>
+            $"pobiera materiał budowlany ×{job.ReservedQuantity} ({job.RemainingWorkTicks})",
+        ActorJobKind.SupplyConstruction when job.Phase == ActorJobPhase.Traveling =>
+            $"niesie materiał na budowę ×{job.ReservedQuantity}",
+        ActorJobKind.SupplyConstruction =>
+            $"składa materiał na budowie ({job.RemainingWorkTicks})",
+        ActorJobKind.BuildConstruction when job.Phase == ActorJobPhase.Traveling =>
+            $"idzie budować → {job.Target}",
+        ActorJobKind.BuildConstruction => $"buduje ({job.RemainingWorkTicks})",
         ActorJobKind.Rest when job.Phase == ActorJobPhase.Traveling => $"idzie odpocząć → {job.Target}",
         ActorJobKind.Rest => $"odpoczywa ({job.RemainingWorkTicks})",
         ActorJobKind.Eat when job.Phase == ActorJobPhase.Traveling => $"idzie coś zjeść → {job.Target}",
@@ -906,6 +994,23 @@ public partial class Main : Node
             $"idzie wykarczować krzak → {job.Target}",
         ActorJobKind.ClearVegetation => $"karczuje krzak ({job.RemainingWorkTicks})",
         _ => "bez zadania",
+    };
+
+    private static string DescribeConstructionSite(ConstructionSiteSnapshot site)
+    {
+        var materials = string.Join(", ", site.Materials.Select(material =>
+            $"{DescribeResource(material.Resource)} {material.DeliveredQuantity}/{material.RequiredQuantity}"));
+        var workDone = site.TotalWorkTicks - site.RemainingWorkTicks;
+        return $"plac budowy {DescribeConstruction(site.Kind)} • materiały: {materials} • praca {workDone}/{site.TotalWorkTicks}";
+    }
+
+    private static string DescribeConstruction(ConstructionKind kind) => kind switch
+    {
+        ConstructionKind.FoodStorage => "składu żywności",
+        ConstructionKind.WoodStorage => "składu drewna",
+        ConstructionKind.WoodenWalkway => "pomostu",
+        ConstructionKind.GoblinFieldCamp => "obozu wypadowego",
+        _ => "konstrukcji",
     };
 
     private static string DescribeFoodSource(PlantKind kind) => kind switch
@@ -1208,9 +1313,50 @@ public partial class Main : Node
 
     private void SetSpeed(int speed)
     {
+        if (speed is not (0 or 1 or 2 or 4 or 8))
+        {
+            throw new ArgumentOutOfRangeException(nameof(speed));
+        }
+
         _speed = speed;
         _worldView.SetSimulationSpeed(speed, SecondsPerTick);
+        UpdateSpeedButtons();
         UpdateStatus();
+    }
+
+    private static bool TryResolveSpeedShortcut(Key key, out int speed)
+    {
+        speed = key switch
+        {
+            Key.Quoteleft or Key.Key0 or Key.Kp0 => 0,
+            Key.Key1 or Key.Kp1 => 1,
+            Key.Key2 or Key.Kp2 => 2,
+            Key.Key3 or Key.Kp3 => 4,
+            Key.Key4 or Key.Kp4 => 8,
+            _ => -1,
+        };
+        return speed >= 0;
+    }
+
+    private void UpdateSpeedButtons()
+    {
+        var states = new (string Name, int Speed, Color SelectedColor)[]
+        {
+            ("Pause", 0, new Color("ff4d57")),
+            ("Speed1", 1, new Color("8bcf72")),
+            ("Speed2", 2, new Color("63e77a")),
+            ("Speed4", 4, new Color("3af28a")),
+            ("Speed8", 8, new Color("55ffad")),
+        };
+        foreach (var state in states)
+        {
+            var button = GetNode<Button>($"Interface/TopBar/Controls/{state.Name}");
+            button.ToggleMode = true;
+            button.ButtonPressed = state.Speed == _speed;
+            button.SelfModulate = state.Speed == _speed
+                ? state.SelectedColor
+                : new Color("aab2b5");
+        }
     }
 
     private void ChangeVisibleLevel(int delta)
@@ -1255,6 +1401,8 @@ public partial class Main : Node
         var resting = snapshot.Actors.Count(actor => actor.Job.Kind == ActorJobKind.Rest);
         var eating = snapshot.Actors.Count(actor => actor.Job.Kind == ActorJobKind.Eat);
         var resupplying = snapshot.Actors.Count(actor => actor.Job.Kind == ActorJobKind.Resupply);
+        var constructionWorkers = snapshot.Actors.Count(actor =>
+            actor.Job.Kind is ActorJobKind.SupplyConstruction or ActorJobKind.BuildConstruction);
         var explored = snapshot.Visibility.Count(state => state != CellVisibility.Unknown);
         var villageVisibility = snapshot.GetVisibility(snapshot.HumanVillage.Anchor, _engine.Map.Width);
         var storedFood = snapshot.ItemStacks
@@ -1269,13 +1417,18 @@ public partial class Main : Node
                 (stack.Location.Kind != ItemLocationKind.Ground ||
                  snapshot.GetVisibility(stack.Location.Position, _engine.Map.Width) == CellVisibility.Visible))
             .Sum(stack => stack.Quantity);
-        _status.Text = $"Tick {snapshot.Tick.Value:N0}  •  z={_visibleLevel}  •  {(_speed == 0 ? "PAUZA" : $"{_speed}×")}  •  plemię {snapshot.Actors.Count}" +
+        _status.Text = $"Tick {snapshot.Tick.Value:N0}  •  z={_visibleLevel}  •  plemię {snapshot.Actors.Count}" +
             $"  •  żywność {snapshot.FoodStock}" +
             $" (skł. {storedFood}, racje {personalFood}/{personalWater})" +
             $"  •  drewno {wood}" +
             $"  •  odkryte {explored}/{snapshot.Visibility.Count}" +
             $"  •  cele pracy {snapshot.WorkDesignations.Count}" +
+            $"  •  budowy {snapshot.ConstructionSites.Count} ({constructionWorkers} gobl.)" +
             $"  •  transport {haulers}  •  w drodze {traveling}  •  pracuje {working}";
+        if (_engine.DebugSettings.RevealFogFromNonPlayerUnits)
+        {
+            _status.Text += "  •  DEBUG: widok obcych jednostek";
+        }
         if (resting > 0)
         {
             _status.Text += $"  •  odpoczywa {resting}";

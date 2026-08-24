@@ -220,6 +220,10 @@ internal sealed class HumanVillageState
 
     public HumanCohortSnapshot GetGuardSnapshot() => ToSnapshot(GetCohort(HumanCohortRole.Guards));
 
+    internal IEnumerable<GridPosition> GetLivingCohortPositions() => _cohorts.Values
+        .Where(cohort => cohort.Population > 0)
+        .Select(cohort => cohort.Position);
+
     public int ApplyGuardDamage(int damage, int healthPerGuard)
     {
         var guard = GetCohort(HumanCohortRole.Guards);

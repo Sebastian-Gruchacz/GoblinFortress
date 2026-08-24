@@ -20,12 +20,15 @@ public enum WorldObjectKind : byte
     WoodenWalkway = 5,
     HumanStorehouse = 6,
     GoblinFieldCamp = 7,
+    Tree = 8,
+    DeadTreeStump = 9,
 }
 
 public enum WorldObjectOwner : byte
 {
     GoblinTribe = 1,
     HumanVillage = 2,
+    Nature = 3,
 }
 
 public enum CardinalOrientation : byte
@@ -53,6 +56,9 @@ public enum WorldObjectPartKind : byte
     WellRim = 5,
     WellShaft = 6,
     Walkway = 7,
+    TreeTrunk = 8,
+    TreeCrown = 9,
+    TreeStump = 10,
 }
 
 public readonly record struct WorldObjectPartSnapshot(

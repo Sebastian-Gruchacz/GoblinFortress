@@ -27,6 +27,7 @@ internal static class UiIcons
     private const int Columns = 4;
     private const int SourceCellSize = 256;
     private const string AtlasPath = "res://Assets/UI/action-icons-v1.png";
+    private const string Speed8IconPath = "res://Assets/UI/speed-8x-icon-v1.png";
 
     public static Texture2D LoadAtlas()
     {
@@ -45,6 +46,22 @@ internal static class UiIcons
         Region = GetRegion(icon),
         FilterClip = true,
     };
+
+    public static AtlasTexture LoadSpeed8Texture()
+    {
+        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(Speed8IconPath));
+        if (image is null || image.IsEmpty())
+        {
+            throw new InvalidOperationException($"Cannot load 8× speed icon: {Speed8IconPath}");
+        }
+
+        return new AtlasTexture
+        {
+            Atlas = ImageTexture.CreateFromImage(image),
+            Region = new Rect2(64, 410, 1152, 420),
+            FilterClip = true,
+        };
+    }
 
     public static Rect2 GetRegion(UiIcon icon)
     {

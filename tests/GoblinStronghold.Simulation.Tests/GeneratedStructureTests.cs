@@ -27,8 +27,9 @@ public sealed class GeneratedStructureTests
     {
         var snapshot = CreateEngine(new WorldSeed(456)).CreateSnapshot();
 
-        foreach (var building in snapshot.WorldObjects.Where(
-                     item => item.Kind != WorldObjectKind.HumanWell))
+        foreach (var building in snapshot.WorldObjects.Where(item => item.Kind is
+                     WorldObjectKind.GoblinHut or WorldObjectKind.HumanCottage or
+                     WorldObjectKind.HumanBarn))
         {
             var absoluteParts = building.GetAbsoluteParts().ToArray();
             Assert.True(
@@ -103,7 +104,11 @@ public sealed class GeneratedStructureTests
                 initialGoblinCount: 0,
                 initialFoodStock: 0);
 
-            Assert.InRange(engine.World.WorldObjectCount, 6, 7);
+            Assert.InRange(
+                engine.World.CreateWorldObjectSnapshot().Count(item =>
+                    item.Owner is WorldObjectOwner.GoblinTribe or WorldObjectOwner.HumanVillage),
+                6,
+                7);
         }
     }
 

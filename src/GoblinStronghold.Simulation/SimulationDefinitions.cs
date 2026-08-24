@@ -45,7 +45,7 @@ public sealed record FoodNutritionSettings(
 public sealed class SimulationDefinitions
 {
     public static SimulationDefinitions Foundation { get; } = new(
-        id: "foundation-v25",
+        id: "foundation-v26",
         ticksPerDay: 240,
         maximumHunger: 10_000,
         hungerPerTick: 8,

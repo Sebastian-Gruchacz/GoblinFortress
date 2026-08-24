@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -96,6 +97,31 @@ public sealed class WorkDispatcherTests
     }
 
     [Fact]
+    public void PreviouslyExploredResourceMayBeDesignatedOutsideCurrentVision()
+    {
+        var engine = CreateEngine(goblinCount: 1);
+        var target = engine.World.CreatePlantSnapshot()
+            .First(plant => plant.Biomass > 0 &&
+                engine.Visibility.Get(plant.Position) == CellVisibility.Unknown);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var visibilityIndex = (target.Position.Y * engine.Map.Width) + target.Position.X;
+        save["visibility"]!.AsArray()[visibilityIndex] = (int)CellVisibility.Explored;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            target.Position,
+            target.Position,
+            ResourceKind.Food));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Contains(engine.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.GatherFood &&
+            designation.Target == target.Position);
+    }
+
+    [Fact]
     public void UprootAreaRemovesBerryBushPermanentlyAndSurvivesSaveLoad()
     {
         var engine = CreateEngine(goblinCount: 1);
@@ -157,10 +183,11 @@ public sealed class WorkDispatcherTests
             sequence: 1,
             zonePosition));
         engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
         Assert.Equal(0, Assert.Single(engine.CreateSnapshot().StorageZones).DesiredQuantity);
 
         engine.QueueCommand(SimulationCommand.DesignateWork(
-            new SimulationTick(2),
+            engine.CurrentTick.Next(),
             sequence: 2,
             spawn,
             spawn,
@@ -185,9 +212,10 @@ public sealed class WorkDispatcherTests
             sequence: 1,
             zonePosition));
         engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
         var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
         engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
-            new SimulationTick(2),
+            engine.CurrentTick.Next(),
             sequence: 2,
             zone.Id,
             desiredQuantity: 3));

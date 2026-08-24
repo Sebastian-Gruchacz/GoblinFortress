@@ -29,15 +29,21 @@ public readonly record struct WorldChangeEvent(
 public sealed class WorldMapState
 {
     private readonly SortedDictionary<int, PlantPatchState> _plantPatches;
+    private readonly SortedDictionary<WorldObjectId, WorldObjectSnapshot> _worldObjects;
+    private readonly Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> _occupancy;
 
     private WorldMapState(
         GeneratedMap baseline,
         ulong version,
-        SortedDictionary<int, PlantPatchState> plantPatches)
+        SortedDictionary<int, PlantPatchState> plantPatches,
+        SortedDictionary<WorldObjectId, WorldObjectSnapshot> worldObjects,
+        Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> occupancy)
     {
         Baseline = baseline;
         Version = version;
         _plantPatches = plantPatches;
+        _worldObjects = worldObjects;
+        _occupancy = occupancy;
     }
 
     public GeneratedMap Baseline { get; }
@@ -46,10 +52,19 @@ public sealed class WorldMapState
 
     public int PlantPatchCount => _plantPatches.Count;
 
+    public int WorldObjectCount => _worldObjects.Count;
+
     internal static WorldMapState CreateInitial(GeneratedMap baseline)
     {
         ArgumentNullException.ThrowIfNull(baseline);
 
+        var generatedObjects = GeneratedSettlementStructureGenerator.Generate(baseline);
+        var (worldObjects, occupancy) = ValidateAndIndexObjects(baseline, generatedObjects);
+        var occupiedColumns = worldObjects.Values
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(item => item.Position.Z == 0)
+            .Select(item => item.Position)
+            .ToHashSet();
         var patches = new SortedDictionary<int, PlantPatchState>();
         for (var y = 0; y < baseline.Height; y++)
         {
@@ -57,7 +72,10 @@ public sealed class WorldMapState
             {
                 var position = new GridPosition(x, y);
                 var cell = baseline.GetCell(position);
-                if (!cell.IsTraversable || cell.Fertility < 35 || cell.Moisture < 30)
+                if (!cell.IsTraversable ||
+                    cell.Fertility < 35 ||
+                    cell.Moisture < 30 ||
+                    occupiedColumns.Contains(position))
                 {
                     continue;
                 }
@@ -87,16 +105,18 @@ public sealed class WorldMapState
 
         EnsurePatch(patches, baseline, baseline.GoblinSpawn);
         EnsurePatch(patches, baseline, baseline.HumanVillage);
-        return new WorldMapState(baseline, version: 0, patches);
+        return new WorldMapState(baseline, version: 0, patches, worldObjects, occupancy);
     }
 
     internal static WorldMapState Restore(
         GeneratedMap baseline,
         ulong version,
-        IEnumerable<PlantPatchSnapshot> plantPatches)
+        IEnumerable<PlantPatchSnapshot> plantPatches,
+        IEnumerable<WorldObjectSnapshot> worldObjects)
     {
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(plantPatches);
+        ArgumentNullException.ThrowIfNull(worldObjects);
 
         var restored = new SortedDictionary<int, PlantPatchState>();
         foreach (var patch in plantPatches)
@@ -120,7 +140,8 @@ public sealed class WorldMapState
             }
         }
 
-        return new WorldMapState(baseline, version, restored);
+        var (restoredObjects, occupancy) = ValidateAndIndexObjects(baseline, worldObjects);
+        return new WorldMapState(baseline, version, restored, restoredObjects, occupancy);
     }
 
     public PlantPatchSnapshot? GetPlantPatch(GridPosition position)
@@ -137,6 +158,117 @@ public sealed class WorldMapState
     public IReadOnlyList<PlantPatchSnapshot> CreatePlantSnapshot() =>
         new ReadOnlyCollection<PlantPatchSnapshot>(
             _plantPatches.Values.Select(patch => patch.ToSnapshot()).ToArray());
+
+    public IReadOnlyList<WorldObjectSnapshot> CreateWorldObjectSnapshot() =>
+        new ReadOnlyCollection<WorldObjectSnapshot>(_worldObjects.Values.ToArray());
+
+    public IReadOnlyList<WorldObjectSnapshot> GetWorldObjectsAt(GridPosition position)
+    {
+        var ids = _occupancy
+            .Where(item => item.Key.Position == position)
+            .Select(item => item.Value.ObjectId)
+            .Distinct()
+            .Order()
+            .ToArray();
+        return new ReadOnlyCollection<WorldObjectSnapshot>(
+            ids.Select(id => _worldObjects[id]).ToArray());
+    }
+
+    public bool IsSurfaceTraversable(GridPosition position)
+    {
+        if (!Baseline.IsWithin(position) || !Baseline.GetCell(position).IsTraversable)
+        {
+            return false;
+        }
+
+        return !_occupancy.TryGetValue(
+                   new SpatialOccupancyKey(position, SpatialOccupancyChannel.Solid),
+                   out var claim) ||
+               claim.PartKind == WorldObjectPartKind.Door;
+    }
+
+    public bool HasSurfacePath(GridPosition start, GridPosition destination)
+        => FindSurfacePath(start, destination) is not null;
+
+    public IReadOnlyList<GridPosition>? FindSurfacePath(GridPosition start, GridPosition destination)
+    {
+        if (!IsSurfaceTraversable(start) || !IsSurfaceTraversable(destination))
+        {
+            return null;
+        }
+
+        var visited = new bool[Baseline.CellCount];
+        var predecessors = new GridPosition?[Baseline.CellCount];
+        var queue = new Queue<GridPosition>();
+        visited[GetIndex(Baseline, start)] = true;
+        queue.Enqueue(start);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (current == destination)
+            {
+                return BuildRoute(start, current, predecessors);
+            }
+
+            foreach (var neighbor in Baseline.GetCardinalNeighbors(current))
+            {
+                var index = GetIndex(Baseline, neighbor);
+                if (visited[index] || !IsSurfaceTraversable(neighbor))
+                {
+                    continue;
+                }
+
+                visited[index] = true;
+                predecessors[index] = current;
+                queue.Enqueue(neighbor);
+            }
+        }
+
+        return null;
+    }
+
+    public IReadOnlyList<GridPosition>? FindNearestHarvestablePlantPath(
+        GridPosition start,
+        ISet<GridPosition> excludedTargets)
+    {
+        ArgumentNullException.ThrowIfNull(excludedTargets);
+        if (!IsSurfaceTraversable(start))
+        {
+            return null;
+        }
+
+        var visited = new bool[Baseline.CellCount];
+        var predecessors = new GridPosition?[Baseline.CellCount];
+        var queue = new Queue<GridPosition>();
+        visited[GetIndex(Baseline, start)] = true;
+        queue.Enqueue(start);
+
+        while (queue.TryDequeue(out var current))
+        {
+            if (!excludedTargets.Contains(current) &&
+                _plantPatches.TryGetValue(GetIndex(Baseline, current), out var patch) &&
+                patch.Biomass > 0)
+            {
+                return BuildRoute(start, current, predecessors);
+            }
+
+            foreach (var neighbor in Baseline.GetCardinalNeighbors(current))
+            {
+                var index = GetIndex(Baseline, neighbor);
+                if (visited[index] || !IsSurfaceTraversable(neighbor))
+                {
+                    continue;
+                }
+
+                visited[index] = true;
+                predecessors[index] = current;
+                queue.Enqueue(neighbor);
+            }
+        }
+
+        return null;
+    }
 
     internal bool TryHarvest(
         GridPosition position,
@@ -214,8 +346,72 @@ public sealed class WorldMapState
         return new WorldChangeEvent(Version, tick, kind, position, amount);
     }
 
+    private static (
+        SortedDictionary<WorldObjectId, WorldObjectSnapshot> Objects,
+        Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> Occupancy)
+        ValidateAndIndexObjects(
+            GeneratedMap baseline,
+            IEnumerable<WorldObjectSnapshot> worldObjects)
+    {
+        var restored = new SortedDictionary<WorldObjectId, WorldObjectSnapshot>();
+        var occupancy = new Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim>();
+
+        foreach (var worldObject in worldObjects.OrderBy(item => item.Id))
+        {
+            if (worldObject.Id == WorldObjectId.None ||
+                !Enum.IsDefined(worldObject.Kind) ||
+                !Enum.IsDefined(worldObject.Owner) ||
+                !Enum.IsDefined(worldObject.Orientation) ||
+                worldObject.Anchor.Z != 0 ||
+                worldObject.Parts.Count == 0 ||
+                !restored.TryAdd(worldObject.Id, worldObject))
+            {
+                throw new InvalidDataException("The world contains an invalid spatial object.");
+            }
+
+            foreach (var (position, part) in worldObject.GetAbsoluteParts())
+            {
+                if (!baseline.IsWithin(position with { Z = 0 }) ||
+                    position.Z is < -16 or > 16 ||
+                    !Enum.IsDefined(part.Channel) ||
+                    !Enum.IsDefined(part.Kind))
+                {
+                    throw new InvalidDataException("A spatial object has an invalid part.");
+                }
+
+                var key = new SpatialOccupancyKey(position, part.Channel);
+                if (!occupancy.TryAdd(
+                        key,
+                        new SpatialOccupancyClaim(worldObject.Id, part.Kind)))
+                {
+                    throw new InvalidDataException("Spatial object parts conflict in one occupancy channel.");
+                }
+            }
+        }
+
+        return (restored, occupancy);
+    }
+
     private static int GetIndex(GeneratedMap map, GridPosition position) =>
         checked((position.Y * map.Width) + position.X);
+
+    private IReadOnlyList<GridPosition> BuildRoute(
+        GridPosition start,
+        GridPosition destination,
+        IReadOnlyList<GridPosition?> predecessors)
+    {
+        var route = new List<GridPosition>();
+        var current = destination;
+        while (current != start)
+        {
+            route.Add(current);
+            current = predecessors[GetIndex(Baseline, current)]
+                ?? throw new InvalidOperationException("Surface path is missing a predecessor.");
+        }
+
+        route.Reverse();
+        return route;
+    }
 
     private sealed class PlantPatchState(
         GridPosition position,

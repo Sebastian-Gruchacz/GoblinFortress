@@ -1,0 +1,55 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Main.cs" id="1_main"]
+[ext_resource type="Script" path="res://WorldView.cs" id="2_world"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1_main")
+
+[node name="WorldView" type="Node2D" parent="."]
+script = ExtResource("2_world")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(640, 640)
+
+[node name="Interface" type="CanvasLayer" parent="."]
+
+[node name="TopBar" type="PanelContainer" parent="Interface"]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 1240.0
+offset_bottom = 72.0
+
+[node name="Controls" type="HBoxContainer" parent="Interface/TopBar"]
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Interface/TopBar/Controls"]
+text = "GOBLIN STRONGHOLD  •  LIVING SWAMP PROBE"
+
+[node name="Pause" type="Button" parent="Interface/TopBar/Controls"]
+text = "⏸"
+
+[node name="Speed1" type="Button" parent="Interface/TopBar/Controls"]
+text = "1×"
+
+[node name="Speed2" type="Button" parent="Interface/TopBar/Controls"]
+text = "2×"
+
+[node name="Speed4" type="Button" parent="Interface/TopBar/Controls"]
+text = "4×"
+
+[node name="Speed8" type="Button" parent="Interface/TopBar/Controls"]
+text = "8×"
+
+[node name="Status" type="Label" parent="Interface/TopBar/Controls"]
+text = "Tick 0"
+
+[node name="Inspector" type="PanelContainer" parent="Interface"]
+offset_left = 16.0
+offset_top = 788.0
+offset_right = 760.0
+offset_bottom = 876.0
+
+[node name="Text" type="Label" parent="Interface/Inspector"]
+text = "LPM goblin: wybór • LPM teren: odznacz • PPM z wyborem: marsz • PPM bez wyboru: skład • WASD/strzałki: kamera • kółko: zoom • Spacja: pauza\nIkona nad głową: zamiar • żółta kropka: w drodze • biała kropka: pracuje"
+autowrap_mode = 2

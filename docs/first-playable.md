@@ -80,6 +80,8 @@ The generated map contains:
 - enough connected traversable terrain for both communities to function;
 - undiscovered territory governed by fog of war.
 
+The initial settlements provide a deliberately small structural test set: two human cottages, one human barn and one well, plus two or three goblin huts. Every structure is one stable object with a multi-cell footprint. Cottage, barn and hut floors and walls occupy the surface layer, roofs occupy the level above it, and the well includes subsurface shaft parts. Settlement access cells remain reserved during atomic placement.
+
 Generation must validate its own result. A seed is rejected or repaired when either settlement is trapped, essential resources cannot be reached or the two communities begin on top of one another.
 
 Generation produces only the versioned baseline and initial ecological state. Each spatial sample is keyed by generator version, region or cell coordinates, feature domain and pass, so generating chunks or depths in a different order cannot change their contents. Runtime world state is mutable and layered: ground and water, vegetation and habitat, construction and damage, plus derived traversal and visibility data. Harvesting a plant, felling a tree or completing a structure changes authoritative world state and emits a compact dirty-region record.

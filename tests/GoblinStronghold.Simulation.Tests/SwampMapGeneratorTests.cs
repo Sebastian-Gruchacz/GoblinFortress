@@ -29,6 +29,26 @@ public sealed class SwampMapGeneratorTests
     }
 
     [Fact]
+    public void HistoricalGeneratorVersionRemainsDeterministic()
+    {
+        var first = SwampMapGenerator.Generate(
+            new WorldSeed(123),
+            width: 32,
+            height: 32,
+            generatorVersion: 1);
+        var second = SwampMapGenerator.Generate(
+            new WorldSeed(123),
+            width: 32,
+            height: 32,
+            generatorVersion: 1);
+        var current = SwampMapGenerator.Generate(new WorldSeed(123), width: 32, height: 32);
+
+        Assert.Equal(1, first.GeneratorVersion);
+        Assert.Equal(first.ComputeFingerprint(), second.ComputeFingerprint());
+        Assert.NotEqual(first.ComputeFingerprint(), current.ComputeFingerprint());
+    }
+
+    [Fact]
     public void DifferentSeedsProduceDifferentMaps()
     {
         var first = SwampMapGenerator.Generate(new WorldSeed(123), width: 64, height: 48);

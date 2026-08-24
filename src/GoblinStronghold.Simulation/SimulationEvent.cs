@@ -9,6 +9,16 @@ public enum SimulationEventKind
     ItemStored = 5,
     ItemStackDepleted = 6,
     CommandRejected = 7,
+    ActorDied = 8,
+    HumanVillageAlerted = 9,
+    HumanGuardHitGoblin = 10,
+    GoblinHitHumanGuard = 11,
+    HumanDied = 12,
+    MoveOrdered = 13,
+    MoveCompleted = 14,
+    ActorProvisionedFood = 15,
+    ActorCollectedWater = 16,
+    ActorDrank = 17,
 }
 
 public readonly record struct SimulationEvent(

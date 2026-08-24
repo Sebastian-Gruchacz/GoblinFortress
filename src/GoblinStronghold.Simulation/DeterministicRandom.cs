@@ -7,6 +7,7 @@ public enum RandomDomain : ulong
     Ecology = 3,
     Combat = 4,
     KnowledgeTransfer = 5,
+    HumanVillage = 6,
 }
 
 public static class DeterministicRandom

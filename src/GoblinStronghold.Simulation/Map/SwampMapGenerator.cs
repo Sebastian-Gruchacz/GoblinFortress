@@ -2,11 +2,11 @@ namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
     public const int MinimumDimension = 16;
     public const int MaximumDimension = 2_048;
 
-    public static bool SupportsVersion(int version) => version == CurrentVersion;
+    public static bool SupportsVersion(int version) => version is 1 or CurrentVersion;
 
     public static GeneratedMap Generate(
         WorldSeed seed,
@@ -55,6 +55,12 @@ public static class SwampMapGenerator
                 sampleKey: 10_002,
                 minimumInclusive: 2,
                 maximumExclusive: height - 2));
+
+        if (generatorVersion >= 2)
+        {
+            CarveSettlementPad(cells, width, height, goblinSpawn, goblin: true);
+            CarveSettlementPad(cells, width, height, humanVillage, goblin: false);
+        }
 
         CarveSettlementAccess(cells, width, goblinSpawn, humanVillage);
         SetCell(cells, width, goblinSpawn, CreateMud(moisture: 92, fertility: 72));
@@ -137,6 +143,33 @@ public static class SwampMapGenerator
         for (var y = start.Y; y != destination.Y + yStep; y += yStep)
         {
             SetTraversableIfNeeded(cells, width, new GridPosition(destination.X, y));
+        }
+    }
+
+    private static void CarveSettlementPad(
+        MapCell[] cells,
+        int width,
+        int height,
+        GridPosition center,
+        bool goblin)
+    {
+        const int padWidth = 8;
+        const int padHeight = 9;
+        var startX = Math.Clamp(center.X - (padWidth / 2), 0, width - padWidth);
+        var startY = Math.Clamp(center.Y - (padHeight / 2), 0, height - padHeight);
+
+        for (var y = startY; y < startY + padHeight; y++)
+        {
+            for (var x = startX; x < startX + padWidth; x++)
+            {
+                SetCell(
+                    cells,
+                    width,
+                    new GridPosition(x, y),
+                    goblin
+                        ? CreateMud(moisture: 82, fertility: 66)
+                        : CreateGround(moisture: 52, fertility: 70));
+            }
         }
     }
 

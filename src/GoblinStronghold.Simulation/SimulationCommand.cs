@@ -9,6 +9,7 @@ public enum SimulationCommandKind
     CreateStorageZone = 2,
     PickUp = 3,
     StoreCarried = 4,
+    Move = 5,
 }
 
 public readonly record struct SimulationCommand(
@@ -80,6 +81,21 @@ public readonly record struct SimulationCommand(
             actor,
             storageZone,
             default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand Move(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor,
+        GridPosition destination) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Move,
+            actor,
+            EntityId.None,
+            destination,
             ResourceKind.Any,
             Amount: 0);
 }

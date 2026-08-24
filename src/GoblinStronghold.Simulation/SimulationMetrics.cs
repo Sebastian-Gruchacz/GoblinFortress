@@ -9,6 +9,7 @@ public readonly record struct SimulationMetrics(
     int ItemStacks,
     int StorageZones,
     int PlantPatches,
+    int WorldObjects,
     int PendingCommands,
     int UndeliveredEvents,
     int UndeliveredWorldChanges,

@@ -301,6 +301,10 @@ The world should make restraint strategically interesting without imposing a mor
 
 **Decision:** The player can design and reuse blueprints for workshops, rooms and other functional sets instead of placing every component repeatedly.
 
+Constructed and natural features are spatial objects rather than special tile values. An object has a stable identity, anchor, orientation and a footprint made of parts at relative three-dimensional coordinates. Parts claim separate occupancy channels such as surface, solid volume, overhead and subsurface, allowing a roof above a floor, a bridge above water or a canopy above a path without erasing the underlying terrain.
+
+A building remains one object even when its floor, walls, doors and roof cover many cells and height levels. Damage and construction progress apply to individual parts while ownership, function and blueprint provenance belong to the whole. Rivers and roads may additionally use network identities joining many spatial segments; they are not required to masquerade as one enormous rectangular building.
+
 Blueprint sources include:
 
 - built-in starter examples that demonstrate the interface;

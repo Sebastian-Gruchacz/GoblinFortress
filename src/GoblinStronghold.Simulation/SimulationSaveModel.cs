@@ -26,6 +26,12 @@ internal sealed class SimulationSaveModel
 
     public List<PlantPatchSaveModel> PlantPatches { get; set; } = [];
 
+    public List<WorldObjectSaveModel> WorldObjects { get; set; } = [];
+
+    public HumanVillageSaveModel HumanVillage { get; set; } = new();
+
+    public List<Map.CellVisibility> Visibility { get; set; } = [];
+
     public List<ActorSaveModel> Actors { get; set; } = [];
 
     public List<ItemStackSaveModel> ItemStacks { get; set; } = [];
@@ -37,6 +43,40 @@ internal sealed class SimulationSaveModel
     public List<EventSaveModel> UndeliveredEvents { get; set; } = [];
 
     public List<WorldChangeSaveModel> UndeliveredWorldChanges { get; set; } = [];
+}
+
+internal sealed class HumanVillageSaveModel
+{
+    public int Population { get; set; }
+
+    public int FoodStock { get; set; }
+
+    public int WoodStock { get; set; }
+
+    public int GoodsStock { get; set; }
+
+    public int Hostility { get; set; }
+
+    public long LastIntruderSeenTick { get; set; }
+
+    public int GuardHitPoints { get; set; }
+
+    public List<HumanCohortSaveModel> Cohorts { get; set; } = [];
+}
+
+internal sealed class HumanCohortSaveModel
+{
+    public int Id { get; set; }
+
+    public HumanCohortRole Role { get; set; }
+
+    public int Population { get; set; }
+
+    public int X { get; set; }
+
+    public int Y { get; set; }
+
+    public int Z { get; set; }
 }
 
 internal sealed class PlantPatchSaveModel
@@ -54,11 +94,53 @@ internal sealed class PlantPatchSaveModel
     public int Capacity { get; set; }
 }
 
+internal sealed class WorldObjectSaveModel
+{
+    public ulong Id { get; set; }
+
+    public Map.WorldObjectKind Kind { get; set; }
+
+    public Map.WorldObjectOwner Owner { get; set; }
+
+    public int AnchorX { get; set; }
+
+    public int AnchorY { get; set; }
+
+    public int AnchorZ { get; set; }
+
+    public Map.CardinalOrientation Orientation { get; set; }
+
+    public List<WorldObjectPartSaveModel> Parts { get; set; } = [];
+}
+
+internal sealed class WorldObjectPartSaveModel
+{
+    public int RelativeX { get; set; }
+
+    public int RelativeY { get; set; }
+
+    public int RelativeZ { get; set; }
+
+    public Map.SpatialOccupancyChannel Channel { get; set; }
+
+    public Map.WorldObjectPartKind Kind { get; set; }
+}
+
 internal sealed class ActorSaveModel
 {
     public ulong Id { get; set; }
 
     public int Hunger { get; set; }
+
+    public int Fatigue { get; set; }
+
+    public int Health { get; set; }
+
+    public int Thirst { get; set; }
+
+    public int PersonalFood { get; set; }
+
+    public int PersonalWater { get; set; }
 
     public int X { get; set; }
 
@@ -67,6 +149,37 @@ internal sealed class ActorSaveModel
     public int Z { get; set; }
 
     public ulong CarriedStackId { get; set; }
+
+    public ActorJobKind JobKind { get; set; }
+
+    public ActorJobPhase JobPhase { get; set; }
+
+    public ActorJobStage JobStage { get; set; }
+
+    public int JobTargetX { get; set; }
+
+    public int JobTargetY { get; set; }
+
+    public int JobTargetZ { get; set; }
+
+    public int RemainingWorkTicks { get; set; }
+
+    public ulong SourceStackId { get; set; }
+
+    public ulong DestinationZoneId { get; set; }
+
+    public int ReservedQuantity { get; set; }
+
+    public List<GridPositionSaveModel> RemainingRoute { get; set; } = [];
+}
+
+internal sealed class GridPositionSaveModel
+{
+    public int X { get; set; }
+
+    public int Y { get; set; }
+
+    public int Z { get; set; }
 }
 
 internal sealed class ItemStackSaveModel

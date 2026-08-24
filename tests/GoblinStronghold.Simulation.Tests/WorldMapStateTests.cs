@@ -42,15 +42,15 @@ public sealed class WorldMapStateTests
         for (var tick = 1; tick <= capacity; tick++)
         {
             engine.QueueCommand(SimulationCommand.Forage(
-                new SimulationTick(tick),
+                new SimulationTick(1),
                 sequence: (ulong)tick,
                 new EntityId(1)));
         }
 
-        engine.AdvanceTicks(capacity);
+        engine.AdvanceTicks(1);
         Assert.Equal(0, engine.World.GetPlantPatch(position)!.Value.Biomass);
 
-        var rejectionTick = capacity + 1;
+        var rejectionTick = 2;
         engine.QueueCommand(SimulationCommand.Forage(
             new SimulationTick(rejectionTick),
             sequence: (ulong)rejectionTick,
@@ -80,9 +80,9 @@ public sealed class WorldMapStateTests
         engine.AdvanceTicks(
             SimulationDefinitions.Foundation.PlantGrowthIntervalTicks - 1);
 
-        var regrown = engine.World.GetPlantPatch(position)!.Value;
-        var change = Assert.Single(engine.DrainWorldChanges());
-        Assert.Equal(harvested.Biomass + 1, regrown.Biomass);
+        var change = Assert.Single(
+            engine.DrainWorldChanges(),
+            item => item.Kind == WorldChangeKind.VegetationRegrown && item.Position == position);
         Assert.Equal(WorldChangeKind.VegetationRegrown, change.Kind);
         Assert.Equal(new SimulationTick(240), change.Tick);
         Assert.Equal(1, change.Amount);

@@ -52,17 +52,35 @@ if (!StringComparer.Ordinal.Equals(acceleratedSnapshot.StateHash, normalSnapshot
 }
 
 var metrics = accelerated.GetMetrics();
+var structureParts = acceleratedSnapshot.WorldObjects
+    .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+    .ToArray();
 
 Console.WriteLine("Goblin Stronghold deterministic simulation foundation");
 Console.WriteLine($"Seed: {acceleratedSnapshot.WorldSeed}");
 Console.WriteLine($"Tick: {acceleratedSnapshot.Tick}");
 Console.WriteLine($"Actors: {acceleratedSnapshot.Actors.Count}");
 Console.WriteLine($"Food stock: {acceleratedSnapshot.FoodStock}");
+Console.WriteLine(
+    $"Personal supplies: food {acceleratedSnapshot.Actors.Sum(actor => actor.PersonalFood)}, " +
+    $"water {acceleratedSnapshot.Actors.Sum(actor => actor.PersonalWater)}, " +
+    $"maximum thirst {acceleratedSnapshot.Actors.Max(actor => actor.Thirst)}");
+Console.WriteLine(
+    $"Human village: {acceleratedSnapshot.HumanVillage.Population} people, " +
+    $"food {acceleratedSnapshot.HumanVillage.FoodStock}, " +
+    $"wood {acceleratedSnapshot.HumanVillage.WoodStock}, " +
+    $"goods {acceleratedSnapshot.HumanVillage.GoodsStock}, " +
+    $"hostility {acceleratedSnapshot.HumanVillage.Hostility}, " +
+    $"guard health {acceleratedSnapshot.HumanVillage.GuardHitPoints}/" +
+    $"{acceleratedSnapshot.HumanVillage.MaximumGuardHitPoints}");
 Console.WriteLine($"Physical stacks: {acceleratedSnapshot.ItemStacks.Count}");
 Console.WriteLine($"Storage zones: {acceleratedSnapshot.StorageZones.Count}");
 Console.WriteLine($"Plant patches: {acceleratedSnapshot.PlantPatches.Count}");
+Console.WriteLine($"Generated structures: {acceleratedSnapshot.WorldObjects.Count}");
 Console.WriteLine($"World version: {acceleratedSnapshot.WorldVersion}");
-Console.WriteLine($"Map: {map.Width}x{map.Height}x{map.LevelCount}");
+Console.WriteLine($"Terrain baseline: {map.Width}x{map.Height}x{map.LevelCount}");
+Console.WriteLine(
+    $"Generated structure Z extent: {structureParts.Min(item => item.Position.Z)}..{structureParts.Max(item => item.Position.Z)}");
 Console.WriteLine($"Map generator version: {map.GeneratorVersion}");
 Console.WriteLine($"Goblin spawn: {map.GoblinSpawn}");
 Console.WriteLine($"Human village: {map.HumanVillage}");

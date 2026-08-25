@@ -37,7 +37,9 @@ public sealed class HumanCombatTests
             $"Raid phase: {snapshot.RaidPhase}; rally: {snapshot.RaidRallyPoint}; storages: {string.Join("; ", snapshot.StorageZones.Select(zone => $"{zone.Id}@{zone.Position} {zone.StoredQuantity}/{zone.DesiredQuantity}"))}; ground: {string.Join("; ", snapshot.ItemStacks.Select(stack => $"{stack.Id}:{stack.Resource}={stack.Quantity}@{stack.Location.Kind}/{stack.Location.Position}"))}; actors: {string.Join("; ", snapshot.Actors.Select(actor => $"{actor.Id}@{actor.Position} f{actor.PersonalFood} w{actor.PersonalWater} h{actor.Hunger} t{actor.Thirst} z{actor.Fatigue} {actor.Job.Kind}/{actor.Job.Stage}->{actor.Job.Target}"))}");
         Assert.Equal(GoblinRaidPhase.Marching, snapshot.RaidPhase);
         Assert.Equal(100, snapshot.HumanVillage.Hostility);
-        Assert.Contains(events, item => item.Kind == SimulationEventKind.RaidDeparted);
+        var departure = Assert.Single(events,
+            item => item.Kind == SimulationEventKind.RaidDeparted);
+        Assert.Equal(SimulationDefinitions.FieldCampCapacity, departure.Amount);
     }
 
     [Fact]

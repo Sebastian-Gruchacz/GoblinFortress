@@ -10,7 +10,7 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
-    private const int SaveFormatVersion = 25;
+    private const int SaveFormatVersion = 26;
     private const int DefaultMapDimension = 32;
 
     private static readonly JsonSerializerOptions SaveOptions = new()
@@ -391,6 +391,7 @@ public sealed partial class SimulationEngine
         {
             FormatVersion = SaveFormatVersion,
             DefinitionsId = Definitions.Id,
+            ClimateProfileId = Definitions.Clock.Climate.Id,
             WorldSeed = WorldSeed.Value,
             MapGeneratorVersion = Map.GeneratorVersion,
             MapWidth = Map.Width,
@@ -489,6 +490,7 @@ public sealed partial class SimulationEngine
         var canonical = new StringBuilder(512);
         Append(canonical, SaveFormatVersion);
         Append(canonical, Definitions.Id);
+        Append(canonical, Definitions.Clock.Climate.Id);
         Append(canonical, WorldSeed.Value);
         Append(canonical, Map.GeneratorVersion);
         Append(canonical, Map.ComputeFingerprint());
@@ -685,6 +687,15 @@ public sealed partial class SimulationEngine
         {
             throw new InvalidDataException(
                 $"Save requires definitions '{save.DefinitionsId}', but '{definitions.Id}' were supplied.");
+        }
+
+        if (!StringComparer.Ordinal.Equals(
+                save.ClimateProfileId,
+                definitions.Clock.Climate.Id))
+        {
+            throw new InvalidDataException(
+                $"Save requires climate profile '{save.ClimateProfileId}', but " +
+                $"'{definitions.Clock.Climate.Id}' was supplied.");
         }
 
         if (!SwampMapGenerator.SupportsVersion(save.MapGeneratorVersion))
@@ -1118,20 +1129,29 @@ public sealed partial class SimulationEngine
     {
         if (CurrentTick.Value % Definitions.PlantGrowthIntervalTicks == 0)
         {
+            var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
             _undeliveredWorldChanges.AddRange(
-                World.GrowPlants(CurrentTick, Definitions.PlantGrowthPerInterval));
+                World.GrowPlants(CurrentTick, Definitions.PlantGrowthPerInterval, calendar.Season));
         }
     }
 
     private void UpdateVisibility()
     {
-        IEnumerable<GridPosition> observers = _actors.Values.Select(actor => actor.Position);
+        var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
+        var goblinRadius = calendar.IsNight
+            ? Math.Max(2, Definitions.VisionRadius - 1)
+            : Definitions.VisionRadius;
+        var observers = _actors.Values
+            .Select(actor => (actor.Position, goblinRadius))
+            .ToList();
         if (DebugSettings.RevealFogFromNonPlayerUnits)
         {
-            observers = observers.Concat(_humanVillage.GetLivingCohortPositions());
+            var humanRadius = calendar.IsNight ? 3 : Definitions.VisionRadius;
+            observers.AddRange(_humanVillage.GetLivingCohortPositions()
+                .Select(position => (position, humanRadius)));
         }
 
-        Visibility.Reveal(observers, Definitions.VisionRadius);
+        Visibility.Reveal(observers);
         foreach (var actor in _actors.Values.Where(actor =>
                      actor.JobKind == ActorJobKind.Explore &&
                      Visibility.Get(actor.JobTarget) != CellVisibility.Unknown))
@@ -1209,14 +1229,18 @@ public sealed partial class SimulationEngine
 
         _raidPhase = GoblinRaidPhase.Preparing;
         _raidRallyPoint = rally.Position;
-        foreach (var actor in _actors.Values)
+        var raidParty = _actors.Values
+            .OrderBy(actor => actor.Id.Value)
+            .Take(SimulationDefinitions.FieldCampCapacity)
+            .ToArray();
+        foreach (var actor in raidParty)
         {
             if (actor.CarriedStackId == EntityId.None && actor.JobKind != ActorJobKind.Haul)
             {
                 actor.ClearJob();
             }
         }
-        Publish(SimulationEventKind.RaidPreparationStarted, EntityId.None, EntityId.None, _actors.Count);
+        Publish(SimulationEventKind.RaidPreparationStarted, EntityId.None, EntityId.None, raidParty.Length);
         return true;
     }
 
@@ -1589,11 +1613,32 @@ public sealed partial class SimulationEngine
         var deadActors = new List<ActorState>();
         foreach (var actor in _actors.Values)
         {
-            if (actor.JobKind != ActorJobKind.Rest || actor.JobPhase != ActorJobPhase.Working)
+            if (actor.JobKind is not (ActorJobKind.Rest or ActorJobKind.Collapsed) ||
+                actor.JobPhase != ActorJobPhase.Working)
             {
                 actor.Fatigue = Math.Min(
                     Definitions.MaximumFatigue,
                     checked(actor.Fatigue + Definitions.FatiguePerTick));
+            }
+
+            if (actor.Fatigue >= Definitions.MaximumFatigue &&
+                actor.JobKind is not (ActorJobKind.Rest or ActorJobKind.Collapsed))
+            {
+                if (actor.CarriedStackId != EntityId.None &&
+                    _itemStacks.TryGetValue(actor.CarriedStackId, out var carried))
+                {
+                    carried.Location = ItemLocation.OnGround(actor.Position);
+                    actor.CarriedStackId = EntityId.None;
+                }
+                actor.SuspendCurrentJob();
+                actor.JobKind = ActorJobKind.Collapsed;
+                actor.JobPhase = ActorJobPhase.Working;
+                actor.JobTarget = actor.Position;
+                actor.RemainingWorkTicks = Math.Max(
+                    1,
+                    (actor.Fatigue + Definitions.RestRecoveryPerTick - 1) /
+                    Definitions.RestRecoveryPerTick);
+                Publish(SimulationEventKind.ActorCollapsed, actor.Id, EntityId.None, 0);
             }
 
             actor.Hunger = Math.Min(

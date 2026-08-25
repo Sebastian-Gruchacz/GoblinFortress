@@ -12,8 +12,12 @@ public partial class Main : Node
     private readonly WorldSeed _seed = new(0x474F424C494EUL);
     private SimulationEngine _engine = null!;
     private WorldView _worldView = null!;
+    private MinimapView _minimap = null!;
     private Camera2D _camera = null!;
     private Label _status = null!;
+    private Label _clock = null!;
+    private Label _seasonName = null!;
+    private SeasonCycleView _seasonProgress = null!;
     private Label _inspector = null!;
     private PopupPanel _buildMenu = null!;
     private PopupPanel _workMenu = null!;
@@ -85,8 +89,12 @@ public partial class Main : Node
             capacity: _engine.Definitions.Storage.SmallFoodCapacity));
 
         _worldView = GetNode<WorldView>("WorldView");
+        _minimap = GetNode<MinimapView>("Interface/RightHud/MinimapFrame/Minimap");
         _camera = GetNode<Camera2D>("Camera2D");
         _status = GetNode<Label>("Interface/TopBar/Controls/Status");
+        _clock = GetNode<Label>("Interface/Calendar/Controls/Clock");
+        _seasonName = GetNode<Label>("Interface/Calendar/Controls/SeasonName");
+        _seasonProgress = GetNode<SeasonCycleView>("Interface/Calendar/Controls/Season");
         _inspector = GetNode<Label>("Interface/Inspector/Text");
         _buildMenu = GetNode<PopupPanel>("BuildMenu");
         _workMenu = GetNode<PopupPanel>("WorkMenu");
@@ -132,8 +140,12 @@ public partial class Main : Node
         _storagePullLoose.Toggled += enabled => _storageTarget.Editable = enabled;
         GetNode<Button>("StorageDetails/Margin/Controls/Apply").Pressed += ApplyStorageSettings;
         _worldView.SetWorld(_engine);
+        _minimap.SetWorld(_engine);
         _worldView.SetSimulationSpeed(_speed, SecondsPerTick);
+        _minimap.NavigationRequested += CenterCameraOn;
+        GetViewport().SizeChanged += ConstrainCameraToMap;
         _camera.Position = _worldView.CellToWorld(map.GoblinSpawn);
+        ConstrainCameraToMap();
 
         BindButton("Pause", 0);
         BindButton("Speed1", 1);
@@ -145,15 +157,15 @@ public partial class Main : Node
         ConfigureActionButton("Speed2", UiIcon.Faster, "Przyspieszenie • klawisz 2 • 2×");
         ConfigureActionButton("Speed4", UiIcon.Fastest, "Przyspieszenie • klawisz 3 • 4×");
         ConfigureActionButton("Speed8", UiIcon.Fastest, "Maksymalne przyspieszenie • klawisz 4 • 8×");
-        GetNode<Button>("Interface/TopBar/Controls/Speed8").Icon = UiIcons.LoadSpeed8Texture();
+        GetToolbarButton("Speed8").Icon = UiIcons.LoadSpeed8Texture();
         ConfigureActionButton("Build", UiIcon.Build, "Budowanie");
         ConfigureActionButton("Work", UiIcon.Work, "Zlecenia pracy");
         ConfigureActionButton("Raid", UiIcon.Expedition, "Przygotuj najazd na wieś");
-        GetNode<Button>("Interface/TopBar/Controls/Build").Pressed += () =>
+        GetToolbarButton("Build").Pressed += () =>
             ShowBuildMenu(GetViewport().GetMousePosition());
-        GetNode<Button>("Interface/TopBar/Controls/Work").Pressed += () =>
+        GetToolbarButton("Work").Pressed += () =>
             ShowWorkMenu(GetViewport().GetMousePosition());
-        GetNode<Button>("Interface/TopBar/Controls/Raid").Pressed += OrderVillageRaid;
+        GetToolbarButton("Raid").Pressed += OrderVillageRaid;
         UpdateSpeedButtons();
         UpdateStatus();
     }
@@ -178,7 +190,9 @@ public partial class Main : Node
         if (changed)
         {
             HandleEvents(_engine.DrainEvents());
-            _worldView.Refresh(_engine.CreateSnapshot());
+            var snapshot = _engine.CreateSnapshot();
+            _worldView.Refresh(snapshot);
+            _minimap.Refresh(snapshot);
             UpdateStatus();
         }
     }
@@ -214,17 +228,14 @@ public partial class Main : Node
                 GetViewport().SetInputAsHandled();
                 break;
             case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.WheelUp }:
-                _camera.Zoom = (_camera.Zoom * 1.15f).Clamp(
-                    new Vector2(0.35f, 0.35f),
-                    new Vector2(3.5f, 3.5f));
+                ChangeCameraZoom(1.15f);
                 break;
             case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.WheelDown }:
-                _camera.Zoom = (_camera.Zoom / 1.15f).Clamp(
-                    new Vector2(0.35f, 0.35f),
-                    new Vector2(3.5f, 3.5f));
+                ChangeCameraZoom(1f / 1.15f);
                 break;
             case InputEventMouseMotion mouse when _isPanningCamera:
                 _camera.Position -= mouse.Relative / _camera.Zoom;
+                ConstrainCameraToMap();
                 _rightDragDistance += mouse.Relative.Length();
                 GetViewport().SetInputAsHandled();
                 break;
@@ -329,7 +340,7 @@ public partial class Main : Node
 
     private void ConfigureActionButton(string name, UiIcon icon, string tooltip)
     {
-        var button = GetNode<Button>($"Interface/TopBar/Controls/{name}");
+        var button = GetToolbarButton(name);
         button.Text = string.Empty;
         button.Icon = UiIcons.CreateTexture(_iconAtlas, icon);
         button.ExpandIcon = true;
@@ -978,6 +989,7 @@ public partial class Main : Node
         ActorJobKind.BuildConstruction => $"buduje ({job.RemainingWorkTicks})",
         ActorJobKind.Rest when job.Phase == ActorJobPhase.Traveling => $"idzie odpocząć → {job.Target}",
         ActorJobKind.Rest => $"odpoczywa ({job.RemainingWorkTicks})",
+        ActorJobKind.Collapsed => $"padł ze zmęczenia i śpi na ziemi ({job.RemainingWorkTicks})",
         ActorJobKind.Eat when job.Phase == ActorJobPhase.Traveling => $"idzie coś zjeść → {job.Target}",
         ActorJobKind.Eat => $"je ({job.RemainingWorkTicks})",
         ActorJobKind.Explore => $"odkrywa teren → {job.Target}",
@@ -1296,10 +1308,71 @@ public partial class Main : Node
         if (Input.IsKeyPressed(Key.W)) direction.Y -= 1;
         if (Input.IsKeyPressed(Key.S)) direction.Y += 1;
         _camera.Position += direction.Normalized() * (float)(520 * delta / _camera.Zoom.X);
+        ConstrainCameraToMap();
     }
 
+    private void CenterCameraOn(GridPosition position)
+    {
+        _camera.Position = _worldView.CellToWorld(position);
+        ConstrainCameraToMap();
+    }
+
+    private void ChangeCameraZoom(float factor)
+    {
+        var minimumZoom = GetMinimumCameraZoom();
+        var maximumZoom = Math.Max(3.5f, minimumZoom);
+        var zoom = Math.Clamp(_camera.Zoom.X * factor, minimumZoom, maximumZoom);
+        _camera.Zoom = Vector2.One * zoom;
+        ConstrainCameraToMap();
+    }
+
+    private void ConstrainCameraToMap()
+    {
+        var worldSize = _worldView.WorldSize;
+        var viewportSize = GetViewport().GetVisibleRect().Size;
+        if (worldSize.X <= 0f || worldSize.Y <= 0f || viewportSize.X <= 0f || viewportSize.Y <= 0f)
+        {
+            return;
+        }
+
+        var minimumZoom = GetMinimumCameraZoom();
+        if (_camera.Zoom.X < minimumZoom)
+        {
+            _camera.Zoom = Vector2.One * minimumZoom;
+        }
+
+        var visibleWorldSize = viewportSize / _camera.Zoom;
+        var halfView = visibleWorldSize / 2f;
+        _camera.Position = new Vector2(
+            ConstrainCameraAxis(_camera.Position.X, halfView.X, worldSize.X),
+            ConstrainCameraAxis(_camera.Position.Y, halfView.Y, worldSize.Y));
+        _minimap.SetCameraView(_camera.Position / worldSize, visibleWorldSize / worldSize);
+    }
+
+    private float GetMinimumCameraZoom()
+    {
+        var worldSize = _worldView.WorldSize;
+        var viewportSize = GetViewport().GetVisibleRect().Size;
+        return worldSize.X <= 0f || worldSize.Y <= 0f
+            ? 1f
+            : Math.Max(viewportSize.X / worldSize.X, viewportSize.Y / worldSize.Y);
+    }
+
+    private static float ConstrainCameraAxis(float center, float halfView, float worldExtent) =>
+        halfView * 2f >= worldExtent
+            ? worldExtent / 2f
+            : Math.Clamp(center, halfView, worldExtent - halfView);
+
     private void BindButton(string name, int speed) =>
-        GetNode<Button>($"Interface/TopBar/Controls/{name}").Pressed += () => SetSpeed(speed);
+        GetToolbarButton(name).Pressed += () => SetSpeed(speed);
+
+    private Button GetToolbarButton(string name)
+    {
+        var parent = name is "Pause" or "Speed1" or "Speed2" or "Speed4" or "Speed8"
+            ? "Interface/RightHud/SpeedPanel/Controls"
+            : "Interface/ActionBar/Controls";
+        return GetNode<Button>($"{parent}/{name}");
+    }
 
     private void OrderVillageRaid()
     {
@@ -1350,7 +1423,7 @@ public partial class Main : Node
         };
         foreach (var state in states)
         {
-            var button = GetNode<Button>($"Interface/TopBar/Controls/{state.Name}");
+            var button = GetToolbarButton(state.Name);
             button.ToggleMode = true;
             button.ButtonPressed = state.Speed == _speed;
             button.SelfModulate = state.Speed == _speed
@@ -1389,6 +1462,7 @@ public partial class Main : Node
     private void UpdateStatus()
     {
         var snapshot = _engine.CreateSnapshot();
+        UpdateCalendar(snapshot);
         if (_selectedActorId != EntityId.None &&
             snapshot.Actors.All(actor => actor.Id != _selectedActorId))
         {
@@ -1467,5 +1541,27 @@ public partial class Main : Node
         {
             _status.Text += "  •  wieś odkryta";
         }
+    }
+
+    private void UpdateCalendar(SimulationSnapshot snapshot)
+    {
+        var calendar = SimulationCalendar.At(snapshot.Tick, _engine.Definitions.Clock);
+        var seasonName = calendar.Season switch
+        {
+            SeasonKind.Spring => "Wiosna",
+            SeasonKind.Summer => "Lato",
+            SeasonKind.Autumn => "Jesień",
+            SeasonKind.Winter => "Zima",
+            _ => throw new ArgumentOutOfRangeException(),
+        };
+        _clock.Text = $"{calendar.Hour:00}:{calendar.Minute:00} • dzień {calendar.DayOfSeason}";
+        _clock.TooltipText = calendar.IsNight
+            ? "Noc • gobliny widzą słabiej, ludzie korzystają z latarni"
+            : "Dzień";
+        _seasonName.Text = seasonName;
+        var season = _engine.Definitions.Clock.Climate.GetSeason(calendar.Season);
+        _seasonProgress.SetCalendar(_engine.Definitions.Clock.Climate, calendar);
+        _seasonProgress.TooltipText =
+            $"{seasonName} • dzień {calendar.DayOfSeason}/{season.Days} • strefa {_engine.Definitions.Clock.Climate.Id}";
     }
 }

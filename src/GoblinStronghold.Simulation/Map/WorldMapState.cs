@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using GoblinStronghold.Simulation;
 
 namespace GoblinStronghold.Simulation.Map;
 
@@ -571,13 +572,27 @@ public sealed class WorldMapState
 
     internal IReadOnlyList<WorldChangeEvent> GrowPlants(
         SimulationTick tick,
-        int growthPerPatch)
+        int growthPerPatch,
+        SeasonKind season)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(growthPerPatch);
 
         var changes = new List<WorldChangeEvent>();
         foreach (var patch in _plantPatches.Values)
         {
+            var canGrow = patch.Kind switch
+            {
+                PlantKind.BerryBush => season == SeasonKind.Summer,
+                PlantKind.MushroomCluster => season is SeasonKind.Spring or SeasonKind.Autumn,
+                PlantKind.EdibleRoots => season is not SeasonKind.Winter,
+                PlantKind.FishShoal => true,
+                _ => false,
+            };
+            if (!canGrow)
+            {
+                continue;
+            }
+
             var growthMultiplier = patch.Kind is PlantKind.MushroomCluster or PlantKind.FishShoal
                 ? 2
                 : 1;

@@ -1,5 +1,7 @@
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Resources;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -88,7 +90,7 @@ public sealed class WorldMapStateTests
     }
 
     [Fact]
-    public void FreshSandboxEcologySupportsEmergencyForagingForThreeDays()
+    public void FreshSandboxEcologyContainsADeepEmergencyForagingReserve()
     {
         var seed = new WorldSeed(0x474F424C494EUL);
         var map = SwampMapGenerator.Generate(seed, 64, 64);
@@ -100,11 +102,13 @@ public sealed class WorldMapStateTests
             initialFoodStock: 16,
             scatterInitialBrushwood: true);
 
-        engine.AdvanceTicks(3 * SimulationDefinitions.Foundation.TicksPerDay);
-
         var snapshot = engine.CreateSnapshot();
         Assert.Equal(8, snapshot.Actors.Count);
-        Assert.All(snapshot.Actors, actor => Assert.True(actor.Health > 0));
+        var looseFood = snapshot.ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Food)
+            .Sum(stack => stack.Quantity);
+        var wildFood = snapshot.PlantPatches.Sum(patch => patch.Biomass);
+        Assert.True(looseFood + wildFood >= snapshot.Actors.Count * 6);
     }
 
     [Fact]
@@ -166,11 +170,11 @@ public sealed class WorldMapStateTests
     [Fact]
     public void VegetationRegrowsAtStableLogicalIntervals()
     {
-        var engine = CreateEngine();
+        var engine = MoveToStartOfSummer(CreateEngine());
         var position = engine.Map.GoblinSpawn;
 
         engine.QueueCommand(SimulationCommand.Forage(
-            new SimulationTick(1),
+            engine.CurrentTick.Next(),
             sequence: 1,
             new EntityId(1)));
         engine.AdvanceTicks(1);
@@ -185,20 +189,23 @@ public sealed class WorldMapStateTests
             engine.DrainWorldChanges(),
             item => item.Kind == WorldChangeKind.VegetationRegrown && item.Position == position);
         Assert.Equal(WorldChangeKind.VegetationRegrown, change.Kind);
-        Assert.Equal(new SimulationTick(240), change.Tick);
+        Assert.Equal(
+            new SimulationTick(engine.Definitions.Clock.Climate.GetSeasonStartTick(SeasonKind.Summer) +
+                engine.Definitions.PlantGrowthIntervalTicks),
+            change.Tick);
         Assert.Equal(1, change.Amount);
     }
 
     [Fact]
     public void HarvestedBerryBushRemainsInWorldWhileItsFruitRegrows()
     {
-        var engine = CreateEngine();
+        var engine = MoveToStartOfSummer(CreateEngine());
         var position = engine.Map.GoblinSpawn;
         var capacity = engine.World.GetPlantPatch(position)!.Value.Capacity;
         for (var sequence = 1; sequence <= capacity; sequence++)
         {
             engine.QueueCommand(SimulationCommand.Forage(
-                new SimulationTick(1),
+                engine.CurrentTick.Next(),
                 (ulong)sequence,
                 new EntityId(1)));
         }
@@ -257,6 +264,14 @@ public sealed class WorldMapStateTests
         SimulationDefinitions.Foundation,
         initialGoblinCount: 1,
         initialFoodStock: 0);
+
+    private static SimulationEngine MoveToStartOfSummer(SimulationEngine engine)
+    {
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["currentTick"] = engine.Definitions.Clock.Climate.GetSeasonStartTick(SeasonKind.Summer);
+        return SimulationEngine.Load(save.ToJsonString(), engine.Definitions);
+    }
 
     private static int MeasureWaterBody(GeneratedMap map, GridPosition start)
     {

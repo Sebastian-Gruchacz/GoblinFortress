@@ -15,9 +15,18 @@ public sealed partial class SimulationEngine
         var reservedDestinationQuantities = CreateHaulReservations(sourceReservations: false);
         var reservedConstructionQuantities = CreateConstructionReservations();
         var activeExplorers = _actors.Values.Count(actor => actor.JobKind == ActorJobKind.Explore);
+        var raidPartyIds = _raidPhase == GoblinRaidPhase.Preparing
+            ? GetRaidParty().Select(actor => actor.Id).ToHashSet()
+            : [];
 
         foreach (var actor in _actors.Values)
         {
+            if (actor.JobKind == ActorJobKind.Collapsed)
+            {
+                UpdateCollapsedJob(actor);
+                continue;
+            }
+
             TryInterruptForWater(
                 actor,
                 reservedForageTargets,
@@ -38,12 +47,13 @@ public sealed partial class SimulationEngine
                 var needsFood = actor.Hunger >= Definitions.FoodSeekThreshold;
                 var needsWater = actor.Thirst >= Definitions.DrinkThreshold && actor.PersonalWater == 0;
                 if (_raidPhase == GoblinRaidPhase.Preparing &&
+                    raidPartyIds.Contains(actor.Id) &&
                     TryPlanRaidPreparation(
                         actor,
                         reservedSourceQuantities,
                         reservedDestinationQuantities))
                 {
-                    // The expedition assembles only after every member is rested and provisioned.
+                    // The camp prepares one bounded expedition while the rest of the tribe keeps working.
                 }
                 else if (needsWater && TryPlanWaterResupply(actor))
                 {
@@ -149,6 +159,9 @@ public sealed partial class SimulationEngine
                 case ActorJobKind.BuildConstruction:
                     UpdateConstructionBuildJob(actor);
                     break;
+                case ActorJobKind.Collapsed:
+                    UpdateCollapsedJob(actor);
+                    break;
             }
         }
 
@@ -201,7 +214,8 @@ public sealed partial class SimulationEngine
         }
         var campZone = _storageZones.Values.FirstOrDefault(zone =>
             zone.Position == _raidRallyPoint && zone.AcceptedResource == ResourceKind.Food);
-        var outstandingPartyFood = _actors.Values.Sum(candidate =>
+        var raidParty = GetRaidParty();
+        var outstandingPartyFood = raidParty.Sum(candidate =>
             Math.Max(0, foodTarget - candidate.PersonalFood) +
             (candidate.Hunger >= Definitions.FoodSeekThreshold ? 1 : 0));
         var requiredCampStock = outstandingPartyFood;
@@ -232,15 +246,16 @@ public sealed partial class SimulationEngine
 
     private void TryLaunchPreparedRaid()
     {
-        if (_raidPhase != GoblinRaidPhase.Preparing || _actors.Count == 0 ||
-            _actors.Values.Any(actor =>
+        var raidParty = GetRaidParty();
+        if (_raidPhase != GoblinRaidPhase.Preparing || raidParty.Count == 0 ||
+            raidParty.Any(actor =>
                 actor.Position != _raidRallyPoint ||
                 actor.JobKind != ActorJobKind.None ||
                 actor.CarriedStackId != EntityId.None ||
                 actor.PersonalFood < Definitions.PersonalFoodCapacity ||
                 actor.PersonalWater < Definitions.PersonalWaterCapacity ||
                 actor.Hunger >= Definitions.FoodSeekThreshold ||
-                actor.Thirst > Definitions.DrinkThreshold / 2 ||
+                actor.Thirst >= Definitions.DrinkThreshold ||
                 actor.Fatigue >= Definitions.RestThreshold))
         {
             return;
@@ -248,7 +263,7 @@ public sealed partial class SimulationEngine
 
         _raidPhase = GoblinRaidPhase.Marching;
         _humanVillage.OrderGoblinAttack();
-        foreach (var actor in _actors.Values)
+        foreach (var actor in raidParty)
         {
             var route = World.FindSurfacePath(actor.Position, Map.HumanVillage);
             if (route is not { Count: > 0 })
@@ -261,8 +276,13 @@ public sealed partial class SimulationEngine
             actor.RemainingRoute.AddRange(route);
             Publish(SimulationEventKind.MoveOrdered, actor.Id, EntityId.None, route.Count);
         }
-        Publish(SimulationEventKind.RaidDeparted, EntityId.None, EntityId.None, _actors.Count);
+        Publish(SimulationEventKind.RaidDeparted, EntityId.None, EntityId.None, raidParty.Count);
     }
+
+    private List<ActorState> GetRaidParty() => _actors.Values
+        .OrderBy(actor => actor.Id.Value)
+        .Take(SimulationDefinitions.FieldCampCapacity)
+        .ToList();
 
     private bool TryPlanExploreJob(ActorState actor)
     {
@@ -532,6 +552,19 @@ public sealed partial class SimulationEngine
             actor.ClearJob();
             TryResumeSuspendedJob(actor);
         }
+    }
+
+    private void UpdateCollapsedJob(ActorState actor)
+    {
+        actor.Fatigue = Math.Max(0, actor.Fatigue - Definitions.RestRecoveryPerTick);
+        actor.RemainingWorkTicks = GetRestWorkTicks(actor);
+        if (actor.Fatigue > 0)
+        {
+            return;
+        }
+
+        actor.ClearJob();
+        TryResumeSuspendedJob(actor);
     }
 
     private bool TryResumeSuspendedJob(ActorState actor)
@@ -1754,11 +1787,28 @@ public sealed partial class SimulationEngine
             case ActorJobKind.BuildConstruction:
                 ValidateLoadedConstructionBuildJob(actor);
                 break;
+            case ActorJobKind.Collapsed:
+                ValidateLoadedCollapsedJob(actor);
+                break;
             default:
                 throw new InvalidDataException("The save contains an unsupported actor job.");
         }
 
         ValidateLoadedJobExecution(actor);
+    }
+
+    private static void ValidateLoadedCollapsedJob(ActorState actor)
+    {
+        if (actor.JobPhase != ActorJobPhase.Working ||
+            actor.JobStage != ActorJobStage.None ||
+            actor.Position != actor.JobTarget ||
+            actor.CarriedStackId != EntityId.None ||
+            actor.SourceStackId != EntityId.None ||
+            actor.DestinationZoneId != EntityId.None ||
+            actor.ReservedQuantity != 0)
+        {
+            throw new InvalidDataException("The save contains an invalid collapsed actor job.");
+        }
     }
 
     private void ValidateLoadedForageJob(ActorState actor)
@@ -1961,6 +2011,7 @@ public sealed partial class SimulationEngine
             ActorJobKind.BuildConstruction when
                 _constructionSites.TryGetValue(actor.DestinationZoneId, out var site) =>
                 site.TotalWorkTicks,
+            ActorJobKind.Collapsed => GetMaximumRestWorkTicks(),
             _ => 0,
         };
         if (actor.JobPhase == ActorJobPhase.Working)
@@ -2057,6 +2108,7 @@ public sealed partial class SimulationEngine
         ActorJobKind.BuildConstruction when
             _constructionSites.TryGetValue(actor.DestinationZoneId, out var site) =>
             site.RemainingWorkTicks,
+        ActorJobKind.Collapsed => GetRestWorkTicks(actor),
         _ => throw new InvalidOperationException("An idle actor cannot begin work."),
     };
 

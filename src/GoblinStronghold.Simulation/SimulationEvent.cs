@@ -27,6 +27,7 @@ public enum SimulationEventKind
     RaidDeparted = 23,
     ConstructionOrdered = 24,
     ConstructionMaterialDelivered = 25,
+    ActorCollapsed = 26,
 }
 
 public readonly record struct SimulationEvent(

@@ -61,11 +61,15 @@ public sealed class SurvivalNeedTests
     {
         var seed = new WorldSeed(0x52455354UL);
         var map = SwampMapGenerator.Generate(seed, width: 32, height: 32);
-        return SimulationEngine.Create(
+        var engine = SimulationEngine.Create(
             seed,
             SimulationDefinitions.Foundation,
             map,
             initialGoblinCount: 1,
             initialFoodStock: 0);
+        var save = System.Text.Json.Nodes.JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["actors"]![0]!["fatigue"] = SimulationDefinitions.Foundation.RestThreshold;
+        return SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
     }
 }

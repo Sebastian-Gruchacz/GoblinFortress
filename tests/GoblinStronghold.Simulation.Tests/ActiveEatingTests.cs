@@ -8,11 +8,11 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class ActiveEatingTests
 {
     [Theory]
-    [InlineData(FoodKind.Berries, 1_800)]
-    [InlineData(FoodKind.Mushrooms, 2_200)]
-    [InlineData(FoodKind.EdibleRoots, 2_800)]
-    [InlineData(FoodKind.Fish, 3_200)]
-    [InlineData(FoodKind.DriedRations, 3_600)]
+    [InlineData(FoodKind.Berries, 2_800)]
+    [InlineData(FoodKind.Mushrooms, 3_400)]
+    [InlineData(FoodKind.EdibleRoots, 4_200)]
+    [InlineData(FoodKind.Fish, 4_800)]
+    [InlineData(FoodKind.DriedRations, 5_700)]
     public void FoodKindsRestoreTheirConfiguredSatiety(FoodKind foodKind, int expectedSatiety)
     {
         var engine = CreateEngine(goblinCount: 1, initialFood: 1, initialHunger: 6_500);

@@ -9,7 +9,15 @@ public sealed partial class SimulationEngine
         var intruders = _actors.Values
             .Select(actor => new HumanIntruderSnapshot(actor.Id, actor.Position))
             .ToArray();
-        var result = _humanVillage.Update(CurrentTick, WorldSeed, World, Definitions, intruders);
+        var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
+        var detectionRadius = calendar.IsNight ? 3 : Definitions.HumanDetectionRadius;
+        var result = _humanVillage.Update(
+            CurrentTick,
+            WorldSeed,
+            World,
+            Definitions,
+            intruders,
+            detectionRadius);
         foreach (var worldChange in result.WorldChanges)
         {
             _undeliveredWorldChanges.Add(worldChange);

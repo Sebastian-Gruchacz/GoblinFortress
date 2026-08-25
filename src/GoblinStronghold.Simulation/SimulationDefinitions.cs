@@ -1,7 +1,5 @@
 namespace GoblinStronghold.Simulation;
 
-public sealed record SimulationClockSettings(int TicksPerDay);
-
 public sealed record ActorNeedSettings(
     int MaximumHunger,
     int HungerPerTick,
@@ -45,28 +43,28 @@ public sealed record FoodNutritionSettings(
 public sealed class SimulationDefinitions
 {
     public static SimulationDefinitions Foundation { get; } = new(
-        id: "foundation-v26",
-        ticksPerDay: 240,
-        maximumHunger: 10_000,
-        hungerPerTick: 8,
-        eatThreshold: 3_200,
-        foodNutrition: 3_600,
-        foodSeekThreshold: 4_000,
-        criticalHungerThreshold: 7_500,
+        id: "foundation-v28",
+        clock: new(ClimateCalendarProfiles.DemoTemperate),
+        maximumHunger: 114_000,
+        hungerPerTick: 1,
+        eatThreshold: 5_700,
+        foodNutrition: 5_700,
+        foodSeekThreshold: 5_000,
+        criticalHungerThreshold: 85_500,
         eatWorkTicks: 10,
         maximumHealth: 10_000,
-        starvationHungerThreshold: 9_500,
-        starvationDamagePerTick: 8,
+        starvationHungerThreshold: 104_000,
+        starvationDamagePerTick: 1,
         baseForageYield: 2,
         forageVariance: 3,
         actorCarryCapacity: 10,
         actorMovementIntervalTicks: 10,
         forageWorkTicks: 30,
         haulHandlingTicks: 10,
-        maximumFatigue: 10_000,
-        fatiguePerTick: 5,
-        restThreshold: 2_000,
-        restRecoveryPerTick: 75,
+        maximumFatigue: 17_100,
+        fatiguePerTick: 1,
+        restThreshold: 10_000,
+        restRecoveryPerTick: 3,
         visionRadius: 4,
         maximumExplorers: 1,
         plantGrowthIntervalTicks: 240,
@@ -80,23 +78,25 @@ public sealed class SimulationDefinitions
         humanGuardDamageVariance: 180,
         goblinMinimumDamage: 260,
         goblinDamageVariance: 160,
-        maximumThirst: 10_000,
-        thirstPerTick: 10,
-        drinkThreshold: 3_000,
-        waterHydration: 3_500,
-        dehydrationThirstThreshold: 9_500,
-        dehydrationDamagePerTick: 12,
+        maximumThirst: 34_200,
+        thirstPerTick: 1,
+        drinkThreshold: 5_700,
+        waterHydration: 5_700,
+        dehydrationThirstThreshold: 24_200,
+        dehydrationDamagePerTick: 1,
         personalFoodCapacity: 2,
         personalWaterCapacity: 2,
         resupplyWorkTicks: 10,
-        berriesNutrition: 1_800,
-        mushroomsNutrition: 2_200,
-        edibleRootsNutrition: 2_800,
-        fishNutrition: 3_200);
+        berriesNutrition: 2_800,
+        mushroomsNutrition: 3_400,
+        edibleRootsNutrition: 4_200,
+        fishNutrition: 4_800);
+
+    public const int FieldCampCapacity = 5;
 
     public SimulationDefinitions(
         string id,
-        int ticksPerDay,
+        SimulationClockSettings clock,
         int maximumHunger,
         int hungerPerTick,
         int eatThreshold,
@@ -145,7 +145,7 @@ public sealed class SimulationDefinitions
         int fishNutrition = 3_200)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ticksPerDay);
+        ArgumentNullException.ThrowIfNull(clock);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumHunger);
         ArgumentOutOfRangeException.ThrowIfNegative(hungerPerTick);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(eatThreshold);
@@ -201,7 +201,7 @@ public sealed class SimulationDefinitions
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fishNutrition);
 
         Id = id;
-        TicksPerDay = ticksPerDay;
+        Clock = clock;
         MaximumHunger = maximumHunger;
         HungerPerTick = hungerPerTick;
         EatThreshold = eatThreshold;
@@ -244,7 +244,6 @@ public sealed class SimulationDefinitions
         PersonalFoodCapacity = personalFoodCapacity;
         PersonalWaterCapacity = personalWaterCapacity;
         ResupplyWorkTicks = resupplyWorkTicks;
-        Clock = new(TicksPerDay);
         Needs = new(
             MaximumHunger, HungerPerTick, EatThreshold, FoodSeekThreshold,
             CriticalHungerThreshold, StarvationHungerThreshold, StarvationDamagePerTick,
@@ -269,8 +268,6 @@ public sealed class SimulationDefinitions
     public StorageSettings Storage { get; }
 
     public FoodNutritionSettings Food { get; }
-
-    public int TicksPerDay { get; }
 
     public int MaximumHunger { get; }
 

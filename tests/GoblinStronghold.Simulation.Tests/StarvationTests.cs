@@ -10,12 +10,14 @@ public sealed class StarvationTests
     [Fact]
     public void StarvationDamagesHealthAndEventuallyKillsActor()
     {
-        var engine = CreateEngine(initialHunger: 10_000, initialHealth: 100);
+        var engine = CreateEngine(
+            initialHunger: SimulationDefinitions.Foundation.StarvationHungerThreshold,
+            initialHealth: 3);
 
         engine.AdvanceTicks(1);
-        Assert.Equal(92, Assert.Single(engine.CreateSnapshot().Actors).Health);
+        Assert.Equal(2, Assert.Single(engine.CreateSnapshot().Actors).Health);
 
-        engine.AdvanceTicks(12);
+        engine.AdvanceTicks(2);
 
         Assert.Empty(engine.CreateSnapshot().Actors);
         Assert.Contains(
@@ -26,7 +28,9 @@ public sealed class StarvationTests
     [Fact]
     public void DeathCancelsFutureCommandsAndLeavesLoadableState()
     {
-        var engine = CreateEngine(initialHunger: 10_000, initialHealth: 8);
+        var engine = CreateEngine(
+            initialHunger: SimulationDefinitions.Foundation.StarvationHungerThreshold,
+            initialHealth: 1);
         engine.QueueCommand(SimulationCommand.Forage(
             new SimulationTick(10),
             sequence: 1,

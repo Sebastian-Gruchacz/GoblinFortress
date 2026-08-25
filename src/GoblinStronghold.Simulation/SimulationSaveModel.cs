@@ -6,6 +6,8 @@ internal sealed class SimulationSaveModel
 
     public string DefinitionsId { get; set; } = string.Empty;
 
+    public string ClimateProfileId { get; set; } = string.Empty;
+
     public ulong WorldSeed { get; set; }
 
     public int MapGeneratorVersion { get; set; }

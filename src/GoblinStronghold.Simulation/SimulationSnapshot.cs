@@ -17,6 +17,7 @@ public enum ActorJobKind : byte
     ClearVegetation = 8,
     SupplyConstruction = 9,
     BuildConstruction = 10,
+    Collapsed = 11,
 }
 
 public enum ActorJobStage : byte

@@ -154,16 +154,18 @@ internal sealed class HumanVillageState
 
     public HumanVillageUpdateResult Update(
         SimulationTick tick, WorldSeed worldSeed, WorldMapState world,
-        SimulationDefinitions definitions, IReadOnlyList<HumanIntruderSnapshot> intruders)
+        SimulationDefinitions definitions, IReadOnlyList<HumanIntruderSnapshot> intruders,
+        int detectionRadius)
     {
         IReadOnlyList<WorldChangeEvent> worldChanges = [];
-        if (tick.Value % definitions.TicksPerDay == 0)
+        var calendar = SimulationCalendar.At(tick, definitions.Clock);
+        if (calendar.IsDayStart)
         {
-            worldChanges = AdvanceDay(tick, world, definitions);
+            worldChanges = AdvanceDay(tick, calendar.AbsoluteDay, world, definitions);
         }
 
         var nearby = intruders.Where(item => _cohorts.Values.Any(cohort => cohort.Population > 0 &&
-                Distance(item.Position, cohort.Position) <= definitions.HumanDetectionRadius))
+                Distance(item.Position, cohort.Position) <= detectionRadius))
             .OrderBy(item => Distance(item.Position, Anchor)).ThenBy(item => item.Id).ToArray();
         var wasPeaceful = Hostility == 0;
         if (nearby.Length > 0)
@@ -238,6 +240,7 @@ internal sealed class HumanVillageState
 
     private IReadOnlyList<WorldChangeEvent> AdvanceDay(
         SimulationTick tick,
+        int absoluteDay,
         WorldMapState world,
         SimulationDefinitions definitions)
     {
@@ -275,8 +278,7 @@ internal sealed class HumanVillageState
             }
         }
 
-        var day = tick.Value / definitions.TicksPerDay;
-        if (_fields.Count < PlannedFieldCount && day % 5 == 0)
+        if (_fields.Count < PlannedFieldCount && absoluteDay % 5 == 0)
         {
             var position = FindNextFieldPosition(world, definitions.HumanVillageActivityRadius);
             if (position is { } fieldPosition)
@@ -309,7 +311,7 @@ internal sealed class HumanVillageState
                 worldChanges.Add(storehouseChange);
             }
         }
-        else if (WoodStock >= StorehouseWoodCost + 2 && day % 7 == 0)
+        else if (WoodStock >= StorehouseWoodCost + 2 && absoluteDay % 7 == 0)
         {
             WoodStock -= 2;
             GoodsStock++;

@@ -61,6 +61,17 @@ public sealed class WorldVisibilityState
     {
         ArgumentNullException.ThrowIfNull(observers);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(radius);
+        Reveal(observers.Select(observer => (observer, radius)));
+    }
+
+    internal void Reveal(IEnumerable<(GridPosition Position, int Radius)> observers)
+    {
+        ArgumentNullException.ThrowIfNull(observers);
+        var observerArray = observers.ToArray();
+        if (observerArray.Any(observer => observer.Radius <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(observers));
+        }
 
         for (var index = 0; index < _cells.Length; index++)
         {
@@ -70,9 +81,9 @@ public sealed class WorldVisibilityState
             }
         }
 
-        var radiusSquared = checked(radius * radius);
-        foreach (var observer in observers)
+        foreach (var (observer, radius) in observerArray)
         {
+            var radiusSquared = checked(radius * radius);
             for (var y = observer.Y - radius; y <= observer.Y + radius; y++)
             {
                 for (var x = observer.X - radius; x <= observer.X + radius; x++)

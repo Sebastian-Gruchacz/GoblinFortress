@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -25,7 +26,7 @@ public sealed class HumanVillageTests
     {
         var engine = CreateEngine();
 
-        engine.AdvanceTicks(engine.Definitions.TicksPerDay - 1);
+        engine = JumpToNextDayBoundary(engine);
         var beforeDayBoundary = engine.CreateSnapshot().HumanVillage;
         Assert.Equal(48, beforeDayBoundary.FoodStock);
         Assert.Equal(24, beforeDayBoundary.WoodStock);
@@ -49,18 +50,18 @@ public sealed class HumanVillageTests
         Assert.Equal(8, initial.PlannedFieldCount);
         Assert.All(initial.Fields, field => Assert.Null(engine.World.GetPlantPatch(field.Position)));
 
-        engine.AdvanceTicks(engine.Definitions.TicksPerDay * 20);
+        engine = AdvanceVillageDays(engine, 20);
         var expanded = engine.CreateSnapshot().HumanVillage;
         Assert.Equal(expanded.PlannedFieldCount, expanded.Fields.Count);
         Assert.True(expanded.WoodStock > initial.WoodStock);
         Assert.DoesNotContain(expanded.Fields, field => field.Phase == HumanFieldPhase.Ripe);
         Assert.All(expanded.Fields, field => Assert.Null(engine.World.GetPlantPatch(field.Position)));
 
-        engine.AdvanceTicks(engine.Definitions.TicksPerDay * 100);
+        engine = AdvanceVillageDays(engine, 100);
         Assert.Contains(engine.CreateSnapshot().HumanVillage.Fields,
             field => field.Phase == HumanFieldPhase.Ripe);
 
-        engine.AdvanceTicks(engine.Definitions.TicksPerDay);
+        engine = AdvanceVillageDays(engine, 1);
         var harvested = engine.CreateSnapshot();
         Assert.Equal(1, harvested.HumanVillage.StorehouseCount);
         var storehouse = Assert.Single(harvested.WorldObjects,
@@ -129,5 +130,26 @@ public sealed class HumanVillageTests
             map,
             initialGoblinCount: 1,
             initialFoodStock: 0);
+    }
+
+    private static SimulationEngine AdvanceVillageDays(SimulationEngine engine, int days)
+    {
+        for (var day = 0; day < days; day++)
+        {
+            engine = JumpToNextDayBoundary(engine);
+            engine.AdvanceTicks(1);
+        }
+        return engine;
+    }
+
+    private static SimulationEngine JumpToNextDayBoundary(SimulationEngine engine)
+    {
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        var nextBoundary = SimulationCalendar.NextDayStart(
+            engine.CurrentTick,
+            engine.Definitions.Clock);
+        save["currentTick"] = nextBoundary.Value - 1;
+        return SimulationEngine.Load(save.ToJsonString(), engine.Definitions);
     }
 }

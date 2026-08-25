@@ -11,6 +11,20 @@ public sealed class SimulationEngineTests
     private static readonly SimulationTick FinalTick = new(480);
 
     [Fact]
+    public void DefaultActiveMapUsesTheExpandedSixtyFourCellRegion()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x4C41524745UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+
+        Assert.Equal(64, engine.Map.Width);
+        Assert.Equal(64, engine.Map.Height);
+        Assert.True(engine.Map.LevelCount >= 4);
+    }
+
+    [Fact]
     public void GoblinProfilesAreDeterministicAndSurviveSaveLoad()
     {
         var first = SimulationEngine.Create(
@@ -231,6 +245,46 @@ public sealed class SimulationEngineTests
     }
 
     [Fact]
+    public void UndergroundStorageBlueprintKeepsItsLevelAndWaitsForThreeDimensionalAccess()
+    {
+        var seed = new WorldSeed(0x554E444552UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var caveFloor = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, -1)))
+            .First(position => map.GetCaveCell(position).Kind == CaveCellKind.Floor);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 16,
+            initialWoodStock: 8);
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            caveFloor));
+
+        engine.AdvanceTicks(200);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(caveFloor, site.Anchor);
+        Assert.All(site.Footprint, position => Assert.Equal(-1, position.Z));
+        Assert.Equal(2, Assert.Single(site.Materials).MissingQuantity);
+        Assert.DoesNotContain(engine.CreateSnapshot().Actors, actor =>
+            actor.Job.Kind is ActorJobKind.SupplyConstruction or ActorJobKind.BuildConstruction);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+
+        Assert.Throws<ArgumentException>(() => engine.QueueCommand(
+            SimulationCommand.BuildWalkway(
+                engine.CurrentTick.Next(),
+                sequence: 2,
+                caveFloor,
+                caveFloor with { X = caveFloor.X + 1 })));
+    }
+
+    [Fact]
     public void ActiveConstructionDeliveryAndWorkSurviveSaveLoadDeterministically()
     {
         var engine = SimulationEngine.Create(
@@ -388,6 +442,21 @@ public sealed class SimulationEngineTests
 
         Assert.Equal(uninterrupted.ComputeStateHash(), restored.ComputeStateHash());
         Assert.Equal(uninterrupted.DrainEvents(), restored.DrainEvents());
+    }
+
+    [Fact]
+    public void LoadedSessionExposesSequenceAfterEveryPendingCommand()
+    {
+        var engine = CreateScenario();
+        engine.QueueCommand(SimulationCommand.Move(
+            new SimulationTick(50),
+            sequence: 9_001,
+            new EntityId(1),
+            engine.Map.GoblinSpawn));
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+
+        Assert.Equal(9_002UL, restored.NextAvailableCommandSequence);
     }
 
     [Fact]

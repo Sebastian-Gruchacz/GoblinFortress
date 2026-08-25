@@ -8,7 +8,7 @@ namespace GoblinStronghold.GodotClient;
 
 public partial class Main : Node
 {
-    private readonly WorldSeed _seed = new(0x474F424C494EUL);
+    private static readonly WorldSeed InitialSeed = new(0x474F424C494EUL);
     private SimulationEngine _engine = null!;
     private WorldView _worldView = null!;
     private MinimapView _minimap = null!;
@@ -56,6 +56,14 @@ public partial class Main : Node
     private OptionButton _storageSource = null!;
     private readonly List<EntityId> _storageSourceZoneIds = [];
     private EntityId _selectedStorageId = EntityId.None;
+    private GameSaveStore _saveStore = null!;
+    private SimulationTick _nextAutosaveTick;
+    private Control _mainMenu = null!;
+    private Button _resumeGameButton = null!;
+    private Button _newGameButton = null!;
+    private Button _loadMenuButton = null!;
+    private bool _hasActiveSession;
+    private int _speedBeforeMenu = 1;
 
     private double SecondsPerTick =>
         _engine.Definitions.Clock.RealSecondsPerTickAtNormalSpeed;
@@ -80,21 +88,9 @@ public partial class Main : Node
 
     public override void _Ready()
     {
-        var map = SwampMapGenerator.Generate(_seed, 64, 64);
-        _engine = SimulationEngine.Create(
-            _seed,
-            SimulationDefinitions.Foundation,
-            map,
-            initialGoblinCount: 8,
-            initialFoodStock: 16,
-            scatterInitialBrushwood: true,
-            debugSettings: SimulationDebugSettings.ForCurrentBuild);
-        _engine.QueueCommand(SimulationCommand.CreateStorageZone(
-            new SimulationTick(1),
-            _commandSequence++,
-            map.GoblinSpawn,
-            ResourceKind.Food,
-            capacity: _engine.Definitions.Storage.SmallFoodCapacity));
+        _saveStore = new GameSaveStore(ProjectSettings.GlobalizePath("user://saves"));
+        _engine = CreateNewEngine(InitialSeed);
+        var map = _engine.Map;
 
         _worldView = GetNode<WorldView>("WorldView");
         _minimap = GetNode<MinimapView>("Interface/RightHud/MinimapFrame/Minimap");
@@ -108,6 +104,10 @@ public partial class Main : Node
         _workMenu = GetNode<PopupPanel>("WorkMenu");
         _buildMenuGrid = GetNode<GridContainer>("BuildMenu/Margin/Grid");
         _workMenuGrid = GetNode<GridContainer>("WorkMenu/Margin/Grid");
+        _mainMenu = GetNode<Control>("Interface/MainMenu");
+        _resumeGameButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Resume");
+        _newGameButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/NewGame");
+        _loadMenuButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/LoadGame");
         _iconAtlas = UiIcons.LoadAtlas();
         _itemIconAtlas = ItemIcons.LoadAtlas();
         _goblinDetails = GetNode<Window>("GoblinDetails");
@@ -156,6 +156,12 @@ public partial class Main : Node
             CloseWindowOnSecondaryInput(inputEvent, _workMenu);
         _storagePullLoose.Toggled += enabled => _storageTarget.Editable = enabled;
         GetNode<Button>("StorageDetails/Margin/Controls/Apply").Pressed += ApplyStorageSettings;
+        GetNode<Button>("Interface/RightHud/SessionPanel/Controls/Menu").Pressed += ShowMainMenu;
+        GetNode<Button>("Interface/RightHud/SessionPanel/Controls/SaveGame").Pressed += SaveGame;
+        _resumeGameButton.Pressed += ResumeGame;
+        _newGameButton.Pressed += StartNewGame;
+        _loadMenuButton.Pressed += LoadGame;
+        GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Quit").Pressed += () => GetTree().Quit();
         _worldView.SetWorld(_engine);
         _minimap.SetWorld(_engine);
         _worldView.SetSimulationSpeed(_speed, SecondsPerTick);
@@ -184,11 +190,19 @@ public partial class Main : Node
             ShowWorkMenu(GetViewport().GetMousePosition());
         GetToolbarButton("Raid").Pressed += OrderVillageRaid;
         UpdateSpeedButtons();
+        UpdateLayerToolAvailability();
+        ScheduleNextAutosave();
         UpdateStatus();
+        ShowMainMenu();
     }
 
     public override void _Process(double delta)
     {
+        if (_mainMenu.Visible)
+        {
+            return;
+        }
+
         MoveCamera(delta);
         if (_speed == 0)
         {
@@ -211,16 +225,56 @@ public partial class Main : Node
             _worldView.Refresh(snapshot);
             _minimap.Refresh(snapshot);
             UpdateStatus();
+            TryAutosave();
         }
     }
 
     public override void _UnhandledInput(InputEvent inputEvent)
     {
+        if (_mainMenu.Visible)
+        {
+            if (inputEvent is InputEventKey { Pressed: true, Echo: false } menuKey)
+            {
+                if (menuKey.AltPressed && menuKey.Keycode is Key.Enter or Key.KpEnter)
+                {
+                    ToggleFullscreen();
+                }
+                else if (menuKey.Keycode == Key.Escape && _hasActiveSession)
+                {
+                    ResumeGame();
+                }
+                else if (menuKey.Keycode == Key.F9)
+                {
+                    LoadGame();
+                }
+                else if (menuKey.CtrlPressed && menuKey.Keycode == Key.N)
+                {
+                    StartNewGame();
+                }
+            }
+
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
         switch (inputEvent)
         {
             case InputEventKey key when key.Pressed && !key.Echo && key.AltPressed &&
                 key.Keycode is Key.Enter or Key.KpEnter:
                 ToggleFullscreen();
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && key.CtrlPressed &&
+                key.Keycode == Key.N:
+                ShowMainMenu();
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.F5:
+                SaveGame();
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.F9:
+                LoadGame();
                 GetViewport().SetInputAsHandled();
                 break;
             case InputEventKey key when key.Pressed && key.Keycode == Key.Space:
@@ -241,7 +295,14 @@ public partial class Main : Node
                 GetViewport().SetInputAsHandled();
                 break;
             case InputEventKey key when key.Pressed && key.Keycode == Key.Escape:
-                CancelActiveTool();
+                if (_buildMode != BuildMode.None || _workMode != WorkMode.None)
+                {
+                    CancelActiveTool();
+                }
+                else
+                {
+                    ShowMainMenu();
+                }
                 GetViewport().SetInputAsHandled();
                 break;
             case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.WheelUp }:
@@ -320,6 +381,182 @@ public partial class Main : Node
             : "Pełny ekran w aktualnej rozdzielczości monitora • Alt+Enter wraca do okna.";
     }
 
+    private SimulationEngine CreateNewEngine(WorldSeed seed)
+    {
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 8,
+            initialFoodStock: 16,
+            scatterInitialBrushwood: true,
+            debugSettings: SimulationDebugSettings.ForCurrentBuild);
+        _commandSequence = 1;
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1),
+            _commandSequence++,
+            map.GoblinSpawn,
+            ResourceKind.Food,
+            capacity: engine.Definitions.Storage.SmallFoodCapacity));
+        return engine;
+    }
+
+    private void StartNewGame()
+    {
+        try
+        {
+            var protectedPreviousSession = _hasActiveSession;
+            if (protectedPreviousSession)
+            {
+                SaveAutosave();
+            }
+
+            var seedBytes = Guid.NewGuid().ToByteArray();
+            var seed = new WorldSeed(BitConverter.ToUInt64(seedBytes, 0));
+            ReplaceEngine(CreateNewEngine(seed));
+            _hasActiveSession = true;
+            CloseMainMenu();
+            _inspector.Text = $"Nowa gra • seed {seed.Value:X16}" +
+                (protectedPreviousSession ? " • poprzednia sesja zabezpieczona autozapisem." : ".");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _inspector.Text = $"Nie udało się rozpocząć nowej gry: {exception.Message}";
+        }
+    }
+
+    private void SaveGame()
+    {
+        if (!_hasActiveSession)
+        {
+            return;
+        }
+
+        try
+        {
+            _saveStore.SaveQuick(_engine.Save());
+            _inspector.Text = $"Gra zapisana • tick {_engine.CurrentTick.Value:N0} • quicksave.json";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _inspector.Text = $"Zapis nie powiódł się: {exception.Message}";
+        }
+    }
+
+    private void LoadGame()
+    {
+        foreach (var candidate in _saveStore.LoadNewestFirst())
+        {
+            try
+            {
+                var loaded = SimulationEngine.Load(
+                    candidate.Json,
+                    SimulationDefinitions.Foundation,
+                    SimulationDebugSettings.ForCurrentBuild);
+                ReplaceEngine(loaded);
+                _hasActiveSession = true;
+                CloseMainMenu();
+                _inspector.Text = $"Gra wczytana • tick {_engine.CurrentTick.Value:N0} • {Path.GetFileName(candidate.Path)}";
+                return;
+            }
+            catch (Exception exception) when (exception is InvalidDataException or System.Text.Json.JsonException)
+            {
+                // Try an older rotating slot if the newest save is incompatible or damaged.
+            }
+        }
+
+        _inspector.Text = "Nie znaleziono zgodnego zapisu do wczytania.";
+    }
+
+    private void ShowMainMenu()
+    {
+        if (_mainMenu.Visible)
+        {
+            return;
+        }
+
+        CancelActiveTool();
+        _speedBeforeMenu = _speed;
+        SetSpeed(0);
+        _resumeGameButton.Visible = _hasActiveSession;
+        _loadMenuButton.Disabled = !_saveStore.HasAnySave;
+        _mainMenu.Show();
+        (_hasActiveSession ? _resumeGameButton : _newGameButton).GrabFocus();
+    }
+
+    private void ResumeGame()
+    {
+        if (!_hasActiveSession)
+        {
+            return;
+        }
+
+        CloseMainMenu();
+    }
+
+    private void CloseMainMenu()
+    {
+        if (!_mainMenu.Visible)
+        {
+            return;
+        }
+
+        _mainMenu.Hide();
+        SetSpeed(_speedBeforeMenu);
+    }
+
+    private void TryAutosave()
+    {
+        if (_engine.CurrentTick.Value < _nextAutosaveTick.Value)
+        {
+            return;
+        }
+
+        try
+        {
+            SaveAutosave();
+            _inspector.Text = $"Autozapis ukończony • początek dnia " +
+                $"{SimulationCalendar.At(_engine.CurrentTick, _engine.Definitions.Clock).AbsoluteDay + 1}.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _inspector.Text = $"Autozapis nie powiódł się: {exception.Message}";
+        }
+        finally
+        {
+            ScheduleNextAutosave();
+        }
+    }
+
+    private void SaveAutosave()
+    {
+        _saveStore.SaveAuto(_engine.Save());
+    }
+
+    private void ScheduleNextAutosave() => _nextAutosaveTick =
+        SimulationCalendar.NextDayStart(_engine.CurrentTick, _engine.Definitions.Clock);
+
+    private void ReplaceEngine(SimulationEngine engine)
+    {
+        CancelActiveTool();
+        SelectActor(EntityId.None);
+        _storageDetails.Hide();
+        _engine = engine;
+        _commandSequence = engine.NextAvailableCommandSequence;
+        _accumulator = 0;
+        _visibleLevel = 0;
+        _worldView.SetWorld(engine);
+        _worldView.SetVisibleLevel(0);
+        _worldView.SetSimulationSpeed(_speed, SecondsPerTick);
+        _minimap.SetWorld(engine);
+        _camera.Position = _worldView.CellToWorld(engine.Map.GoblinSpawn);
+        UpdateLayerToolAvailability();
+        ScheduleNextAutosave();
+        ConstrainCameraToMap();
+        UpdateStatus();
+    }
+
     private void CloseWindowOnSecondaryInput(InputEvent inputEvent, Window window)
     {
         if (inputEvent is not InputEventMouseButton
@@ -345,12 +582,23 @@ public partial class Main : Node
 
     private void ShowBuildMenu(Vector2 screenPosition)
     {
+        if (_visibleLevel > 0)
+        {
+            _inspector.Text = "Budowanie ponad powierzchnią wymaga blueprintu podpartej konstrukcji.";
+            return;
+        }
+
         _buildMenu.Position = new Vector2I((int)screenPosition.X, (int)screenPosition.Y);
         _buildMenu.Popup();
     }
 
     private void ShowWorkMenu(Vector2 screenPosition)
     {
+        if (!EnsureSurfaceToolAvailable("Zlecenia pracy"))
+        {
+            return;
+        }
+
         _workMenu.Position = new Vector2I((int)screenPosition.X, (int)screenPosition.Y);
         _workMenu.Popup();
     }
@@ -429,8 +677,14 @@ public partial class Main : Node
 
     private void SelectBuildMode(long id)
     {
+        var mode = (BuildMode)id;
+        if (!EnsureBuildModeAvailable(mode))
+        {
+            return;
+        }
+
         CancelWorkMode(clearInspector: false);
-        _buildMode = (BuildMode)id;
+        _buildMode = mode;
         _isDraggingWalkway = false;
         _worldView.SetConstructionPreview([]);
         _inspector.Text = _buildMode switch
@@ -445,6 +699,11 @@ public partial class Main : Node
 
     private void SelectWorkMode(long id)
     {
+        if (!EnsureSurfaceToolAvailable("Zlecenia pracy"))
+        {
+            return;
+        }
+
         CancelBuildMode(clearInspector: false);
         _workMode = (WorkMode)id;
         _isDraggingWorkArea = false;
@@ -461,8 +720,13 @@ public partial class Main : Node
 
     private void BeginConstruction(Vector2 screenPosition)
     {
-        var cell = ScreenToCell(screenPosition);
-        if (!_engine.Map.IsWithin(cell))
+        if (!EnsureBuildModeAvailable(_buildMode))
+        {
+            return;
+        }
+
+        var cell = ScreenToVisibleCell(screenPosition);
+        if (!IsBuildableLayerCell(cell))
         {
             return;
         }
@@ -502,7 +766,7 @@ public partial class Main : Node
 
     private void FinishWalkway(Vector2 screenPosition)
     {
-        var end = ScreenToCell(screenPosition);
+        var end = ScreenToVisibleCell(screenPosition);
         _isDraggingWalkway = false;
         if (!_engine.Map.IsWithin(end))
         {
@@ -531,8 +795,8 @@ public partial class Main : Node
 
     private void UpdateBuildPreview(Vector2 screenPosition)
     {
-        var cell = ScreenToCell(screenPosition);
-        if (!_engine.Map.IsWithin(cell))
+        var cell = ScreenToVisibleCell(screenPosition);
+        if (!IsBuildableLayerCell(cell))
         {
             _worldView.SetConstructionPreview([]);
             return;
@@ -566,6 +830,11 @@ public partial class Main : Node
 
     private void BeginWorkArea(Vector2 screenPosition)
     {
+        if (!EnsureSurfaceToolAvailable("Zlecenia pracy"))
+        {
+            return;
+        }
+
         var cell = ScreenToCell(screenPosition);
         if (!_engine.Map.IsWithin(cell))
         {
@@ -701,9 +970,14 @@ public partial class Main : Node
     private void CreateStorage(GridPosition cell, ResourceKind resource)
     {
         var snapshot = _engine.CreateSnapshot();
-        if (!_engine.World.IsSurfaceTraversable(cell) ||
-            !snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered())
+        var terrainAvailable = cell.Z == 0
+            ? _engine.World.IsSurfaceTraversable(cell)
+            : _engine.Map.IsTerrainTraversable(cell);
+        var discovered = cell.Z < 0 ||
+            snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered();
+        if (!terrainAvailable || !discovered)
         {
+            _inspector.Text = $"{cell} • tu nie można wyznaczyć składu.";
             return;
         }
 
@@ -840,6 +1114,22 @@ public partial class Main : Node
         if (_visibleLevel != 0)
         {
             var levelPosition = cell with { Z = _visibleLevel };
+            if (_visibleLevel < 0 && _engine.Map.IsCavePosition(levelPosition))
+            {
+                var caveCell = _engine.Map.GetCaveCell(levelPosition);
+                var passages = _engine.Map.VerticalPassages
+                    .Where(passage => passage.Upper == levelPosition || passage.Lower == levelPosition)
+                    .Select(passage => passage.Kind == VerticalPassageKind.CaveMouth
+                        ? "wejście na powierzchnię"
+                        : "pochylnia między poziomami")
+                    .ToArray();
+                SelectActor(EntityId.None);
+                _inspector.Text = $"{levelPosition} • {DescribeCaveRock(caveCell.Rock)} • " +
+                    $"{DescribeCaveKind(caveCell.Kind)}" +
+                    (passages.Length == 0 ? string.Empty : $" • {string.Join(", ", passages)}");
+                return;
+            }
+
             var parts = snapshot.WorldObjects
                 .SelectMany(worldObject => worldObject.GetAbsoluteParts()
                     .Where(part => part.Position == levelPosition)
@@ -936,12 +1226,30 @@ public partial class Main : Node
                 : $" • w kieszeniach: {string.Join(", ", carriedStacks.Select(DescribeStack))}");
     }
 
+    private static string DescribeCaveRock(RockKind rock) => rock switch
+    {
+        RockKind.Sandstone => "piaskowiec",
+        RockKind.Granite => "granit",
+        _ => rock.ToString(),
+    };
+
+    private static string DescribeCaveKind(CaveCellKind kind) => kind switch
+    {
+        CaveCellKind.SolidRock => "lita skała",
+        CaveCellKind.Floor => "podłoga jaskini • przejście dostępne",
+        CaveCellKind.Ramp => "naturalna pochylnia • przejście dostępne",
+        _ => kind.ToString(),
+    };
+
     private GridPosition ScreenToCell(Vector2 screenPosition)
     {
         var worldPosition = _camera.GetScreenCenterPosition() +
             ((screenPosition - GetViewport().GetVisibleRect().Size / 2f) / _camera.Zoom);
         return _worldView.WorldToCell(worldPosition);
     }
+
+    private GridPosition ScreenToVisibleCell(Vector2 screenPosition) =>
+        ScreenToCell(screenPosition) with { Z = _visibleLevel };
 
     private static string DescribeStack(ItemStackSnapshot stack) =>
         $"{(stack.Resource == ResourceKind.Food
@@ -1608,11 +1916,12 @@ public partial class Main : Node
     private void ChangeVisibleLevel(int delta)
     {
         var snapshot = _engine.CreateSnapshot();
-        var minimumLevel = Enumerable.Range(0, _engine.Map.CellCount)
+        var minimumSurfaceFloor = Enumerable.Range(0, _engine.Map.CellCount)
             .Select(index => _engine.Map.GetCell(new GridPosition(
                 index % _engine.Map.Width,
                 index / _engine.Map.Width)).FloorLevel)
             .Min(level => (int)level);
+        var minimumLevel = Math.Min(minimumSurfaceFloor, _engine.Map.DeepestCaveLevel);
         var maximumLevel = Math.Max(0, snapshot.WorldObjects
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Select(part => part.Position.Z)
@@ -1628,8 +1937,66 @@ public partial class Main : Node
         SelectActor(EntityId.None);
         _visibleLevel = next;
         _worldView.SetVisibleLevel(next);
+        UpdateLayerToolAvailability();
         _inspector.Text = $"Widoczna warstwa mapy: z={next}. Page Up / Page Down zmienia poziom.";
         UpdateStatus();
+    }
+
+    private bool EnsureSurfaceToolAvailable(string toolName)
+    {
+        if (_visibleLevel == 0)
+        {
+            return true;
+        }
+
+        CancelActiveTool();
+        _buildMenu.Hide();
+        _workMenu.Hide();
+        _inspector.Text = $"{toolName} jest obecnie dostępne tylko na powierzchni (z=0). " +
+            "Podziemne konstrukcje i prace dostaną osobne blueprinty.";
+        return false;
+    }
+
+    private bool EnsureBuildModeAvailable(BuildMode mode)
+    {
+        if (_visibleLevel == 0 ||
+            (_visibleLevel < 0 && mode is BuildMode.FoodStorage or BuildMode.WoodStorage))
+        {
+            return true;
+        }
+
+        CancelBuildMode(clearInspector: false);
+        _buildMenu.Hide();
+        _inspector.Text = _visibleLevel < 0
+            ? "W jaskini można obecnie planować składy żywności i drewna. " +
+              "Pomost oraz obozowisko są blueprintami powierzchniowymi."
+            : "Budowanie ponad powierzchnią wymaga blueprintu podpartej konstrukcji.";
+        return false;
+    }
+
+    private bool IsBuildableLayerCell(GridPosition position) => position.Z switch
+    {
+        0 => _engine.Map.IsWithin(position),
+        < 0 => _engine.Map.IsCavePosition(position),
+        _ => false,
+    };
+
+    private void UpdateLayerToolAvailability()
+    {
+        var surface = _visibleLevel == 0;
+        var build = GetToolbarButton("Build");
+        var work = GetToolbarButton("Work");
+        build.Disabled = _visibleLevel > 0;
+        work.Disabled = !surface;
+        build.TooltipText = _visibleLevel switch
+        {
+            0 => "Budowanie",
+            < 0 => "Budowanie pod ziemią • obecnie dostępne składy żywności i drewna",
+            _ => "Budowanie niedostępne: brak blueprintów konstrukcji nadziemnych",
+        };
+        work.TooltipText = surface
+            ? "Zlecenia pracy"
+            : "Zlecenia pracy niedostępne: widoczna warstwa nie jest powierzchnią z=0";
     }
 
     private void UpdateStatus()

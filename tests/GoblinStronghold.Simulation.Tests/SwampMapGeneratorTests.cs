@@ -148,9 +148,97 @@ public sealed class SwampMapGeneratorTests
         {
             Assert.False(cell.IsTraversable);
             Assert.False(cell.HasFloorAtSurface);
-            Assert.Equal(-1, cell.FloorLevel);
-            Assert.Equal(1, cell.WaterDepthLevels);
+            Assert.InRange(cell.FloorLevel, (sbyte)-2, (sbyte)-1);
+            Assert.InRange(cell.WaterDepthLevels, 1, 2);
         });
+    }
+
+    [Fact]
+    public void CurrentGeneratorCreatesHillsDepressionsRampsAndCliffs()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x484549474854UL), 96, 96);
+        var positions = Positions(map).ToArray();
+        var levels = positions.Select(position => map.GetCell(position).SurfaceLevel).ToHashSet();
+        var ramp = positions.First(position =>
+            map.GetCell(position).RampDirection != TerrainRampDirection.None);
+        var rampUphill = UphillNeighbor(ramp, map.GetCell(ramp).RampDirection);
+        var cliff = (
+                from position in positions
+                from neighbor in map.GetCardinalNeighbors(position)
+                let cell = map.GetCell(position)
+                let neighborCell = map.GetCell(neighbor)
+                where cell.IsTraversable && neighborCell.IsTraversable &&
+                    cell.SurfaceLevel != neighborCell.SurfaceLevel &&
+                    !map.CanTraverseSurfaceEdge(position, neighbor)
+                select (position, neighbor))
+            .First();
+
+        Assert.Contains((sbyte)-1, levels);
+        Assert.Contains((sbyte)0, levels);
+        Assert.Contains((sbyte)1, levels);
+        Assert.Contains((sbyte)2, levels);
+        Assert.True(map.CanTraverseSurfaceEdge(ramp, rampUphill));
+        Assert.True(map.CanTraverseSurfaceEdge(rampUphill, ramp));
+        Assert.False(map.CanTraverseSurfaceEdge(cliff.position, cliff.neighbor));
+        Assert.True(map.HasTraversablePath(map.GoblinSpawn, map.HumanVillage));
+        Assert.Equal(0, map.GetCell(map.GoblinSpawn).SurfaceLevel);
+        Assert.Equal(0, map.GetCell(map.HumanVillage).SurfaceLevel);
+    }
+
+    [Fact]
+    public void CurrentGeneratorCreatesConnectedTwoLevelCaves()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x4341564553UL), 64, 64);
+        var deepestFloor = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, map.DeepestCaveLevel)))
+            .First(position => map.GetCaveCell(position).IsOpen);
+        var path = map.FindTerrainPath(map.CaveEntrances.Single(), deepestFloor);
+
+        Assert.Equal(2, map.CaveLevelCount);
+        Assert.Equal(-2, map.DeepestCaveLevel);
+        Assert.Contains(map.VerticalPassages, passage =>
+            passage.Kind == VerticalPassageKind.CaveMouth);
+        Assert.Contains(map.VerticalPassages, passage =>
+            passage.Kind == VerticalPassageKind.NaturalRamp);
+        Assert.Equal(0, map.CaveEntrances.Single().Z);
+        Assert.NotNull(path);
+        Assert.Contains(path, position => position.Z == -1);
+        Assert.Contains(path, position => position.Z == -2);
+    }
+
+    [Fact]
+    public void CaveRockAndOpenSpaceHaveDistinctTraversalContracts()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x524F434BUL), 64, 64);
+        var cavePositions = Enumerable.Range(1, map.CaveLevelCount)
+            .SelectMany(level => Enumerable.Range(0, map.Height)
+                .SelectMany(y => Enumerable.Range(0, map.Width)
+                    .Select(x => new GridPosition(x, y, -level))))
+            .ToArray();
+        var solidRock = cavePositions.First(position => !map.GetCaveCell(position).IsOpen);
+        var floor = cavePositions.First(position => map.GetCaveCell(position).Kind == CaveCellKind.Floor);
+
+        Assert.Contains(cavePositions.Select(position => map.GetCaveCell(position).Rock),
+            rock => rock == RockKind.Sandstone);
+        Assert.Contains(cavePositions.Select(position => map.GetCaveCell(position).Rock),
+            rock => rock == RockKind.Granite);
+        Assert.False(map.IsTerrainTraversable(solidRock));
+        Assert.True(map.IsTerrainTraversable(floor));
+    }
+
+    [Fact]
+    public void GeneratorVersionFiveKeepsWorldWithoutMaterializedCaves()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(123),
+            width: 32,
+            height: 32,
+            generatorVersion: 5);
+
+        Assert.Equal(0, map.CaveLevelCount);
+        Assert.Empty(map.VerticalPassages);
+        Assert.Empty(map.CaveEntrances);
     }
 
     [Fact]
@@ -200,4 +288,15 @@ public sealed class SwampMapGeneratorTests
 
     private static bool IsWetTerrain(MapCell cell) =>
         cell.Terrain is TerrainKind.Mud or TerrainKind.ShallowWater or TerrainKind.DeepWater;
+
+    private static GridPosition UphillNeighbor(
+        GridPosition position,
+        TerrainRampDirection direction) => direction switch
+    {
+        TerrainRampDirection.North => position with { Y = position.Y - 1 },
+        TerrainRampDirection.East => position with { X = position.X + 1 },
+        TerrainRampDirection.South => position with { Y = position.Y + 1 },
+        TerrainRampDirection.West => position with { X = position.X - 1 },
+        _ => throw new ArgumentOutOfRangeException(nameof(direction), direction, null),
+    };
 }

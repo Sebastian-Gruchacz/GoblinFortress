@@ -12,7 +12,19 @@ internal static class GeneratedSettlementStructureGenerator
             map.GoblinSpawn,
             map.HumanVillage,
         };
-        ReserveSettlementAccess(map, reservedCells);
+        foreach (var entrance in map.CaveEntrances)
+        {
+            reservedCells.Add(entrance);
+        }
+        foreach (var neighbor in map.GetCardinalNeighbors(map.HumanVillage))
+        {
+            reservedCells.Add(neighbor);
+        }
+
+        if (Math.Min(map.Width, map.Height) >= 32)
+        {
+            ReserveSettlementAccess(map, reservedCells);
+        }
         ulong nextId = 1;
 
         AddBuilding(
@@ -104,7 +116,7 @@ internal static class GeneratedSettlementStructureGenerator
                     continue;
                 }
 
-                AddTree(objects, reservedCells, new WorldObjectId(nextId++), position);
+                AddTree(objects, reservedCells, map, new WorldObjectId(nextId++), position);
             }
         }
 
@@ -131,13 +143,16 @@ internal static class GeneratedSettlementStructureGenerator
         GridPosition anchor,
         HashSet<GridPosition> reservedCells)
     {
+        var anchorCell = map.GetCell(anchor);
         for (var y = -1; y <= 1; y++)
         {
             for (var x = -1; x <= 1; x++)
             {
                 var position = new GridPosition(anchor.X + x, anchor.Y + y);
                 if (!map.IsWithin(position) || reservedCells.Contains(position) ||
-                    map.GetCell(position).Terrain != TerrainKind.SolidGround)
+                    map.GetCell(position).Terrain != TerrainKind.SolidGround ||
+                    map.GetCell(position).SurfaceLevel != anchorCell.SurfaceLevel ||
+                    map.GetCell(position).RampDirection != TerrainRampDirection.None)
                 {
                     return false;
                 }
@@ -150,19 +165,25 @@ internal static class GeneratedSettlementStructureGenerator
     private static void AddTree(
         List<WorldObjectSnapshot> objects,
         HashSet<GridPosition> reservedCells,
+        GeneratedMap map,
         WorldObjectId id,
         GridPosition anchor)
     {
-        var parts = new List<WorldObjectPartSnapshot>
+        var trunkHeight = 1 + (SamplePercent(map, anchor, sampleKey: 31_003) % 3);
+        var parts = new List<WorldObjectPartSnapshot>();
+        for (var z = 0; z < trunkHeight; z++)
         {
-            new(default, SpatialOccupancyChannel.Solid, WorldObjectPartKind.TreeTrunk),
-        };
+            parts.Add(new WorldObjectPartSnapshot(
+                new GridPosition(0, 0, z),
+                SpatialOccupancyChannel.Solid,
+                WorldObjectPartKind.TreeTrunk));
+        }
         for (var y = -1; y <= 1; y++)
         {
             for (var x = -1; x <= 1; x++)
             {
                 parts.Add(new WorldObjectPartSnapshot(
-                    new GridPosition(x, y, 1),
+                    new GridPosition(x, y, trunkHeight),
                     SpatialOccupancyChannel.Overhead,
                     WorldObjectPartKind.TreeCrown));
             }
@@ -254,7 +275,7 @@ internal static class GeneratedSettlementStructureGenerator
             (width, height) = (height, width);
         }
 
-        var anchor = FindPlacement(map, settlementCenter, width, height, reservedCells);
+        var anchor = FindPlacement(map, settlementCenter, width, height, reservedCells, owner);
         var parts = CreateBuildingParts(width, height, orientation);
         var worldObject = new WorldObjectSnapshot(id, kind, owner, anchor, orientation, parts);
         ReserveFootprint(worldObject, reservedCells);
@@ -270,7 +291,13 @@ internal static class GeneratedSettlementStructureGenerator
     {
         const int width = 2;
         const int height = 2;
-        var anchor = FindPlacement(map, settlementCenter, width, height, reservedCells);
+        var anchor = FindPlacement(
+            map,
+            settlementCenter,
+            width,
+            height,
+            reservedCells,
+            WorldObjectOwner.HumanVillage);
         var parts = new List<WorldObjectPartSnapshot>();
         for (var y = 0; y < height; y++)
         {
@@ -348,7 +375,8 @@ internal static class GeneratedSettlementStructureGenerator
         GridPosition center,
         int width,
         int height,
-        HashSet<GridPosition> reservedCells)
+        HashSet<GridPosition> reservedCells,
+        WorldObjectOwner owner)
     {
         var candidates = new List<(GridPosition Position, int Distance)>();
         for (var y = 0; y <= map.Height - height; y++)
@@ -368,7 +396,7 @@ internal static class GeneratedSettlementStructureGenerator
                      .ThenBy(item => item.Position.Y)
                      .ThenBy(item => item.Position.X))
         {
-            if (CanPlace(map, candidate.Position, width, height, reservedCells))
+            if (CanPlace(map, candidate.Position, width, height, reservedCells, owner))
             {
                 return candidate.Position;
             }
@@ -382,17 +410,29 @@ internal static class GeneratedSettlementStructureGenerator
         GridPosition anchor,
         int width,
         int height,
-        HashSet<GridPosition> reservedCells)
+        HashSet<GridPosition> reservedCells,
+        WorldObjectOwner owner)
     {
+        sbyte? footprintLevel = null;
         for (var y = 0; y < height; y++)
         {
             for (var x = 0; x < width; x++)
             {
                 var position = new GridPosition(anchor.X + x, anchor.Y + y);
-                if (reservedCells.Contains(position) || !map.GetCell(position).IsTraversable)
+                var cell = map.GetCell(position);
+                if (reservedCells.Contains(position) ||
+                    !cell.IsTraversable ||
+                    cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater ||
+                    cell.RampDirection != TerrainRampDirection.None ||
+                    (owner == WorldObjectOwner.HumanVillage &&
+                        Math.Min(map.Width, map.Height) >= 32 &&
+                        cell.Terrain != TerrainKind.SolidGround) ||
+                    (footprintLevel is not null && cell.SurfaceLevel != footprintLevel.Value))
                 {
                     return false;
                 }
+
+                footprintLevel ??= cell.SurfaceLevel;
             }
         }
 

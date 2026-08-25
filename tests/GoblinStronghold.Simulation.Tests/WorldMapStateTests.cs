@@ -50,11 +50,21 @@ public sealed class WorldMapStateTests
         var stumps = objects.Where(item => item.Kind == WorldObjectKind.DeadTreeStump).ToArray();
 
         Assert.NotEmpty(trees);
+        Assert.Contains(trees, tree => tree.Parts.Count(part =>
+            part.Kind == WorldObjectPartKind.TreeTrunk) > 1);
         Assert.All(trees, tree =>
         {
             Assert.Equal(WorldObjectOwner.Nature, tree.Owner);
-            Assert.Contains(tree.Parts, part => part.Kind == WorldObjectPartKind.TreeTrunk);
+            var trunkParts = tree.Parts
+                .Where(part => part.Kind == WorldObjectPartKind.TreeTrunk)
+                .OrderBy(part => part.RelativePosition.Z)
+                .ToArray();
+            Assert.InRange(trunkParts.Length, 1, 3);
+            Assert.Equal(Enumerable.Range(0, trunkParts.Length),
+                trunkParts.Select(part => part.RelativePosition.Z));
             Assert.Equal(9, tree.Parts.Count(part => part.Kind == WorldObjectPartKind.TreeCrown));
+            Assert.All(tree.Parts.Where(part => part.Kind == WorldObjectPartKind.TreeCrown),
+                part => Assert.Equal(trunkParts.Length, part.RelativePosition.Z));
             Assert.True(tree.Anchor.X >= map.Width * 0.42);
             Assert.True(tree.Anchor.Y <= map.Height * 0.62);
         });

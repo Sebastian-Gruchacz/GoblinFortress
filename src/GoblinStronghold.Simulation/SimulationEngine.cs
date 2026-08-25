@@ -11,7 +11,7 @@ namespace GoblinStronghold.Simulation;
 public sealed partial class SimulationEngine
 {
     private const int SaveFormatVersion = 30;
-    private const int DefaultMapDimension = 32;
+    private const int DefaultMapDimension = 64;
 
     private static readonly JsonSerializerOptions SaveOptions = new()
     {
@@ -74,6 +74,10 @@ public sealed partial class SimulationEngine
     public WorldVisibilityState Visibility { get; private set; }
 
     public SimulationTick CurrentTick { get; private set; } = SimulationTick.Zero;
+
+    public ulong NextAvailableCommandSequence => _pendingCommands.Count == 0
+        ? 1
+        : checked(_pendingCommands.Values.Max(command => command.Sequence) + 1);
 
     public static SimulationEngine Create(
         WorldSeed worldSeed,
@@ -1052,7 +1056,8 @@ public sealed partial class SimulationEngine
             var end = new GridPosition(model.EndX, model.EndY, model.EndZ);
             if (id == EntityId.None ||
                 !Enum.IsDefined(model.Kind) ||
-                !Map.IsWithin(anchor) || !Map.IsWithin(end) ||
+                !IsPotentialConstructionPosition(anchor) ||
+                !IsPotentialConstructionPosition(end) ||
                 model.RequiredWood <= 0 ||
                 model.DeliveredWood < 0 || model.DeliveredWood > model.RequiredWood ||
                 model.TotalWorkTicks <= 0 ||
@@ -1086,7 +1091,7 @@ public sealed partial class SimulationEngine
                 model.RemainingWorkTicks,
                 model.TotalWorkTicks,
                 expected.Capabilities);
-            if (site.GetFootprint().Any(position => !Map.IsWithin(position)) ||
+            if (!CanPlaceConstruction(site.Kind, site.Anchor, site.GetFootprint()) ||
                 _constructionSites.Values.Any(other =>
                     other.GetFootprint().Intersect(site.GetFootprint()).Any()) ||
                 !_constructionSites.TryAdd(id, site))
@@ -1700,7 +1705,7 @@ public sealed partial class SimulationEngine
         GridPosition anchor,
         IReadOnlyList<GridPosition> footprint)
     {
-        if (footprint.Any(position => !Map.IsWithin(position)) ||
+        if (footprint.Any(position => !IsPotentialConstructionPosition(position)) ||
             _storageZones.Values.Any(zone => footprint.Contains(zone.Position)))
         {
             return false;
@@ -1709,12 +1714,19 @@ public sealed partial class SimulationEngine
         return kind switch
         {
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage =>
-                World.IsSurfaceTraversable(anchor),
+                anchor.Z == 0
+                    ? World.IsSurfaceTraversable(anchor)
+                    : Map.IsTerrainTraversable(anchor),
             ConstructionKind.WoodenWalkway => World.CanBuildWalkway(footprint),
             ConstructionKind.GoblinFieldCamp => World.CanBuildGoblinFieldCamp(anchor),
             _ => false,
         };
     }
+
+    private bool IsPotentialConstructionPosition(GridPosition position) =>
+        position.Z == 0
+            ? Map.IsWithin(position)
+            : Map.IsCavePosition(position) && Map.GetCaveCell(position).IsOpen;
 
     private bool CompleteConstruction(ActorState builder, ConstructionSiteState site)
     {
@@ -2186,8 +2198,8 @@ public sealed partial class SimulationEngine
             case SimulationCommandKind.Build:
                 if (!Enum.IsDefined(command.Construction) ||
                     command.Resource != ResourceKind.Wood ||
-                    !Map.IsWithin(command.Position) ||
-                    !Map.IsWithin(command.EndPosition))
+                    !IsPotentialConstructionPosition(command.Position) ||
+                    !IsPotentialConstructionPosition(command.EndPosition))
                 {
                     throw new ArgumentException("Construction command is invalid.", nameof(command));
                 }
@@ -2199,13 +2211,15 @@ public sealed partial class SimulationEngine
                 }
 
                 if (command.Construction == ConstructionKind.WoodenWalkway &&
-                    (command.Amount != 1 || command.Position.Z != command.EndPosition.Z))
+                    (command.Amount != 1 || command.Position.Z != 0 || command.EndPosition.Z != 0))
                 {
                     throw new ArgumentException("Walkway construction is invalid.", nameof(command));
                 }
 
                 if (command.Construction == ConstructionKind.GoblinFieldCamp &&
                     (command.Amount != 6 ||
+                     command.Position.Z != 0 ||
+                     command.EndPosition.Z != 0 ||
                      command.EndPosition != command.Position with
                      {
                          X = command.Position.X + 1,

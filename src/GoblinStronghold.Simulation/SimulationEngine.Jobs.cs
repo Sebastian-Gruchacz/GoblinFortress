@@ -327,7 +327,8 @@ public sealed partial class SimulationEngine
 
             foreach (var neighbor in Map.GetCardinalNeighbors(current))
             {
-                if (!visited.Add(neighbor) || !World.IsSurfaceTraversable(neighbor))
+                if (!visited.Add(neighbor) || !World.IsSurfaceTraversable(neighbor) ||
+                    !Map.CanTraverseSurfaceEdge(current, neighbor))
                 {
                     continue;
                 }
@@ -765,7 +766,8 @@ public sealed partial class SimulationEngine
 
             foreach (var neighbor in Map.GetCardinalNeighbors(current))
             {
-                if (visited.Add(neighbor) && World.IsSurfaceTraversable(neighbor))
+                if (visited.Add(neighbor) && World.IsSurfaceTraversable(neighbor) &&
+                    Map.CanTraverseSurfaceEdge(current, neighbor))
                 {
                     predecessors[neighbor] = current;
                     queue.Enqueue(neighbor);
@@ -1349,7 +1351,9 @@ public sealed partial class SimulationEngine
 
     private IReadOnlyList<GridPosition>? FindConstructionAccessPath(
         GridPosition start,
-        ConstructionSiteState site) => site.GetFootprint()
+        ConstructionSiteState site) => site.Anchor.Z != 0
+        ? null
+        : site.GetFootprint()
         .SelectMany(position => Map.GetCardinalNeighbors(position).Append(position))
         .Where(World.IsSurfaceTraversable)
         .Distinct()

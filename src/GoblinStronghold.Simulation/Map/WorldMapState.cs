@@ -346,6 +346,13 @@ public sealed class WorldMapState
                      .ThenBy(item => item.Y)
                      .ThenBy(item => item.X))
         {
+            var door = new GridPosition(1, 2);
+            var doorPosition = anchor with
+            {
+                X = anchor.X + door.X,
+                Y = anchor.Y + door.Y,
+            };
+            var anchorLevel = Baseline.GetCell(anchor).SurfaceLevel;
             var footprint = Enumerable.Range(0, height)
                 .SelectMany(y => Enumerable.Range(0, width)
                     .Select(x => new GridPosition(anchor.X + x, anchor.Y + y)))
@@ -353,7 +360,12 @@ public sealed class WorldMapState
             if (footprint.Any(position =>
                     reservedPositions.Contains(position) ||
                     !Baseline.GetCell(position).IsTraversable ||
+                    Baseline.GetCell(position).SurfaceLevel != anchorLevel ||
                     _occupancy.Keys.Any(key => key.Position.X == position.X && key.Position.Y == position.Y)))
+            {
+                continue;
+            }
+            if (!HasSurfacePath(settlementCenter, doorPosition))
             {
                 continue;
             }
@@ -362,7 +374,6 @@ public sealed class WorldMapState
                 ? 1UL
                 : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
             var parts = new List<WorldObjectPartSnapshot>();
-            var door = new GridPosition(1, 2);
             for (var y = 0; y < height; y++)
             {
                 for (var x = 0; x < width; x++)
@@ -431,7 +442,8 @@ public sealed class WorldMapState
             foreach (var neighbor in Baseline.GetCardinalNeighbors(current))
             {
                 var index = GetIndex(Baseline, neighbor);
-                if (visited[index] || !IsSurfaceTraversable(neighbor))
+                if (visited[index] || !IsSurfaceTraversable(neighbor) ||
+                    !Baseline.CanTraverseSurfaceEdge(current, neighbor))
                 {
                     continue;
                 }
@@ -475,7 +487,8 @@ public sealed class WorldMapState
             foreach (var neighbor in Baseline.GetCardinalNeighbors(current))
             {
                 var index = GetIndex(Baseline, neighbor);
-                if (visited[index] || !IsSurfaceTraversable(neighbor))
+                if (visited[index] || !IsSurfaceTraversable(neighbor) ||
+                    !Baseline.CanTraverseSurfaceEdge(current, neighbor))
                 {
                     continue;
                 }
@@ -519,7 +532,8 @@ public sealed class WorldMapState
             foreach (var neighbor in Baseline.GetCardinalNeighbors(current))
             {
                 var index = GetIndex(Baseline, neighbor);
-                if (visited[index] || !IsSurfaceTraversable(neighbor))
+                if (visited[index] || !IsSurfaceTraversable(neighbor) ||
+                    !Baseline.CanTraverseSurfaceEdge(current, neighbor))
                 {
                     continue;
                 }

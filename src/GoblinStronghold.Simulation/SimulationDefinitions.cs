@@ -48,7 +48,7 @@ public sealed record VisionSettings(
 public sealed class SimulationDefinitions
 {
     public static SimulationDefinitions Foundation { get; } = new(
-        id: "foundation-v35",
+        id: "foundation-v37",
         clock: new(ClimateCalendarProfiles.DemoTemperate),
         maximumHunger: 114_000,
         hungerPerTick: 1,

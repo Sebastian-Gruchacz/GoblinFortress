@@ -24,6 +24,7 @@ public partial class WorldView : Node2D
     private Texture2D _itemIconAtlas = null!;
     private Texture2D _environmentAtlas = null!;
     private Texture2D _terrainAtlas = null!;
+    private Texture2D _caveAtlas = null!;
     private Texture2D _humanStructureAtlas = null!;
     private Texture2D _walkwayAtlas = null!;
     private int _visibleLevel;
@@ -42,12 +43,15 @@ public partial class WorldView : Node2D
         _itemIconAtlas = ItemIcons.LoadAtlas();
         _environmentAtlas = EnvironmentSprites.LoadAtlas();
         _terrainAtlas = TerrainSprites.LoadAtlas();
+        _caveAtlas = CaveSprites.LoadAtlas();
         _humanStructureAtlas = HumanStructureSprites.LoadAtlas();
         _walkwayAtlas = WalkwaySprites.LoadAtlas();
     }
 
     public void SetWorld(SimulationEngine engine)
     {
+        _visualActorPositions.Clear();
+        _targetActorPositions.Clear();
         _engine = engine;
         Refresh(engine.CreateSnapshot());
     }
@@ -143,6 +147,13 @@ public partial class WorldView : Node2D
         }
 
         DrawTerrain();
+        if (_visibleLevel < 0)
+        {
+            DrawConstructionSites();
+            DrawConstructionPreview();
+            return;
+        }
+
         DrawPlants();
         DrawHumanFields();
         DrawStructures();
@@ -162,6 +173,12 @@ public partial class WorldView : Node2D
 
     private void DrawTerrain()
     {
+        if (_visibleLevel < 0)
+        {
+            DrawCaveTerrain();
+            return;
+        }
+
         var livingTrees = _snapshot.WorldObjects
             .Where(worldObject => worldObject.Kind == WorldObjectKind.Tree)
             .Select(worldObject => worldObject.Anchor)
@@ -184,6 +201,8 @@ public partial class WorldView : Node2D
                         _terrainAtlas,
                         CellRect(x, y),
                         TerrainSprites.GetRegion(_terrainAtlas, sprite));
+                    DrawTerrainRelief(x, y, cell);
+                    DrawCaveMouth(x, y);
                     continue;
                 }
 
@@ -195,6 +214,213 @@ public partial class WorldView : Node2D
             }
         }
     }
+
+    private void DrawCaveMouth(int x, int y)
+    {
+        var position = new GridPosition(x, y);
+        if (!_engine.Map.CaveEntrances.Contains(position))
+        {
+            return;
+        }
+
+        var center = CellCenter(position);
+        DrawCircle(center + new Vector2(1f, 1.5f), 7.5f, new Color(0.025f, 0.03f, 0.028f, 0.92f));
+        DrawArc(center, 7.5f, Mathf.Pi, Mathf.Tau, 16, new Color("8b7654"), 2f);
+        DrawLine(center + new Vector2(-5f, 4f), center + new Vector2(5f, 4f), new Color("2b241b"), 1.5f);
+    }
+
+    private void DrawCaveTerrain()
+    {
+        for (var y = 0; y < _engine.Map.Height; y++)
+        {
+            for (var x = 0; x < _engine.Map.Width; x++)
+            {
+                var position = new GridPosition(x, y, _visibleLevel);
+                if (!_engine.Map.IsCavePosition(position))
+                {
+                    DrawRect(CellRect(x, y), new Color("080b0d"));
+                    continue;
+                }
+
+                var cell = _engine.Map.GetCaveCell(position);
+                if (cell.IsOpen)
+                {
+                    DrawTextureRectRegion(
+                        _caveAtlas,
+                        CellRect(x, y),
+                        CaveSprites.GetRegion(_caveAtlas, cell.Rock, wall: false));
+                    if (cell.Kind == CaveCellKind.Ramp)
+                    {
+                        DrawCavePassage(position);
+                    }
+
+                    continue;
+                }
+
+                if (HasOpenCaveNeighbor(position))
+                {
+                    DrawTextureRectRegion(
+                        _caveAtlas,
+                        CellRect(x, y),
+                        CaveSprites.GetRegion(_caveAtlas, cell.Rock, wall: true));
+                }
+                else
+                {
+                    var rockTint = cell.Rock == RockKind.Sandstone
+                        ? new Color("19140f")
+                        : new Color("101216");
+                    DrawRect(CellRect(x, y), rockTint);
+                }
+            }
+        }
+    }
+
+    private bool HasOpenCaveNeighbor(GridPosition position)
+    {
+        ReadOnlySpan<(int X, int Y)> offsets = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+        foreach (var offset in offsets)
+        {
+            var neighbor = new GridPosition(position.X + offset.X, position.Y + offset.Y, position.Z);
+            if (_engine.Map.IsCavePosition(neighbor) && _engine.Map.GetCaveCell(neighbor).IsOpen)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void DrawCavePassage(GridPosition position)
+    {
+        var center = CellCenter(position);
+        var connectsUp = _engine.Map.VerticalPassages.Any(passage => passage.Lower == position);
+        var connectsDown = _engine.Map.VerticalPassages.Any(passage => passage.Upper == position);
+        var color = connectsUp ? new Color("d8b36a") : new Color("7394ad");
+        DrawCircle(center, 6.5f, new Color(0.035f, 0.04f, 0.04f, 0.7f));
+        DrawArc(center, 6.5f, 0f, Mathf.Tau, 20, color, 1.5f);
+        if (connectsUp)
+        {
+            DrawLine(center + new Vector2(-3.5f, 2f), center, color, 1.5f);
+            DrawLine(center, center + new Vector2(3.5f, 2f), color, 1.5f);
+        }
+        if (connectsDown)
+        {
+            DrawLine(center + new Vector2(-3.5f, -2f), center, color, 1.5f);
+            DrawLine(center, center + new Vector2(3.5f, -2f), color, 1.5f);
+        }
+    }
+
+    private void DrawTerrainRelief(int x, int y, MapCell cell)
+    {
+        var rect = CellRect(x, y);
+        if (cell.SurfaceLevel > 0)
+        {
+            DrawRect(rect, new Color(1f, 0.96f, 0.78f, 0.035f * cell.SurfaceLevel));
+        }
+        else if (cell.SurfaceLevel < 0)
+        {
+            DrawRect(rect, new Color(0.02f, 0.04f, 0.07f, 0.12f));
+        }
+
+        if (cell.RampDirection != TerrainRampDirection.None)
+        {
+            DrawTerrainSlope(rect, cell.RampDirection);
+        }
+
+        DrawCliffEdge(x, y, cell, TerrainRampDirection.North);
+        DrawCliffEdge(x, y, cell, TerrainRampDirection.East);
+        DrawCliffEdge(x, y, cell, TerrainRampDirection.South);
+        DrawCliffEdge(x, y, cell, TerrainRampDirection.West);
+    }
+
+    private void DrawTerrainSlope(Rect2 rect, TerrainRampDirection uphill)
+    {
+        const float highlightThickness = 2.5f;
+        const float shadowThickness = 3.5f;
+        var highlight = new Color(0.92f, 0.9f, 0.7f, 0.16f);
+        var shadow = new Color(0.025f, 0.035f, 0.03f, 0.24f);
+        var contour = new Color(0.83f, 0.79f, 0.58f, 0.1f);
+        switch (uphill)
+        {
+            case TerrainRampDirection.North:
+                DrawRect(new Rect2(rect.Position, new Vector2(rect.Size.X, highlightThickness)), highlight);
+                DrawRect(new Rect2(rect.Position.X, rect.End.Y - shadowThickness, rect.Size.X, shadowThickness), shadow);
+                DrawLine(rect.Position + new Vector2(0f, rect.Size.Y * 0.38f),
+                    rect.Position + new Vector2(rect.Size.X, rect.Size.Y * 0.38f), contour, 1f);
+                break;
+            case TerrainRampDirection.East:
+                DrawRect(new Rect2(rect.End.X - highlightThickness, rect.Position.Y, highlightThickness, rect.Size.Y), highlight);
+                DrawRect(new Rect2(rect.Position, new Vector2(shadowThickness, rect.Size.Y)), shadow);
+                DrawLine(rect.Position + new Vector2(rect.Size.X * 0.62f, 0f),
+                    rect.Position + new Vector2(rect.Size.X * 0.62f, rect.Size.Y), contour, 1f);
+                break;
+            case TerrainRampDirection.South:
+                DrawRect(new Rect2(rect.Position.X, rect.End.Y - highlightThickness, rect.Size.X, highlightThickness), highlight);
+                DrawRect(new Rect2(rect.Position, new Vector2(rect.Size.X, shadowThickness)), shadow);
+                DrawLine(rect.Position + new Vector2(0f, rect.Size.Y * 0.62f),
+                    rect.Position + new Vector2(rect.Size.X, rect.Size.Y * 0.62f), contour, 1f);
+                break;
+            case TerrainRampDirection.West:
+                DrawRect(new Rect2(rect.Position, new Vector2(highlightThickness, rect.Size.Y)), highlight);
+                DrawRect(new Rect2(rect.End.X - shadowThickness, rect.Position.Y, shadowThickness, rect.Size.Y), shadow);
+                DrawLine(rect.Position + new Vector2(rect.Size.X * 0.38f, 0f),
+                    rect.Position + new Vector2(rect.Size.X * 0.38f, rect.Size.Y), contour, 1f);
+                break;
+        }
+    }
+
+    private void DrawCliffEdge(
+        int x,
+        int y,
+        MapCell cell,
+        TerrainRampDirection direction)
+    {
+        var neighbor = direction switch
+        {
+            TerrainRampDirection.North => new GridPosition(x, y - 1),
+            TerrainRampDirection.East => new GridPosition(x + 1, y),
+            TerrainRampDirection.South => new GridPosition(x, y + 1),
+            TerrainRampDirection.West => new GridPosition(x - 1, y),
+            _ => default,
+        };
+        if (!_engine.Map.IsWithin(neighbor))
+        {
+            return;
+        }
+
+        var neighborCell = _engine.Map.GetCell(neighbor);
+        var drop = cell.SurfaceLevel - neighborCell.SurfaceLevel;
+        if (drop <= 0 ||
+            (drop == 1 && neighborCell.RampDirection == Opposite(direction)))
+        {
+            return;
+        }
+
+        var rect = CellRect(x, y);
+        var thickness = Math.Min(5f, 1.5f + (drop * 1.35f));
+        var edge = direction switch
+        {
+            TerrainRampDirection.North =>
+                new Rect2(rect.Position, new Vector2(rect.Size.X, thickness)),
+            TerrainRampDirection.East =>
+                new Rect2(rect.End.X - thickness, rect.Position.Y, thickness, rect.Size.Y),
+            TerrainRampDirection.South =>
+                new Rect2(rect.Position.X, rect.End.Y - thickness, rect.Size.X, thickness),
+            TerrainRampDirection.West =>
+                new Rect2(rect.Position, new Vector2(thickness, rect.Size.Y)),
+            _ => default,
+        };
+        DrawRect(edge, new Color(0.08f, 0.065f, 0.055f, 0.38f + (0.08f * drop)));
+    }
+
+    private static TerrainRampDirection Opposite(TerrainRampDirection direction) => direction switch
+    {
+        TerrainRampDirection.North => TerrainRampDirection.South,
+        TerrainRampDirection.East => TerrainRampDirection.West,
+        TerrainRampDirection.South => TerrainRampDirection.North,
+        TerrainRampDirection.West => TerrainRampDirection.East,
+        _ => TerrainRampDirection.None,
+    };
 
     private TerrainSprite ResolveTerrainSprite(
         int x,
@@ -458,11 +684,6 @@ public partial class WorldView : Node2D
 
     private void DrawIllustratedNaturalStructure(WorldObjectSnapshot worldObject)
     {
-        if (_visibleLevel is not (0 or 1))
-        {
-            return;
-        }
-
         var center = CellCenter(worldObject.Anchor);
         if (worldObject.Kind == WorldObjectKind.DeadTreeStump)
         {
@@ -477,13 +698,22 @@ public partial class WorldView : Node2D
             return;
         }
 
-        if (_visibleLevel == 0)
+        var visibleParts = worldObject.GetAbsoluteParts()
+            .Where(item => item.Position.Z == _visibleLevel)
+            .Select(item => item.Part.Kind)
+            .ToArray();
+        if (visibleParts.Contains(WorldObjectPartKind.TreeTrunk))
         {
             const float trunkSize = 21f;
             DrawTextureRectRegion(
                 _environmentAtlas,
                 new Rect2(center - new Vector2(trunkSize / 2f, trunkSize / 2f), new Vector2(trunkSize, trunkSize)),
                 EnvironmentSprites.GetRegion(_environmentAtlas, EnvironmentSprite.TreeTrunk));
+            return;
+        }
+
+        if (!visibleParts.Contains(WorldObjectPartKind.TreeCrown))
+        {
             return;
         }
 
@@ -577,15 +807,12 @@ public partial class WorldView : Node2D
 
     private void DrawConstructionPreview()
     {
-        if (_visibleLevel != 0)
+        foreach (var cell in _constructionPreview.Where(cell => cell.Z == _visibleLevel))
         {
-            return;
-        }
-
-        foreach (var cell in _constructionPreview)
-        {
-            var valid = _engine.Map.IsWithin(cell) &&
-                _snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered();
+            var valid = cell.Z == 0
+                ? _engine.Map.IsWithin(cell) &&
+                  _snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered()
+                : _engine.Map.IsCavePosition(cell) && _engine.Map.GetCaveCell(cell).IsOpen;
             var color = valid
                 ? new Color(0.95f, 0.75f, 0.28f, 0.7f)
                 : new Color(0.92f, 0.2f, 0.2f, 0.72f);
@@ -840,12 +1067,8 @@ public partial class WorldView : Node2D
 
     private void DrawConstructionSites()
     {
-        if (_visibleLevel != 0)
-        {
-            return;
-        }
-
-        foreach (var site in _snapshot.ConstructionSites)
+        foreach (var site in _snapshot.ConstructionSites.Where(site =>
+                     site.Anchor.Z == _visibleLevel))
         {
             var materialRequired = site.Materials.Sum(material => material.RequiredQuantity);
             var materialDelivered = site.Materials.Sum(material => material.DeliveredQuantity);
@@ -860,7 +1083,9 @@ public partial class WorldView : Node2D
                 : new Color(0.98f, 0.67f, 0.24f, 0.82f);
 
             foreach (var position in site.Footprint.Where(position =>
-                         _snapshot.GetVisibility(position, _engine.Map.Width) == CellVisibility.Visible))
+                         position.Z == _visibleLevel &&
+                         (position.Z < 0 ||
+                          _snapshot.GetVisibility(position, _engine.Map.Width) == CellVisibility.Visible)))
             {
                 var rect = CellRect(position.X, position.Y).Grow(-2f);
                 DrawRect(rect, color with { A = 0.18f });

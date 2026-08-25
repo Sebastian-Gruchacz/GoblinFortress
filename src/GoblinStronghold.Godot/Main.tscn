@@ -72,7 +72,7 @@ anchor_right = 1.0
 offset_left = -200.0
 offset_top = 16.0
 offset_right = -16.0
-offset_bottom = 232.0
+offset_bottom = 280.0
 grow_horizontal = 0
 theme_override_constants/separation = 6
 
@@ -107,6 +107,24 @@ custom_minimum_size = Vector2(30, 30)
 
 [node name="Speed8" type="Button" parent="Interface/RightHud/SpeedPanel/Controls"]
 custom_minimum_size = Vector2(30, 30)
+
+[node name="SessionPanel" type="PanelContainer" parent="Interface/RightHud"]
+custom_minimum_size = Vector2(184, 38)
+
+[node name="Controls" type="HBoxContainer" parent="Interface/RightHud/SessionPanel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 3
+
+[node name="Menu" type="Button" parent="Interface/RightHud/SessionPanel/Controls"]
+custom_minimum_size = Vector2(82, 30)
+text = "Menu"
+tooltip_text = "Otwórz menu gry • Esc"
+
+[node name="SaveGame" type="Button" parent="Interface/RightHud/SessionPanel/Controls"]
+custom_minimum_size = Vector2(82, 30)
+text = "Zapisz"
+tooltip_text = "Zapisz bieżącą sesję • F5"
 
 [node name="ActionBar" type="PanelContainer" parent="Interface"]
 anchor_left = 0.5
@@ -146,6 +164,75 @@ grow_vertical = 0
 [node name="Text" type="Label" parent="Interface/Inspector"]
 text = "LPM: wybór i narzędzia • Buduj/Praca: menu działań • PPM klik: anuluj lub odznacz • PPM przeciągnięty: kamera • PPM na oknie: zamknij • WASD/strzałki: kamera • kółko: zoom • ~: pauza • 1–4: prędkość • Spacja: pauza/wznów • Alt+Enter: pełny ekran\nObszary pracy i pomost: przeciągnij LPM • można oznaczać teren odkryty, choć aktualnie niewidoczny • Esc: anuluj narzędzie"
 autowrap_mode = 2
+
+[node name="MainMenu" type="ColorRect" parent="Interface"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.018, 0.027, 0.024, 0.94)
+
+[node name="Center" type="CenterContainer" parent="Interface/MainMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="Interface/MainMenu/Center"]
+custom_minimum_size = Vector2(520, 430)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="Interface/MainMenu/Center/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 48
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 48
+theme_override_constants/margin_bottom = 40
+
+[node name="Controls" type="VBoxContainer" parent="Interface/MainMenu/Center/Panel/Margin"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.9, 0.48, 1)
+theme_override_font_sizes/font_size = 38
+text = "GOBLIN STRONGHOLD"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+layout_mode = 2
+text = "Plemię pamięta to, co zdoła pożreć."
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+
+[node name="Resume" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "Wróć do gry"
+
+[node name="NewGame" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "Nowa gra"
+
+[node name="LoadGame" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "Wczytaj ostatni zapis"
+
+[node name="Quit" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "Wyjście"
 
 [node name="BuildMenu" type="PopupPanel" parent="."]
 size = Vector2i(164, 164)

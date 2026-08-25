@@ -110,9 +110,12 @@ internal sealed class HumanVillageState
                 item.Population < 0 || item.SkillLevel is < 1 or > 10 ||
                 !world.IsSurfaceTraversable(position) ||
                 Distance(position, world.Baseline.HumanVillage) >
-                    definitions.HumanVillageActivityRadius + (item.Task == HumanCohortTask.GatherBerries ? 4 : 0))
+                    definitions.HumanVillageActivityRadius + 4)
             {
-                throw new InvalidDataException("The save contains an invalid human cohort.");
+                throw new InvalidDataException(
+                    $"The save contains invalid human cohort {item.Id} at {position} " +
+                    $"with task {item.Task}; traversable={world.IsSurfaceTraversable(position)}, " +
+                    $"distance={Distance(position, world.Baseline.HumanVillage)}.");
             }
             return new HumanCohortState(item.Id, item.Role, item.Population, position, item.Task, item.SkillLevel, item.Tools);
         }).ToList();
@@ -433,7 +436,9 @@ internal sealed class HumanVillageState
             foreach (var neighbor in world.Baseline.GetCardinalNeighbors(current))
             {
                 if (Distance(neighbor, world.Baseline.HumanVillage) <= radius &&
-                    world.IsSurfaceTraversable(neighbor) && visited.Add(neighbor)) queue.Enqueue(neighbor);
+                    world.IsSurfaceTraversable(neighbor) &&
+                    world.Baseline.CanTraverseSurfaceEdge(current, neighbor) &&
+                    visited.Add(neighbor)) queue.Enqueue(neighbor);
             }
         }
         return result;

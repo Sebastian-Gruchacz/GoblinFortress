@@ -23,6 +23,35 @@ public sealed class GeneratedStructureTests
     }
 
     [Fact]
+    public void HumanVillageStructuresStayOnDryFlatGroundAcrossSeeds()
+    {
+        for (ulong seed = 0; seed < 64; seed++)
+        {
+            var engine = CreateEngine(new WorldSeed(seed));
+            var structures = engine.World.CreateWorldObjectSnapshot().Where(item =>
+                item.Owner == WorldObjectOwner.HumanVillage).ToArray();
+
+            Assert.NotEmpty(structures);
+            foreach (var structure in structures)
+            {
+                var footprint = structure.GetAbsoluteParts()
+                    .Select(item => item.Position with { Z = 0 })
+                    .Distinct()
+                    .ToArray();
+                var levels = footprint.Select(position =>
+                    engine.Map.GetCell(position).SurfaceLevel).Distinct().ToArray();
+                Assert.Single(levels);
+                Assert.All(footprint, position =>
+                {
+                    var cell = engine.Map.GetCell(position);
+                    Assert.Equal(TerrainKind.SolidGround, cell.Terrain);
+                    Assert.Equal(TerrainRampDirection.None, cell.RampDirection);
+                });
+            }
+        }
+    }
+
+    [Fact]
     public void BuildingsOccupyManyColumnsAndSeveralHeightLayers()
     {
         var snapshot = CreateEngine(new WorldSeed(456)).CreateSnapshot();

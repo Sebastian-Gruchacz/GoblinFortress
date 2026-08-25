@@ -165,6 +165,9 @@ public sealed class WorldMapState
     public IReadOnlyList<WorldObjectSnapshot> CreateWorldObjectSnapshot() =>
         new ReadOnlyCollection<WorldObjectSnapshot>(_worldObjects.Values.ToArray());
 
+    internal IEnumerable<WorldObjectSnapshot> EnumerateWorldObjects() =>
+        _worldObjects.Values;
+
     public int CountWorldObjects(WorldObjectKind kind, WorldObjectOwner owner) =>
         _worldObjects.Values.Count(item => item.Kind == kind && item.Owner == owner);
 

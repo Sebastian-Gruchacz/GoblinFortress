@@ -9,6 +9,12 @@ public enum CellVisibility : byte
     Visible = 2,
 }
 
+public static class CellVisibilityExtensions
+{
+    public static bool IsDiscovered(this CellVisibility visibility) =>
+        visibility is CellVisibility.Explored or CellVisibility.Visible;
+}
+
 public sealed class WorldVisibilityState
 {
     private readonly CellVisibility[] _cells;

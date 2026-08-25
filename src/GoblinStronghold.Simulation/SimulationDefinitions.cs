@@ -40,10 +40,15 @@ public sealed record FoodNutritionSettings(
     };
 }
 
+public sealed record VisionSettings(
+    int GoblinDayRadius,
+    int GoblinNightRadius,
+    int GoblinStructureRadius);
+
 public sealed class SimulationDefinitions
 {
     public static SimulationDefinitions Foundation { get; } = new(
-        id: "foundation-v34",
+        id: "foundation-v35",
         clock: new(ClimateCalendarProfiles.DemoTemperate),
         maximumHunger: 114_000,
         hungerPerTick: 1,
@@ -90,7 +95,9 @@ public sealed class SimulationDefinitions
         berriesNutrition: 2_800,
         mushroomsNutrition: 3_400,
         edibleRootsNutrition: 4_200,
-        fishNutrition: 4_800);
+        fishNutrition: 4_800,
+        goblinNightVisionRadius: 3,
+        goblinStructureVisionRadius: 3);
 
     public const int FieldCampCapacity = 5;
 
@@ -142,7 +149,9 @@ public sealed class SimulationDefinitions
         int berriesNutrition = 1_800,
         int mushroomsNutrition = 2_200,
         int edibleRootsNutrition = 2_800,
-        int fishNutrition = 3_200)
+        int fishNutrition = 3_200,
+        int? goblinNightVisionRadius = null,
+        int goblinStructureVisionRadius = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(clock);
@@ -172,6 +181,11 @@ public sealed class SimulationDefinitions
         ArgumentOutOfRangeException.ThrowIfGreaterThan(restThreshold, maximumFatigue);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(restRecoveryPerTick);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(visionRadius);
+        if (goblinNightVisionRadius is not null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(goblinNightVisionRadius.Value);
+        }
+        ArgumentOutOfRangeException.ThrowIfNegative(goblinStructureVisionRadius);
         ArgumentOutOfRangeException.ThrowIfNegative(maximumExplorers);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(plantGrowthIntervalTicks);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(plantGrowthPerInterval);
@@ -257,6 +271,10 @@ public sealed class SimulationDefinitions
             Mushrooms: mushroomsNutrition,
             EdibleRoots: edibleRootsNutrition,
             Fish: fishNutrition);
+        Vision = new(
+            GoblinDayRadius: visionRadius,
+            GoblinNightRadius: goblinNightVisionRadius ?? Math.Max(2, visionRadius - 1),
+            GoblinStructureRadius: goblinStructureVisionRadius);
     }
 
     public string Id { get; }
@@ -268,6 +286,8 @@ public sealed class SimulationDefinitions
     public StorageSettings Storage { get; }
 
     public FoodNutritionSettings Food { get; }
+
+    public VisionSettings Vision { get; }
 
     public int MaximumHunger { get; }
 

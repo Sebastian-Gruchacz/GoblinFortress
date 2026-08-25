@@ -482,7 +482,7 @@ public partial class Main : Node
             var snapshot = _engine.CreateSnapshot();
             if (cells.Any(item =>
                     !_engine.Map.IsWithin(item) ||
-                    snapshot.GetVisibility(item, _engine.Map.Width) == CellVisibility.Unknown))
+                    !snapshot.GetVisibility(item, _engine.Map.Width).IsDiscovered()))
             {
                 _inspector.Text = "Całe obozowisko musi mieścić się na odkrytym terenie.";
                 CancelBuildMode(clearInspector: false);
@@ -513,7 +513,7 @@ public partial class Main : Node
         var cells = SimulationCommand.GetWalkwayCells(_walkwayStart, end);
         var snapshot = _engine.CreateSnapshot();
         if (cells.Any(cell =>
-                snapshot.GetVisibility(cell, _engine.Map.Width) == CellVisibility.Unknown))
+                !snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered()))
         {
             _inspector.Text = "Pomost musi przebiegać przez odkryty teren.";
             CancelBuildMode(clearInspector: false);
@@ -591,7 +591,7 @@ public partial class Main : Node
             : new[] { cell };
         var snapshot = _engine.CreateSnapshot();
         cells = cells.Where(position =>
-            snapshot.GetVisibility(position, _engine.Map.Width) != CellVisibility.Unknown).ToArray();
+            snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered()).ToArray();
         _worldView.SetWorkPreview(ToDesignationKind(_workMode), cells);
         if (_isDraggingWorkArea)
         {
@@ -702,7 +702,7 @@ public partial class Main : Node
     {
         var snapshot = _engine.CreateSnapshot();
         if (!_engine.World.IsSurfaceTraversable(cell) ||
-            snapshot.GetVisibility(cell, _engine.Map.Width) == CellVisibility.Unknown)
+            !snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered())
         {
             return;
         }
@@ -854,7 +854,7 @@ public partial class Main : Node
         }
 
         var visibility = snapshot.GetVisibility(cell, _engine.Map.Width);
-        if (visibility == CellVisibility.Unknown)
+        if (!visibility.IsDiscovered())
         {
             SelectActor(EntityId.None);
             _inspector.Text = $"{cell} • nieznany teren";
@@ -862,13 +862,6 @@ public partial class Main : Node
         }
 
         var terrain = _engine.Map.GetCell(cell);
-        if (visibility == CellVisibility.Explored)
-        {
-            SelectActor(EntityId.None);
-            _inspector.Text = $"{cell} • odkryte, obecnie niewidoczne • {terrain.Terrain}";
-            return;
-        }
-
         var plant = _engine.World.GetPlantPatch(cell);
         var objects = _engine.World.GetWorldObjectsAt(cell);
         var actors = snapshot.Actors.Where(actor => actor.Position == cell).ToArray();
@@ -893,7 +886,9 @@ public partial class Main : Node
             ShowStorageDetails(zones[0]);
         }
 
-        _inspector.Text = $"{cell} • {terrain.Terrain}{DescribeWaterDepth(terrain)} • wilgoć {terrain.Moisture} • żyzność {terrain.Fertility}" +
+        _inspector.Text = $"{cell}" +
+            (visibility == CellVisibility.Explored ? " • odkryte, obecnie niewidoczne" : string.Empty) +
+            $" • {terrain.Terrain}{DescribeWaterDepth(terrain)} • wilgoć {terrain.Moisture} • żyzność {terrain.Fertility}" +
             (plant is null
                 ? string.Empty
                 : $" • {DescribeFoodSource(plant.Value.Kind)} {plant.Value.Biomass}/{plant.Value.Capacity}") +

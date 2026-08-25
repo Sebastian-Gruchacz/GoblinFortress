@@ -1344,11 +1344,21 @@ public sealed partial class SimulationEngine
     {
         var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
         var goblinRadius = calendar.IsNight
-            ? Math.Max(2, Definitions.VisionRadius - 1)
-            : Definitions.VisionRadius;
+            ? Definitions.Vision.GoblinNightRadius
+            : Definitions.Vision.GoblinDayRadius;
         var observers = _actors.Values
             .Select(actor => (actor.Position, goblinRadius))
             .ToList();
+        if (Definitions.Vision.GoblinStructureRadius > 0)
+        {
+            observers.AddRange(World.EnumerateWorldObjects()
+                .Where(worldObject =>
+                    worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+                    worldObject.Kind is WorldObjectKind.GoblinHut or
+                        WorldObjectKind.GoblinFieldCamp)
+                .Select(worldObject =>
+                    (worldObject.Anchor, Definitions.Vision.GoblinStructureRadius)));
+        }
         if (DebugSettings.RevealFogFromNonPlayerUnits)
         {
             var humanRadius = calendar.IsNight ? 3 : Definitions.VisionRadius;

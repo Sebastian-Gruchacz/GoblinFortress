@@ -6,6 +6,17 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class VisibilityTests
 {
+    [Theory]
+    [InlineData(CellVisibility.Unknown, false)]
+    [InlineData(CellVisibility.Explored, true)]
+    [InlineData(CellVisibility.Visible, true)]
+    public void DiscoveredTerrainIncludesFoggedMemory(
+        CellVisibility visibility,
+        bool expected)
+    {
+        Assert.Equal(expected, visibility.IsDiscovered());
+    }
+
     [Fact]
     public void CurrentBuildVisibilityAidIsDisabledForRelease()
     {
@@ -28,6 +39,32 @@ public sealed class VisibilityTests
             snapshot.Visibility.Count(state => state == CellVisibility.Visible),
             1,
             snapshot.Visibility.Count - 1);
+    }
+
+    [Fact]
+    public void GoblinStructuresRevealTheirConfiguredSurroundingsWithoutActors()
+    {
+        var seed = new WorldSeed(0x535452554354UL);
+        var map = SwampMapGenerator.Generate(seed, width: 32, height: 32);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 0,
+            initialFoodStock: 0);
+        var hut = engine.CreateSnapshot().WorldObjects.First(worldObject =>
+            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            worldObject.Kind == WorldObjectKind.GoblinHut);
+
+        var snapshot = engine.CreateSnapshot();
+
+        Assert.Equal(
+            CellVisibility.Visible,
+            snapshot.GetVisibility(hut.Anchor, engine.Map.Width));
+        Assert.True(snapshot.Visibility.Count(state => state == CellVisibility.Visible) > 1);
+        Assert.Equal(
+            CellVisibility.Unknown,
+            snapshot.GetVisibility(engine.Map.HumanVillage, engine.Map.Width));
     }
 
     [Fact]

@@ -585,7 +585,7 @@ public partial class WorldView : Node2D
         foreach (var cell in _constructionPreview)
         {
             var valid = _engine.Map.IsWithin(cell) &&
-                _snapshot.GetVisibility(cell, _engine.Map.Width) != CellVisibility.Unknown;
+                _snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered();
             var color = valid
                 ? new Color(0.95f, 0.75f, 0.28f, 0.7f)
                 : new Color(0.92f, 0.2f, 0.2f, 0.72f);

@@ -49,6 +49,12 @@ public partial class Main : Node
     private Label _storageSummary = null!;
     private CheckButton _storagePullLoose = null!;
     private SpinBox _storageTarget = null!;
+    private OptionButton _storagePriority = null!;
+    private OptionButton _resourcePriority = null!;
+    private OptionButton _storageHauler = null!;
+    private readonly List<EntityId> _storageHaulerActorIds = [];
+    private OptionButton _storageSource = null!;
+    private readonly List<EntityId> _storageSourceZoneIds = [];
     private EntityId _selectedStorageId = EntityId.None;
 
     private double SecondsPerTick =>
@@ -132,6 +138,15 @@ public partial class Main : Node
         _storageSummary = GetNode<Label>("StorageDetails/Margin/Controls/Summary");
         _storagePullLoose = GetNode<CheckButton>("StorageDetails/Margin/Controls/PullLoose");
         _storageTarget = GetNode<SpinBox>("StorageDetails/Margin/Controls/TargetRow/Target");
+        _storagePriority = GetNode<OptionButton>("StorageDetails/Margin/Controls/PriorityRow/Priority");
+        _resourcePriority = GetNode<OptionButton>("StorageDetails/Margin/Controls/GlobalPriorityRow/Priority");
+        _storageHauler = GetNode<OptionButton>("StorageDetails/Margin/Controls/HaulerRow/Hauler");
+        _storageSource = GetNode<OptionButton>("StorageDetails/Margin/Controls/SourceRow/Source");
+        foreach (var priority in Enum.GetValues<StoragePriority>())
+        {
+            _storagePriority.AddItem(DescribeStoragePriority(priority));
+            _resourcePriority.AddItem(DescribeStoragePriority(priority));
+        }
         _storageDetails.CloseRequested += _storageDetails.Hide;
         _storageDetails.GetNode<Control>("Margin").GuiInput += inputEvent =>
             CloseWindowOnSecondaryInput(inputEvent, _storageDetails);
@@ -707,7 +722,11 @@ public partial class Main : Node
         var workEvent = events.LastOrDefault(item =>
             item.Kind is SimulationEventKind.WorkDesignationCreated or
                 SimulationEventKind.WorkDesignationRemoved or
-                SimulationEventKind.StoragePullConfigured);
+                SimulationEventKind.StoragePullConfigured or
+                SimulationEventKind.StorageHaulerConfigured or
+                SimulationEventKind.StorageSourceConfigured or
+                SimulationEventKind.StoragePriorityConfigured or
+                SimulationEventKind.ResourcePriorityConfigured);
         if (workEvent.Kind == SimulationEventKind.WorkDesignationCreated)
         {
             _inspector.Text = (WorkDesignationKind)workEvent.Amount switch
@@ -722,13 +741,32 @@ public partial class Main : Node
         {
             _inspector.Text = "Cel pracy został zakończony lub usunięty.";
         }
-        else if (workEvent.Kind == SimulationEventKind.StoragePullConfigured)
+        else if (workEvent.Kind is SimulationEventKind.StoragePullConfigured or
+                 SimulationEventKind.StorageHaulerConfigured or
+                 SimulationEventKind.StorageSourceConfigured or
+                 SimulationEventKind.StoragePriorityConfigured or
+                 SimulationEventKind.ResourcePriorityConfigured)
         {
+            var configuredId = workEvent.Kind == SimulationEventKind.ResourcePriorityConfigured
+                ? _selectedStorageId
+                : workEvent.Target;
             var configured = _engine.CreateSnapshot().StorageZones
-                .FirstOrDefault(zone => zone.Id == workEvent.Target);
+                .FirstOrDefault(zone => zone.Id == configuredId);
             if (configured.Id != EntityId.None && configured.Id == _selectedStorageId)
             {
                 UpdateStorageDetails(configured);
+            }
+        }
+
+        if (_selectedStorageId != EntityId.None &&
+            events.Any(item => item.Kind is
+                SimulationEventKind.ItemPickedUp or SimulationEventKind.ItemStored))
+        {
+            var selectedStorage = _engine.CreateSnapshot().StorageZones
+                .FirstOrDefault(zone => zone.Id == _selectedStorageId);
+            if (selectedStorage.Id != EntityId.None)
+            {
+                UpdateStorageDetails(selectedStorage);
             }
         }
 
@@ -936,6 +974,15 @@ public partial class Main : Node
         _ => "towarów",
     };
 
+    private static string DescribeStoragePriority(StoragePriority priority) => priority switch
+    {
+        StoragePriority.Low => "Niski",
+        StoragePriority.Normal => "Normalny",
+        StoragePriority.High => "Wysoki",
+        StoragePriority.Urgent => "Pilny",
+        _ => "Nieznany",
+    };
+
     private static string DescribeCohort(HumanCohortSnapshot cohort) =>
         $"{cohort.Role switch
         {
@@ -1067,7 +1114,9 @@ public partial class Main : Node
 
     private void UpdateStorageDetails(StorageZoneSnapshot zone)
     {
-        var contents = _engine.CreateSnapshot().ItemStacks
+        var snapshot = _engine.CreateSnapshot();
+        var delivery = _engine.InspectStorageDelivery(zone.Id);
+        var contents = snapshot.ItemStacks
             .Where(stack =>
                 stack.Location.Kind == ItemLocationKind.StorageZone &&
                 stack.Location.OwnerId == zone.Id)
@@ -1075,6 +1124,19 @@ public partial class Main : Node
             .ThenBy(stack => stack.Id)
             .Select(DescribeStack)
             .ToArray();
+        var assignedHauler = snapshot.Actors.FirstOrDefault(actor =>
+            actor.Id == zone.AssignedHaulerId);
+        var haulerDescription = assignedHauler.Id == EntityId.None
+            ? "publiczny dispatcher"
+            : $"{assignedHauler.Name} ({assignedHauler.Id})";
+        var sourceZone = snapshot.StorageZones.FirstOrDefault(candidate =>
+            candidate.Id == zone.SourceStorageZoneId);
+        var sourceDescription = sourceZone.Id == EntityId.None
+            ? "teren i nadwyżki dowolnych składów"
+            : $"skład {sourceZone.Id} przy {sourceZone.Position}";
+        var globalPriority = snapshot.ResourcePriorities
+            .Single(priority => priority.Resource == zone.AcceptedResource)
+            .Priority;
         _storageSummary.Text = $"Skład {DescribeResource(zone.AcceptedResource)}\n" +
             $"Stan: {zone.StoredQuantity}/{zone.Capacity}\n" +
             (zone.TypeSlotCount > 0
@@ -1084,15 +1146,76 @@ public partial class Main : Node
             (contents.Length == 0 ? "Zawartość: pusty\n" :
                 $"Zawartość: {string.Join(", ", contents)}\n") +
             (zone.DesiredQuantity == 0
-                ? "Automatyczne zbieranie wyłączone."
-                : $"Żądanie transportowe do {zone.DesiredQuantity} szt.");
+                ? "Automatyczne dostawy wyłączone.\n"
+                : $"Żądanie dostawy do {zone.DesiredQuantity} szt.\n") +
+            $"Status dostaw: {DescribeStorageDelivery(delivery, assignedHauler)}\n" +
+            $"Transport: {haulerDescription}.\n" +
+            $"Źródło: {sourceDescription}.\n" +
+            $"Priorytet lokalny: {DescribeStoragePriority(zone.Priority)}.\n" +
+            $"Priorytet {DescribeResource(zone.AcceptedResource)} w plemieniu: " +
+            $"{DescribeStoragePriority(globalPriority)}.";
         _storagePullLoose.ButtonPressed = zone.DesiredQuantity > 0;
         _storageTarget.MaxValue = zone.Capacity;
         _storageTarget.Value = zone.DesiredQuantity > 0
             ? zone.DesiredQuantity
             : zone.Capacity;
         _storageTarget.Editable = zone.DesiredQuantity > 0;
+        _storagePriority.Select((int)zone.Priority);
+        _resourcePriority.Select((int)globalPriority);
+
+        _storageHauler.Clear();
+        _storageHaulerActorIds.Clear();
+        _storageHauler.AddItem("Dowolny wolny goblin");
+        _storageHaulerActorIds.Add(EntityId.None);
+        foreach (var actor in snapshot.Actors.OrderBy(actor => actor.Id))
+        {
+            _storageHauler.AddItem($"{actor.Name} ({actor.Id})");
+            _storageHaulerActorIds.Add(actor.Id);
+        }
+
+        var selectedHaulerIndex = _storageHaulerActorIds.IndexOf(zone.AssignedHaulerId);
+        _storageHauler.Select(Math.Max(0, selectedHaulerIndex));
+
+        _storageSource.Clear();
+        _storageSourceZoneIds.Clear();
+        _storageSource.AddItem("Dowolne źródło");
+        _storageSourceZoneIds.Add(EntityId.None);
+        foreach (var candidate in snapshot.StorageZones
+                     .Where(candidate => candidate.Id != zone.Id &&
+                         candidate.AcceptedResource == zone.AcceptedResource)
+                     .OrderBy(candidate => candidate.Id))
+        {
+            _storageSource.AddItem($"Skład {candidate.Id} • {candidate.Position}");
+            _storageSourceZoneIds.Add(candidate.Id);
+        }
+
+        var selectedSourceIndex = _storageSourceZoneIds.IndexOf(zone.SourceStorageZoneId);
+        _storageSource.Select(Math.Max(0, selectedSourceIndex));
     }
+
+    private static string DescribeStorageDelivery(
+        StorageDeliveryDiagnostic delivery,
+        ActorSnapshot assignedHauler) => delivery.State switch
+    {
+        StorageDeliveryState.Disabled => "wyłączone",
+        StorageDeliveryState.Satisfied => "cel osiągnięty",
+        StorageDeliveryState.InTransit =>
+            $"w drodze {delivery.InTransitQuantity} szt. (brakuje {delivery.RequestedQuantity})",
+        StorageDeliveryState.NoAllowedSource => "brak dozwolonego źródła z tym zasobem",
+        StorageDeliveryState.NoSurplus =>
+            $"źródła istnieją, ale nie mają nadwyżki (brakuje {delivery.RequestedQuantity})",
+        StorageDeliveryState.DestinationBlocked =>
+            "brak wolnego slotu dla dostępnego rodzaju zasobu",
+        StorageDeliveryState.NoReachableSource =>
+            $"nadwyżka {delivery.AvailableSourceQuantity} szt. istnieje, ale nie ma drogi",
+        StorageDeliveryState.NoAvailableHauler => "brak goblina mogącego obsłużyć dostawę",
+        StorageDeliveryState.AssignedHaulerBusy => assignedHauler.Id == EntityId.None
+            ? "przypisany tragarz jest zajęty"
+            : $"{assignedHauler.Name} jest zajęty: {DescribeJob(assignedHauler.Job)}",
+        StorageDeliveryState.WaitingForHauler =>
+            $"oczekuje na tragarza; dostępne {delivery.AvailableSourceQuantity} szt.",
+        _ => "nieznany",
+    };
 
     private void ApplyStorageSettings()
     {
@@ -1107,14 +1230,57 @@ public partial class Main : Node
         var desired = _storagePullLoose.ButtonPressed
             ? Math.Clamp((int)Math.Round(_storageTarget.Value), 1, zone.Capacity)
             : 0;
+        var selectedHaulerIndex = _storageHauler.Selected;
+        var assignedHaulerId = selectedHaulerIndex >= 0 &&
+            selectedHaulerIndex < _storageHaulerActorIds.Count
+                ? _storageHaulerActorIds[selectedHaulerIndex]
+                : EntityId.None;
+        var selectedSourceIndex = _storageSource.Selected;
+        var sourceZoneId = selectedSourceIndex >= 0 &&
+            selectedSourceIndex < _storageSourceZoneIds.Count
+                ? _storageSourceZoneIds[selectedSourceIndex]
+                : EntityId.None;
+        var priority = Enum.IsDefined((StoragePriority)_storagePriority.Selected)
+            ? (StoragePriority)_storagePriority.Selected
+            : StoragePriority.Normal;
+        var globalPriority = Enum.IsDefined((StoragePriority)_resourcePriority.Selected)
+            ? (StoragePriority)_resourcePriority.Selected
+            : StoragePriority.Normal;
+        var executeAt = _engine.CurrentTick.Next();
         _engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
-            _engine.CurrentTick.Next(),
+            executeAt,
             _commandSequence++,
             zone.Id,
             desired));
+        _engine.QueueCommand(SimulationCommand.ConfigureStorageHauler(
+            executeAt,
+            _commandSequence++,
+            zone.Id,
+            assignedHaulerId));
+        _engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            executeAt,
+            _commandSequence++,
+            zone.Id,
+            sourceZoneId));
+        _engine.QueueCommand(SimulationCommand.ConfigureStoragePriority(
+            executeAt,
+            _commandSequence++,
+            zone.Id,
+            priority));
+        _engine.QueueCommand(SimulationCommand.ConfigureResourcePriority(
+            executeAt,
+            _commandSequence++,
+            zone.AcceptedResource,
+            globalPriority));
+        var haulerDescription = assignedHaulerId == EntityId.None
+            ? "dowolny wolny goblin"
+            : snapshot.Actors.First(actor => actor.Id == assignedHaulerId).Name;
+        var sourceDescription = sourceZoneId == EntityId.None
+            ? "dowolne źródło"
+            : $"skład {sourceZoneId}";
         _inspector.Text = desired == 0
-            ? $"Skład {zone.Id}: wyłączono ssanie."
-            : $"Skład {zone.Id}: żądaj zasobów do {desired}.";
+            ? $"Skład {zone.Id}: wyłączono automatyczne dostawy; transport: {haulerDescription}; źródło: {sourceDescription}; priorytet lokalny: {DescribeStoragePriority(priority)}; globalny: {DescribeStoragePriority(globalPriority)}."
+            : $"Skład {zone.Id}: żądaj zasobów do {desired}; transport: {haulerDescription}; źródło: {sourceDescription}; priorytet lokalny: {DescribeStoragePriority(priority)}; globalny: {DescribeStoragePriority(globalPriority)}.";
     }
 
     private void UpdateGoblinDetails(SimulationSnapshot snapshot)
@@ -1148,6 +1314,14 @@ public partial class Main : Node
         var cargo = actor.CarriedStackId == EntityId.None
             ? (ItemStackSnapshot?)null
             : snapshot.ItemStacks.FirstOrDefault(stack => stack.Id == actor.CarriedStackId);
+        var logisticsDuty = snapshot.StorageZones
+            .Where(zone => zone.AssignedHaulerId == actor.Id)
+            .OrderByDescending(zone => zone.Priority)
+            .ThenBy(zone => zone.Id)
+            .Select(zone =>
+                $"skład {zone.Id} ({DescribeResource(zone.AcceptedResource)}, " +
+                $"{DescribeStoragePriority(zone.Priority)})")
+            .ToArray();
         UpdateInventoryIcons(actor, cargo);
         var text = new StringBuilder()
             .AppendLine($"{actor.Name}  [#{actor.Id}]")
@@ -1156,6 +1330,8 @@ public partial class Main : Node
             .AppendLine($"Znane umiejętności: {DescribeSkills(actor.KnownSkills)}")
             .AppendLine($"Doświadczenie: {DescribeExperience(actor.Experience)}")
             .AppendLine($"Znane cechy: {DescribeTraits(actor.KnownTraits)}")
+            .AppendLine($"Służba logistyczna: " +
+                (logisticsDuty.Length == 0 ? "brak przydziału" : string.Join(", ", logisticsDuty)))
             .AppendLine()
             .AppendLine("Aktualne zadanie:")
             .AppendLine(DescribeJob(actor.Job))

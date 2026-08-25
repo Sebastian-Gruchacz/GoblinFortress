@@ -221,8 +221,8 @@ autowrap_mode = 2
 [node name="StorageDetails" type="Window" parent="."]
 title = "Ustawienia składu"
 initial_position = 1
-size = Vector2i(390, 240)
-min_size = Vector2i(330, 210)
+size = Vector2i(480, 470)
+min_size = Vector2i(430, 420)
 visible = false
 
 [node name="Margin" type="MarginContainer" parent="StorageDetails"]
@@ -244,7 +244,7 @@ text = "Skład"
 autowrap_mode = 2
 
 [node name="PullLoose" type="CheckButton" parent="StorageDetails/Margin/Controls"]
-text = "Żądaj luźnych zasobów"
+text = "Żądaj dostaw zasobów"
 
 [node name="TargetRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
 
@@ -256,6 +256,38 @@ max_value = 64.0
 value = 64.0
 allow_greater = false
 allow_lesser = false
+
+[node name="PriorityRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/PriorityRow"]
+text = "Priorytet:"
+
+[node name="Priority" type="OptionButton" parent="StorageDetails/Margin/Controls/PriorityRow"]
+size_flags_horizontal = 3
+
+[node name="GlobalPriorityRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/GlobalPriorityRow"]
+text = "Priorytet towaru:"
+
+[node name="Priority" type="OptionButton" parent="StorageDetails/Margin/Controls/GlobalPriorityRow"]
+size_flags_horizontal = 3
+
+[node name="HaulerRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/HaulerRow"]
+text = "Tragarz:"
+
+[node name="Hauler" type="OptionButton" parent="StorageDetails/Margin/Controls/HaulerRow"]
+size_flags_horizontal = 3
+
+[node name="SourceRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/SourceRow"]
+text = "Źródło:"
+
+[node name="Source" type="OptionButton" parent="StorageDetails/Margin/Controls/SourceRow"]
+size_flags_horizontal = 3
 
 [node name="Apply" type="Button" parent="StorageDetails/Margin/Controls"]
 text = "Zastosuj"

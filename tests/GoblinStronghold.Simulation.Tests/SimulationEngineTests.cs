@@ -289,6 +289,13 @@ public sealed class SimulationEngineTests
         var water = crossing.Water;
         var land = crossing.Land;
         var cells = SimulationCommand.GetWalkwayCells(land, water);
+        var topologyVersion = engine.World.TopologyVersion;
+        Assert.NotNull(engine.Navigation.FindSurfacePath(map.GoblinSpawn, land));
+        Assert.NotNull(engine.Navigation.FindSurfacePath(map.GoblinSpawn, land));
+        var cachedMetrics = engine.Navigation.GetMetrics();
+        Assert.Equal(2, cachedMetrics.Requests);
+        Assert.Equal(1, cachedMetrics.Searches);
+        Assert.Equal(1, cachedMetrics.CacheHits);
         engine.QueueCommand(SimulationCommand.BuildWalkway(
             new SimulationTick(1),
             sequence: 1,
@@ -301,6 +308,10 @@ public sealed class SimulationEngineTests
         SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
 
         Assert.True(engine.World.IsSurfaceTraversable(water));
+        Assert.Equal(topologyVersion + 1, engine.World.TopologyVersion);
+        var invalidatedMetrics = engine.Navigation.GetMetrics();
+        Assert.True(invalidatedMetrics.CacheInvalidations > cachedMetrics.CacheInvalidations);
+        Assert.Equal(engine.World.TopologyVersion, invalidatedMetrics.TopologyVersion);
         Assert.Contains(engine.CreateSnapshot().WorldObjects, item =>
             item.Kind == WorldObjectKind.WoodenWalkway && item.Parts.Count == cells.Count);
         Assert.Equal(10 - cells.Count, engine.CreateSnapshot().ItemStacks

@@ -43,7 +43,7 @@ public sealed record FoodNutritionSettings(
 public sealed class SimulationDefinitions
 {
     public static SimulationDefinitions Foundation { get; } = new(
-        id: "foundation-v29",
+        id: "foundation-v34",
         clock: new(ClimateCalendarProfiles.DemoTemperate),
         maximumHunger: 114_000,
         hungerPerTick: 1,

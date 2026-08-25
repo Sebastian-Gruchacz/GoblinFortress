@@ -117,6 +117,7 @@ public sealed class WorldMapStateTests
         var engine = CreateEngine();
         var position = engine.Map.GoblinSpawn;
         var before = engine.World.GetPlantPatch(position)!.Value;
+        var topologyVersion = engine.World.TopologyVersion;
 
         engine.QueueCommand(SimulationCommand.Forage(
             new SimulationTick(1),
@@ -135,6 +136,7 @@ public sealed class WorldMapStateTests
         Assert.Equal(position, change.Position);
         Assert.Equal(-gathered.Amount, change.Amount);
         Assert.Equal(engine.World.Version, change.Version);
+        Assert.Equal(topologyVersion, engine.World.TopologyVersion);
     }
 
     [Fact]

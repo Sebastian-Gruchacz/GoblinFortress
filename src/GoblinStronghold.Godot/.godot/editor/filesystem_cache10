@@ -3,8 +3,8 @@
 EnvironmentSprites.cs::CSharpScript::8337352776345285480::1787608085::0::1::::<><><>0<>0<><>::
 HumanStructureSprites.cs::CSharpScript::1636649240612434515::1787609335::0::1::::<><><>0<>0<><>::
 ItemIcons.cs::CSharpScript::6682173192107189819::1787595148::0::1::::<><><>0<>0<><>::
-Main.cs::CSharpScript::3703657148517459982::1787614941::0::1::::<>Node<><>0<>0<><>::
-Main.tscn::PackedScene::-1::1787615832::0::1::::<><><>0<>0<><>::res://Main.cs<>res://WorldView.cs<>res://MinimapView.cs<>res://SeasonCycleView.cs
+Main.cs::CSharpScript::3703657148517459982::1787624643::0::1::::<>Node<><>0<>0<><>::
+Main.tscn::PackedScene::-1::1787623440::0::1::::<><><>0<>0<><>::res://Main.cs<>res://WorldView.cs<>res://MinimapView.cs<>res://SeasonCycleView.cs
 MinimapView.cs::CSharpScript::4491012679072878169::1787611023::0::1::::<>Control<><>0<>0<><>::
 SeasonCycleView.cs::CSharpScript::6601608163527303132::1787615831::0::1::::<>Control<><>0<>0<><>::
 SeasonRibbonSprites.cs::CSharpScript::6440356217927205539::1787615829::0::1::::<><><>0<>0<><>::
@@ -18,7 +18,7 @@ action-icons-v1.png::CompressedTexture2D::1209345450551689045::1787594610::17876
 item-icons-v1.png::CompressedTexture2D::6454904691500104187::1787595059::1787602046::1::::<><><>0<>0<>4dd0b8ad219eed138061ee1fc5dedf6f<>res://.godot/imported/item-icons-v1.png-bd2106175f736088beee0428891d30a2.ctex::
 season-ribbon-v1.png::CompressedTexture2D::6040520537425303431::1787615541::1787616021::1::::<><><>0<>0<>791f224d69d459b019eda94edcba12a1<>res://.godot/imported/season-ribbon-v1.png-820feedc30f2eba1da7990d9ae0177ff.ctex::
 speed-8x-icon-v1.png::CompressedTexture2D::9153190893043479359::1787609071::1787609378::1::::<><><>0<>0<>9795f4d97273008eebb42833f53e7780<>res://.godot/imported/speed-8x-icon-v1.png-8316260aecf9842881325c99641f7e4c.ctex::
-::res://Assets/World/::1787616021
+::res://Assets/World/::1787616179
 environment-atlas-v1.png::CompressedTexture2D::8297971927137917071::1787602745::1787608218::1::::<><><>0<>0<>ec8a021ecc98c1c7217e8a7ab33a4c84<>res://.godot/imported/environment-atlas-v1.png-80b8e7838d8a0043f2aefee2ae4faf1f.ctex::
 human-structures-atlas-v1.png::CompressedTexture2D::6807016506412351296::1787609142::1787609379::1::::<><><>0<>0<>7de0fcc4eeb8f87d81e392814444034e<>res://.godot/imported/human-structures-atlas-v1.png-419103c8ecf06e4a8c56448d60949a0c.ctex::
 terrain-water-atlas-v1.png::CompressedTexture2D::1310911856741871427::1787607816::1787608218::1::::<><><>0<>0<>e83bbeb7c41f162a1fd5e86d7604e142<>res://.godot/imported/terrain-water-atlas-v1.png-ab0e3a67d82d077cd714c6ae5d3aa8e1.ctex::

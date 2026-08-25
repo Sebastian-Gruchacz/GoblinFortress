@@ -10,7 +10,7 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
-    private const int SaveFormatVersion = 26;
+    private const int SaveFormatVersion = 30;
     private const int DefaultMapDimension = 32;
 
     private static readonly JsonSerializerOptions SaveOptions = new()
@@ -22,6 +22,7 @@ public sealed partial class SimulationEngine
     private readonly SortedDictionary<EntityId, ActorState> _actors = [];
     private readonly SortedDictionary<EntityId, ItemStackState> _itemStacks = [];
     private readonly SortedDictionary<EntityId, StorageZoneState> _storageZones = [];
+    private readonly SortedDictionary<ResourceKind, StoragePriority> _resourcePriorities = [];
     private readonly SortedDictionary<EntityId, ConstructionSiteState> _constructionSites = [];
     private readonly SortedDictionary<EntityId, WorkDesignationSnapshot> _workDesignations = [];
     private readonly SortedDictionary<CommandKey, SimulationCommand> _pendingCommands = [];
@@ -49,8 +50,13 @@ public sealed partial class SimulationEngine
         Definitions = definitions;
         DebugSettings = debugSettings;
         World = WorldMapState.CreateInitial(map);
+        Navigation = new NavigationPathService(World);
         Visibility = WorldVisibilityState.Create(map);
         _humanVillage = HumanVillageState.CreateInitial(World, definitions);
+        foreach (var resource in Enum.GetValues<ResourceKind>().Where(IsStorableResource))
+        {
+            _resourcePriorities.Add(resource, StoragePriority.Normal);
+        }
     }
 
     public WorldSeed WorldSeed { get; }
@@ -62,6 +68,8 @@ public sealed partial class SimulationEngine
     public GeneratedMap Map => World.Baseline;
 
     public WorldMapState World { get; private set; }
+
+    public NavigationPathService Navigation { get; private set; }
 
     public WorldVisibilityState Visibility { get; private set; }
 
@@ -219,6 +227,7 @@ public sealed partial class SimulationEngine
                     new GridPosition(part.RelativeX, part.RelativeY, part.RelativeZ),
                     part.Channel,
                     part.Kind)))));
+        engine.Navigation = new NavigationPathService(engine.World);
         engine.Visibility = WorldVisibilityState.Restore(map, save.Visibility);
         engine._humanVillage = HumanVillageState.Restore(
             engine.World,
@@ -226,6 +235,7 @@ public sealed partial class SimulationEngine
             definitions,
             engine.CurrentTick);
         engine.ValidateLoadedRaidState();
+        engine.LoadResourcePriorities(save.ResourcePriorities);
         engine.LoadStorageZones(save.StorageZones);
         engine.LoadWorkDesignations(save.WorkDesignations);
         engine.LoadItemStacks(save.ItemStacks);
@@ -311,9 +321,15 @@ public sealed partial class SimulationEngine
                 zone.Capacity,
                 GetStoredQuantity(zone.Id),
                 zone.DesiredQuantity,
+                zone.AssignedHaulerId,
+                zone.SourceStorageZoneId,
+                zone.Priority,
                 UsesSmallFoodSlotRules(zone) ? Definitions.Storage.SmallFoodTypeSlots : 0,
                 UsesSmallFoodSlotRules(zone) ? Definitions.Storage.SmallStackCapacity : zone.Capacity,
                 GetUsedTypeSlots(zone.Id)))
+            .ToArray();
+        var resourcePriorities = _resourcePriorities
+            .Select(pair => new ResourcePrioritySnapshot(pair.Key, pair.Value))
             .ToArray();
         var workDesignations = _workDesignations.Values.ToArray();
         var constructionSites = _constructionSites.Values
@@ -331,6 +347,7 @@ public sealed partial class SimulationEngine
             actors,
             itemStacks,
             storageZones,
+            resourcePriorities,
             constructionSites,
             workDesignations,
             plantPatches,
@@ -343,6 +360,148 @@ public sealed partial class SimulationEngine
             Map.GeneratorVersion,
             Map.ComputeFingerprint(),
             ComputeStateHash());
+    }
+
+    public StorageDeliveryDiagnostic InspectStorageDelivery(EntityId zoneId)
+    {
+        if (!_storageZones.TryGetValue(zoneId, out var zone))
+        {
+            throw new ArgumentException($"Storage zone {zoneId} does not exist.", nameof(zoneId));
+        }
+
+        var stored = GetStoredQuantity(zone.Id);
+        var requested = Math.Max(0, zone.DesiredQuantity - stored);
+        if (zone.DesiredQuantity == 0)
+        {
+            return CreateDiagnostic(StorageDeliveryState.Disabled, requested);
+        }
+        if (requested == 0)
+        {
+            return CreateDiagnostic(StorageDeliveryState.Satisfied, requested);
+        }
+
+        var destinationReservations = CreateHaulReservations(sourceReservations: false);
+        var inTransit = destinationReservations.GetValueOrDefault(zone.Id);
+        if (inTransit > 0)
+        {
+            return CreateDiagnostic(
+                StorageDeliveryState.InTransit,
+                requested,
+                inTransitQuantity: inTransit);
+        }
+
+        var sourceReservations = CreateHaulReservations(sourceReservations: true);
+        var matchingSources = _itemStacks.Values
+            .Where(source =>
+                source.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
+                source.Location.OwnerId != zone.Id &&
+                Visibility.Get(source.Location.Position) != CellVisibility.Unknown &&
+                ZoneAccepts(zone, source.Resource) &&
+                IsSourceAllowedForZone(source, zone))
+            .ToArray();
+        if (matchingSources.Length == 0)
+        {
+            return CreateDiagnostic(StorageDeliveryState.NoAllowedSource, requested);
+        }
+
+        var availableSources = matchingSources
+            .Select(source => new
+            {
+                Source = source,
+                Available = GetAvailableSourceQuantity(source, sourceReservations),
+            })
+            .Where(candidate => candidate.Available > 0)
+            .ToArray();
+        var availableQuantity = availableSources.Sum(candidate => candidate.Available);
+        if (availableSources.Length == 0)
+        {
+            return CreateDiagnostic(
+                StorageDeliveryState.NoSurplus,
+                requested,
+                matchingSourceCount: matchingSources.Length);
+        }
+
+        var storableSources = availableSources
+            .Where(candidate => CanStoreStack(zone, candidate.Source, 1))
+            .ToArray();
+        if (storableSources.Length == 0)
+        {
+            return CreateDiagnostic(
+                StorageDeliveryState.DestinationBlocked,
+                requested,
+                availableQuantity: availableQuantity,
+                matchingSourceCount: matchingSources.Length);
+        }
+
+        var allowedHaulers = _actors.Values
+            .Where(actor => IsHaulerAllowedForZone(actor, zone))
+            .ToArray();
+        if (allowedHaulers.Length == 0)
+        {
+            return CreateDiagnostic(
+                StorageDeliveryState.NoAvailableHauler,
+                requested,
+                availableQuantity: availableQuantity,
+                matchingSourceCount: matchingSources.Length);
+        }
+
+        var hasReachablePlan = storableSources.Any(candidate =>
+            Navigation.HasSurfacePath(candidate.Source.Location.Position, zone.Position) &&
+            allowedHaulers.Any(actor => Navigation.HasSurfacePath(
+                actor.Position,
+                candidate.Source.Location.Position)));
+        if (!hasReachablePlan)
+        {
+            return CreateDiagnostic(
+                StorageDeliveryState.NoReachableSource,
+                requested,
+                availableQuantity: availableQuantity,
+                matchingSourceCount: matchingSources.Length);
+        }
+
+        if (zone.AssignedHaulerId != EntityId.None &&
+            _actors[zone.AssignedHaulerId].JobKind != ActorJobKind.None)
+        {
+            return CreateDiagnostic(
+                StorageDeliveryState.AssignedHaulerBusy,
+                requested,
+                availableQuantity: availableQuantity,
+                matchingSourceCount: matchingSources.Length);
+        }
+
+        return CreateDiagnostic(
+            StorageDeliveryState.WaitingForHauler,
+            requested,
+            availableQuantity: availableQuantity,
+            matchingSourceCount: matchingSources.Length);
+
+        StorageDeliveryDiagnostic CreateDiagnostic(
+            StorageDeliveryState state,
+            int requestedQuantity,
+            int inTransitQuantity = 0,
+            int availableQuantity = 0,
+            int matchingSourceCount = 0) =>
+            new(
+                zoneId,
+                state,
+                requestedQuantity,
+                inTransitQuantity,
+                availableQuantity,
+                matchingSourceCount);
+    }
+
+    private int GetAvailableSourceQuantity(
+        ItemStackState source,
+        IReadOnlyDictionary<EntityId, int> sourceReservations)
+    {
+        var protectedAtSource = source.Location.Kind == ItemLocationKind.StorageZone &&
+            _storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone)
+                ? Math.Max(0, sourceZone.DesiredQuantity -
+                    (GetStoredQuantity(sourceZone.Id) - source.Quantity))
+                : 0;
+        return Math.Max(
+            0,
+            source.Quantity - protectedAtSource - sourceReservations.GetValueOrDefault(source.Id));
     }
 
     public IReadOnlyList<SimulationEvent> DrainEvents()
@@ -382,6 +541,7 @@ public sealed partial class SimulationEngine
         PendingCommands: _pendingCommands.Count,
         UndeliveredEvents: _undeliveredEvents.Count,
         UndeliveredWorldChanges: _undeliveredWorldChanges.Count,
+        Navigation: Navigation.GetMetrics(),
         LastTickDuration: StopwatchTicksToTimeSpan(_lastTickStopwatchTicks),
         TotalTickDuration: StopwatchTicksToTimeSpan(_totalTickStopwatchTicks));
 
@@ -438,6 +598,11 @@ public sealed partial class SimulationEngine
             Actors = _actors.Values.Select(ToSaveModel).ToList(),
             ItemStacks = _itemStacks.Values.Select(ToSaveModel).ToList(),
             StorageZones = _storageZones.Values.Select(ToSaveModel).ToList(),
+            ResourcePriorities = _resourcePriorities.Select(pair => new ResourcePrioritySaveModel
+            {
+                Resource = pair.Key,
+                Priority = pair.Value,
+            }).ToList(),
             ConstructionSites = _constructionSites.Values.Select(site =>
                 new ConstructionSiteSaveModel
                 {
@@ -620,6 +785,13 @@ public sealed partial class SimulationEngine
             Append(canonical, stack.Location.OwnerId.Value);
         }
 
+        Append(canonical, _resourcePriorities.Count);
+        foreach (var pair in _resourcePriorities)
+        {
+            Append(canonical, (int)pair.Key);
+            Append(canonical, (int)pair.Value);
+        }
+
         Append(canonical, _storageZones.Count);
         foreach (var zone in _storageZones.Values)
         {
@@ -628,6 +800,9 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)zone.AcceptedResource);
             Append(canonical, zone.Capacity);
             Append(canonical, zone.DesiredQuantity);
+            Append(canonical, zone.AssignedHaulerId.Value);
+            Append(canonical, zone.SourceStorageZoneId.Value);
+            Append(canonical, (int)zone.Priority);
         }
 
         Append(canonical, _workDesignations.Count);
@@ -801,6 +976,7 @@ public sealed partial class SimulationEngine
                 zoneModel.Capacity <= 0 ||
                 zoneModel.DesiredQuantity < 0 ||
                 zoneModel.DesiredQuantity > zoneModel.Capacity ||
+                !Enum.IsDefined(zoneModel.Priority) ||
                 !IsStorableResource(zoneModel.AcceptedResource))
             {
                 throw new InvalidDataException("The save contains an invalid storage zone.");
@@ -813,10 +989,35 @@ public sealed partial class SimulationEngine
                         position,
                         zoneModel.AcceptedResource,
                         zoneModel.Capacity,
-                        zoneModel.DesiredQuantity)))
+                        zoneModel.DesiredQuantity,
+                        new EntityId(zoneModel.AssignedHaulerId),
+                        new EntityId(zoneModel.SourceStorageZoneId),
+                        zoneModel.Priority)))
             {
                 throw new InvalidDataException($"The save contains duplicate storage zone {id}.");
             }
+        }
+    }
+
+    private void LoadResourcePriorities(IEnumerable<ResourcePrioritySaveModel> models)
+    {
+        var loaded = models.ToArray();
+        var expectedResources = Enum.GetValues<ResourceKind>()
+            .Where(IsStorableResource)
+            .ToArray();
+        if (loaded.Length != expectedResources.Length ||
+            loaded.Select(model => model.Resource).Distinct().Count() != loaded.Length ||
+            loaded.Any(model =>
+                !IsStorableResource(model.Resource) ||
+                !Enum.IsDefined(model.Priority)))
+        {
+            throw new InvalidDataException("The save contains invalid resource priorities.");
+        }
+
+        _resourcePriorities.Clear();
+        foreach (var model in loaded.OrderBy(model => model.Resource))
+        {
+            _resourcePriorities.Add(model.Resource, model.Priority);
         }
     }
 
@@ -1000,9 +1201,13 @@ public sealed partial class SimulationEngine
 
         foreach (var zone in _storageZones.Values)
         {
-            if (GetStoredQuantity(zone.Id) > zone.Capacity)
+            if (GetStoredQuantity(zone.Id) > zone.Capacity ||
+                (zone.AssignedHaulerId != EntityId.None &&
+                 !_actors.ContainsKey(zone.AssignedHaulerId)) ||
+                (zone.SourceStorageZoneId != EntityId.None &&
+                 (!TryGetCompatibleStorageSource(zone, zone.SourceStorageZoneId, out _))))
             {
-                throw new InvalidDataException($"Storage zone {zone.Id} exceeds its capacity.");
+                throw new InvalidDataException($"Storage zone {zone.Id} has invalid ownership or capacity.");
             }
         }
     }
@@ -1195,6 +1400,10 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.DesignateWork => TryExecuteDesignateWork(command),
         SimulationCommandKind.ClearWorkDesignations => TryExecuteClearWork(command),
         SimulationCommandKind.ConfigureStoragePull => TryExecuteConfigureStoragePull(command),
+        SimulationCommandKind.ConfigureStorageHauler => TryExecuteConfigureStorageHauler(command),
+        SimulationCommandKind.ConfigureStorageSource => TryExecuteConfigureStorageSource(command),
+        SimulationCommandKind.ConfigureStoragePriority => TryExecuteConfigureStoragePriority(command),
+        SimulationCommandKind.ConfigureResourcePriority => TryExecuteConfigureResourcePriority(command),
         SimulationCommandKind.AttackHumanVillage => TryExecuteAttackHumanVillage(),
         _ => false,
     };
@@ -1215,7 +1424,7 @@ public sealed partial class SimulationEngine
             .Select(position => new
             {
                 Position = position,
-                Route = World.FindSurfacePath(position, Map.HumanVillage),
+                Route = Navigation.FindSurfacePath(position, Map.HumanVillage),
             })
             .Where(item => item.Route is not null)
             .OrderBy(item => item.Route!.Count)
@@ -1337,12 +1546,103 @@ public sealed partial class SimulationEngine
         }
 
         zone.DesiredQuantity = command.Amount;
+        WakeAssignedHauler(zone);
+        foreach (var destination in _storageZones.Values.Where(destination =>
+                     destination.SourceStorageZoneId == zone.Id))
+        {
+            WakeAssignedHauler(destination);
+        }
         Publish(
             SimulationEventKind.StoragePullConfigured,
             EntityId.None,
             zone.Id,
             command.Amount);
         return true;
+    }
+
+    private bool TryExecuteConfigureStorageHauler(SimulationCommand command)
+    {
+        if (!_storageZones.TryGetValue(command.Target, out var zone) ||
+            (command.Subject != EntityId.None && !_actors.ContainsKey(command.Subject)))
+        {
+            return false;
+        }
+
+        zone.AssignedHaulerId = command.Subject;
+        WakeAssignedHauler(zone);
+        Publish(
+            SimulationEventKind.StorageHaulerConfigured,
+            command.Subject,
+            zone.Id,
+            amount: 0);
+        return true;
+    }
+
+    private bool TryExecuteConfigureStorageSource(SimulationCommand command)
+    {
+        if (!_storageZones.TryGetValue(command.Target, out var zone) ||
+            (command.Subject != EntityId.None &&
+             !TryGetCompatibleStorageSource(zone, command.Subject, out _)))
+        {
+            return false;
+        }
+
+        zone.SourceStorageZoneId = command.Subject;
+        WakeAssignedHauler(zone);
+        Publish(
+            SimulationEventKind.StorageSourceConfigured,
+            command.Subject,
+            zone.Id,
+            amount: 0);
+        return true;
+    }
+
+    private bool TryExecuteConfigureStoragePriority(SimulationCommand command)
+    {
+        var priority = (StoragePriority)command.Amount;
+        if (!_storageZones.TryGetValue(command.Target, out var zone) ||
+            !Enum.IsDefined(priority))
+        {
+            return false;
+        }
+
+        zone.Priority = priority;
+        WakeAssignedHauler(zone);
+        Publish(
+            SimulationEventKind.StoragePriorityConfigured,
+            EntityId.None,
+            zone.Id,
+            command.Amount);
+        return true;
+    }
+
+    private bool TryExecuteConfigureResourcePriority(SimulationCommand command)
+    {
+        var priority = (StoragePriority)command.Amount;
+        if (!_resourcePriorities.ContainsKey(command.Resource) ||
+            !Enum.IsDefined(priority))
+        {
+            return false;
+        }
+
+        _resourcePriorities[command.Resource] = priority;
+        Publish(
+            SimulationEventKind.ResourcePriorityConfigured,
+            EntityId.None,
+            EntityId.None,
+            (int)command.Resource);
+        return true;
+    }
+
+    private void WakeAssignedHauler(StorageZoneState zone)
+    {
+        if (zone.AssignedHaulerId != EntityId.None &&
+            zone.DesiredQuantity > GetStoredQuantity(zone.Id) &&
+            _actors.TryGetValue(zone.AssignedHaulerId, out var actor) &&
+            actor.JobKind == ActorJobKind.Explore)
+        {
+            actor.ClearJob();
+        }
     }
 
     private bool TryExecuteBuild(SimulationCommand command)
@@ -1468,7 +1768,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var route = World.FindSurfacePath(actor.Position, command.Position);
+        var route = Navigation.FindSurfacePath(actor.Position, command.Position);
         if (route is null)
         {
             return false;
@@ -1560,7 +1860,7 @@ public sealed partial class SimulationEngine
         }
 
         var sourcePosition = source.Location.Position;
-        if (!World.HasSurfacePath(actor.Position, sourcePosition))
+        if (!Navigation.HasSurfacePath(actor.Position, sourcePosition))
         {
             return false;
         }
@@ -1595,7 +1895,7 @@ public sealed partial class SimulationEngine
             !_itemStacks.TryGetValue(actor.CarriedStackId, out var carried) ||
             !_storageZones.TryGetValue(command.Target, out var zone) ||
             !CanStoreStack(zone, carried, carried.Quantity) ||
-            !World.HasSurfacePath(actor.Position, zone.Position))
+            !Navigation.HasSurfacePath(actor.Position, zone.Position))
         {
             return false;
         }
@@ -1724,6 +2024,16 @@ public sealed partial class SimulationEngine
         }
 
         _actors.Remove(actor.Id);
+        foreach (var zone in _storageZones.Values.Where(zone =>
+                     zone.AssignedHaulerId == actor.Id))
+        {
+            zone.AssignedHaulerId = EntityId.None;
+            Publish(
+                SimulationEventKind.StorageHaulerConfigured,
+                EntityId.None,
+                zone.Id,
+                amount: 0);
+        }
         Publish(SimulationEventKind.ActorDied, actor.Id, EntityId.None, 0);
 
         var canceledCommands = _pendingCommands
@@ -1920,6 +2230,42 @@ public sealed partial class SimulationEngine
                 }
 
                 break;
+            case SimulationCommandKind.ConfigureStorageHauler:
+                if (!_storageZones.ContainsKey(command.Target) ||
+                    (command.Subject != EntityId.None && !_actors.ContainsKey(command.Subject)) ||
+                    command.Amount != 0)
+                {
+                    throw new ArgumentException("Storage hauler command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureStorageSource:
+                if (!_storageZones.TryGetValue(command.Target, out var destinationZone) ||
+                    (command.Subject != EntityId.None &&
+                     !TryGetCompatibleStorageSource(destinationZone, command.Subject, out _)) ||
+                    command.Amount != 0)
+                {
+                    throw new ArgumentException("Storage source command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureStoragePriority:
+                if (!_storageZones.ContainsKey(command.Target) ||
+                    !Enum.IsDefined((StoragePriority)command.Amount))
+                {
+                    throw new ArgumentException("Storage priority command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureResourcePriority:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    !_resourcePriorities.ContainsKey(command.Resource) ||
+                    !Enum.IsDefined((StoragePriority)command.Amount))
+                {
+                    throw new ArgumentException("Resource priority command is invalid.", nameof(command));
+                }
+
+                break;
             case SimulationCommandKind.AttackHumanVillage:
                 if (command.Subject != EntityId.None || command.Target != EntityId.None ||
                     command.Amount != 0)
@@ -1978,7 +2324,10 @@ public sealed partial class SimulationEngine
         GridPosition position,
         ResourceKind acceptedResource,
         int capacity,
-        int desiredQuantity = 0)
+        int desiredQuantity = 0,
+        EntityId assignedHaulerId = default,
+        EntityId sourceStorageZoneId = default,
+        StoragePriority priority = StoragePriority.Normal)
     {
         var id = AllocateEntityId();
         var zone = new StorageZoneState(
@@ -1986,7 +2335,10 @@ public sealed partial class SimulationEngine
             position,
             acceptedResource,
             capacity,
-            desiredQuantity);
+            desiredQuantity,
+            assignedHaulerId,
+            sourceStorageZoneId,
+            priority);
         _storageZones.Add(id, zone);
         return zone;
     }
@@ -2402,8 +2754,19 @@ public sealed partial class SimulationEngine
     private static bool ZoneAccepts(StorageZoneState zone, ResourceKind resource) =>
         zone.AcceptedResource is ResourceKind.Any || zone.AcceptedResource == resource;
 
+    private bool TryGetCompatibleStorageSource(
+        StorageZoneState destination,
+        EntityId sourceId,
+        out StorageZoneState source) =>
+        _storageZones.TryGetValue(sourceId, out source!) &&
+        source.Id != destination.Id &&
+        source.AcceptedResource == destination.AcceptedResource;
+
     private static bool IsStorableResource(ResourceKind resource) =>
         Enum.IsDefined(resource) && resource != ResourceKind.Any;
+
+    private StoragePriority GetResourcePriority(ResourceKind resource) =>
+        _resourcePriorities.GetValueOrDefault(resource, StoragePriority.Normal);
 
     private static ActorSaveModel ToSaveModel(ActorState actor) => new()
     {
@@ -2470,6 +2833,9 @@ public sealed partial class SimulationEngine
         AcceptedResource = zone.AcceptedResource,
         Capacity = zone.Capacity,
         DesiredQuantity = zone.DesiredQuantity,
+        AssignedHaulerId = zone.AssignedHaulerId.Value,
+        SourceStorageZoneId = zone.SourceStorageZoneId.Value,
+        Priority = zone.Priority,
     };
 
     private static CommandSaveModel ToSaveModel(SimulationCommand command) => new()
@@ -2640,7 +3006,10 @@ public sealed partial class SimulationEngine
         GridPosition position,
         ResourceKind acceptedResource,
         int capacity,
-        int desiredQuantity = 0)
+        int desiredQuantity = 0,
+        EntityId assignedHaulerId = default,
+        EntityId sourceStorageZoneId = default,
+        StoragePriority priority = StoragePriority.Normal)
     {
         public EntityId Id { get; } = id;
 
@@ -2651,5 +3020,11 @@ public sealed partial class SimulationEngine
         public int Capacity { get; } = capacity;
 
         public int DesiredQuantity { get; set; } = desiredQuantity;
+
+        public EntityId AssignedHaulerId { get; set; } = assignedHaulerId;
+
+        public EntityId SourceStorageZoneId { get; set; } = sourceStorageZoneId;
+
+        public StoragePriority Priority { get; set; } = priority;
     }
 }

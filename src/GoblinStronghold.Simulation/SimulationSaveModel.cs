@@ -48,6 +48,8 @@ internal sealed class SimulationSaveModel
 
     public List<StorageZoneSaveModel> StorageZones { get; set; } = [];
 
+    public List<ResourcePrioritySaveModel> ResourcePriorities { get; set; } = [];
+
     public List<ConstructionSiteSaveModel> ConstructionSites { get; set; } = [];
 
     public List<WorkDesignationSaveModel> WorkDesignations { get; set; } = [];
@@ -57,6 +59,13 @@ internal sealed class SimulationSaveModel
     public List<EventSaveModel> UndeliveredEvents { get; set; } = [];
 
     public List<WorldChangeSaveModel> UndeliveredWorldChanges { get; set; } = [];
+}
+
+internal sealed class ResourcePrioritySaveModel
+{
+    public Resources.ResourceKind Resource { get; set; }
+
+    public Resources.StoragePriority Priority { get; set; }
 }
 
 internal sealed class HumanVillageSaveModel
@@ -280,6 +289,12 @@ internal sealed class StorageZoneSaveModel
     public int Capacity { get; set; }
 
     public int DesiredQuantity { get; set; }
+
+    public ulong AssignedHaulerId { get; set; }
+
+    public ulong SourceStorageZoneId { get; set; }
+
+    public Resources.StoragePriority Priority { get; set; }
 }
 
 internal sealed class WorkDesignationSaveModel

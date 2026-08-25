@@ -247,6 +247,7 @@ public sealed class SimulationSnapshot
         ActorSnapshot[] actors,
         ItemStackSnapshot[] itemStacks,
         StorageZoneSnapshot[] storageZones,
+        ResourcePrioritySnapshot[] resourcePriorities,
         ConstructionSiteSnapshot[] constructionSites,
         WorkDesignationSnapshot[] workDesignations,
         PlantPatchSnapshot[] plantPatches,
@@ -266,6 +267,7 @@ public sealed class SimulationSnapshot
         Actors = new ReadOnlyCollection<ActorSnapshot>(actors);
         ItemStacks = new ReadOnlyCollection<ItemStackSnapshot>(itemStacks);
         StorageZones = new ReadOnlyCollection<StorageZoneSnapshot>(storageZones);
+        ResourcePriorities = new ReadOnlyCollection<ResourcePrioritySnapshot>(resourcePriorities);
         ConstructionSites = new ReadOnlyCollection<ConstructionSiteSnapshot>(constructionSites);
         WorkDesignations = new ReadOnlyCollection<WorkDesignationSnapshot>(workDesignations);
         PlantPatches = new ReadOnlyCollection<PlantPatchSnapshot>(plantPatches);
@@ -291,6 +293,8 @@ public sealed class SimulationSnapshot
     public IReadOnlyList<ItemStackSnapshot> ItemStacks { get; }
 
     public IReadOnlyList<StorageZoneSnapshot> StorageZones { get; }
+
+    public IReadOnlyList<ResourcePrioritySnapshot> ResourcePriorities { get; }
 
     public IReadOnlyList<ConstructionSiteSnapshot> ConstructionSites { get; }
 

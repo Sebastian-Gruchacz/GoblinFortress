@@ -56,6 +56,8 @@ public sealed class WorldMapState
 
     public ulong Version { get; private set; }
 
+    public ulong TopologyVersion { get; private set; }
+
     public int PlantPatchCount => _plantPatches.Count;
 
     public int WorldObjectCount => _worldObjects.Count;
@@ -746,6 +748,10 @@ public sealed class WorldMapState
         int amount)
     {
         Version = checked(Version + 1);
+        if (kind == WorldChangeKind.StructureBuilt)
+        {
+            TopologyVersion = checked(TopologyVersion + 1);
+        }
         return new WorldChangeEvent(Version, tick, kind, position, amount);
     }
 

@@ -28,6 +28,10 @@ public enum SimulationEventKind
     ConstructionOrdered = 24,
     ConstructionMaterialDelivered = 25,
     ActorCollapsed = 26,
+    StorageHaulerConfigured = 27,
+    StorageSourceConfigured = 28,
+    StoragePriorityConfigured = 29,
+    ResourcePriorityConfigured = 30,
 }
 
 public readonly record struct SimulationEvent(

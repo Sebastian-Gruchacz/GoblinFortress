@@ -15,6 +15,10 @@ public enum SimulationCommandKind
     ClearWorkDesignations = 8,
     ConfigureStoragePull = 9,
     AttackHumanVillage = 10,
+    ConfigureStorageHauler = 11,
+    ConfigureStorageSource = 12,
+    ConfigureStoragePriority = 13,
+    ConfigureResourcePriority = 14,
 }
 
 public enum ConstructionKind : byte
@@ -264,6 +268,74 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             desiredQuantity);
+
+    public static SimulationCommand ConfigureStorageHauler(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZone,
+        EntityId actor) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStorageHauler,
+            actor,
+            storageZone,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ConfigureStorageSource(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZone,
+        EntityId sourceStorageZone) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStorageSource,
+            sourceStorageZone,
+            storageZone,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ConfigureStoragePriority(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZone,
+        StoragePriority priority) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStoragePriority,
+            EntityId.None,
+            storageZone,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: (int)priority);
+
+    public static SimulationCommand ConfigureResourcePriority(
+        SimulationTick executeAt,
+        ulong sequence,
+        ResourceKind resource,
+        StoragePriority priority) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureResourcePriority,
+            EntityId.None,
+            EntityId.None,
+            default,
+            default,
+            default,
+            resource,
+            Amount: (int)priority);
 
     public static SimulationCommand AttackHumanVillage(
         SimulationTick executeAt,

@@ -15,6 +15,7 @@ public sealed partial class SimulationEngine
             CurrentTick,
             WorldSeed,
             World,
+            Navigation,
             Definitions,
             intruders,
             detectionRadius);

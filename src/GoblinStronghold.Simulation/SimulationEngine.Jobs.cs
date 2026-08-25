@@ -83,6 +83,15 @@ public sealed partial class SimulationEngine
                 {
                     // Survival work outranks gathering once the current job has ended.
                 }
+                else if (HasAssignedStorageDuty(actor.Id) &&
+                         TryPlanHaulCollection(
+                             actor,
+                             reservedSourceQuantities,
+                             reservedDestinationQuantities,
+                             assignedDestinationsOnly: true))
+                {
+                    // A named hauler services assigned stockpiles before public settlement work.
+                }
                 else if (TryPlanConstructionSupply(
                              actor,
                              reservedSourceQuantities,
@@ -233,7 +242,7 @@ public sealed partial class SimulationEngine
         }
         if (!isAtRally)
         {
-            var route = World.FindSurfacePath(actor.Position, _raidRallyPoint);
+            var route = Navigation.FindSurfacePath(actor.Position, _raidRallyPoint);
             if (route is { Count: > 0 })
             {
                 actor.JobKind = ActorJobKind.Move;
@@ -266,7 +275,7 @@ public sealed partial class SimulationEngine
         _humanVillage.OrderGoblinAttack();
         foreach (var actor in raidParty)
         {
-            var route = World.FindSurfacePath(actor.Position, Map.HumanVillage);
+            var route = Navigation.FindSurfacePath(actor.Position, Map.HumanVillage);
             if (route is not { Count: > 0 })
             {
                 continue;
@@ -373,7 +382,7 @@ public sealed partial class SimulationEngine
             stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
             stack.Quantity - itemReservations.GetValueOrDefault(stack.Id) +
                 (stack.Id == actor.SourceStackId ? releasedSourceQuantity : 0) > 0 &&
-            World.HasSurfacePath(actor.Position, stack.Location.Position));
+            Navigation.HasSurfacePath(actor.Position, stack.Location.Position));
         if (!hasReachableMeal)
         {
             return;
@@ -411,7 +420,7 @@ public sealed partial class SimulationEngine
                     item.Position.Z == 0 &&
                     item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door &&
                     World.IsSurfaceTraversable(item.Position) &&
-                    World.HasSurfacePath(actor.Position, item.Position)))
+                    Navigation.HasSurfacePath(actor.Position, item.Position)))
         {
             return;
         }
@@ -510,7 +519,7 @@ public sealed partial class SimulationEngine
             .Select(position => new
             {
                 Position = position,
-                Route = World.FindSurfacePath(actor.Position, position),
+                Route = Navigation.FindSurfacePath(actor.Position, position),
             })
             .Where(candidate => candidate.Route is not null)
             .OrderBy(candidate => candidate.Route!.Count)
@@ -579,7 +588,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var route = World.FindSurfacePath(actor.Position, target);
+        var route = Navigation.FindSurfacePath(actor.Position, target);
         if (route is null)
         {
             return false;
@@ -690,7 +699,7 @@ public sealed partial class SimulationEngine
             .Select(stack => new
             {
                 Stack = stack,
-                Route = World.FindSurfacePath(actor.Position, stack.Location.Position),
+                Route = Navigation.FindSurfacePath(actor.Position, stack.Location.Position),
             })
             .Where(candidate => candidate.Route is not null)
             .OrderBy(candidate => candidate.Route!.Count)
@@ -852,7 +861,7 @@ public sealed partial class SimulationEngine
             .Select(stack => new
             {
                 Stack = stack,
-                Route = World.FindSurfacePath(actor.Position, stack.Location.Position),
+                Route = Navigation.FindSurfacePath(actor.Position, stack.Location.Position),
             })
             .Where(candidate => candidate.Route is not null)
             .OrderBy(candidate => candidate.Route!.Count)
@@ -955,7 +964,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var route = World.FindNearestHarvestablePlantPath(
+        var route = Navigation.FindNearestHarvestablePlantPath(
             actor.Position,
             reservedTargets,
             position =>
@@ -984,7 +993,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var route = World.FindNearestBerryBushPath(
+        var route = Navigation.FindNearestBerryBushPath(
             actor.Position,
             reservedTargets,
             position =>
@@ -1069,7 +1078,7 @@ public sealed partial class SimulationEngine
                     continue;
                 }
 
-                var routeToSource = World.FindSurfacePath(actor.Position, source.Location.Position);
+                var routeToSource = Navigation.FindSurfacePath(actor.Position, source.Location.Position);
                 var routeToSite = FindConstructionAccessPath(source.Location.Position, site);
                 if (routeToSource is null || routeToSite is null)
                 {
@@ -1085,6 +1094,8 @@ public sealed partial class SimulationEngine
                     site.Id,
                     quantity,
                     routeToSource,
+                    StoragePriority.Normal,
+                    StoragePriority.Normal,
                     checked(routeToSource.Count + routeToSite.Count));
                 if (best is null || IsBetter(candidate, best.Value))
                 {
@@ -1345,7 +1356,7 @@ public sealed partial class SimulationEngine
         .Select(position => new
         {
             Position = position,
-            Route = World.FindSurfacePath(start, position),
+            Route = Navigation.FindSurfacePath(start, position),
         })
         .Where(candidate => candidate.Route is not null)
         .OrderBy(candidate => candidate.Route!.Count)
@@ -1358,20 +1369,15 @@ public sealed partial class SimulationEngine
         ActorState actor,
         Dictionary<EntityId, int> sourceReservations,
         Dictionary<EntityId, int> destinationReservations,
-        EntityId? requiredDestination = null)
+        EntityId? requiredDestination = null,
+        bool assignedDestinationsOnly = false)
     {
         HaulPlan? best = null;
         foreach (var source in _itemStacks.Values.Where(stack =>
                      stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
                      Visibility.Get(stack.Location.Position) != CellVisibility.Unknown))
         {
-            var protectedAtSource = source.Location.Kind == ItemLocationKind.StorageZone &&
-                _storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone)
-                    ? Math.Max(0, sourceZone.DesiredQuantity -
-                        (GetStoredQuantity(sourceZone.Id) - source.Quantity))
-                    : 0;
-            var availableSource = source.Quantity - protectedAtSource -
-                sourceReservations.GetValueOrDefault(source.Id);
+            var availableSource = GetAvailableSourceQuantity(source, sourceReservations);
             if (availableSource <= 0)
             {
                 continue;
@@ -1385,8 +1391,11 @@ public sealed partial class SimulationEngine
                     source.Location.Position);
             var candidateZones = _storageZones.Values.Where(zone =>
                          ZoneAccepts(zone, source.Resource) &&
+                         IsHaulerAllowedForZone(actor, zone) &&
+                         IsSourceAllowedForZone(source, zone) &&
                          CanStoreStack(zone, source, 1) &&
-                         (requiredDestination is null || zone.Id == requiredDestination.Value))
+                         (requiredDestination is null || zone.Id == requiredDestination.Value) &&
+                         (!assignedDestinationsOnly || zone.AssignedHaulerId == actor.Id))
                 .Where(zone =>
                 {
                     var stored = GetStoredQuantity(zone.Id);
@@ -1400,7 +1409,7 @@ public sealed partial class SimulationEngine
                 continue;
             }
 
-            var routeToSource = World.FindSurfacePath(actor.Position, source.Location.Position);
+            var routeToSource = Navigation.FindSurfacePath(actor.Position, source.Location.Position);
             if (routeToSource is null)
             {
                 continue;
@@ -1427,7 +1436,7 @@ public sealed partial class SimulationEngine
                     continue;
                 }
 
-                var routeToDestination = World.FindSurfacePath(source.Location.Position, zone.Position);
+                var routeToDestination = Navigation.FindSurfacePath(source.Location.Position, zone.Position);
                 if (routeToDestination is null)
                 {
                     continue;
@@ -1441,6 +1450,8 @@ public sealed partial class SimulationEngine
                     zone.Id,
                     quantity,
                     routeToSource,
+                    GetResourcePriority(source.Resource),
+                    zone.Priority,
                     checked(routeToSource.Count + routeToDestination.Count));
                 if (best is null || IsBetter(candidate, best.Value))
                 {
@@ -1468,6 +1479,9 @@ public sealed partial class SimulationEngine
             destinationReservations.GetValueOrDefault(plan.DestinationZoneId) + plan.Quantity);
         return true;
     }
+
+    private bool HasAssignedStorageDuty(EntityId actorId) =>
+        _storageZones.Values.Any(zone => zone.AssignedHaulerId == actorId);
 
     private bool IsBackgroundPlanningTick(ActorState actor)
     {
@@ -1511,16 +1525,19 @@ public sealed partial class SimulationEngine
 
         var best = _storageZones.Values
             .Where(zone =>
+                zone.SourceStorageZoneId == EntityId.None &&
+                IsHaulerAllowedForZone(actor, zone) &&
                 CanStoreStack(zone, carried, carried.Quantity) &&
                 zone.Capacity - GetStoredQuantity(zone.Id) -
                     destinationReservations.GetValueOrDefault(zone.Id) >= carried.Quantity)
             .Select(zone => new
             {
                 Zone = zone,
-                Route = World.FindSurfacePath(actor.Position, zone.Position),
+                Route = Navigation.FindSurfacePath(actor.Position, zone.Position),
             })
             .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
+            .OrderByDescending(candidate => candidate.Zone.Priority)
+            .ThenBy(candidate => candidate.Route!.Count)
             .ThenBy(candidate => candidate.Zone.Id)
             .FirstOrDefault();
         if (best is null)
@@ -1572,6 +1589,7 @@ public sealed partial class SimulationEngine
     private bool IsHaulJobStillValid(ActorState actor)
     {
         if (!_storageZones.TryGetValue(actor.DestinationZoneId, out var zone) ||
+            !IsHaulerAllowedForZone(actor, zone) ||
             actor.ReservedQuantity <= 0)
         {
             return false;
@@ -1579,10 +1597,21 @@ public sealed partial class SimulationEngine
 
         if (actor.JobStage == ActorJobStage.Collecting)
         {
-            return actor.CarriedStackId == EntityId.None &&
-                _itemStacks.TryGetValue(actor.SourceStackId, out var source) &&
-                source.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
-                source.Quantity >= actor.ReservedQuantity &&
+            if (actor.CarriedStackId != EntityId.None ||
+                !_itemStacks.TryGetValue(actor.SourceStackId, out var source) ||
+                source.Location.Kind is not (ItemLocationKind.Ground or
+                    ItemLocationKind.StorageZone) ||
+                !IsSourceAllowedForZone(source, zone))
+            {
+                return false;
+            }
+
+            var protectedAtSource = source.Location.Kind == ItemLocationKind.StorageZone &&
+                _storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone)
+                    ? Math.Max(0, sourceZone.DesiredQuantity -
+                        (GetStoredQuantity(sourceZone.Id) - source.Quantity))
+                    : 0;
+            return source.Quantity - protectedAtSource >= actor.ReservedQuantity &&
                 CanStoreStack(zone, source, actor.ReservedQuantity);
         }
 
@@ -1622,7 +1651,7 @@ public sealed partial class SimulationEngine
         actor.SourceStackId = EntityId.None;
         actor.JobStage = ActorJobStage.Delivering;
         var destination = _storageZones[actor.DestinationZoneId];
-        var route = World.FindSurfacePath(actor.Position, destination.Position);
+        var route = Navigation.FindSurfacePath(actor.Position, destination.Position);
         if (route is null)
         {
             actor.ClearJob();
@@ -1651,6 +1680,14 @@ public sealed partial class SimulationEngine
         Publish(SimulationEventKind.ItemStored, actor.Id, stored.Id, deliveredQuantity);
         actor.ClearJob();
     }
+
+    private static bool IsHaulerAllowedForZone(ActorState actor, StorageZoneState zone) =>
+        zone.AssignedHaulerId == EntityId.None || zone.AssignedHaulerId == actor.Id;
+
+    private static bool IsSourceAllowedForZone(ItemStackState source, StorageZoneState zone) =>
+        zone.SourceStorageZoneId == EntityId.None ||
+        (source.Location.Kind == ItemLocationKind.StorageZone &&
+         source.Location.OwnerId == zone.SourceStorageZoneId);
 
     private void BeginJobLeg(
         ActorState actor,
@@ -2117,12 +2154,27 @@ public sealed partial class SimulationEngine
         }
     }
 
-    private static bool IsBetter(HaulPlan candidate, HaulPlan current) =>
-        candidate.TotalDistance < current.TotalDistance ||
-        (candidate.TotalDistance == current.TotalDistance &&
-         (candidate.SourceStackId.Value < current.SourceStackId.Value ||
-          (candidate.SourceStackId == current.SourceStackId &&
-           candidate.DestinationZoneId.Value < current.DestinationZoneId.Value)));
+    private static bool IsBetter(HaulPlan candidate, HaulPlan current)
+    {
+        if (candidate.ResourcePriority != current.ResourcePriority)
+        {
+            return candidate.ResourcePriority > current.ResourcePriority;
+        }
+
+        if (candidate.DestinationPriority != current.DestinationPriority)
+        {
+            return candidate.DestinationPriority > current.DestinationPriority;
+        }
+
+        if (candidate.TotalDistance != current.TotalDistance)
+        {
+            return candidate.TotalDistance < current.TotalDistance;
+        }
+
+        return candidate.SourceStackId.Value < current.SourceStackId.Value ||
+            (candidate.SourceStackId == current.SourceStackId &&
+             candidate.DestinationZoneId.Value < current.DestinationZoneId.Value);
+    }
 
     private int GetJobWorkTicks(ActorState actor) => actor.JobKind switch
     {
@@ -2195,5 +2247,7 @@ public sealed partial class SimulationEngine
         EntityId DestinationZoneId,
         int Quantity,
         IReadOnlyList<GridPosition> Route,
+        StoragePriority ResourcePriority,
+        StoragePriority DestinationPriority,
         int TotalDistance);
 }

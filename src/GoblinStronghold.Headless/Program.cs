@@ -1,6 +1,12 @@
+using System.Diagnostics;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+
+if (args.Contains("--benchmark-day", StringComparer.OrdinalIgnoreCase))
+{
+    return RunFullDayBenchmark();
+}
 
 const long finalTick = 720;
 var definitions = SimulationDefinitions.Foundation;
@@ -149,4 +155,43 @@ static SimulationEngine CreateScenario(SimulationDefinitions definitions, Genera
     }
 
     return engine;
+}
+
+static int RunFullDayBenchmark()
+{
+    var seed = new WorldSeed(0x474F424C494EUL);
+    var definitions = SimulationDefinitions.Foundation;
+    var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
+    var engine = SimulationEngine.Create(
+        seed,
+        definitions,
+        map,
+        initialGoblinCount: 8,
+        initialFoodStock: 16,
+        scatterInitialBrushwood: true);
+    engine.QueueCommand(SimulationCommand.CreateStorageZone(
+        new SimulationTick(1),
+        sequence: 1,
+        map.GoblinSpawn,
+        ResourceKind.Food,
+        definitions.Storage.SmallFoodCapacity));
+
+    var ticks = definitions.Clock.Climate.GetSeason(SeasonKind.Spring).TicksPerDay;
+    var stopwatch = Stopwatch.StartNew();
+    engine.AdvanceTicks(ticks);
+    stopwatch.Stop();
+    var metrics = engine.GetMetrics();
+    var navigation = metrics.Navigation;
+    var hitRate = navigation.Requests == 0
+        ? 0
+        : 100d * navigation.CacheHits / navigation.Requests;
+    Console.WriteLine(
+        $"Full demo day ({ticks:N0} ticks): {stopwatch.Elapsed.TotalMilliseconds:F1} ms, " +
+        $"mean tick {metrics.TotalTickDuration.TotalMilliseconds / metrics.TicksExecuted:F3} ms, " +
+        $"last tick {metrics.LastTickDuration.TotalMilliseconds:F3} ms");
+    Console.WriteLine(
+        $"Paths: {navigation.Requests:N0} requests, {navigation.Searches:N0} searches, " +
+        $"{navigation.CacheHits:N0} hits ({hitRate:F1}%), " +
+        $"{navigation.CachedRoutes:N0} cached, {navigation.CacheInvalidations:N0} invalidations");
+    return 0;
 }

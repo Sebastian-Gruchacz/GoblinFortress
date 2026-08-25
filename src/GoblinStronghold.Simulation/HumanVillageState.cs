@@ -154,9 +154,11 @@ internal sealed class HumanVillageState
 
     public HumanVillageUpdateResult Update(
         SimulationTick tick, WorldSeed worldSeed, WorldMapState world,
+        NavigationPathService navigation,
         SimulationDefinitions definitions, IReadOnlyList<HumanIntruderSnapshot> intruders,
         int detectionRadius)
     {
+        ArgumentNullException.ThrowIfNull(navigation);
         IReadOnlyList<WorldChangeEvent> worldChanges = [];
         var calendar = SimulationCalendar.At(tick, definitions.Clock);
         if (calendar.IsDayStart)
@@ -177,7 +179,13 @@ internal sealed class HumanVillageState
         AssignTasks(nearby);
         if (tick.Value % definitions.HumanCohortMovementIntervalTicks == 0)
         {
-            MoveCohorts(tick, worldSeed, world, definitions.HumanVillageActivityRadius, nearby.FirstOrDefault());
+            MoveCohorts(
+                tick,
+                worldSeed,
+                world,
+                navigation,
+                definitions.HumanVillageActivityRadius,
+                nearby.FirstOrDefault());
         }
         return new HumanVillageUpdateResult(wasPeaceful && Hostility > 0, worldChanges);
     }
@@ -338,6 +346,7 @@ internal sealed class HumanVillageState
 
     private void MoveCohorts(
         SimulationTick tick, WorldSeed worldSeed, WorldMapState world,
+        NavigationPathService navigation,
         int activityRadius, HumanIntruderSnapshot intruder)
     {
         var occupied = _cohorts.Values.Select(item => item.Position).ToHashSet();
@@ -346,7 +355,7 @@ internal sealed class HumanVillageState
             occupied.Remove(cohort.Position);
             var target = GetTaskTarget(cohort, world, intruder);
             var cohortRadius = activityRadius + (cohort.Task == HumanCohortTask.GatherBerries ? 4 : 0);
-            var route = world.FindSurfacePath(cohort.Position, target);
+            var route = navigation.FindSurfacePath(cohort.Position, target);
             if (route is { Count: > 0 } && Distance(route[0], Anchor) <= cohortRadius && !occupied.Contains(route[0]))
             {
                 cohort.Position = route[0];

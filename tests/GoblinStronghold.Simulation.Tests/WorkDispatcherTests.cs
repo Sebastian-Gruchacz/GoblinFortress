@@ -228,6 +228,440 @@ public sealed class WorkDispatcherTests
     }
 
     [Fact]
+    public void AssignedHaulerMovesOnlySurplusBetweenStorageZonesAndSurvivesSaveLoad()
+    {
+        var engine = CreateEngine(goblinCount: 2, initialWood: 10);
+        var sourcePosition = engine.Map.GoblinSpawn;
+        var destinationPosition = engine.Map.GetCardinalNeighbors(sourcePosition)
+            .First(engine.World.IsSurfaceTraversable);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1),
+            sequence: 1,
+            sourcePosition,
+            ResourceKind.Wood,
+            capacity: 10));
+        engine.AdvanceTicks(80);
+
+        var source = Assert.Single(engine.CreateSnapshot().StorageZones);
+        Assert.Equal(10, source.StoredQuantity);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            sequence: 2,
+            destinationPosition,
+            ResourceKind.Wood,
+            capacity: 10));
+        engine.AdvanceTicks(1);
+        var snapshot = engine.CreateSnapshot();
+        var destination = snapshot.StorageZones.Single(zone => zone.Id != source.Id);
+        var assignedHauler = snapshot.Actors.OrderBy(actor => actor.Id).Last();
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            engine.CurrentTick.Next(),
+            sequence: 3,
+            source.Id,
+            desiredQuantity: 2));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageHauler(
+            engine.CurrentTick.Next(),
+            sequence: 4,
+            destination.Id,
+            assignedHauler.Id));
+        engine.DrainEvents();
+
+        engine.AdvanceTicks(200);
+
+        snapshot = engine.CreateSnapshot();
+        source = snapshot.StorageZones.Single(zone => zone.Id == source.Id);
+        destination = snapshot.StorageZones.Single(zone => zone.Id == destination.Id);
+        Assert.Equal(2, source.StoredQuantity);
+        Assert.Equal(8, destination.StoredQuantity);
+        Assert.Equal(assignedHauler.Id, destination.AssignedHaulerId);
+        Assert.All(
+            engine.DrainEvents().Where(item =>
+                item.Kind is SimulationEventKind.ItemPickedUp or SimulationEventKind.ItemStored),
+            item => Assert.Equal(assignedHauler.Id, item.Subject));
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Equal(
+            assignedHauler.Id,
+            restored.CreateSnapshot().StorageZones
+                .Single(zone => zone.Id == destination.Id)
+                .AssignedHaulerId);
+    }
+
+    [Fact]
+    public void LinkedDestinationIgnoresSurplusOutsideItsConfiguredSource()
+    {
+        var engine = CreateEngine(goblinCount: 2, initialWood: 10);
+        var firstSourcePosition = engine.Map.GoblinSpawn;
+        var secondSourcePosition = engine.Map.GetCardinalNeighbors(firstSourcePosition)
+            .First(engine.World.IsSurfaceTraversable);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1), sequence: 1, firstSourcePosition, ResourceKind.Wood, capacity: 5));
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1), sequence: 2, secondSourcePosition, ResourceKind.Wood, capacity: 5));
+        engine.AdvanceTicks(80);
+
+        var sources = engine.CreateSnapshot().StorageZones;
+        Assert.Equal(2, sources.Count);
+        Assert.All(sources, source => Assert.Equal(5, source.StoredQuantity));
+        var firstSource = sources.Single(source => source.Position == firstSourcePosition);
+        var secondSource = sources.Single(source => source.Position == secondSourcePosition);
+        var destinationPosition = (
+                from y in Enumerable.Range(0, engine.Map.Height)
+                from x in Enumerable.Range(0, engine.Map.Width)
+                let position = new GridPosition(x, y)
+                where position != firstSourcePosition &&
+                    position != secondSourcePosition &&
+                    engine.World.IsSurfaceTraversable(position)
+                orderby Math.Abs(position.X - firstSourcePosition.X) +
+                    Math.Abs(position.Y - firstSourcePosition.Y), position.Y, position.X
+                select position)
+            .First();
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            sequence: 3,
+            destinationPosition,
+            ResourceKind.Wood,
+            capacity: 10));
+        engine.AdvanceTicks(1);
+        var destination = engine.CreateSnapshot().StorageZones
+            .Single(zone => zone.Position == destinationPosition);
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            engine.CurrentTick.Next(),
+            sequence: 4,
+            destination.Id,
+            firstSource.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            engine.CurrentTick.Next(),
+            sequence: 5,
+            secondSource.Id,
+            desiredQuantity: 0));
+
+        engine.AdvanceTicks(100);
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.Equal(0, snapshot.StorageZones.Single(zone => zone.Id == destination.Id).StoredQuantity);
+        Assert.Equal(5, snapshot.StorageZones.Single(zone => zone.Id == secondSource.Id).StoredQuantity);
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            engine.CurrentTick.Next(),
+            sequence: 6,
+            firstSource.Id,
+            desiredQuantity: 0));
+        engine.AdvanceTicks(100);
+
+        snapshot = engine.CreateSnapshot();
+        destination = snapshot.StorageZones.Single(zone => zone.Id == destination.Id);
+        Assert.Equal(5, destination.StoredQuantity);
+        Assert.Equal(firstSource.Id, destination.SourceStorageZoneId);
+        Assert.Equal(5, snapshot.StorageZones.Single(zone => zone.Id == secondSource.Id).StoredQuantity);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Equal(
+            firstSource.Id,
+            restored.CreateSnapshot().StorageZones
+                .Single(zone => zone.Id == destination.Id)
+                .SourceStorageZoneId);
+    }
+
+    [Fact]
+    public void UrgentStockpileWinsAgainstACloserLowPriorityDestination()
+    {
+        var engine = CreateEngine(goblinCount: 2, initialWood: 5);
+        var sourcePosition = engine.Map.GoblinSpawn;
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1), sequence: 1, sourcePosition, ResourceKind.Wood, capacity: 5));
+        engine.AdvanceTicks(80);
+        var source = Assert.Single(engine.CreateSnapshot().StorageZones);
+        Assert.Equal(5, source.StoredQuantity);
+
+        var destinations = (
+                from y in Enumerable.Range(0, engine.Map.Height)
+                from x in Enumerable.Range(0, engine.Map.Width)
+                let position = new GridPosition(x, y)
+                where position != sourcePosition && engine.World.IsSurfaceTraversable(position)
+                let route = engine.Navigation.FindSurfacePath(sourcePosition, position)
+                where route is { Count: > 0 and <= 12 }
+                orderby route.Count, position.Y, position.X
+                select (Position: position, Distance: route.Count))
+            .ToArray();
+        var lowPosition = destinations[0].Position;
+        var urgentPosition = destinations.Last(candidate =>
+            candidate.Distance > destinations[0].Distance).Position;
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), sequence: 2, lowPosition, ResourceKind.Wood, capacity: 5));
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), sequence: 3, urgentPosition, ResourceKind.Wood, capacity: 5));
+        engine.AdvanceTicks(1);
+        var snapshot = engine.CreateSnapshot();
+        var low = snapshot.StorageZones.Single(zone => zone.Position == lowPosition);
+        var urgent = snapshot.StorageZones.Single(zone => zone.Position == urgentPosition);
+        var executeAt = engine.CurrentTick.Next();
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePriority(
+            executeAt, sequence: 4, low.Id, StoragePriority.Low));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePriority(
+            executeAt, sequence: 5, urgent.Id, StoragePriority.Urgent));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            executeAt, sequence: 6, low.Id, source.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            executeAt, sequence: 7, urgent.Id, source.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            executeAt, sequence: 8, source.Id, desiredQuantity: 0));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Contains(engine.CreateSnapshot().Actors, actor =>
+            actor.Job.Kind == ActorJobKind.Haul &&
+            actor.Job.DestinationZoneId == urgent.Id);
+        engine.AdvanceTicks(200);
+        snapshot = engine.CreateSnapshot();
+        Assert.Equal(0, snapshot.StorageZones.Single(zone => zone.Id == low.Id).StoredQuantity);
+        urgent = snapshot.StorageZones.Single(zone => zone.Id == urgent.Id);
+        Assert.Equal(5, urgent.StoredQuantity);
+        Assert.Equal(StoragePriority.Urgent, urgent.Priority);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Equal(
+            StoragePriority.Urgent,
+            restored.CreateSnapshot().StorageZones.Single(zone => zone.Id == urgent.Id).Priority);
+    }
+
+    [Fact]
+    public void GlobalResourcePriorityOutranksLocalDistanceAcrossGoods()
+    {
+        var engine = CreateEngine(goblinCount: 2, initialWood: 5, initialFood: 9);
+        var positions = (
+                from y in Enumerable.Range(0, engine.Map.Height)
+                from x in Enumerable.Range(0, engine.Map.Width)
+                let position = new GridPosition(x, y)
+                where engine.World.IsSurfaceTraversable(position) &&
+                    engine.Navigation.HasSurfacePath(engine.Map.GoblinSpawn, position)
+                orderby Math.Abs(position.X - engine.Map.GoblinSpawn.X) +
+                    Math.Abs(position.Y - engine.Map.GoblinSpawn.Y), position.Y, position.X
+                select position)
+            .Take(4)
+            .ToArray();
+        Assert.Equal(4, positions.Length);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1), sequence: 1, positions[0], ResourceKind.Food, capacity: 5));
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1), sequence: 2, positions[1], ResourceKind.Wood, capacity: 5));
+        engine.AdvanceTicks(80);
+        var snapshot = engine.CreateSnapshot();
+        var foodSource = snapshot.StorageZones.Single(zone =>
+            zone.AcceptedResource == ResourceKind.Food);
+        var woodSource = snapshot.StorageZones.Single(zone =>
+            zone.AcceptedResource == ResourceKind.Wood);
+        Assert.Equal(5, foodSource.StoredQuantity);
+        Assert.Equal(5, woodSource.StoredQuantity);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), sequence: 3, positions[2], ResourceKind.Wood, capacity: 5));
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), sequence: 4, positions[3], ResourceKind.Food, capacity: 5));
+        engine.AdvanceTicks(1);
+        snapshot = engine.CreateSnapshot();
+        var assignedHauler = snapshot.Actors.First(actor => actor.Job.Kind == ActorJobKind.None);
+        var woodDestination = snapshot.StorageZones.Single(zone => zone.Position == positions[2]);
+        var foodDestination = snapshot.StorageZones.Single(zone => zone.Position == positions[3]);
+        var executeAt = engine.CurrentTick.Next();
+        engine.QueueCommand(SimulationCommand.ConfigureStorageHauler(
+            executeAt, sequence: 5, woodDestination.Id, assignedHauler.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageHauler(
+            executeAt, sequence: 6, foodDestination.Id, assignedHauler.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            executeAt, sequence: 7, woodDestination.Id, woodSource.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            executeAt, sequence: 8, foodDestination.Id, foodSource.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            executeAt, sequence: 9, woodSource.Id, desiredQuantity: 0));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            executeAt, sequence: 10, foodSource.Id, desiredQuantity: 0));
+        engine.QueueCommand(SimulationCommand.ConfigureResourcePriority(
+            executeAt, sequence: 11, ResourceKind.Wood, StoragePriority.Low));
+        engine.QueueCommand(SimulationCommand.ConfigureResourcePriority(
+            executeAt, sequence: 12, ResourceKind.Food, StoragePriority.Urgent));
+
+        engine.AdvanceTicks(1);
+
+        snapshot = engine.CreateSnapshot();
+        var hauler = snapshot.Actors.Single(actor => actor.Id == assignedHauler.Id);
+        Assert.Equal(ActorJobKind.Haul, hauler.Job.Kind);
+        Assert.Equal(foodDestination.Id, hauler.Job.DestinationZoneId);
+        Assert.Equal(
+            StoragePriority.Urgent,
+            snapshot.ResourcePriorities.Single(priority =>
+                priority.Resource == ResourceKind.Food).Priority);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Equal(snapshot.ResourcePriorities, restored.CreateSnapshot().ResourcePriorities);
+    }
+
+    [Fact]
+    public void AssignedDutyWakesExplorerAndOutranksUrgentPublicStockpile()
+    {
+        var engine = CreateEngine(goblinCount: 2, initialWood: 5);
+        var sourcePosition = engine.Map.GoblinSpawn;
+        var destinations = (
+                from y in Enumerable.Range(0, engine.Map.Height)
+                from x in Enumerable.Range(0, engine.Map.Width)
+                let position = new GridPosition(x, y)
+                where position != sourcePosition &&
+                    engine.World.IsSurfaceTraversable(position) &&
+                    engine.Navigation.HasSurfacePath(sourcePosition, position)
+                orderby Math.Abs(position.X - sourcePosition.X) +
+                    Math.Abs(position.Y - sourcePosition.Y), position.Y, position.X
+                select position)
+            .Take(2)
+            .ToArray();
+        Assert.Equal(2, destinations.Length);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1), sequence: 1, sourcePosition, ResourceKind.Wood, capacity: 5));
+        engine.AdvanceTicks(80);
+        var source = Assert.Single(engine.CreateSnapshot().StorageZones);
+        Assert.Equal(5, source.StoredQuantity);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), sequence: 2, destinations[0], ResourceKind.Wood, capacity: 5));
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), sequence: 3, destinations[1], ResourceKind.Wood, capacity: 5));
+        engine.AdvanceTicks(1);
+        for (var attempt = 0;
+             attempt < SimulationDefinitions.Foundation.ActorMovementIntervalTicks &&
+             engine.CreateSnapshot().Actors.All(actor => actor.Job.Kind != ActorJobKind.Explore);
+             attempt++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        var assignedActor = snapshot.Actors.First(actor => actor.Job.Kind == ActorJobKind.Explore);
+        var otherActor = snapshot.Actors.Single(actor => actor.Id != assignedActor.Id);
+        var assignedDestination = snapshot.StorageZones.Single(zone =>
+            zone.Position == destinations[0]);
+        var publicDestination = snapshot.StorageZones.Single(zone =>
+            zone.Position == destinations[1]);
+        var executeAt = engine.CurrentTick.Next();
+        engine.QueueCommand(SimulationCommand.Move(
+            executeAt, sequence: 4, otherActor.Id, engine.Map.HumanVillage));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePriority(
+            executeAt, sequence: 5, assignedDestination.Id, StoragePriority.Low));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePriority(
+            executeAt, sequence: 6, publicDestination.Id, StoragePriority.Urgent));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageHauler(
+            executeAt, sequence: 7, assignedDestination.Id, assignedActor.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            executeAt, sequence: 8, assignedDestination.Id, source.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            executeAt, sequence: 9, publicDestination.Id, source.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            executeAt, sequence: 10, source.Id, desiredQuantity: 0));
+
+        engine.AdvanceTicks(1);
+
+        snapshot = engine.CreateSnapshot();
+        assignedActor = snapshot.Actors.Single(actor => actor.Id == assignedActor.Id);
+        Assert.Equal(ActorJobKind.Haul, assignedActor.Job.Kind);
+        Assert.Equal(assignedDestination.Id, assignedActor.Job.DestinationZoneId);
+        Assert.Equal(
+            ActorJobKind.Move,
+            snapshot.Actors.Single(actor => actor.Id == otherActor.Id).Job.Kind);
+    }
+
+    [Fact]
+    public void DeliveryDiagnosticExplainsProtectedSurplusAndTracksTheDelivery()
+    {
+        var engine = CreateEngine(goblinCount: 1, initialWood: 5);
+        var sourcePosition = engine.Map.GoblinSpawn;
+        var destinationPosition = engine.Map.GetCardinalNeighbors(sourcePosition)
+            .First(engine.World.IsSurfaceTraversable);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1), sequence: 1, sourcePosition, ResourceKind.Wood, capacity: 5));
+        engine.AdvanceTicks(80);
+        var source = Assert.Single(engine.CreateSnapshot().StorageZones);
+        Assert.Equal(5, source.StoredQuantity);
+
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            sequence: 2,
+            destinationPosition,
+            ResourceKind.Wood,
+            capacity: 5));
+        engine.AdvanceTicks(1);
+        var snapshot = engine.CreateSnapshot();
+        var destination = snapshot.StorageZones.Single(zone => zone.Id != source.Id);
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            engine.CurrentTick.Next(), sequence: 3, destination.Id, source.Id));
+        engine.AdvanceTicks(1);
+
+        var diagnostic = engine.InspectStorageDelivery(destination.Id);
+        Assert.Equal(StorageDeliveryState.NoSurplus, diagnostic.State);
+        Assert.Equal(5, diagnostic.RequestedQuantity);
+        Assert.Equal(1, diagnostic.MatchingSourceCount);
+        Assert.Equal(0, diagnostic.AvailableSourceQuantity);
+
+        var actor = Assert.Single(snapshot.Actors);
+        var executeAt = engine.CurrentTick.Next();
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            executeAt, sequence: 4, source.Id, desiredQuantity: 0));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageHauler(
+            executeAt, sequence: 5, destination.Id, actor.Id));
+
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            engine.AdvanceTicks(1);
+            diagnostic = engine.InspectStorageDelivery(destination.Id);
+            if (diagnostic.State == StorageDeliveryState.InTransit)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(StorageDeliveryState.InTransit, diagnostic.State);
+        Assert.Equal(5, diagnostic.InTransitQuantity);
+        engine.AdvanceTicks(200);
+        diagnostic = engine.InspectStorageDelivery(destination.Id);
+        Assert.Equal(StorageDeliveryState.Satisfied, diagnostic.State);
+        Assert.Equal(0, diagnostic.RequestedQuantity);
+    }
+
+    [Fact]
+    public void DeliveryDiagnosticNamesABusyAssignedHaulerState()
+    {
+        var engine = CreateEngine(goblinCount: 1, initialWood: 5);
+        var sourcePosition = engine.Map.GoblinSpawn;
+        var destinationPosition = engine.Map.GetCardinalNeighbors(sourcePosition)
+            .First(engine.World.IsSurfaceTraversable);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1), sequence: 1, sourcePosition, ResourceKind.Wood, capacity: 5));
+        engine.AdvanceTicks(80);
+        var snapshot = engine.CreateSnapshot();
+        var source = Assert.Single(snapshot.StorageZones);
+        var actor = Assert.Single(snapshot.Actors);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            sequence: 2,
+            destinationPosition,
+            ResourceKind.Wood,
+            capacity: 5));
+        engine.AdvanceTicks(1);
+        var destination = engine.CreateSnapshot().StorageZones.Single(zone => zone.Id != source.Id);
+        var executeAt = engine.CurrentTick.Next();
+        engine.QueueCommand(SimulationCommand.Move(
+            executeAt, sequence: 3, actor.Id, engine.Map.HumanVillage));
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            executeAt, sequence: 4, source.Id, desiredQuantity: 0));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageSource(
+            executeAt, sequence: 5, destination.Id, source.Id));
+        engine.QueueCommand(SimulationCommand.ConfigureStorageHauler(
+            executeAt, sequence: 6, destination.Id, actor.Id));
+
+        engine.AdvanceTicks(1);
+
+        var diagnostic = engine.InspectStorageDelivery(destination.Id);
+        Assert.Equal(StorageDeliveryState.AssignedHaulerBusy, diagnostic.State);
+        Assert.Equal(5, diagnostic.AvailableSourceQuantity);
+        Assert.Equal(ActorJobKind.Move, Assert.Single(engine.CreateSnapshot().Actors).Job.Kind);
+    }
+
+    [Fact]
     public void ClearAreaRemovesOverlappingWorkDesignation()
     {
         var engine = CreateEngine(goblinCount: 1);
@@ -251,14 +685,17 @@ public sealed class WorkDispatcherTests
         Assert.Empty(engine.CreateSnapshot().WorkDesignations);
     }
 
-    private static SimulationEngine CreateEngine(int goblinCount, int initialWood = 0)
+    private static SimulationEngine CreateEngine(
+        int goblinCount,
+        int initialWood = 0,
+        int initialFood = 0)
     {
         var seed = new WorldSeed(0x574F524BUL);
         return SimulationEngine.Create(
             seed,
             SimulationDefinitions.Foundation,
             initialGoblinCount: goblinCount,
-            initialFoodStock: 0,
+            initialFoodStock: initialFood,
             initialWoodStock: initialWood);
     }
 }

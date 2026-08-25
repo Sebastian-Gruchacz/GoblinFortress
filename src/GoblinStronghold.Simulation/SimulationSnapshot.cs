@@ -18,6 +18,8 @@ public enum ActorJobKind : byte
     SupplyConstruction = 9,
     BuildConstruction = 10,
     Collapsed = 11,
+    FellTree = 12,
+    QuarryBoulder = 13,
 }
 
 public enum ActorJobStage : byte
@@ -49,6 +51,23 @@ public readonly record struct ActorJobSnapshot(
     ActorJobKind SuspendedKind,
     GridPosition SuspendedTarget);
 
+public enum ActorPlanIntentKind : byte
+{
+    CurrentJob = 0,
+    Eat = 1,
+    FindFood = 2,
+    Drink = 3,
+    RefillWater = 4,
+    Rest = 5,
+    ResumeSuspendedJob = 6,
+}
+
+public readonly record struct ActorPlanEntrySnapshot(
+    ActorPlanIntentKind Kind,
+    ActorJobKind JobKind,
+    int Priority,
+    GridPosition Target);
+
 [Flags]
 public enum GoblinSkill : ushort
 {
@@ -70,6 +89,20 @@ public readonly record struct GoblinExperienceSnapshot(
     public static int GetProgressToNextLevel(int experience) => experience % 100;
 }
 
+public readonly record struct GoblinWorkPreferences(
+    int Foraging,
+    int Hauling,
+    int Building)
+{
+    public const int Minimum = -2;
+    public const int Maximum = 2;
+
+    public bool IsValid =>
+        Foraging is >= Minimum and <= Maximum &&
+        Hauling is >= Minimum and <= Maximum &&
+        Building is >= Minimum and <= Maximum;
+}
+
 [Flags]
 public enum GoblinTrait : ushort
 {
@@ -88,6 +121,8 @@ public enum PersonalEquipment : ushort
     RagClothes = 1 << 0,
     PrimitiveWaterskin = 1 << 1,
     BoneKnife = 1 << 2,
+    WoodenAxe = 1 << 3,
+    PrimitivePickaxe = 1 << 4,
 }
 
 public readonly record struct ActorSnapshot(
@@ -97,6 +132,7 @@ public readonly record struct ActorSnapshot(
     GoblinTrait KnownTraits,
     PersonalEquipment Equipment,
     GoblinExperienceSnapshot Experience,
+    GoblinWorkPreferences WorkPreferences,
     GridPosition Position,
     int Hunger,
     int Fatigue,
@@ -106,7 +142,8 @@ public readonly record struct ActorSnapshot(
     FoodKind PersonalFoodKind,
     int PersonalWater,
     EntityId CarriedStackId,
-    ActorJobSnapshot Job);
+    ActorJobSnapshot Job,
+    IReadOnlyList<ActorPlanEntrySnapshot> Plan);
 
 public enum HumanCohortRole : byte
 {
@@ -248,6 +285,7 @@ public sealed class SimulationSnapshot
         ItemStackSnapshot[] itemStacks,
         StorageZoneSnapshot[] storageZones,
         ResourcePrioritySnapshot[] resourcePriorities,
+        ResourceInventorySnapshot[] resourceInventory,
         ConstructionSiteSnapshot[] constructionSites,
         WorkDesignationSnapshot[] workDesignations,
         PlantPatchSnapshot[] plantPatches,
@@ -268,6 +306,7 @@ public sealed class SimulationSnapshot
         ItemStacks = new ReadOnlyCollection<ItemStackSnapshot>(itemStacks);
         StorageZones = new ReadOnlyCollection<StorageZoneSnapshot>(storageZones);
         ResourcePriorities = new ReadOnlyCollection<ResourcePrioritySnapshot>(resourcePriorities);
+        ResourceInventory = new ReadOnlyCollection<ResourceInventorySnapshot>(resourceInventory);
         ConstructionSites = new ReadOnlyCollection<ConstructionSiteSnapshot>(constructionSites);
         WorkDesignations = new ReadOnlyCollection<WorkDesignationSnapshot>(workDesignations);
         PlantPatches = new ReadOnlyCollection<PlantPatchSnapshot>(plantPatches);
@@ -295,6 +334,8 @@ public sealed class SimulationSnapshot
     public IReadOnlyList<StorageZoneSnapshot> StorageZones { get; }
 
     public IReadOnlyList<ResourcePrioritySnapshot> ResourcePriorities { get; }
+
+    public IReadOnlyList<ResourceInventorySnapshot> ResourceInventory { get; }
 
     public IReadOnlyList<ConstructionSiteSnapshot> ConstructionSites { get; }
 

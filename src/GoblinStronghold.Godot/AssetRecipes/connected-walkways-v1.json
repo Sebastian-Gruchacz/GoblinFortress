@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "kind": "connected-atlas",
+  "id": "connected-walkways-v1",
+  "source": {
+    "path": "res://Assets/World/wooden-walkway-atlas-v2.png",
+    "columns": 3,
+    "rows": 2
+  },
+  "output": {
+    "atlasPath": "res://Assets/Generated/connected-walkways-v1.png",
+    "manifestPath": "res://Assets/Generated/connected-walkways-v1.manifest.json",
+    "tileSize": 192
+  },
+  "materials": [
+    {
+      "id": "bogwood",
+      "tint": "80684b",
+      "tintStrength": 0.42,
+      "saturation": 0.82,
+      "brightness": 0.84
+    },
+    {
+      "id": "oak",
+      "tint": "bc9159",
+      "tintStrength": 0.34,
+      "saturation": 0.96,
+      "brightness": 1.02
+    },
+    {
+      "id": "pine",
+      "tint": "d0ae70",
+      "tintStrength": 0.48,
+      "saturation": 0.78,
+      "brightness": 1.08
+    }
+  ],
+  "topologies": [
+    { "id": "mask-00-isolated", "outputIndex": 0, "sourceCell": 0, "quarterTurns": 0 },
+    { "id": "mask-01-north-end", "outputIndex": 1, "sourceCell": 1, "quarterTurns": 2 },
+    { "id": "mask-02-east-end", "outputIndex": 2, "sourceCell": 1, "quarterTurns": -1 },
+    { "id": "mask-03-north-east-corner", "outputIndex": 3, "sourceCell": 3, "quarterTurns": 0 },
+    { "id": "mask-04-south-end", "outputIndex": 4, "sourceCell": 1, "quarterTurns": 0 },
+    { "id": "mask-05-north-south-straight", "outputIndex": 5, "sourceCell": 2, "quarterTurns": 0 },
+    { "id": "mask-06-east-south-corner", "outputIndex": 6, "sourceCell": 3, "quarterTurns": 1 },
+    { "id": "mask-07-north-east-south-tee", "outputIndex": 7, "sourceCell": 4, "quarterTurns": -1 },
+    { "id": "mask-08-west-end", "outputIndex": 8, "sourceCell": 1, "quarterTurns": 1 },
+    { "id": "mask-09-north-west-corner", "outputIndex": 9, "sourceCell": 3, "quarterTurns": -1 },
+    { "id": "mask-10-east-west-straight", "outputIndex": 10, "sourceCell": 2, "quarterTurns": 1 },
+    { "id": "mask-11-north-east-west-tee", "outputIndex": 11, "sourceCell": 4, "quarterTurns": 2 },
+    { "id": "mask-12-south-west-corner", "outputIndex": 12, "sourceCell": 3, "quarterTurns": 2 },
+    { "id": "mask-13-north-south-west-tee", "outputIndex": 13, "sourceCell": 4, "quarterTurns": 1 },
+    { "id": "mask-14-east-south-west-tee", "outputIndex": 14, "sourceCell": 4, "quarterTurns": 0 },
+    { "id": "mask-15-cross", "outputIndex": 15, "sourceCell": 5, "quarterTurns": 0 }
+  ]
+}

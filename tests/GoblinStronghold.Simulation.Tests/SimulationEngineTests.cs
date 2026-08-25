@@ -45,11 +45,45 @@ public sealed class SimulationEngineTests
             Assert.False(string.IsNullOrWhiteSpace(actor.Name));
             Assert.NotEqual(GoblinSkill.None, actor.KnownSkills);
             Assert.NotEqual(GoblinTrait.None, actor.KnownTraits);
+            Assert.True(actor.WorkPreferences.IsValid);
         });
+        Assert.True(first.CreateSnapshot().Actors
+            .Select(actor => actor.WorkPreferences)
+            .Distinct()
+            .Count() > 1);
 
         var restored = SimulationEngine.Load(first.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(first.CreateSnapshot().Actors, restored.CreateSnapshot().Actors);
         Assert.Equal(first.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void OldSaveWithoutWorkPreferencesDerivesTheOriginalDeterministicProfiles()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x505245464552454EUL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 4,
+            initialFoodStock: 0);
+        var expected = engine.CreateSnapshot().Actors
+            .Select(actor => actor.WorkPreferences)
+            .ToArray();
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+
+        foreach (var actor in save["actors"]?.AsArray() ?? [])
+        {
+            var actorObject = actor?.AsObject()
+                ?? throw new InvalidOperationException("The save contains an invalid actor.");
+            actorObject.Remove("foragingPreference");
+            actorObject.Remove("haulingPreference");
+            actorObject.Remove("buildingPreference");
+        }
+
+        var restored = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        Assert.Equal(expected, restored.CreateSnapshot().Actors
+            .Select(actor => actor.WorkPreferences));
     }
 
     [Fact]
@@ -188,6 +222,283 @@ public sealed class SimulationEngineTests
     }
 
     [Fact]
+    public void WoodenWallBlueprintBuildsAConnectedSolidObstacle()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(998),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 2);
+        var position = engine.Map.GetCardinalNeighbors(engine.Map.GoblinSpawn)
+            .First(engine.World.CanBuildWoodenBarrier);
+        engine.QueueCommand(SimulationCommand.BuildWoodenWall(
+            new SimulationTick(1), sequence: 1, position));
+
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.WoodenWall, site.Kind);
+        Assert.Equal(2, Assert.Single(site.Materials).RequiredQuantity);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        Assert.Contains(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenWall &&
+            worldObject.Parts.Single().Kind == WorldObjectPartKind.Wall);
+        Assert.False(engine.World.IsSurfaceTraversable(position));
+        Assert.Equal(0, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity));
+    }
+
+    [Fact]
+    public void WoodenWallLineBuildsIndependentSegmentsAndSurvivesSaveLoad()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x57414C4C4C494E45UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 6);
+        var cells = FindBuildableWallLine(engine, segmentCount: 3);
+        engine.QueueCommand(SimulationCommand.BuildWoodenWall(
+            new SimulationTick(1), sequence: 1, cells[0], cells[^1]));
+
+        engine.AdvanceTicks(1);
+
+        var sites = engine.CreateSnapshot().ConstructionSites
+            .OrderBy(site => site.Id)
+            .ToArray();
+        Assert.Equal(cells.Count, sites.Length);
+        Assert.Equal(cells, sites.Select(site => site.Anchor));
+        Assert.All(sites, site =>
+        {
+            Assert.Equal([site.Anchor], site.Footprint);
+            Assert.Equal(2, Assert.Single(site.Materials).RequiredQuantity);
+            Assert.Equal(45, site.TotalWorkTicks);
+        });
+        Assert.Equal(6, sites.Sum(site => Assert.Single(site.Materials).RequiredQuantity));
+        Assert.Equal(135, sites.Sum(site => site.TotalWorkTicks));
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+
+        for (var tick = 0; tick < 1_000 && cells.All(cell =>
+                 engine.World.GetWorldObjectsAt(cell).All(worldObject =>
+                     worldObject.Kind != WorldObjectKind.WoodenWall)); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var completedSegments = cells.Count(cell => engine.World.GetWorldObjectsAt(cell)
+            .Any(worldObject => worldObject.Kind == WorldObjectKind.WoodenWall));
+        Assert.InRange(completedSegments, 1, cells.Count - 1);
+        Assert.Equal(cells.Count - completedSegments, engine.CreateSnapshot().ConstructionSites.Count);
+
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(restored);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        var wallObjects = cells
+            .Select(cell => Assert.Single(engine.World.GetWorldObjectsAt(cell)
+                .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenWall)))
+            .ToArray();
+        Assert.Equal(cells.Count, wallObjects.Select(worldObject => worldObject.Id).Distinct().Count());
+        Assert.All(cells, cell => Assert.False(engine.World.IsSurfaceTraversable(cell)));
+    }
+
+    [Fact]
+    public void WoodenDoorFrameBlueprintRemainsTraversable()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(999),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 1);
+        var position = engine.Map.GetCardinalNeighbors(engine.Map.GoblinSpawn)
+            .First(engine.World.CanBuildWoodenBarrier);
+        engine.QueueCommand(SimulationCommand.BuildWoodenDoorFrame(
+            new SimulationTick(1), sequence: 1, position));
+
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        Assert.Contains(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenDoorFrame &&
+            worldObject.Parts.Single().Kind == WorldObjectPartKind.Door);
+        Assert.True(engine.World.IsSurfaceTraversable(position));
+        Assert.True(engine.Navigation.HasSurfacePath(engine.Map.GoblinSpawn, position));
+    }
+
+    [Fact]
+    public void WoodenDoorFrameAtomicallyReplacesCompletedWall()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x444F4F5257414C4CUL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 3);
+        var position = FindBuildableWallLine(engine, segmentCount: 1)[0];
+        engine.QueueCommand(SimulationCommand.BuildWoodenWall(
+            new SimulationTick(1), sequence: 1, position));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        var wallId = Assert.Single(engine.World.GetWorldObjectsAt(position)
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenWall)).Id;
+
+        engine.QueueCommand(SimulationCommand.BuildWoodenDoorFrame(
+            engine.CurrentTick.Next(), sequence: 2, position));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.WoodenDoorFrame, site.Kind);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(restored);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        var replacement = Assert.Single(engine.World.GetWorldObjectsAt(position));
+        Assert.Equal(wallId, replacement.Id);
+        Assert.Equal(WorldObjectKind.WoodenDoorFrame, replacement.Kind);
+        Assert.Equal(WorldObjectPartKind.Door, Assert.Single(replacement.Parts).Kind);
+        Assert.True(engine.World.IsSurfaceTraversable(position));
+    }
+
+    [Fact]
+    public void WoodenDoorBuildsInFrameAndToggleStateSurvivesSaveLoad()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x444F4F524C454146UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 2);
+        var position = FindBuildableWallLine(engine, segmentCount: 1)[0];
+        engine.QueueCommand(SimulationCommand.BuildWoodenDoorFrame(
+            new SimulationTick(1), sequence: 1, position));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        engine.QueueCommand(SimulationCommand.BuildWoodenDoor(
+            engine.CurrentTick.Next(), sequence: 2, position));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.WoodenDoor, site.Kind);
+        Assert.Equal(1, Assert.Single(site.Materials).RequiredQuantity);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(restored);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        var frame = Assert.Single(engine.World.GetWorldObjectsAt(position)
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorFrame));
+        var closedLeaf = Assert.Single(engine.World.GetWorldObjectsAt(position)
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorLeaf));
+        Assert.Equal(frame.Orientation, closedLeaf.Orientation);
+        Assert.Equal(WorldObjectPartKind.ClosedDoorLeaf, Assert.Single(closedLeaf.Parts).Kind);
+        Assert.False(engine.World.IsSurfaceTraversable(position));
+
+        engine.QueueCommand(SimulationCommand.ToggleWoodenDoor(
+            engine.CurrentTick.Next(), sequence: 3, position));
+        restored.QueueCommand(SimulationCommand.ToggleWoodenDoor(
+            restored.CurrentTick.Next(), sequence: 3, position));
+        engine.AdvanceTicks(1);
+        restored.AdvanceTicks(1);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.True(engine.World.TryGetWoodenDoorState(position, out var isOpen));
+        Assert.True(isOpen);
+        Assert.True(engine.World.IsSurfaceTraversable(position));
+        var openSave = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), openSave.ComputeStateHash());
+
+        engine.QueueCommand(SimulationCommand.ToggleWoodenDoor(
+            engine.CurrentTick.Next(), sequence: 4, position));
+        restored.QueueCommand(SimulationCommand.ToggleWoodenDoor(
+            restored.CurrentTick.Next(), sequence: 4, position));
+        engine.AdvanceTicks(1);
+        restored.AdvanceTicks(1);
+        Assert.False(engine.World.IsSurfaceTraversable(position));
+
+        var actorId = Assert.Single(engine.CreateSnapshot().Actors).Id;
+        var actorPosition = Assert.Single(engine.CreateSnapshot().Actors).Position;
+        Assert.Null(engine.World.FindSurfacePath(actorPosition, position));
+        Assert.NotNull(engine.Navigation.FindSurfacePath(actorPosition, position));
+        var restoredActorId = Assert.Single(restored.CreateSnapshot().Actors).Id;
+        engine.QueueCommand(SimulationCommand.Move(
+            engine.CurrentTick.Next(), sequence: 5, actorId, position));
+        restored.QueueCommand(SimulationCommand.Move(
+            restored.CurrentTick.Next(), sequence: 5, restoredActorId, position));
+        SimulationEngine? automaticallyOpenSave = null;
+        for (var tick = 0; tick < 100 &&
+             engine.CreateSnapshot().Actors.Single().Position != position; tick++)
+        {
+            engine.AdvanceTicks(1);
+            restored.AdvanceTicks(1);
+            var doorPart = engine.World.GetWorldObjectsAt(position)
+                .Single(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorLeaf)
+                .Parts.Single().Kind;
+            if (automaticallyOpenSave is null &&
+                doorPart == WorldObjectPartKind.AutomaticallyOpenedDoorLeaf)
+            {
+                automaticallyOpenSave = SimulationEngine.Load(
+                    engine.Save(),
+                    SimulationDefinitions.Foundation);
+            }
+        }
+        Assert.Equal(position, engine.CreateSnapshot().Actors.Single().Position);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.NotNull(automaticallyOpenSave);
+        automaticallyOpenSave.AdvanceTicks((int)(
+            engine.CurrentTick.Value - automaticallyOpenSave.CurrentTick.Value));
+        Assert.Equal(engine.ComputeStateHash(), automaticallyOpenSave.ComputeStateHash());
+        Assert.True(engine.World.TryGetWoodenDoorState(position, out isOpen));
+        Assert.True(isOpen);
+        engine.QueueCommand(SimulationCommand.ToggleWoodenDoor(
+            engine.CurrentTick.Next(), sequence: 6, position));
+        engine.AdvanceTicks(1);
+
+        Assert.True(engine.World.TryGetWoodenDoorState(position, out isOpen));
+        Assert.True(isOpen);
+        Assert.Contains(engine.DrainEvents(), simulationEvent =>
+            simulationEvent.Kind == SimulationEventKind.CommandRejected &&
+            simulationEvent.Amount == (int)SimulationCommandKind.ToggleWoodenDoor);
+
+        engine.QueueCommand(SimulationCommand.Move(
+            engine.CurrentTick.Next(), sequence: 7, actorId, actorPosition));
+        for (var tick = 0; tick < 100 &&
+             engine.CreateSnapshot().Actors.Single().Position != actorPosition; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        Assert.Equal(actorPosition, engine.CreateSnapshot().Actors.Single().Position);
+        Assert.True(engine.World.TryGetWoodenDoorState(position, out isOpen));
+        Assert.False(isOpen);
+        Assert.False(engine.World.IsSurfaceTraversable(position));
+
+        engine.QueueCommand(SimulationCommand.ToggleWoodenDoor(
+            engine.CurrentTick.Next(), sequence: 8, position));
+        engine.AdvanceTicks(2);
+
+        Assert.True(engine.World.TryGetWoodenDoorState(position, out isOpen));
+        Assert.True(isOpen);
+        Assert.Equal(
+            WorldObjectPartKind.OpenDoorLeaf,
+            Assert.Single(engine.World.GetWorldObjectsAt(position)
+                .Single(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorLeaf)
+                .Parts).Kind);
+        var manuallyOpenSave = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), manuallyOpenSave.ComputeStateHash());
+    }
+
+    [Fact]
     public void ConstructionWithoutEnoughWoodRemainsAsUnsatisfiedBlueprint()
     {
         var engine = SimulationEngine.Create(
@@ -242,6 +553,169 @@ public sealed class SimulationEngineTests
         var site = Assert.Single(snapshot.ConstructionSites);
         Assert.Equal(2, Assert.Single(site.Materials).MissingQuantity);
         Assert.Equal(site.TotalWorkTicks, site.RemainingWorkTicks);
+    }
+
+    [Fact]
+    public void ImpossibleConstructionRemainsUnassignedAndExplainsItsBlocker()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x424C4F434B4544UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 0,
+            scatterInitialBrushwood: false);
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            engine.Map.GoblinSpawn));
+
+        engine.AdvanceTicks(1);
+
+        var snapshot = engine.CreateSnapshot();
+        var site = Assert.Single(snapshot.ConstructionSites);
+        Assert.DoesNotContain(snapshot.Actors, actor =>
+            actor.Job.Kind is ActorJobKind.SupplyConstruction or ActorJobKind.BuildConstruction);
+        var diagnostic = engine.InspectConstructionReadiness(site.Id);
+        Assert.Equal(ConstructionReadinessState.NoAvailableMaterials, diagnostic.State);
+        Assert.Equal(2, diagnostic.MissingMaterialQuantity);
+        Assert.Equal(0, diagnostic.InTransitQuantity);
+        Assert.Equal(0, diagnostic.AvailableMaterialQuantity);
+        Assert.Equal(0, diagnostic.MatchingSourceCount);
+        Assert.Equal(1, diagnostic.CapableBuilderCount);
+    }
+
+    [Fact]
+    public void ConstructionDiagnosticTracksMaterialDeliveryAndAssignedBuilder()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x5245414459UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 2,
+            scatterInitialBrushwood: false);
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            engine.Map.GoblinSpawn));
+        engine.AdvanceTicks(1);
+        var siteId = Assert.Single(engine.CreateSnapshot().ConstructionSites).Id;
+
+        Assert.Equal(
+            ConstructionReadinessState.MaterialsInTransit,
+            engine.InspectConstructionReadiness(siteId).State);
+
+        for (var tick = 0; tick < 200 &&
+             engine.CreateSnapshot().Actors.Single().Job.Kind != ActorJobKind.BuildConstruction; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var diagnostic = engine.InspectConstructionReadiness(siteId);
+        Assert.Equal(ConstructionReadinessState.Building, diagnostic.State);
+        Assert.Equal(0, diagnostic.MissingMaterialQuantity);
+        Assert.Equal(1, diagnostic.CapableBuilderCount);
+    }
+
+    [Fact]
+    public void UrgentConstructionOutranksACloserLowPrioritySiteAndSurvivesSaveLoad()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x5052494F52495459UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 4,
+            scatterInitialBrushwood: false);
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        var lowPosition = engine.Map.GoblinSpawn;
+        var urgentPosition = engine.Map.GetCardinalNeighbors(lowPosition)
+            .First(engine.World.IsSurfaceTraversable);
+        var moveDestination = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .OrderByDescending(position =>
+                Math.Abs(position.X - actor.Position.X) + Math.Abs(position.Y - actor.Position.Y))
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .First(position => engine.Navigation.HasSurfacePath(actor.Position, position));
+        var executeAt = new SimulationTick(1);
+        engine.QueueCommand(SimulationCommand.Move(
+            executeAt, sequence: 1, actor.Id, moveDestination));
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            executeAt, sequence: 2, lowPosition));
+        engine.QueueCommand(SimulationCommand.BuildWoodStorage(
+            executeAt, sequence: 3, urgentPosition));
+        engine.AdvanceTicks(1);
+
+        var sites = engine.CreateSnapshot().ConstructionSites;
+        var low = sites.Single(site => site.Anchor == lowPosition);
+        var urgent = sites.Single(site => site.Anchor == urgentPosition);
+        executeAt = engine.CurrentTick.Next();
+        engine.QueueCommand(SimulationCommand.ConfigureConstructionPriority(
+            executeAt, sequence: 4, low.Id, StoragePriority.Low));
+        engine.QueueCommand(SimulationCommand.ConfigureConstructionPriority(
+            executeAt, sequence: 5, urgent.Id, StoragePriority.Urgent));
+        engine.AdvanceTicks(1);
+
+        var configured = engine.CreateSnapshot().ConstructionSites;
+        Assert.Equal(StoragePriority.Low, configured.Single(site => site.Id == low.Id).Priority);
+        Assert.Equal(StoragePriority.Urgent, configured.Single(site => site.Id == urgent.Id).Priority);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Equal(
+            StoragePriority.Urgent,
+            restored.CreateSnapshot().ConstructionSites.Single(site => site.Id == urgent.Id).Priority);
+
+        for (var tick = 0; tick < 2_000 &&
+             engine.CreateSnapshot().Actors.Single().Job.Kind != ActorJobKind.SupplyConstruction; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var supplier = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(ActorJobKind.SupplyConstruction, supplier.Job.Kind);
+        Assert.Equal(urgent.Id, supplier.Job.DestinationZoneId);
+    }
+
+    [Fact]
+    public void ConstructionSupplyPlanningDoesNotPathfindEveryLooseWoodStack()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x504C414EUL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 0,
+            scatterInitialBrushwood: true);
+        var woodStackCount = engine.CreateSnapshot().ItemStacks.Count(stack =>
+            stack.Resource == ResourceKind.Wood);
+        var searchesBefore = engine.Navigation.GetMetrics().Searches;
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            engine.Map.GoblinSpawn));
+
+        engine.AdvanceTicks(1);
+
+        var searchesAfter = engine.Navigation.GetMetrics().Searches;
+        Assert.True(woodStackCount > 12, $"wood stacks: {woodStackCount}");
+        Assert.InRange(searchesAfter - searchesBefore, 1, 4);
+        Assert.Equal(
+            ActorJobKind.SupplyConstruction,
+            engine.CreateSnapshot().Actors.Single().Job.Kind);
+        var simulationSnapshot = engine.CreateSnapshot();
+        var indexedStackIds = engine.CreateResourceSpatialSnapshot().Entries
+            .Select(entry => entry.StackId)
+            .Order()
+            .ToArray();
+        var expectedStackIds = simulationSnapshot.ItemStacks
+            .Where(stack => stack.Location.Kind != ItemLocationKind.ActorInventory)
+            .Select(stack => stack.Id)
+            .Order()
+            .ToArray();
+        Assert.Equal(expectedStackIds, indexedStackIds);
     }
 
     [Fact]
@@ -358,16 +832,17 @@ public sealed class SimulationEngineTests
 
         engine.AdvanceTicks(1);
 
-        Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(cells.Count, engine.CreateSnapshot().ConstructionSites.Count);
         SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
 
         Assert.True(engine.World.IsSurfaceTraversable(water));
-        Assert.Equal(topologyVersion + 1, engine.World.TopologyVersion);
+        Assert.Equal(topologyVersion + (ulong)cells.Count, engine.World.TopologyVersion);
         var invalidatedMetrics = engine.Navigation.GetMetrics();
         Assert.True(invalidatedMetrics.CacheInvalidations > cachedMetrics.CacheInvalidations);
         Assert.Equal(engine.World.TopologyVersion, invalidatedMetrics.TopologyVersion);
-        Assert.Contains(engine.CreateSnapshot().WorldObjects, item =>
-            item.Kind == WorldObjectKind.WoodenWalkway && item.Parts.Count == cells.Count);
+        Assert.All(cells, cell => Assert.Contains(
+            engine.World.GetWorldObjectsAt(cell),
+            item => item.Kind == WorldObjectKind.WoodenWalkway && item.Parts.Count == 1));
         Assert.Equal(10 - cells.Count, engine.CreateSnapshot().ItemStacks
             .Where(stack => stack.Resource == ResourceKind.Wood)
             .Sum(stack => stack.Quantity));
@@ -573,6 +1048,24 @@ public sealed class SimulationEngineTests
         }
 
         return engine;
+    }
+
+    private static IReadOnlyList<GridPosition> FindBuildableWallLine(
+        SimulationEngine engine,
+        int segmentCount)
+    {
+        var candidates =
+            from y in Enumerable.Range(0, engine.Map.Height)
+            from x in Enumerable.Range(0, engine.Map.Width - segmentCount + 1)
+            let cells = Enumerable.Range(0, segmentCount)
+                .Select(offset => new GridPosition(x + offset, y))
+                .ToArray()
+            where !cells.Contains(engine.Map.GoblinSpawn) &&
+                engine.World.CanBuildWoodenWalls(cells)
+            orderby Math.Abs(x - engine.Map.GoblinSpawn.X) +
+                Math.Abs(y - engine.Map.GoblinSpawn.Y)
+            select cells;
+        return candidates.First();
     }
 
     private sealed record ScenarioResult(

@@ -24,12 +24,18 @@ public partial class WorldView : Node2D
     private Texture2D _itemIconAtlas = null!;
     private Texture2D _environmentAtlas = null!;
     private Texture2D _terrainAtlas = null!;
+    private Texture2D _terrainTransitionAtlas = null!;
     private Texture2D _caveAtlas = null!;
+    private Texture2D _caveWallAtlas = null!;
     private Texture2D _humanStructureAtlas = null!;
     private Texture2D _walkwayAtlas = null!;
+    private Texture2D _structureWallAtlas = null!;
     private int _visibleLevel;
     private double _waterAnimationElapsed;
     private double _waterAnimationRedrawElapsed;
+    private WallEnclosureAnalysis? _wallEnclosure;
+    private HashSet<GridPosition> _wallEnclosureBarriers = [];
+    private HashSet<GridPosition> _wallEnclosureSolids = [];
 
     public int VisibleLevel => _visibleLevel;
 
@@ -43,15 +49,21 @@ public partial class WorldView : Node2D
         _itemIconAtlas = ItemIcons.LoadAtlas();
         _environmentAtlas = EnvironmentSprites.LoadAtlas();
         _terrainAtlas = TerrainSprites.LoadAtlas();
+        _terrainTransitionAtlas = TerrainTransitionSprites.LoadAtlas();
         _caveAtlas = CaveSprites.LoadAtlas();
+        _caveWallAtlas = CaveSprites.LoadWallAtlas();
         _humanStructureAtlas = HumanStructureSprites.LoadAtlas();
         _walkwayAtlas = WalkwaySprites.LoadAtlas();
+        _structureWallAtlas = StructureWallSprites.LoadAtlas();
     }
 
     public void SetWorld(SimulationEngine engine)
     {
         _visualActorPositions.Clear();
         _targetActorPositions.Clear();
+        _wallEnclosure = null;
+        _wallEnclosureBarriers.Clear();
+        _wallEnclosureSolids.Clear();
         _engine = engine;
         Refresh(engine.CreateSnapshot());
     }
@@ -197,11 +209,16 @@ public partial class WorldView : Node2D
                     }
 
                     var sprite = ResolveTerrainSprite(x, y, cell.Terrain, livingTrees);
+                    var useGeneratedTransition = cell.RampDirection != TerrainRampDirection.None &&
+                        TerrainTransitionSprites.Supports(sprite);
                     DrawTextureRectRegion(
-                        _terrainAtlas,
+                        useGeneratedTransition ? _terrainTransitionAtlas : _terrainAtlas,
                         CellRect(x, y),
-                        TerrainSprites.GetRegion(_terrainAtlas, sprite));
-                    DrawTerrainRelief(x, y, cell);
+                        useGeneratedTransition
+                            ? TerrainTransitionSprites.GetRegion(
+                                _terrainTransitionAtlas, sprite, cell.RampDirection)
+                            : TerrainSprites.GetRegion(_terrainAtlas, sprite));
+                    DrawTerrainRelief(x, y, cell, drawSlopeOverlay: !useGeneratedTransition);
                     DrawCaveMouth(x, y);
                     continue;
                 }
@@ -248,7 +265,8 @@ public partial class WorldView : Node2D
                     DrawTextureRectRegion(
                         _caveAtlas,
                         CellRect(x, y),
-                        CaveSprites.GetRegion(_caveAtlas, cell.Rock, wall: false));
+                        CaveSprites.GetFloorRegion(_caveAtlas, cell.Rock));
+                    DrawRect(CellRect(x, y), CaveSprites.GetFloorShade(cell.Rock));
                     if (cell.Kind == CaveCellKind.Ramp)
                     {
                         DrawCavePassage(position);
@@ -257,12 +275,16 @@ public partial class WorldView : Node2D
                     continue;
                 }
 
-                if (HasOpenCaveNeighbor(position))
+                var openNeighborMask = GetOpenCaveNeighborMask(position);
+                if (openNeighborMask != 0)
                 {
                     DrawTextureRectRegion(
-                        _caveAtlas,
+                        _caveWallAtlas,
                         CellRect(x, y),
-                        CaveSprites.GetRegion(_caveAtlas, cell.Rock, wall: true));
+                        CaveSprites.GetWallRegion(
+                            _caveWallAtlas,
+                            cell.Rock,
+                            openNeighborMask));
                 }
                 else
                 {
@@ -271,23 +293,67 @@ public partial class WorldView : Node2D
                         : new Color("101216");
                     DrawRect(CellRect(x, y), rockTint);
                 }
+                DrawCaveInnerCorners(position, cell.Rock);
             }
         }
     }
 
-    private bool HasOpenCaveNeighbor(GridPosition position)
+    private void DrawCaveInnerCorners(GridPosition position, RockKind rock)
     {
-        ReadOnlySpan<(int X, int Y)> offsets = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+        var corners = CaveWallTopology.GetInnerOpenCorners(position, IsOpenCaveCell);
+        if (corners == CaveInnerCorner.None)
+        {
+            return;
+        }
+
+        if ((corners & CaveInnerCorner.NorthWest) != 0)
+        {
+            DrawCaveInnerCorner(position, rock, CaveInnerCorner.NorthWest);
+        }
+        if ((corners & CaveInnerCorner.NorthEast) != 0)
+        {
+            DrawCaveInnerCorner(position, rock, CaveInnerCorner.NorthEast);
+        }
+        if ((corners & CaveInnerCorner.SouthEast) != 0)
+        {
+            DrawCaveInnerCorner(position, rock, CaveInnerCorner.SouthEast);
+        }
+        if ((corners & CaveInnerCorner.SouthWest) != 0)
+        {
+            DrawCaveInnerCorner(position, rock, CaveInnerCorner.SouthWest);
+        }
+    }
+
+    private void DrawCaveInnerCorner(
+        GridPosition position,
+        RockKind rock,
+        CaveInnerCorner corner)
+    {
+        DrawTextureRectRegion(
+            _caveWallAtlas,
+            CellRect(position.X, position.Y),
+            CaveSprites.GetInnerCornerRegion(_caveWallAtlas, rock, corner));
+    }
+
+    private bool IsOpenCaveCell(GridPosition position) =>
+        _engine.Map.IsCavePosition(position) &&
+        _engine.Map.GetCaveCell(position).IsOpen;
+
+    private int GetOpenCaveNeighborMask(GridPosition position)
+    {
+        ReadOnlySpan<(int X, int Y, int Bit)> offsets =
+            [(0, -1, 1), (1, 0, 2), (0, 1, 4), (-1, 0, 8)];
+        var mask = 0;
         foreach (var offset in offsets)
         {
             var neighbor = new GridPosition(position.X + offset.X, position.Y + offset.Y, position.Z);
             if (_engine.Map.IsCavePosition(neighbor) && _engine.Map.GetCaveCell(neighbor).IsOpen)
             {
-                return true;
+                mask |= offset.Bit;
             }
         }
 
-        return false;
+        return mask;
     }
 
     private void DrawCavePassage(GridPosition position)
@@ -310,7 +376,7 @@ public partial class WorldView : Node2D
         }
     }
 
-    private void DrawTerrainRelief(int x, int y, MapCell cell)
+    private void DrawTerrainRelief(int x, int y, MapCell cell, bool drawSlopeOverlay)
     {
         var rect = CellRect(x, y);
         if (cell.SurfaceLevel > 0)
@@ -322,7 +388,7 @@ public partial class WorldView : Node2D
             DrawRect(rect, new Color(0.02f, 0.04f, 0.07f, 0.12f));
         }
 
-        if (cell.RampDirection != TerrainRampDirection.None)
+        if (drawSlopeOverlay && cell.RampDirection != TerrainRampDirection.None)
         {
             DrawTerrainSlope(rect, cell.RampDirection);
         }
@@ -551,17 +617,31 @@ public partial class WorldView : Node2D
             .Select(item => item.Position)
             .ToHashSet();
         DrawWalkways(walkwayCells);
+        DrawPrimitiveBarriers();
 
         foreach (var worldObject in _snapshot.WorldObjects)
         {
-            if (worldObject.Kind == WorldObjectKind.WoodenWalkway)
+            if (worldObject.Kind is WorldObjectKind.WoodenWalkway or
+                WorldObjectKind.WoodenWall or WorldObjectKind.WoodenDoorFrame or
+                WorldObjectKind.WoodenDoorLeaf)
             {
                 continue;
             }
             if (worldObject.Kind is WorldObjectKind.HumanCottage or
                 WorldObjectKind.HumanBarn or
-                WorldObjectKind.HumanStorehouse or
-                WorldObjectKind.HumanWell)
+                WorldObjectKind.HumanStorehouse)
+            {
+                if (worldObject.Orientation == CardinalOrientation.South)
+                {
+                    DrawIllustratedHumanStructure(worldObject);
+                }
+                else
+                {
+                    DrawModularHumanStructure(worldObject);
+                }
+                continue;
+            }
+            if (worldObject.Kind == WorldObjectKind.HumanWell)
             {
                 DrawIllustratedHumanStructure(worldObject);
                 continue;
@@ -573,7 +653,8 @@ public partial class WorldView : Node2D
                 continue;
             }
 
-            if (worldObject.Kind is WorldObjectKind.Tree or WorldObjectKind.DeadTreeStump)
+            if (worldObject.Kind is WorldObjectKind.Tree or WorldObjectKind.DeadTreeStump or
+                WorldObjectKind.Boulder)
             {
                 DrawIllustratedNaturalStructure(worldObject);
                 continue;
@@ -613,14 +694,78 @@ public partial class WorldView : Node2D
             if (walkwayCells.Contains(position with { Y = position.Y + 1 })) mask |= 4;
             if (walkwayCells.Contains(position with { X = position.X - 1 })) mask |= 8;
 
-            var placement = WalkwaySprites.Resolve(mask);
             var cell = CellRect(position.X, position.Y).Grow(-0.5f);
-            DrawSetTransform(cell.GetCenter(), placement.Rotation);
             DrawTextureRectRegion(
                 _walkwayAtlas,
-                new Rect2(-cell.Size / 2f, cell.Size),
-                WalkwaySprites.GetRegion(_walkwayAtlas, placement.Sprite));
-            DrawSetTransform(Vector2.Zero);
+                cell,
+                WalkwaySprites.GetRegion(_walkwayAtlas, mask));
+        }
+    }
+
+    private void DrawPrimitiveBarriers()
+    {
+        if (_visibleLevel != 0)
+        {
+            return;
+        }
+
+        var walls = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenWall)
+            .Select(worldObject => worldObject.Anchor)
+            .ToHashSet();
+        var doorFrames = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorFrame)
+            .ToDictionary(worldObject => worldObject.Anchor);
+        var doorLeaves = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorLeaf)
+            .ToDictionary(
+                worldObject => worldObject.Anchor,
+                worldObject => worldObject.Parts.Single().Kind is
+                    WorldObjectPartKind.OpenDoorLeaf or
+                    WorldObjectPartKind.AutomaticallyOpenedDoorLeaf);
+        var connectedCells = walls.Concat(doorFrames.Keys).ToHashSet();
+        var structuralSolids = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind is not (
+                WorldObjectKind.WoodenWall or WorldObjectKind.WoodenDoorFrame or
+                WorldObjectKind.WoodenDoorLeaf))
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(item => item.Position.Z == 0 && item.Part.Kind == WorldObjectPartKind.Wall)
+            .Select(item => item.Position)
+            .ToHashSet();
+        if (_wallEnclosure is null ||
+            !_wallEnclosureBarriers.SetEquals(connectedCells) ||
+            !_wallEnclosureSolids.SetEquals(structuralSolids))
+        {
+            _wallEnclosure = WallEnclosureAnalysis.Analyze(
+                _engine.Map.Width,
+                _engine.Map.Height,
+                connectedCells,
+                structuralSolids);
+            _wallEnclosureBarriers = connectedCells;
+            _wallEnclosureSolids = structuralSolids;
+        }
+        foreach (var position in walls)
+        {
+            var mask = GetCardinalConnectionMask(position, connectedCells);
+            DrawTextureRectRegion(
+                _structureWallAtlas,
+                CellRect(position.X, position.Y).Grow(-0.5f),
+                StructureWallSprites.GetRegion(
+                    _structureWallAtlas,
+                    StructureWallMaterial.GoblinBogwood,
+                    mask));
+            DrawInteriorWallFaces(
+                position,
+                _wallEnclosure.GetWallSides(position).VisibleFaces);
+        }
+
+        foreach (var (position, frame) in doorFrames)
+        {
+            DrawDoorFrame(position, frame.Orientation);
+            if (doorLeaves.TryGetValue(position, out var isOpen))
+            {
+                DrawDoorLeaf(position, frame.Orientation, isOpen);
+            }
         }
     }
 
@@ -673,6 +818,267 @@ public partial class WorldView : Node2D
         DrawSetTransform(Vector2.Zero);
     }
 
+    private void DrawModularHumanStructure(WorldObjectSnapshot worldObject)
+    {
+        var parts = worldObject.GetAbsoluteParts()
+            .Where(item => item.Position.Z == _visibleLevel)
+            .ToArray();
+        if (parts.Length == 0)
+        {
+            return;
+        }
+
+        if (_visibleLevel == 1)
+        {
+            foreach (var position in parts
+                         .Where(item => item.Part.Kind == WorldObjectPartKind.Roof)
+                         .Select(item => item.Position))
+            {
+                var rect = CellRect(position.X, position.Y).Grow(-0.7f);
+                DrawRect(rect, new Color("51483c"));
+                DrawLine(rect.Position + new Vector2(0f, rect.Size.Y * 0.5f),
+                    new Vector2(rect.End.X, rect.Position.Y + (rect.Size.Y * 0.5f)),
+                    new Color("84745d"), 0.8f);
+            }
+            return;
+        }
+
+        if (_visibleLevel != 0)
+        {
+            return;
+        }
+
+        foreach (var position in parts
+                     .Where(item => item.Part.Kind == WorldObjectPartKind.Floor)
+                     .Select(item => item.Position))
+        {
+            var rect = CellRect(position.X, position.Y).Grow(-0.6f);
+            var variation = ((position.X + position.Y) & 1) == 0 ? 0f : 0.055f;
+            DrawRect(rect, new Color("917654").Lightened(variation));
+            DrawRect(rect, new Color("4d3d2d"), filled: false, width: 0.55f);
+        }
+
+        var wallConnections = parts
+            .Where(item => item.Part.Kind is WorldObjectPartKind.Wall or WorldObjectPartKind.Door)
+            .Select(item => item.Position)
+            .ToHashSet();
+        foreach (var position in parts
+                     .Where(item => item.Part.Kind == WorldObjectPartKind.Wall)
+                     .Select(item => item.Position))
+        {
+            var mask = GetCardinalConnectionMask(position, wallConnections);
+            DrawTextureRectRegion(
+                _structureWallAtlas,
+                CellRect(position.X, position.Y).Grow(-0.5f),
+                StructureWallSprites.GetRegion(
+                    _structureWallAtlas,
+                    StructureWallMaterial.HumanOak,
+                    mask));
+        }
+
+        foreach (var position in parts
+                     .Where(item => item.Part.Kind == WorldObjectPartKind.Door)
+                     .Select(item => item.Position))
+        {
+            DrawDoorFrame(position, worldObject.Orientation);
+        }
+    }
+
+    private static int GetCardinalConnectionMask(
+        GridPosition position,
+        IReadOnlySet<GridPosition> connectedCells)
+    {
+        var mask = 0;
+        if (connectedCells.Contains(position with { Y = position.Y - 1 })) mask |= 1;
+        if (connectedCells.Contains(position with { X = position.X + 1 })) mask |= 2;
+        if (connectedCells.Contains(position with { Y = position.Y + 1 })) mask |= 4;
+        if (connectedCells.Contains(position with { X = position.X - 1 })) mask |= 8;
+        return mask;
+    }
+
+    private void DrawDoorFrame(GridPosition position, CardinalOrientation orientation)
+    {
+        var rect = CellRect(position.X, position.Y).Grow(-1.2f);
+        var timber = new Color("b47d43");
+        var shadow = new Color("4a2e19");
+        const float postSize = 4.2f;
+        if (orientation is CardinalOrientation.North or CardinalOrientation.South)
+        {
+            DrawRect(new Rect2(rect.Position, new Vector2(postSize, rect.Size.Y)), shadow);
+            DrawRect(new Rect2(rect.End.X - postSize, rect.Position.Y, postSize, rect.Size.Y), shadow);
+            DrawRect(new Rect2(rect.Position + Vector2.One, new Vector2(postSize - 1f, rect.Size.Y - 2f)), timber);
+            DrawRect(new Rect2(rect.End.X - postSize, rect.Position.Y + 1f,
+                postSize - 1f, rect.Size.Y - 2f), timber);
+            DrawLine(new Vector2(rect.Position.X + postSize, rect.GetCenter().Y),
+                new Vector2(rect.End.X - postSize, rect.GetCenter().Y), timber, 1.4f);
+        }
+        else
+        {
+            DrawRect(new Rect2(rect.Position, new Vector2(rect.Size.X, postSize)), shadow);
+            DrawRect(new Rect2(rect.Position.X, rect.End.Y - postSize, rect.Size.X, postSize), shadow);
+            DrawRect(new Rect2(rect.Position + Vector2.One, new Vector2(rect.Size.X - 2f, postSize - 1f)), timber);
+            DrawRect(new Rect2(rect.Position.X + 1f, rect.End.Y - postSize,
+                rect.Size.X - 2f, postSize - 1f), timber);
+            DrawLine(new Vector2(rect.GetCenter().X, rect.Position.Y + postSize),
+                new Vector2(rect.GetCenter().X, rect.End.Y - postSize), timber, 1.4f);
+        }
+    }
+
+    private void DrawInteriorWallFaces(
+        GridPosition position,
+        WallInteriorFacing facing)
+    {
+        if (facing == WallInteriorFacing.None)
+        {
+            return;
+        }
+
+        var rect = CellRect(position.X, position.Y).Grow(-0.5f);
+        if ((facing & WallInteriorFacing.North) != 0)
+        {
+            DrawInteriorWallFace(rect, WallInteriorFacing.North);
+        }
+        if ((facing & WallInteriorFacing.East) != 0)
+        {
+            DrawInteriorWallFace(rect, WallInteriorFacing.East);
+        }
+        if ((facing & WallInteriorFacing.South) != 0)
+        {
+            DrawInteriorWallFace(rect, WallInteriorFacing.South);
+        }
+        if ((facing & WallInteriorFacing.West) != 0)
+        {
+            DrawInteriorWallFace(rect, WallInteriorFacing.West);
+        }
+    }
+
+    private void DrawInteriorWallFace(Rect2 rect, WallInteriorFacing direction)
+    {
+        const int bands = 7;
+        const float faceFraction = 0.66f;
+        var light = new Color(0.43f, 0.29f, 0.17f, 0.94f);
+        var dark = new Color(0.13f, 0.075f, 0.04f, 0.98f);
+        for (var band = 0; band < bands; band++)
+        {
+            var phase = (band + 0.5f) / bands;
+            var color = light.Lerp(dark, phase);
+            Rect2 strip;
+            if (direction == WallInteriorFacing.South)
+            {
+                var height = rect.Size.Y * faceFraction / bands;
+                strip = new Rect2(
+                    rect.Position.X,
+                    rect.End.Y - rect.Size.Y * faceFraction + band * height,
+                    rect.Size.X,
+                    height + 0.2f);
+            }
+            else if (direction == WallInteriorFacing.North)
+            {
+                var height = rect.Size.Y * faceFraction / bands;
+                strip = new Rect2(
+                    rect.Position.X,
+                    rect.Position.Y + rect.Size.Y * faceFraction - (band + 1) * height,
+                    rect.Size.X,
+                    height + 0.2f);
+            }
+            else if (direction == WallInteriorFacing.East)
+            {
+                var width = rect.Size.X * faceFraction / bands;
+                strip = new Rect2(
+                    rect.End.X - rect.Size.X * faceFraction + band * width,
+                    rect.Position.Y,
+                    width + 0.2f,
+                    rect.Size.Y);
+            }
+            else
+            {
+                var width = rect.Size.X * faceFraction / bands;
+                strip = new Rect2(
+                    rect.Position.X + rect.Size.X * faceFraction - (band + 1) * width,
+                    rect.Position.Y,
+                    width + 0.2f,
+                    rect.Size.Y);
+            }
+            DrawRect(strip, color);
+        }
+
+        var rim = new Color(0.68f, 0.47f, 0.27f, 0.95f);
+        switch (direction)
+        {
+            case WallInteriorFacing.North:
+                DrawLine(
+                    new Vector2(rect.Position.X, rect.Position.Y + rect.Size.Y * faceFraction),
+                    new Vector2(rect.End.X, rect.Position.Y + rect.Size.Y * faceFraction),
+                    rim,
+                    1f);
+                break;
+            case WallInteriorFacing.East:
+                DrawLine(
+                    new Vector2(rect.End.X - rect.Size.X * faceFraction, rect.Position.Y),
+                    new Vector2(rect.End.X - rect.Size.X * faceFraction, rect.End.Y),
+                    rim,
+                    1f);
+                break;
+            case WallInteriorFacing.South:
+                DrawLine(
+                    new Vector2(rect.Position.X, rect.End.Y - rect.Size.Y * faceFraction),
+                    new Vector2(rect.End.X, rect.End.Y - rect.Size.Y * faceFraction),
+                    rim,
+                    1f);
+                break;
+            case WallInteriorFacing.West:
+                DrawLine(
+                    new Vector2(rect.Position.X + rect.Size.X * faceFraction, rect.Position.Y),
+                    new Vector2(rect.Position.X + rect.Size.X * faceFraction, rect.End.Y),
+                    rim,
+                    1f);
+                break;
+        }
+    }
+
+    private void DrawDoorLeaf(
+        GridPosition position,
+        CardinalOrientation orientation,
+        bool isOpen)
+    {
+        var rect = CellRect(position.X, position.Y).Grow(-5.2f);
+        var timber = new Color("8f5d30");
+        var edge = new Color("402716");
+        var horizontal = orientation is CardinalOrientation.North or CardinalOrientation.South;
+        if (!isOpen)
+        {
+            var leaf = horizontal
+                ? new Rect2(rect.Position, new Vector2(rect.Size.X, rect.Size.Y * 0.55f))
+                : new Rect2(rect.Position, new Vector2(rect.Size.X * 0.55f, rect.Size.Y));
+            leaf.Position += horizontal
+                ? new Vector2(0f, rect.Size.Y * 0.225f)
+                : new Vector2(rect.Size.X * 0.225f, 0f);
+            DrawRect(leaf, edge);
+            DrawRect(leaf.Grow(-1.2f), timber);
+            var center = leaf.GetCenter();
+            if (horizontal)
+            {
+                DrawLine(new Vector2(center.X, leaf.Position.Y + 1f),
+                    new Vector2(center.X, leaf.End.Y - 1f), edge, 1f);
+            }
+            else
+            {
+                DrawLine(new Vector2(leaf.Position.X + 1f, center.Y),
+                    new Vector2(leaf.End.X - 1f, center.Y), edge, 1f);
+            }
+            return;
+        }
+
+        var hinge = horizontal
+            ? new Vector2(rect.Position.X, rect.GetCenter().Y)
+            : new Vector2(rect.GetCenter().X, rect.Position.Y);
+        var openedEnd = horizontal
+            ? hinge + new Vector2(rect.Size.X * 0.72f, rect.Size.Y * 0.48f)
+            : hinge + new Vector2(rect.Size.X * 0.48f, rect.Size.Y * 0.72f);
+        DrawLine(hinge, openedEnd, edge, 4.5f);
+        DrawLine(hinge, openedEnd, timber, 2.5f);
+    }
+
     private static float RotationFor(CardinalOrientation orientation) => orientation switch
     {
         CardinalOrientation.North => Mathf.Pi,
@@ -685,6 +1091,22 @@ public partial class WorldView : Node2D
     private void DrawIllustratedNaturalStructure(WorldObjectSnapshot worldObject)
     {
         var center = CellCenter(worldObject.Anchor);
+        if (worldObject.Kind == WorldObjectKind.Boulder)
+        {
+            if (_visibleLevel == 0)
+            {
+                const float boulderSize = 25f;
+                DrawCircle(center + new Vector2(1.5f, 2f), 10.5f, new Color(0, 0, 0, 0.45f));
+                DrawTextureRectRegion(
+                    _itemIconAtlas,
+                    new Rect2(
+                        center - new Vector2(boulderSize / 2f, boulderSize / 2f),
+                        new Vector2(boulderSize, boulderSize)),
+                    ItemIcons.GetRegion(_itemIconAtlas, ItemIcon.Stone));
+            }
+            return;
+        }
+
         if (worldObject.Kind == WorldObjectKind.DeadTreeStump)
         {
             if (_visibleLevel == 0)
@@ -834,6 +1256,9 @@ public partial class WorldView : Node2D
                 WorkDesignationKind.GatherFood => new Color(0.55f, 0.9f, 0.28f, 0.72f),
                 WorkDesignationKind.GatherBrushwood => new Color(0.72f, 0.46f, 0.22f, 0.78f),
                 WorkDesignationKind.UprootBerryBush => new Color(0.92f, 0.3f, 0.2f, 0.82f),
+                WorkDesignationKind.FellTree => new Color(0.95f, 0.72f, 0.18f, 0.86f),
+                WorkDesignationKind.GatherStone => new Color(0.62f, 0.7f, 0.76f, 0.8f),
+                WorkDesignationKind.QuarryBoulder => new Color(0.75f, 0.82f, 0.88f, 0.9f),
                 _ => Colors.Magenta,
             };
             DrawRect(
@@ -856,6 +1281,9 @@ public partial class WorldView : Node2D
             WorkDesignationKind.GatherFood => new Color(0.65f, 1f, 0.3f, 0.9f),
             WorkDesignationKind.GatherBrushwood => new Color(0.9f, 0.58f, 0.25f, 0.9f),
             WorkDesignationKind.UprootBerryBush => new Color(1f, 0.32f, 0.2f, 0.92f),
+            WorkDesignationKind.FellTree => new Color(1f, 0.78f, 0.18f, 0.95f),
+            WorkDesignationKind.GatherStone => new Color(0.7f, 0.8f, 0.88f, 0.92f),
+            WorkDesignationKind.QuarryBoulder => new Color(0.84f, 0.9f, 0.96f, 0.96f),
             _ => new Color(0.95f, 0.28f, 0.24f, 0.9f),
         };
         foreach (var cell in _workPreview)
@@ -1156,7 +1584,9 @@ public partial class WorldView : Node2D
         var icon = actor.Job.Kind switch
         {
             ActorJobKind.Forage => UiIcon.GatherFood,
-            ActorJobKind.ClearVegetation => UiIcon.GatherBrushwood,
+            ActorJobKind.ClearVegetation => UiIcon.UprootBush,
+            ActorJobKind.FellTree => UiIcon.FellTree,
+            ActorJobKind.QuarryBoulder => UiIcon.Work,
             ActorJobKind.Haul => UiIcon.FoodStorage,
             ActorJobKind.SupplyConstruction => UiIcon.GatherBrushwood,
             ActorJobKind.BuildConstruction => UiIcon.Build,

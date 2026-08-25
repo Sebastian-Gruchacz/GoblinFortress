@@ -191,6 +191,12 @@ internal sealed class ActorSaveModel
 
     public int BuildingExperience { get; set; }
 
+    public int? ForagingPreference { get; set; }
+
+    public int? HaulingPreference { get; set; }
+
+    public int? BuildingPreference { get; set; }
+
     public int Hunger { get; set; }
 
     public int Fatigue { get; set; }
@@ -343,6 +349,8 @@ internal sealed class ConstructionSiteSaveModel
     public int MinimumBuildingLevel { get; set; }
 
     public PersonalEquipment RequiredEquipment { get; set; }
+
+    public Resources.StoragePriority? Priority { get; set; }
 }
 
 internal sealed class CommandSaveModel

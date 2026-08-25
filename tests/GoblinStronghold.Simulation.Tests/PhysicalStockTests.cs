@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -6,6 +7,31 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class PhysicalStockTests
 {
+    [Fact]
+    public void ResourceInventoryDoesNotRevealUnknownGroundGoods()
+    {
+        var engine = CreateStockScenario(initialFood: 5);
+        var stack = Assert.Single(engine.CreateSnapshot().ItemStacks);
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        var visibilityIndex = (stack.Location.Position.Y * engine.Map.Width) +
+            stack.Location.Position.X;
+        save["visibility"]!.AsArray()[visibilityIndex] = (int)CellVisibility.Unknown;
+
+        var hidden = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        var snapshot = hidden.CreateSnapshot();
+        var inventory = Assert.Single(snapshot.ResourceInventory, item =>
+            item.Resource == ResourceKind.Food);
+        Assert.Equal(0, inventory.KnownLooseQuantity);
+        Assert.DoesNotContain(
+            snapshot.ResourceInventory,
+            item => item.Resource == ResourceKind.Vegetation);
+        Assert.Equal(5, snapshot.FoodStock);
+    }
+
     [Fact]
     public void SmallFoodStorageLimitsOneFoodKindToOneStackOfThirtyTwo()
     {
@@ -42,6 +68,11 @@ public sealed class PhysicalStockTests
         var engine = CreateStockScenario(initialFood: 7);
         var initial = engine.CreateSnapshot();
         var groundStack = Assert.Single(initial.ItemStacks);
+        var initialInventory = Assert.Single(initial.ResourceInventory, item =>
+            item.Resource == ResourceKind.Food);
+        Assert.Equal(0, initialInventory.StoredQuantity);
+        Assert.Equal(7, initialInventory.KnownLooseQuantity);
+        Assert.Equal(0, initialInventory.CarriedQuantity);
 
         engine.QueueCommand(SimulationCommand.CreateStorageZone(
             new SimulationTick(1),
@@ -72,6 +103,11 @@ public sealed class PhysicalStockTests
         Assert.Equal(carried.Id, actor.CarriedStackId);
         Assert.Equal(groundStack.Location.Position, actor.Position);
         Assert.Equal(7, carrying.FoodStock);
+        var carryingInventory = Assert.Single(carrying.ResourceInventory, item =>
+            item.Resource == ResourceKind.Food);
+        Assert.Equal(0, carryingInventory.StoredQuantity);
+        Assert.Equal(4, carryingInventory.KnownLooseQuantity);
+        Assert.Equal(3, carryingInventory.CarriedQuantity);
 
         engine.QueueCommand(SimulationCommand.StoreCarried(
             new SimulationTick(3),
@@ -91,6 +127,11 @@ public sealed class PhysicalStockTests
         Assert.Equal(zone.Id, carried.Location.OwnerId);
         Assert.Equal(3, zone.StoredQuantity);
         Assert.Equal(7, stored.FoodStock);
+        var storedInventory = Assert.Single(stored.ResourceInventory, item =>
+            item.Resource == ResourceKind.Food);
+        Assert.Equal(3, storedInventory.StoredQuantity);
+        Assert.Equal(4, storedInventory.KnownLooseQuantity);
+        Assert.Equal(0, storedInventory.CarriedQuantity);
     }
 
     [Fact]

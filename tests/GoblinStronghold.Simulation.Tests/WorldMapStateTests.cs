@@ -77,6 +77,58 @@ public sealed class WorldMapStateTests
     }
 
     [Fact]
+    public void FreshRegionalMapContainsDeterministicLooseStoneAndBlockingBoulders()
+    {
+        var seed = new WorldSeed(0x53544F4EUL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var first = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 2,
+            initialFoodStock: 0,
+            scatterInitialBrushwood: true);
+        var second = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            SwampMapGenerator.Generate(seed, 64, 64),
+            initialGoblinCount: 2,
+            initialFoodStock: 0,
+            scatterInitialBrushwood: true);
+
+        var boulders = first.World.CreateWorldObjectSnapshot()
+            .Where(item => item.Kind == WorldObjectKind.Boulder)
+            .ToArray();
+        Assert.NotEmpty(boulders);
+        Assert.Equal(
+            boulders.Select(item => item.Anchor),
+            second.World.CreateWorldObjectSnapshot()
+                .Where(item => item.Kind == WorldObjectKind.Boulder)
+                .Select(item => item.Anchor));
+        Assert.All(boulders, boulder =>
+        {
+            Assert.Equal(WorldObjectOwner.Nature, boulder.Owner);
+            Assert.False(first.World.IsSurfaceTraversable(boulder.Anchor));
+            Assert.Contains(boulder.Parts, part => part.Kind == WorldObjectPartKind.Boulder);
+        });
+
+        var looseStone = first.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Stone &&
+                stack.Location.Kind == ItemLocationKind.Ground)
+            .ToArray();
+        Assert.NotEmpty(looseStone);
+        Assert.Contains(looseStone, stack =>
+            Math.Abs(stack.Location.Position.X - map.GoblinSpawn.X) +
+            Math.Abs(stack.Location.Position.Y - map.GoblinSpawn.Y) <=
+            SimulationDefinitions.Foundation.VisionRadius);
+        Assert.Equal(
+            looseStone,
+            second.CreateSnapshot().ItemStacks.Where(stack =>
+                stack.Resource == ResourceKind.Stone &&
+                stack.Location.Kind == ItemLocationKind.Ground));
+    }
+
+    [Fact]
     public void FishShoalsOnlyOccupyShallowsInLargerConnectedWaterBodies()
     {
         var seed = new WorldSeed(0x474F424C494EUL);

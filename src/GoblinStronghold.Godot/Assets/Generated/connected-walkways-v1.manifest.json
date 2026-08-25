@@ -1,0 +1,442 @@
+{
+  "schemaVersion": 1,
+  "recipe": "connected-walkways-v1",
+  "contentHash": "43492bf558fe62f45a735e833bbefe00ed1e74970dbd77c19081fdb14af6e1d2",
+  "tileSize": 192,
+  "columns": 16,
+  "rows": 3,
+  "entries": [
+    {
+      "material": "bogwood",
+      "topology": "mask-00-isolated",
+      "index": 0,
+      "x": 0,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-01-north-end",
+      "index": 1,
+      "x": 192,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-02-east-end",
+      "index": 2,
+      "x": 384,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-03-north-east-corner",
+      "index": 3,
+      "x": 576,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-04-south-end",
+      "index": 4,
+      "x": 768,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-05-north-south-straight",
+      "index": 5,
+      "x": 960,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-06-east-south-corner",
+      "index": 6,
+      "x": 1152,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-07-north-east-south-tee",
+      "index": 7,
+      "x": 1344,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-08-west-end",
+      "index": 8,
+      "x": 1536,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-09-north-west-corner",
+      "index": 9,
+      "x": 1728,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-10-east-west-straight",
+      "index": 10,
+      "x": 1920,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-11-north-east-west-tee",
+      "index": 11,
+      "x": 2112,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-12-south-west-corner",
+      "index": 12,
+      "x": 2304,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-13-north-south-west-tee",
+      "index": 13,
+      "x": 2496,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-14-east-south-west-tee",
+      "index": 14,
+      "x": 2688,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "bogwood",
+      "topology": "mask-15-cross",
+      "index": 15,
+      "x": 2880,
+      "y": 0,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-00-isolated",
+      "index": 0,
+      "x": 0,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-01-north-end",
+      "index": 1,
+      "x": 192,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-02-east-end",
+      "index": 2,
+      "x": 384,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-03-north-east-corner",
+      "index": 3,
+      "x": 576,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-04-south-end",
+      "index": 4,
+      "x": 768,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-05-north-south-straight",
+      "index": 5,
+      "x": 960,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-06-east-south-corner",
+      "index": 6,
+      "x": 1152,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-07-north-east-south-tee",
+      "index": 7,
+      "x": 1344,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-08-west-end",
+      "index": 8,
+      "x": 1536,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-09-north-west-corner",
+      "index": 9,
+      "x": 1728,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-10-east-west-straight",
+      "index": 10,
+      "x": 1920,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-11-north-east-west-tee",
+      "index": 11,
+      "x": 2112,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-12-south-west-corner",
+      "index": 12,
+      "x": 2304,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-13-north-south-west-tee",
+      "index": 13,
+      "x": 2496,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-14-east-south-west-tee",
+      "index": 14,
+      "x": 2688,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "oak",
+      "topology": "mask-15-cross",
+      "index": 15,
+      "x": 2880,
+      "y": 192,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-00-isolated",
+      "index": 0,
+      "x": 0,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-01-north-end",
+      "index": 1,
+      "x": 192,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-02-east-end",
+      "index": 2,
+      "x": 384,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-03-north-east-corner",
+      "index": 3,
+      "x": 576,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-04-south-end",
+      "index": 4,
+      "x": 768,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-05-north-south-straight",
+      "index": 5,
+      "x": 960,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-06-east-south-corner",
+      "index": 6,
+      "x": 1152,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-07-north-east-south-tee",
+      "index": 7,
+      "x": 1344,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-08-west-end",
+      "index": 8,
+      "x": 1536,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-09-north-west-corner",
+      "index": 9,
+      "x": 1728,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-10-east-west-straight",
+      "index": 10,
+      "x": 1920,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-11-north-east-west-tee",
+      "index": 11,
+      "x": 2112,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-12-south-west-corner",
+      "index": 12,
+      "x": 2304,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-13-north-south-west-tee",
+      "index": 13,
+      "x": 2496,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-14-east-south-west-tee",
+      "index": 14,
+      "x": 2688,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    },
+    {
+      "material": "pine",
+      "topology": "mask-15-cross",
+      "index": 15,
+      "x": 2880,
+      "y": 384,
+      "width": 192,
+      "height": 192
+    }
+  ]
+}

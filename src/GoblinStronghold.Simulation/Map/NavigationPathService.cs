@@ -27,11 +27,12 @@ public sealed class NavigationPathService
 
     public IReadOnlyList<GridPosition>? FindSurfacePath(
         GridPosition start,
-        GridPosition destination)
+        GridPosition destination,
+        bool canOpenDoors = true)
     {
         EnsureCurrentTopology();
         _requests = checked(_requests + 1);
-        var key = new PathKey(start, destination);
+        var key = new PathKey(start, destination, canOpenDoors);
         if (_routeCache.TryGetValue(key, out var cached))
         {
             _cacheHits = checked(_cacheHits + 1);
@@ -39,7 +40,7 @@ public sealed class NavigationPathService
         }
 
         _searches = checked(_searches + 1);
-        var route = _world.FindSurfacePath(start, destination)?.ToArray();
+        var route = _world.FindSurfacePath(start, destination, canOpenDoors)?.ToArray();
         if (_routeCache.Count >= MaximumCachedRoutes)
         {
             _routeCache.Clear();
@@ -60,7 +61,11 @@ public sealed class NavigationPathService
         EnsureCurrentTopology();
         _requests = checked(_requests + 1);
         _searches = checked(_searches + 1);
-        return _world.FindNearestHarvestablePlantPath(start, excludedTargets, isAllowed);
+        return _world.FindNearestHarvestablePlantPath(
+            start,
+            excludedTargets,
+            isAllowed,
+            canOpenDoors: true);
     }
 
     public IReadOnlyList<GridPosition>? FindNearestBerryBushPath(
@@ -71,7 +76,11 @@ public sealed class NavigationPathService
         EnsureCurrentTopology();
         _requests = checked(_requests + 1);
         _searches = checked(_searches + 1);
-        return _world.FindNearestBerryBushPath(start, excludedTargets, isAllowed);
+        return _world.FindNearestBerryBushPath(
+            start,
+            excludedTargets,
+            isAllowed,
+            canOpenDoors: true);
     }
 
     public NavigationPathMetrics GetMetrics()
@@ -100,5 +109,6 @@ public sealed class NavigationPathService
 
     private readonly record struct PathKey(
         GridPosition Start,
-        GridPosition Destination);
+        GridPosition Destination,
+        bool CanOpenDoors);
 }

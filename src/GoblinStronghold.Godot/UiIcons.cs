@@ -20,13 +20,19 @@ internal enum UiIcon
     Health,
     Hunger,
     Thirst,
+    WoodStorage,
+    WoodenWall,
+    WoodenDoorFrame,
+    WoodenDoor,
+    UprootBush,
+    FellTree,
 }
 
 internal static class UiIcons
 {
     private const int Columns = 4;
     private const int SourceCellSize = 256;
-    private const string AtlasPath = "res://Assets/UI/action-icons-v1.png";
+    private const string AtlasPath = "res://Assets/UI/action-icons-v2.png";
     private const string Speed8IconPath = "res://Assets/UI/speed-8x-icon-v1.png";
 
     public static Texture2D LoadAtlas()

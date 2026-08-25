@@ -11,6 +11,7 @@ public partial class Main : Node
     private static readonly WorldSeed InitialSeed = new(0x474F424C494EUL);
     private SimulationEngine _engine = null!;
     private WorldView _worldView = null!;
+    private WorldView3D _worldView3D = null!;
     private MinimapView _minimap = null!;
     private Camera2D _camera = null!;
     private Label _status = null!;
@@ -20,10 +21,13 @@ public partial class Main : Node
     private Label _inspector = null!;
     private PopupPanel _buildMenu = null!;
     private PopupPanel _workMenu = null!;
+    private PopupPanel _statisticsMenu = null!;
     private GridContainer _buildMenuGrid = null!;
     private GridContainer _workMenuGrid = null!;
+    private GridContainer _statisticsMenuGrid = null!;
     private Texture2D _iconAtlas = null!;
     private Texture2D _itemIconAtlas = null!;
+    private Texture2D _pickaxeIcon = null!;
     private Window _goblinDetails = null!;
     private Label _goblinDetailsText = null!;
     private ProgressBar _healthBar = null!;
@@ -32,14 +36,27 @@ public partial class Main : Node
     private ProgressBar _fatigueBar = null!;
     private HBoxContainer _inventoryIcons = null!;
     private string _inventorySignature = string.Empty;
+    private Window _storedResourcesWindow = null!;
+    private Label _storedResourcesSummary = null!;
+    private GridContainer _storedResourcesGrid = null!;
+    private string _storedResourcesSignature = string.Empty;
+    private Window _looseResourcesWindow = null!;
+    private Label _looseResourcesSummary = null!;
+    private GridContainer _looseResourcesGrid = null!;
+    private string _looseResourcesSignature = string.Empty;
+    private Window _goblinRosterWindow = null!;
+    private VBoxContainer _goblinRosterRows = null!;
+    private string _goblinRosterSignature = string.Empty;
+    private Window _statisticsWindow = null!;
+    private Label _statisticsText = null!;
     private int _speed = 1;
     private int _visibleLevel;
     private double _accumulator;
     private ulong _commandSequence = 1;
     private EntityId _selectedActorId = EntityId.None;
     private BuildMode _buildMode;
-    private bool _isDraggingWalkway;
-    private GridPosition _walkwayStart;
+    private bool _isDraggingLinearBuild;
+    private GridPosition _linearBuildStart;
     private WorkMode _workMode;
     private bool _isDraggingWorkArea;
     private GridPosition _workAreaStart;
@@ -56,6 +73,10 @@ public partial class Main : Node
     private OptionButton _storageSource = null!;
     private readonly List<EntityId> _storageSourceZoneIds = [];
     private EntityId _selectedStorageId = EntityId.None;
+    private Window _constructionDetails = null!;
+    private Label _constructionSummary = null!;
+    private OptionButton _constructionPriority = null!;
+    private EntityId _selectedConstructionId = EntityId.None;
     private GameSaveStore _saveStore = null!;
     private SimulationTick _nextAutosaveTick;
     private Control _mainMenu = null!;
@@ -64,6 +85,10 @@ public partial class Main : Node
     private Button _loadMenuButton = null!;
     private bool _hasActiveSession;
     private int _speedBeforeMenu = 1;
+    private Button _viewModeButton = null!;
+    private Control _cameraModePanel = null!;
+    private Button _cameraAngleButton = null!;
+    private bool _use3DView;
 
     private double SecondsPerTick =>
         _engine.Definitions.Clock.RealSecondsPerTickAtNormalSpeed;
@@ -74,7 +99,11 @@ public partial class Main : Node
         FoodStorage,
         Walkway,
         WoodStorage,
+        StoneStorage,
         FieldCamp,
+        WoodenWall,
+        WoodenDoorFrame,
+        WoodenDoor,
     }
 
     private enum WorkMode
@@ -82,7 +111,10 @@ public partial class Main : Node
         None,
         GatherFood,
         GatherBrushwood,
+        GatherStone,
         UprootBerryBushes,
+        FellTrees,
+        QuarryBoulders,
         Clear,
     }
 
@@ -93,6 +125,7 @@ public partial class Main : Node
         var map = _engine.Map;
 
         _worldView = GetNode<WorldView>("WorldView");
+        _worldView3D = GetNode<WorldView3D>("WorldView3D");
         _minimap = GetNode<MinimapView>("Interface/RightHud/MinimapFrame/Minimap");
         _camera = GetNode<Camera2D>("Camera2D");
         _status = GetNode<Label>("Interface/TopBar/Controls/Status");
@@ -102,38 +135,104 @@ public partial class Main : Node
         _inspector = GetNode<Label>("Interface/Inspector/Text");
         _buildMenu = GetNode<PopupPanel>("BuildMenu");
         _workMenu = GetNode<PopupPanel>("WorkMenu");
+        _statisticsMenu = GetNode<PopupPanel>("StatisticsMenu");
         _buildMenuGrid = GetNode<GridContainer>("BuildMenu/Margin/Grid");
         _workMenuGrid = GetNode<GridContainer>("WorkMenu/Margin/Grid");
+        _statisticsMenuGrid = GetNode<GridContainer>("StatisticsMenu/Margin/Grid");
         _mainMenu = GetNode<Control>("Interface/MainMenu");
         _resumeGameButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Resume");
         _newGameButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/NewGame");
         _loadMenuButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/LoadGame");
+        _viewModeButton = GetNode<Button>("Interface/RightHud/SessionPanel/Controls/ViewMode");
+        _cameraModePanel = GetNode<Control>("Interface/RightHud/CameraPanel");
+        _cameraAngleButton = GetNode<Button>("Interface/RightHud/CameraPanel/Controls/Angle");
         _iconAtlas = UiIcons.LoadAtlas();
         _itemIconAtlas = ItemIcons.LoadAtlas();
+        _pickaxeIcon = GD.Load<Texture2D>("res://Assets/UI/primitive-pickaxe-v1.svg");
         _goblinDetails = GetNode<Window>("GoblinDetails");
         _goblinDetailsText = GetNode<Label>("GoblinDetails/Scroll/Content/Text");
         _inventoryIcons = GetNode<HBoxContainer>("GoblinDetails/Scroll/Content/Inventory");
+        _storedResourcesWindow = GetNode<Window>("StoredResourcesWindow");
+        _storedResourcesSummary = GetNode<Label>("StoredResourcesWindow/Margin/Content/Summary");
+        _storedResourcesGrid = GetNode<GridContainer>("StoredResourcesWindow/Margin/Content/Grid");
+        _looseResourcesWindow = GetNode<Window>("LooseResourcesWindow");
+        _looseResourcesSummary = GetNode<Label>("LooseResourcesWindow/Margin/Content/Summary");
+        _looseResourcesGrid = GetNode<GridContainer>("LooseResourcesWindow/Margin/Content/Grid");
+        _goblinRosterWindow = GetNode<Window>("GoblinRosterWindow");
+        _goblinRosterRows = GetNode<VBoxContainer>("GoblinRosterWindow/Scroll/Rows");
+        _statisticsWindow = GetNode<Window>("StatisticsWindow");
+        _statisticsText = GetNode<Label>("StatisticsWindow/Margin/Text");
         GetViewport().GuiEmbedSubwindows = true;
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FoodStorage,
             "Skład żywności\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.FoodStorage));
-        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.GatherBrushwood,
+        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodStorage,
             "Skład drewna\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodStorage));
+        CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
+            "Skład kamienia\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.StoneStorage));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.Walkway,
             "Pomost\nKoszt: 1 drewno za segment", () => SelectBuildMode((long)BuildMode.Walkway));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
             "Obozowisko wypadowe\nKoszt: 6 drewna", () => SelectBuildMode((long)BuildMode.FieldCamp));
+        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenWall,
+            "Drewniana ściana\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodenWall));
+        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenDoorFrame,
+            "Drewniana ościeżnica\nKoszt: 1 drewno", () => SelectBuildMode((long)BuildMode.WoodenDoorFrame));
+        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenDoor,
+            "Drewniane drzwi\nKoszt: 1 drewno", () => SelectBuildMode((long)BuildMode.WoodenDoor));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherFood,
             "Zbierz żywność\nJagody, grzyby, korzonki i ryby", () => SelectWorkMode((long)WorkMode.GatherFood));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherBrushwood,
             "Zbierz chrust\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.GatherBrushwood));
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherBrushwood,
+        CreateItemTileButton(_workMenuGrid, _workMenu, ItemIcon.Stone,
+            "Zbierz kamienie\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.GatherStone));
+        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.UprootBush,
             "Wykarcz krzaki\nTrwale usuwa źródła jagód", () => SelectWorkMode((long)WorkMode.UprootBerryBushes));
+        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.FellTree,
+            "Wyrąb drzew i pni\nWymaga goblina z siekierą", () => SelectWorkMode((long)WorkMode.FellTrees));
+        CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
+            "Rozbij głazy\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.QuarryBoulders));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
             "Usuń zlecenia\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.Clear));
+        CreateItemTileButton(
+            _statisticsMenuGrid,
+            _statisticsMenu,
+            ItemIcon.Cargo,
+            "Łączne zapasy w magazynach",
+            ShowStoredResources);
+        CreateItemTileButton(
+            _statisticsMenuGrid,
+            _statisticsMenu,
+            ItemIcon.Wood,
+            "Znane towary leżące na ziemi",
+            ShowLooseResources);
+        CreateTileButton(
+            _statisticsMenuGrid,
+            _statisticsMenu,
+            UiIcon.Health,
+            "Lista goblinów",
+            ShowGoblinRoster);
+        CreateTextTileButton(
+            _statisticsMenuGrid,
+            _statisticsMenu,
+            "Σ",
+            "Statystyki plemienia",
+            ShowStatistics);
         CreateNeedIndicators();
         _goblinDetails.CloseRequested += _goblinDetails.Hide;
         _goblinDetails.GetNode<Control>("Scroll").GuiInput += inputEvent =>
             CloseWindowOnSecondaryInput(inputEvent, _goblinDetails);
+        ConfigureOverviewWindow(
+            _storedResourcesWindow,
+            _storedResourcesWindow.GetNode<Control>("Margin"));
+        ConfigureOverviewWindow(
+            _looseResourcesWindow,
+            _looseResourcesWindow.GetNode<Control>("Margin"));
+        ConfigureOverviewWindow(
+            _goblinRosterWindow,
+            _goblinRosterWindow.GetNode<Control>("Scroll"));
+        ConfigureOverviewWindow(
+            _statisticsWindow,
+            _statisticsWindow.GetNode<Control>("Margin"));
         _storageDetails = GetNode<Window>("StorageDetails");
         _storageSummary = GetNode<Label>("StorageDetails/Margin/Controls/Summary");
         _storagePullLoose = GetNode<CheckButton>("StorageDetails/Margin/Controls/PullLoose");
@@ -150,19 +249,42 @@ public partial class Main : Node
         _storageDetails.CloseRequested += _storageDetails.Hide;
         _storageDetails.GetNode<Control>("Margin").GuiInput += inputEvent =>
             CloseWindowOnSecondaryInput(inputEvent, _storageDetails);
+        _constructionDetails = GetNode<Window>("ConstructionDetails");
+        _constructionSummary = GetNode<Label>("ConstructionDetails/Margin/Controls/Summary");
+        _constructionPriority = GetNode<OptionButton>(
+            "ConstructionDetails/Margin/Controls/PriorityRow/Priority");
+        foreach (var priority in Enum.GetValues<StoragePriority>())
+        {
+            _constructionPriority.AddItem(DescribeStoragePriority(priority));
+        }
+        _constructionDetails.CloseRequested += _constructionDetails.Hide;
+        _constructionDetails.GetNode<Control>("Margin").GuiInput += inputEvent =>
+            CloseWindowOnSecondaryInput(inputEvent, _constructionDetails);
         _buildMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
             CloseWindowOnSecondaryInput(inputEvent, _buildMenu);
         _workMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
             CloseWindowOnSecondaryInput(inputEvent, _workMenu);
+        _statisticsMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
+            CloseWindowOnSecondaryInput(inputEvent, _statisticsMenu);
         _storagePullLoose.Toggled += enabled => _storageTarget.Editable = enabled;
         GetNode<Button>("StorageDetails/Margin/Controls/Apply").Pressed += ApplyStorageSettings;
+        GetNode<Button>("ConstructionDetails/Margin/Controls/Apply").Pressed +=
+            ApplyConstructionSettings;
         GetNode<Button>("Interface/RightHud/SessionPanel/Controls/Menu").Pressed += ShowMainMenu;
         GetNode<Button>("Interface/RightHud/SessionPanel/Controls/SaveGame").Pressed += SaveGame;
+        _viewModeButton.Pressed += ToggleWorldView;
+        GetNode<Button>("Interface/RightHud/CameraPanel/Controls/RotateLeft").Pressed +=
+            () => Rotate3DCamera(-1);
+        _cameraAngleButton.Pressed += Toggle3DCameraAngle;
+        GetNode<Button>("Interface/RightHud/CameraPanel/Controls/RotateRight").Pressed +=
+            () => Rotate3DCamera(1);
         _resumeGameButton.Pressed += ResumeGame;
         _newGameButton.Pressed += StartNewGame;
         _loadMenuButton.Pressed += LoadGame;
         GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Quit").Pressed += () => GetTree().Quit();
         _worldView.SetWorld(_engine);
+        _worldView3D.SetWorld(_engine);
+        _worldView3D.SetActive(false);
         _minimap.SetWorld(_engine);
         _worldView.SetSimulationSpeed(_speed, SecondsPerTick);
         _minimap.NavigationRequested += CenterCameraOn;
@@ -184,11 +306,13 @@ public partial class Main : Node
         ConfigureActionButton("Build", UiIcon.Build, "Budowanie");
         ConfigureActionButton("Work", UiIcon.Work, "Zlecenia pracy");
         ConfigureActionButton("Raid", UiIcon.Expedition, "Przygotuj najazd na wieś");
-        GetToolbarButton("Build").Pressed += () =>
-            ShowBuildMenu(GetViewport().GetMousePosition());
-        GetToolbarButton("Work").Pressed += () =>
-            ShowWorkMenu(GetViewport().GetMousePosition());
+        var statisticsButton = GetToolbarButton("Statistics");
+        statisticsButton.FocusMode = Control.FocusModeEnum.None;
+        statisticsButton.TooltipText = "Zestawienia i statystyki";
+        GetToolbarButton("Build").Pressed += ShowBuildMenu;
+        GetToolbarButton("Work").Pressed += ShowWorkMenu;
         GetToolbarButton("Raid").Pressed += OrderVillageRaid;
+        statisticsButton.Pressed += ShowStatisticsMenu;
         UpdateSpeedButtons();
         UpdateLayerToolAvailability();
         ScheduleNextAutosave();
@@ -222,7 +346,14 @@ public partial class Main : Node
         {
             HandleEvents(_engine.DrainEvents());
             var snapshot = _engine.CreateSnapshot();
-            _worldView.Refresh(snapshot);
+            if (_use3DView)
+            {
+                _worldView3D.Refresh(snapshot);
+            }
+            else
+            {
+                _worldView.Refresh(snapshot);
+            }
             _minimap.Refresh(snapshot);
             UpdateStatus();
             TryAutosave();
@@ -277,6 +408,25 @@ public partial class Main : Node
                 LoadGame();
                 GetViewport().SetInputAsHandled();
                 break;
+            case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.F3:
+                ToggleWorldView();
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.F4 &&
+                _use3DView:
+                Toggle3DCameraAngle();
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.Q &&
+                _use3DView:
+                Rotate3DCamera(-1);
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.E &&
+                _use3DView:
+                Rotate3DCamera(1);
+                GetViewport().SetInputAsHandled();
+                break;
             case InputEventKey key when key.Pressed && key.Keycode == Key.Space:
                 SetSpeed(_speed == 0 ? 1 : 0);
                 GetViewport().SetInputAsHandled();
@@ -312,7 +462,14 @@ public partial class Main : Node
                 ChangeCameraZoom(1f / 1.15f);
                 break;
             case InputEventMouseMotion mouse when _isPanningCamera:
-                _camera.Position -= mouse.Relative / _camera.Zoom;
+                if (_use3DView)
+                {
+                    _worldView3D.PanScreenDelta(mouse.Relative, GetViewport().GetVisibleRect().Size);
+                }
+                else
+                {
+                    _camera.Position -= mouse.Relative / _camera.Zoom;
+                }
                 ConstrainCameraToMap();
                 _rightDragDistance += mouse.Relative.Length();
                 GetViewport().SetInputAsHandled();
@@ -338,8 +495,8 @@ public partial class Main : Node
                 }
                 break;
             case InputEventMouseButton { Pressed: false, ButtonIndex: MouseButton.Left } mouse
-                when _isDraggingWalkway:
-                FinishWalkway(mouse.Position);
+                when _isDraggingLinearBuild:
+                FinishLinearConstruction(mouse.Position);
                 break;
             case InputEventMouseButton { Pressed: false, ButtonIndex: MouseButton.Left } mouse
                 when _isDraggingWorkArea:
@@ -541,7 +698,17 @@ public partial class Main : Node
     {
         CancelActiveTool();
         SelectActor(EntityId.None);
+        _selectedStorageId = EntityId.None;
+        _selectedConstructionId = EntityId.None;
         _storageDetails.Hide();
+        _constructionDetails.Hide();
+        _storedResourcesWindow.Hide();
+        _looseResourcesWindow.Hide();
+        _goblinRosterWindow.Hide();
+        _statisticsWindow.Hide();
+        _storedResourcesSignature = string.Empty;
+        _looseResourcesSignature = string.Empty;
+        _goblinRosterSignature = string.Empty;
         _engine = engine;
         _commandSequence = engine.NextAvailableCommandSequence;
         _accumulator = 0;
@@ -549,6 +716,7 @@ public partial class Main : Node
         _worldView.SetWorld(engine);
         _worldView.SetVisibleLevel(0);
         _worldView.SetSimulationSpeed(_speed, SecondsPerTick);
+        _worldView3D.SetWorld(engine);
         _minimap.SetWorld(engine);
         _camera.Position = _worldView.CellToWorld(engine.Map.GoblinSpawn);
         UpdateLayerToolAvailability();
@@ -572,15 +740,23 @@ public partial class Main : Node
         GetViewport().SetInputAsHandled();
     }
 
+    private void ConfigureOverviewWindow(Window window, Control content)
+    {
+        window.CloseRequested += window.Hide;
+        content.GuiInput += inputEvent => CloseWindowOnSecondaryInput(inputEvent, window);
+    }
+
     private void ClearSelection()
     {
         SelectActor(EntityId.None);
         _selectedStorageId = EntityId.None;
+        _selectedConstructionId = EntityId.None;
         _storageDetails.Hide();
+        _constructionDetails.Hide();
         _inspector.Text = "Zaznaczenie wyczyszczone. PPM przeciągnięty przesuwa mapę.";
     }
 
-    private void ShowBuildMenu(Vector2 screenPosition)
+    private void ShowBuildMenu()
     {
         if (_visibleLevel > 0)
         {
@@ -588,19 +764,46 @@ public partial class Main : Node
             return;
         }
 
-        _buildMenu.Position = new Vector2I((int)screenPosition.X, (int)screenPosition.Y);
-        _buildMenu.Popup();
+        ShowToolbarMenu(_buildMenu, "Build");
     }
 
-    private void ShowWorkMenu(Vector2 screenPosition)
+    private void ShowWorkMenu()
     {
         if (!EnsureSurfaceToolAvailable("Zlecenia pracy"))
         {
             return;
         }
 
-        _workMenu.Position = new Vector2I((int)screenPosition.X, (int)screenPosition.Y);
-        _workMenu.Popup();
+        ShowToolbarMenu(_workMenu, "Work");
+    }
+
+    private void ShowStatisticsMenu() => ShowToolbarMenu(_statisticsMenu, "Statistics");
+
+    private void ShowToolbarMenu(PopupPanel menu, string buttonName)
+    {
+        foreach (var candidate in new[] { _buildMenu, _workMenu, _statisticsMenu })
+        {
+            if (candidate != menu)
+            {
+                candidate.Hide();
+            }
+        }
+
+        menu.Popup();
+        var buttonRect = GetToolbarButton(buttonName).GetGlobalRect();
+        var menuSize = (Vector2)menu.Size;
+        var viewportSize = GetViewport().GetVisibleRect().Size;
+        var maximumX = Math.Max(8f, viewportSize.X - menuSize.X - 8f);
+        var maximumY = Math.Max(8f, viewportSize.Y - menuSize.Y - 8f);
+        var position = new Vector2(
+            Math.Clamp(
+                buttonRect.Position.X + ((buttonRect.Size.X - menuSize.X) / 2f),
+                8f,
+                maximumX),
+            Math.Clamp(buttonRect.Position.Y - menuSize.Y - 8f, 8f, maximumY));
+        menu.Position = new Vector2I(
+            Mathf.RoundToInt(position.X),
+            Mathf.RoundToInt(position.Y));
     }
 
     private void ConfigureActionButton(string name, UiIcon icon, string tooltip)
@@ -628,6 +831,75 @@ public partial class Main : Node
             FocusMode = Control.FocusModeEnum.None,
             TooltipText = tooltip,
         };
+        button.Pressed += () =>
+        {
+            menu.Hide();
+            action();
+        };
+        grid.AddChild(button);
+    }
+
+    private void CreateItemTileButton(
+        GridContainer grid,
+        PopupPanel menu,
+        ItemIcon icon,
+        string tooltip,
+        Action action)
+    {
+        var button = new Button
+        {
+            CustomMinimumSize = new Vector2(68, 68),
+            Icon = ItemIcons.CreateTexture(_itemIconAtlas, icon),
+            ExpandIcon = true,
+            FocusMode = Control.FocusModeEnum.None,
+            TooltipText = tooltip,
+        };
+        button.Pressed += () =>
+        {
+            menu.Hide();
+            action();
+        };
+        grid.AddChild(button);
+    }
+
+    private static void CreateTextureTileButton(
+        GridContainer grid,
+        PopupPanel menu,
+        Texture2D texture,
+        string tooltip,
+        Action action)
+    {
+        var button = new Button
+        {
+            CustomMinimumSize = new Vector2(68, 68),
+            Icon = texture,
+            ExpandIcon = true,
+            FocusMode = Control.FocusModeEnum.None,
+            TooltipText = tooltip,
+        };
+        button.Pressed += () =>
+        {
+            menu.Hide();
+            action();
+        };
+        grid.AddChild(button);
+    }
+
+    private static void CreateTextTileButton(
+        GridContainer grid,
+        PopupPanel menu,
+        string text,
+        string tooltip,
+        Action action)
+    {
+        var button = new Button
+        {
+            CustomMinimumSize = new Vector2(68, 68),
+            Text = text,
+            FocusMode = Control.FocusModeEnum.None,
+            TooltipText = tooltip,
+        };
+        button.AddThemeFontSizeOverride("font_size", 30);
         button.Pressed += () =>
         {
             menu.Hide();
@@ -685,14 +957,18 @@ public partial class Main : Node
 
         CancelWorkMode(clearInspector: false);
         _buildMode = mode;
-        _isDraggingWalkway = false;
+        _isDraggingLinearBuild = false;
         _worldView.SetConstructionPreview([]);
         _inspector.Text = _buildMode switch
         {
             BuildMode.FoodStorage => "Budowa składu żywności: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
             BuildMode.WoodStorage => "Budowa składu drewna: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
+            BuildMode.StoneStorage => "Budowa składu kamienia: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
             BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • Esc anuluje",
             BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik przy płytkiej wodzie • koszt 6 drewna • zawiera skład prowiantu",
+            BuildMode.WoodenWall => "Budowa drewnianej ściany: przeciągnij LPM od początku do końca • 2 drewna/segment • blokuje przejście",
+            BuildMode.WoodenDoorFrame => "Budowa drewnianej ościeżnicy: wskaż pole LPM • koszt 1 drewna • może zastąpić gotową ścianę",
+            BuildMode.WoodenDoor => "Budowa drewnianych drzwi: wskaż gotową ościeżnicę LPM • koszt 1 drewna • po budowie kliknij skrzydło, aby je otworzyć",
             _ => _inspector.Text,
         };
     }
@@ -712,7 +988,10 @@ public partial class Main : Node
         {
             WorkMode.GatherFood => "Praca: przeciągnij obszar zbierania żywności • Esc anuluje",
             WorkMode.GatherBrushwood => "Praca: przeciągnij obszar zbierania chrustu • Esc anuluje",
+            WorkMode.GatherStone => "Praca: przeciągnij obszar zbierania małych kamieni • Esc anuluje",
             WorkMode.UprootBerryBushes => "Praca: przeciągnij obszar karczowania krzaków • usuwa je trwale • Esc anuluje",
+            WorkMode.FellTrees => "Praca: przeciągnij obszar wyrębu • pozostaną konkretne drzewa i martwe pnie • Esc anuluje",
+            WorkMode.QuarryBoulders => "Praca: przeciągnij obszar wydobycia • pozostaną konkretne głazy • wymaga kilofa • Esc anuluje",
             WorkMode.Clear => "Praca: przeciągnij obszar usuwania zleceń • Esc anuluje",
             _ => _inspector.Text,
         };
@@ -731,11 +1010,41 @@ public partial class Main : Node
             return;
         }
 
-        if (_buildMode is BuildMode.FoodStorage or BuildMode.WoodStorage)
+        if (_buildMode is BuildMode.FoodStorage or BuildMode.WoodStorage or BuildMode.StoneStorage)
         {
+            var resource = _buildMode switch
+            {
+                BuildMode.FoodStorage => ResourceKind.Food,
+                BuildMode.WoodStorage => ResourceKind.Wood,
+                BuildMode.StoneStorage => ResourceKind.Stone,
+                _ => throw new InvalidOperationException(),
+            };
             CreateStorage(
                 cell,
-                _buildMode == BuildMode.FoodStorage ? ResourceKind.Food : ResourceKind.Wood);
+                resource);
+            CancelBuildMode(clearInspector: false);
+            return;
+        }
+
+        if (_buildMode is BuildMode.WoodenDoorFrame or BuildMode.WoodenDoor)
+        {
+            var snapshot = _engine.CreateSnapshot();
+            if (!snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered())
+            {
+                _inspector.Text = "Konstrukcja musi stanąć na odkrytym polu.";
+                CancelBuildMode(clearInspector: false);
+                return;
+            }
+
+            var command = _buildMode == BuildMode.WoodenDoorFrame
+                ? SimulationCommand.BuildWoodenDoorFrame(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell)
+                : SimulationCommand.BuildWoodenDoor(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell);
+            _engine.QueueCommand(command);
+            _inspector.Text = _buildMode == BuildMode.WoodenDoorFrame
+                ? "Zlecono przechodnią drewnianą ościeżnicę • koszt 1 drewna"
+                : "Zlecono zamknięte drewniane drzwi w ościeżnicy • koszt 1 drewna";
             CancelBuildMode(clearInspector: false);
             return;
         }
@@ -759,37 +1068,40 @@ public partial class Main : Node
             return;
         }
 
-        _walkwayStart = cell;
-        _isDraggingWalkway = true;
+        _linearBuildStart = cell;
+        _isDraggingLinearBuild = true;
         UpdateBuildPreview(screenPosition);
     }
 
-    private void FinishWalkway(Vector2 screenPosition)
+    private void FinishLinearConstruction(Vector2 screenPosition)
     {
         var end = ScreenToVisibleCell(screenPosition);
-        _isDraggingWalkway = false;
+        _isDraggingLinearBuild = false;
         if (!_engine.Map.IsWithin(end))
         {
             CancelBuildMode();
             return;
         }
 
-        var cells = SimulationCommand.GetWalkwayCells(_walkwayStart, end);
+        var cells = SimulationCommand.GetLinearCells(_linearBuildStart, end);
         var snapshot = _engine.CreateSnapshot();
         if (cells.Any(cell =>
                 !snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered()))
         {
-            _inspector.Text = "Pomost musi przebiegać przez odkryty teren.";
+            _inspector.Text = "Cała liniowa konstrukcja musi przebiegać przez odkryty teren.";
             CancelBuildMode(clearInspector: false);
             return;
         }
 
-        _engine.QueueCommand(SimulationCommand.BuildWalkway(
-            _engine.CurrentTick.Next(),
-            _commandSequence++,
-            _walkwayStart,
-            end));
-        _inspector.Text = $"Zlecono pomost: {cells.Count} segmentów • koszt {cells.Count} drewna";
+        var command = _buildMode == BuildMode.WoodenWall
+            ? SimulationCommand.BuildWoodenWall(
+                _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end)
+            : SimulationCommand.BuildWalkway(
+                _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end);
+        _engine.QueueCommand(command);
+        _inspector.Text = _buildMode == BuildMode.WoodenWall
+            ? $"Zlecono ścianę: {cells.Count} segmentów • koszt {cells.Count * 2} drewna"
+            : $"Zlecono pomost: {cells.Count} segmentów • koszt {cells.Count} drewna";
         CancelBuildMode(clearInspector: false);
     }
 
@@ -804,15 +1116,17 @@ public partial class Main : Node
 
         var cells = _buildMode switch
         {
-            BuildMode.Walkway when _isDraggingWalkway =>
-                SimulationCommand.GetWalkwayCells(_walkwayStart, cell),
+            BuildMode.Walkway or BuildMode.WoodenWall when _isDraggingLinearBuild =>
+                SimulationCommand.GetLinearCells(_linearBuildStart, cell),
             BuildMode.FieldCamp => GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
             _ => new[] { cell },
         };
         _worldView.SetConstructionPreview(cells);
-        if (_isDraggingWalkway)
+        if (_isDraggingLinearBuild)
         {
-            _inspector.Text = $"Pomost: {cells.Count} segmentów • koszt {cells.Count} drewna";
+            _inspector.Text = _buildMode == BuildMode.WoodenWall
+                ? $"Ściana: {cells.Count} segmentów • koszt {cells.Count * 2} drewna"
+                : $"Pomost: {cells.Count} segmentów • koszt {cells.Count} drewna";
         }
     }
 
@@ -820,7 +1134,7 @@ public partial class Main : Node
     {
         var wasActive = _buildMode != BuildMode.None;
         _buildMode = BuildMode.None;
-        _isDraggingWalkway = false;
+        _isDraggingLinearBuild = false;
         _worldView.SetConstructionPreview([]);
         if (clearInspector && wasActive)
         {
@@ -893,12 +1207,28 @@ public partial class Main : Node
                 _workAreaStart,
                 end,
                 ResourceKind.Wood),
+            WorkMode.GatherStone => SimulationCommand.DesignateWork(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end,
+                ResourceKind.Stone),
             WorkMode.UprootBerryBushes => SimulationCommand.DesignateWork(
                 executeAt,
                 _commandSequence++,
                 _workAreaStart,
                 end,
                 ResourceKind.Vegetation),
+            WorkMode.FellTrees => SimulationCommand.DesignateTreeFelling(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end),
+            WorkMode.QuarryBoulders => SimulationCommand.DesignateBoulderQuarrying(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end),
             WorkMode.Clear => SimulationCommand.ClearWorkDesignations(
                 executeAt,
                 _commandSequence++,
@@ -945,7 +1275,10 @@ public partial class Main : Node
     {
         WorkMode.GatherFood => WorkDesignationKind.GatherFood,
         WorkMode.GatherBrushwood => WorkDesignationKind.GatherBrushwood,
+        WorkMode.GatherStone => WorkDesignationKind.GatherStone,
         WorkMode.UprootBerryBushes => WorkDesignationKind.UprootBerryBush,
+        WorkMode.FellTrees => WorkDesignationKind.FellTree,
+        WorkMode.QuarryBoulders => WorkDesignationKind.QuarryBoulder,
         _ => default,
     };
 
@@ -981,9 +1314,16 @@ public partial class Main : Node
             return;
         }
 
-        var command = resource == ResourceKind.Food
-            ? SimulationCommand.BuildFoodStorage(_engine.CurrentTick.Next(), _commandSequence++, cell)
-            : SimulationCommand.BuildWoodStorage(_engine.CurrentTick.Next(), _commandSequence++, cell);
+        var command = resource switch
+        {
+            ResourceKind.Food => SimulationCommand.BuildFoodStorage(
+                _engine.CurrentTick.Next(), _commandSequence++, cell),
+            ResourceKind.Wood => SimulationCommand.BuildWoodStorage(
+                _engine.CurrentTick.Next(), _commandSequence++, cell),
+            ResourceKind.Stone => SimulationCommand.BuildStoneStorage(
+                _engine.CurrentTick.Next(), _commandSequence++, cell),
+            _ => throw new ArgumentOutOfRangeException(nameof(resource)),
+        };
         _engine.QueueCommand(command);
         var capacity = resource == ResourceKind.Food
             ? _engine.Definitions.Storage.SmallFoodCapacity
@@ -1007,7 +1347,10 @@ public partial class Main : Node
             {
                 WorkDesignationKind.GatherFood => "Dispatcher dodał wskazane źródło żywności do zebrania.",
                 WorkDesignationKind.GatherBrushwood => "Dispatcher dodał wskazany stos chrustu do transportu.",
+                WorkDesignationKind.GatherStone => "Dispatcher dodał wskazany stos kamieni do transportu.",
                 WorkDesignationKind.UprootBerryBush => "Dispatcher dodał krzak do trwałego wykarczowania.",
+                WorkDesignationKind.FellTree => "Dispatcher dodał drzewo lub martwy pień do wyrębu.",
+                WorkDesignationKind.QuarryBoulder => "Dispatcher dodał głaz do rozbicia kilofem.",
                 _ => "Dispatcher dodał cel pracy.",
             };
         }
@@ -1047,6 +1390,7 @@ public partial class Main : Node
         var constructionEvent = events.LastOrDefault(item =>
             item.Kind is SimulationEventKind.ConstructionOrdered or
                 SimulationEventKind.ConstructionMaterialDelivered or
+                SimulationEventKind.ConstructionPriorityConfigured or
                 SimulationEventKind.ConstructionCompleted ||
             (item.Kind == SimulationEventKind.CommandRejected &&
              item.Amount == (int)SimulationCommandKind.Build));
@@ -1055,7 +1399,8 @@ public partial class Main : Node
             _inspector.Text = "Nie można wyznaczyć placu budowy: teren jest niedostępny albo zajęty.";
         }
         else if (constructionEvent.Kind is SimulationEventKind.ConstructionOrdered or
-                 SimulationEventKind.ConstructionMaterialDelivered)
+                 SimulationEventKind.ConstructionMaterialDelivered or
+                 SimulationEventKind.ConstructionPriorityConfigured)
         {
             var site = _engine.CreateSnapshot().ConstructionSites
                 .FirstOrDefault(item => item.Id == constructionEvent.Target);
@@ -1077,6 +1422,24 @@ public partial class Main : Node
                     ? $"Obóz wypadowy ukończony • zużyto {constructionEvent.Amount} drewna"
                 : $"Skład {DescribeResource(zone.AcceptedResource)} ukończony • " +
                   $"zużyto {constructionEvent.Amount} drewna";
+        }
+
+        if (_selectedConstructionId != EntityId.None &&
+            constructionEvent.Kind is SimulationEventKind.ConstructionMaterialDelivered or
+                SimulationEventKind.ConstructionPriorityConfigured or
+                SimulationEventKind.ConstructionCompleted)
+        {
+            var selectedConstruction = _engine.CreateSnapshot().ConstructionSites
+                .FirstOrDefault(site => site.Id == _selectedConstructionId);
+            if (selectedConstruction is null)
+            {
+                _selectedConstructionId = EntityId.None;
+                _constructionDetails.Hide();
+            }
+            else
+            {
+                UpdateConstructionDetails(selectedConstruction);
+            }
         }
 
         var selectedEvent = events.LastOrDefault(item =>
@@ -1170,10 +1533,27 @@ public partial class Main : Node
         var constructionSites = snapshot.ConstructionSites
             .Where(site => site.Footprint.Contains(cell))
             .ToArray();
+        if (objects.Any(item => item.Kind == WorldObjectKind.WoodenDoorLeaf) &&
+            _engine.World.TryGetWoodenDoorState(cell, out var isDoorOpen))
+        {
+            _engine.QueueCommand(SimulationCommand.ToggleWoodenDoor(
+                _engine.CurrentTick.Next(), _commandSequence++, cell));
+            SelectActor(EntityId.None);
+            _inspector.Text = isDoorOpen
+                ? $"{cell} • polecenie zamknięcia drzwi" +
+                  (_speed == 0 ? " • zostanie wykonane po wznowieniu czasu" : string.Empty)
+                : $"{cell} • polecenie otwarcia drzwi" +
+                  (_speed == 0 ? " • zostanie wykonane po wznowieniu czasu" : string.Empty);
+            return;
+        }
         SelectActor(actors.OrderBy(actor => actor.Id).FirstOrDefault().Id);
         if (actors.Length == 0 && zones.Length > 0)
         {
             ShowStorageDetails(zones[0]);
+        }
+        else if (actors.Length == 0 && constructionSites.Length > 0)
+        {
+            ShowConstructionDetails(constructionSites[0]);
         }
 
         _inspector.Text = $"{cell}" +
@@ -1243,6 +1623,11 @@ public partial class Main : Node
 
     private GridPosition ScreenToCell(Vector2 screenPosition)
     {
+        if (_use3DView)
+        {
+            return _worldView3D.ScreenToCell(screenPosition);
+        }
+
         var worldPosition = _camera.GetScreenCenterPosition() +
             ((screenPosition - GetViewport().GetVisibleRect().Size / 2f) / _camera.Zoom);
         return _worldView.WorldToCell(worldPosition);
@@ -1357,23 +1742,60 @@ public partial class Main : Node
         ActorJobKind.ClearVegetation when job.Phase == ActorJobPhase.Traveling =>
             $"idzie wykarczować krzak → {job.Target}",
         ActorJobKind.ClearVegetation => $"karczuje krzak ({job.RemainingWorkTicks})",
+        ActorJobKind.FellTree when job.Phase == ActorJobPhase.Traveling =>
+            $"idzie do wyrębu → {job.Target}",
+        ActorJobKind.FellTree => $"rąbie drzewo lub pień ({job.RemainingWorkTicks})",
+        ActorJobKind.QuarryBoulder when job.Phase == ActorJobPhase.Traveling =>
+            $"idzie rozbić głaz → {job.Target}",
+        ActorJobKind.QuarryBoulder => $"rozbija głaz kilofem ({job.RemainingWorkTicks})",
         _ => "bez zadania",
     };
 
-    private static string DescribeConstructionSite(ConstructionSiteSnapshot site)
+    private string DescribeConstructionSite(ConstructionSiteSnapshot site)
     {
         var materials = string.Join(", ", site.Materials.Select(material =>
             $"{DescribeResource(material.Resource)} {material.DeliveredQuantity}/{material.RequiredQuantity}"));
         var workDone = site.TotalWorkTicks - site.RemainingWorkTicks;
-        return $"plac budowy {DescribeConstruction(site.Kind)} • materiały: {materials} • praca {workDone}/{site.TotalWorkTicks}";
+        var readiness = DescribeConstructionReadiness(
+            _engine.InspectConstructionReadiness(site.Id));
+        return $"plac budowy {DescribeConstruction(site.Kind)} • " +
+            $"priorytet: {DescribeStoragePriority(site.Priority)} • materiały: {materials} • " +
+            $"praca {workDone}/{site.TotalWorkTicks} • {readiness}";
     }
+
+    private static string DescribeConstructionReadiness(
+        ConstructionReadinessDiagnostic diagnostic) => diagnostic.State switch
+    {
+        ConstructionReadinessState.NoAvailableMaterials =>
+            $"wstrzymana: brak wolnego drewna ({diagnostic.MatchingSourceCount} źródeł)",
+        ConstructionReadinessState.NoAvailableSupplier =>
+            "wstrzymana: brak goblina mogącego dostarczyć materiały",
+        ConstructionReadinessState.NoReachableMaterialSource =>
+            $"wstrzymana: dostępne drewno ({diagnostic.AvailableMaterialQuantity}) jest nieosiągalne",
+        ConstructionReadinessState.WaitingForSupplier =>
+            $"oczekuje na dostawcę; dostępne drewno: {diagnostic.AvailableMaterialQuantity}",
+        ConstructionReadinessState.MaterialsInTransit =>
+            $"materiały w drodze: {diagnostic.InTransitQuantity}",
+        ConstructionReadinessState.NoCapableBuilder =>
+            "wstrzymana: brak budowniczego z wymaganą wiedzą, umiejętnością lub narzędziem",
+        ConstructionReadinessState.NoReachableBuilder =>
+            "wstrzymana: żaden zdolny budowniczy nie ma dojścia",
+        ConstructionReadinessState.WaitingForBuilder =>
+            $"gotowa; oczekuje na budowniczego ({diagnostic.CapableBuilderCount} zdolnych)",
+        ConstructionReadinessState.Building => "budowa trwa",
+        _ => "stan budowy nieznany",
+    };
 
     private static string DescribeConstruction(ConstructionKind kind) => kind switch
     {
         ConstructionKind.FoodStorage => "składu żywności",
         ConstructionKind.WoodStorage => "składu drewna",
+        ConstructionKind.StoneStorage => "składu kamienia",
         ConstructionKind.WoodenWalkway => "pomostu",
         ConstructionKind.GoblinFieldCamp => "obozu wypadowego",
+        ConstructionKind.WoodenWall => "drewnianej ściany",
+        ConstructionKind.WoodenDoorFrame => "drewnianej ościeżnicy",
+        ConstructionKind.WoodenDoor => "drewnianych drzwi",
         _ => "konstrukcji",
     };
 
@@ -1393,10 +1815,314 @@ public partial class Main : Node
         _ => string.Empty,
     };
 
+    private void ShowStoredResources()
+    {
+        UpdateStoredResources(_engine.CreateSnapshot(), force: true);
+        _storedResourcesWindow.Popup();
+    }
+
+    private void ShowLooseResources()
+    {
+        UpdateLooseResources(_engine.CreateSnapshot(), force: true);
+        _looseResourcesWindow.Popup();
+    }
+
+    private void ShowGoblinRoster()
+    {
+        UpdateGoblinRoster(_engine.CreateSnapshot(), force: true);
+        _goblinRosterWindow.Popup();
+    }
+
+    private void ShowStatistics()
+    {
+        UpdateStatistics(_engine.CreateSnapshot());
+        _statisticsWindow.Popup();
+    }
+
+    private void UpdateOverviewWindows(SimulationSnapshot snapshot)
+    {
+        if (_storedResourcesWindow.Visible)
+        {
+            UpdateStoredResources(snapshot);
+        }
+        if (_looseResourcesWindow.Visible)
+        {
+            UpdateLooseResources(snapshot);
+        }
+        if (_goblinRosterWindow.Visible)
+        {
+            UpdateGoblinRoster(snapshot);
+        }
+        if (_statisticsWindow.Visible)
+        {
+            UpdateStatistics(snapshot);
+        }
+    }
+
+    private void UpdateStoredResources(SimulationSnapshot snapshot, bool force = false)
+    {
+        var signature = string.Join('|', snapshot.ResourceInventory.Select(item =>
+            $"{(int)item.Resource}:{item.StoredQuantity}")) +
+            CreateFoodBreakdownSignature(snapshot, ItemLocationKind.StorageZone);
+        if (!force && signature == _storedResourcesSignature)
+        {
+            return;
+        }
+
+        _storedResourcesSignature = signature;
+        var total = snapshot.ResourceInventory.Sum(item => item.StoredQuantity);
+        _storedResourcesSummary.Text =
+            $"Fizyczna zawartość {snapshot.StorageZones.Count} magazynów • razem {total:N0} szt.";
+        RebuildResourceGrid(
+            _storedResourcesGrid,
+            snapshot,
+            item => item.StoredQuantity,
+            ItemLocationKind.StorageZone,
+            "w magazynach");
+    }
+
+    private void UpdateLooseResources(SimulationSnapshot snapshot, bool force = false)
+    {
+        var signature = string.Join('|', snapshot.ResourceInventory.Select(item =>
+            $"{(int)item.Resource}:{item.KnownLooseQuantity}")) +
+            CreateFoodBreakdownSignature(snapshot, ItemLocationKind.Ground);
+        if (!force && signature == _looseResourcesSignature)
+        {
+            return;
+        }
+
+        _looseResourcesSignature = signature;
+        var total = snapshot.ResourceInventory.Sum(item => item.KnownLooseQuantity);
+        _looseResourcesSummary.Text =
+            $"Znane towary leżące na ziemi • razem {total:N0} szt. • osobna pula dla tragarzy.";
+        RebuildResourceGrid(
+            _looseResourcesGrid,
+            snapshot,
+            item => item.KnownLooseQuantity,
+            ItemLocationKind.Ground,
+            "na ziemi");
+    }
+
+    private void RebuildResourceGrid(
+        GridContainer grid,
+        SimulationSnapshot snapshot,
+        Func<ResourceInventorySnapshot, int> quantitySelector,
+        ItemLocationKind locationKind,
+        string location)
+    {
+        foreach (var child in grid.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        foreach (var item in snapshot.ResourceInventory.OrderBy(item => item.Resource))
+        {
+            var quantity = quantitySelector(item);
+            var tooltip = DescribeResourceOverviewTooltip(
+                snapshot,
+                item,
+                quantity,
+                locationKind,
+                location);
+            var tile = new PanelContainer
+            {
+                CustomMinimumSize = new Vector2(70, 92),
+                TooltipText = tooltip,
+            };
+            var content = new VBoxContainer
+            {
+                Alignment = BoxContainer.AlignmentMode.Center,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            var icon = new TextureRect
+            {
+                CustomMinimumSize = new Vector2(58, 58),
+                Texture = ItemIcons.CreateTexture(_itemIconAtlas, ItemIcons.ForResource(item.Resource)),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            var quantityLabel = new Label
+            {
+                Text = quantity.ToString("N0"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            content.AddChild(icon);
+            content.AddChild(quantityLabel);
+            tile.AddChild(content);
+            grid.AddChild(tile);
+        }
+    }
+
+    private string CreateFoodBreakdownSignature(
+        SimulationSnapshot snapshot,
+        ItemLocationKind locationKind) =>
+        string.Concat(
+            "|food:",
+            string.Join(',', GetVisibleFoodStacks(snapshot, locationKind)
+                .GroupBy(stack => stack.FoodKind)
+                .OrderBy(group => group.Key)
+                .Select(group => $"{(int)group.Key}:{group.Sum(stack => stack.Quantity)}")));
+
+    private string DescribeResourceOverviewTooltip(
+        SimulationSnapshot snapshot,
+        ResourceInventorySnapshot item,
+        int quantity,
+        ItemLocationKind locationKind,
+        string location)
+    {
+        var tooltip = $"{DescribeResource(item.Resource)}: {quantity:N0} szt. {location}";
+        if (item.Resource != ResourceKind.Food)
+        {
+            return tooltip;
+        }
+
+        var breakdown = GetVisibleFoodStacks(snapshot, locationKind)
+            .GroupBy(stack => stack.FoodKind)
+            .OrderBy(group => group.Key)
+            .Select(group => $"{DescribeFood(group.Key)}: {group.Sum(stack => stack.Quantity):N0}")
+            .ToArray();
+        return breakdown.Length == 0
+            ? tooltip
+            : $"{tooltip}\n{string.Join(", ", breakdown)}";
+    }
+
+    private IEnumerable<ItemStackSnapshot> GetVisibleFoodStacks(
+        SimulationSnapshot snapshot,
+        ItemLocationKind locationKind) =>
+        snapshot.ItemStacks.Where(stack =>
+            stack.Resource == ResourceKind.Food &&
+            stack.Location.Kind == locationKind &&
+            (locationKind != ItemLocationKind.Ground ||
+             (stack.Location.Position.Z == 0 &&
+              snapshot.GetVisibility(stack.Location.Position, _engine.Map.Width) != CellVisibility.Unknown)));
+
+    private void UpdateGoblinRoster(SimulationSnapshot snapshot, bool force = false)
+    {
+        var signature = string.Join('|', snapshot.Actors.Select(actor =>
+            $"{actor.Id.Value}:{actor.Name}:{actor.Health}:{(int)actor.Job.Kind}:{(int)actor.Job.Phase}"));
+        if (!force && signature == _goblinRosterSignature)
+        {
+            return;
+        }
+
+        _goblinRosterSignature = signature;
+        foreach (var child in _goblinRosterRows.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        foreach (var actor in snapshot.Actors.OrderBy(actor => actor.Id))
+        {
+            var row = new HBoxContainer
+            {
+                CustomMinimumSize = new Vector2(0, 38),
+                TooltipText = DescribeJob(actor.Job),
+            };
+            var name = new Button
+            {
+                Text = actor.Name,
+                Alignment = HorizontalAlignment.Left,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                FocusMode = Control.FocusModeEnum.None,
+                TooltipText = $"Pokaż {actor.Name} na mapie",
+            };
+            var actorId = actor.Id;
+            name.Pressed += () => FocusGoblinFromRoster(actorId);
+            var health = new Label
+            {
+                CustomMinimumSize = new Vector2(145, 0),
+                Text = $"zdrowie {actor.Health:N0}/{_engine.Definitions.MaximumHealth:N0}",
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var job = new Label
+            {
+                CustomMinimumSize = new Vector2(54, 0),
+                Text = DescribeJobSymbol(actor.Job.Kind),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TooltipText = DescribeJob(actor.Job),
+            };
+            row.AddChild(name);
+            row.AddChild(health);
+            row.AddChild(job);
+            _goblinRosterRows.AddChild(row);
+        }
+    }
+
+    private void FocusGoblinFromRoster(EntityId actorId)
+    {
+        var actor = _engine.CreateSnapshot().Actors.FirstOrDefault(actor => actor.Id == actorId);
+        if (actor.Id == EntityId.None)
+        {
+            return;
+        }
+
+        _goblinRosterWindow.Hide();
+        if (!_use3DView && _visibleLevel != actor.Position.Z)
+        {
+            _visibleLevel = actor.Position.Z;
+            _worldView.SetVisibleLevel(_visibleLevel);
+            UpdateLayerToolAvailability();
+        }
+        CenterCameraOn(actor.Position);
+        SelectActor(actor.Id);
+        UpdateStatus();
+    }
+
+    private static string DescribeJobSymbol(ActorJobKind kind) => kind switch
+    {
+        ActorJobKind.Forage => "⌕",
+        ActorJobKind.Haul => "⇢",
+        ActorJobKind.Rest => "Zz",
+        ActorJobKind.Eat => "●",
+        ActorJobKind.Explore => "⌖",
+        ActorJobKind.Move => "→",
+        ActorJobKind.Resupply => "↺",
+        ActorJobKind.ClearVegetation => "×",
+        ActorJobKind.SupplyConstruction => "⇥",
+        ActorJobKind.BuildConstruction => "⚒",
+        ActorJobKind.Collapsed => "!",
+        ActorJobKind.FellTree => "♣",
+        ActorJobKind.QuarryBoulder => "◆",
+        _ => "·",
+    };
+
+    private void UpdateStatistics(SimulationSnapshot snapshot)
+    {
+        var metrics = _engine.GetMetrics();
+        var navigation = metrics.Navigation;
+        var cacheHitRate = navigation.Requests == 0
+            ? 0
+            : navigation.CacheHits * 100d / navigation.Requests;
+        var averageTickMilliseconds = metrics.TicksExecuted == 0
+            ? 0
+            : metrics.TotalTickDuration.TotalMilliseconds / metrics.TicksExecuted;
+        var explored = snapshot.Visibility.Count(state => state != CellVisibility.Unknown);
+        var stored = snapshot.ResourceInventory.Sum(item => item.StoredQuantity);
+        var loose = snapshot.ResourceInventory.Sum(item => item.KnownLooseQuantity);
+        _statisticsText.Text =
+            $"Plemię: {snapshot.Actors.Count}\n" +
+            $"Magazyny: {snapshot.StorageZones.Count} • towary {stored:N0}\n" +
+            $"Znane luźne towary: {loose:N0}\n" +
+            $"Budowy: {snapshot.ConstructionSites.Count}\n" +
+            $"Zlecenia terenowe: {snapshot.WorkDesignations.Count}\n" +
+            $"Odkryta mapa: {explored:N0}/{snapshot.Visibility.Count:N0}\n\n" +
+            $"Ticki: {metrics.TicksExecuted:N0}\n" +
+            $"Ostatni tick: {metrics.LastTickDuration.TotalMilliseconds:N3} ms\n" +
+            $"Średni tick: {averageTickMilliseconds:N3} ms\n" +
+            $"Aktywne stacki: {metrics.ItemStacks:N0}\n" +
+            $"Obiekty świata: {metrics.WorldObjects:N0}\n" +
+            $"Ścieżki: {navigation.Searches:N0}/{navigation.Requests:N0} wyszukań " +
+            $"• cache {cacheHitRate:N1}% ({navigation.CachedRoutes:N0})";
+    }
+
     private void SelectActor(EntityId actorId)
     {
         _selectedActorId = actorId;
         _worldView.SetSelectedActor(actorId);
+        _worldView3D.SetSelectedActor(actorId);
         if (actorId == EntityId.None)
         {
             _goblinDetails.Hide();
@@ -1410,6 +2136,8 @@ public partial class Main : Node
 
     private void ShowStorageDetails(StorageZoneSnapshot zone)
     {
+        _selectedConstructionId = EntityId.None;
+        _constructionDetails.Hide();
         _selectedStorageId = zone.Id;
         UpdateStorageDetails(zone);
         _storageDetails.Popup();
@@ -1586,6 +2314,45 @@ public partial class Main : Node
             : $"Skład {zone.Id}: żądaj zasobów do {desired}; transport: {haulerDescription}; źródło: {sourceDescription}; priorytet lokalny: {DescribeStoragePriority(priority)}; globalny: {DescribeStoragePriority(globalPriority)}.";
     }
 
+    private void ShowConstructionDetails(ConstructionSiteSnapshot site)
+    {
+        _selectedStorageId = EntityId.None;
+        _storageDetails.Hide();
+        _selectedConstructionId = site.Id;
+        UpdateConstructionDetails(site);
+        _constructionDetails.Popup();
+    }
+
+    private void UpdateConstructionDetails(ConstructionSiteSnapshot site)
+    {
+        _constructionSummary.Text = DescribeConstructionSite(site);
+        _constructionPriority.Select((int)site.Priority);
+    }
+
+    private void ApplyConstructionSettings()
+    {
+        var site = _engine.CreateSnapshot().ConstructionSites
+            .FirstOrDefault(item => item.Id == _selectedConstructionId);
+        if (site is null)
+        {
+            _selectedConstructionId = EntityId.None;
+            _constructionDetails.Hide();
+            return;
+        }
+
+        var priority = Enum.IsDefined((StoragePriority)_constructionPriority.Selected)
+            ? (StoragePriority)_constructionPriority.Selected
+            : StoragePriority.Normal;
+        _engine.QueueCommand(SimulationCommand.ConfigureConstructionPriority(
+            _engine.CurrentTick.Next(),
+            _commandSequence++,
+            site.Id,
+            priority));
+        _inspector.Text = $"Plac budowy {site.Id}: ustaw priorytet " +
+            $"{DescribeStoragePriority(priority)}" +
+            (_speed == 0 ? " po wznowieniu czasu." : ".");
+    }
+
     private void UpdateGoblinDetails(SimulationSnapshot snapshot)
     {
         var actor = snapshot.Actors.FirstOrDefault(item => item.Id == _selectedActorId);
@@ -1632,10 +2399,26 @@ public partial class Main : Node
             .AppendLine()
             .AppendLine($"Znane umiejętności: {DescribeSkills(actor.KnownSkills)}")
             .AppendLine($"Doświadczenie: {DescribeExperience(actor.Experience)}")
+            .AppendLine($"Preferencje pracy: zbieractwo {DescribeWorkPreference(actor.WorkPreferences.Foraging)}, " +
+                $"transport {DescribeWorkPreference(actor.WorkPreferences.Hauling)}, " +
+                $"budowanie {DescribeWorkPreference(actor.WorkPreferences.Building)}")
             .AppendLine($"Znane cechy: {DescribeTraits(actor.KnownTraits)}")
             .AppendLine($"Służba logistyczna: " +
                 (logisticsDuty.Length == 0 ? "brak przydziału" : string.Join(", ", logisticsDuty)))
-            .AppendLine()
+            .AppendLine();
+        text.AppendLine("Plan działań:");
+        if (actor.Plan.Count == 0)
+        {
+            text.AppendLine("— brak kolejnych zamiarów");
+        }
+        else
+        {
+            for (var index = 0; index < actor.Plan.Count; index++)
+            {
+                text.AppendLine($"{index + 1}. {DescribePlanEntry(actor.Plan[index])}");
+            }
+        }
+        text.AppendLine()
             .AppendLine("Aktualne zadanie:")
             .AppendLine(DescribeJob(actor.Job))
             .AppendLine($"Faza: {actor.Job.Phase} • etap: {actor.Job.Stage}")
@@ -1646,6 +2429,51 @@ public partial class Main : Node
         _goblinDetails.Title = actor.Name;
         _goblinDetailsText.Text = text.ToString();
     }
+
+    private static string DescribePlanEntry(ActorPlanEntrySnapshot entry)
+    {
+        var action = entry.Kind switch
+        {
+            ActorPlanIntentKind.CurrentJob => $"kontynuuje: {DescribeJobKind(entry.JobKind)}",
+            ActorPlanIntentKind.Eat => "zje niesioną rację",
+            ActorPlanIntentKind.FindFood => "poszuka posiłku",
+            ActorPlanIntentKind.Drink => "napije się z bukłaka",
+            ActorPlanIntentKind.RefillWater => "poszuka wody",
+            ActorPlanIntentKind.Rest => "pójdzie odpocząć",
+            ActorPlanIntentKind.ResumeSuspendedJob =>
+                $"wróci do: {DescribeJobKind(entry.JobKind)} → {entry.Target}",
+            _ => "nieznany zamiar",
+        };
+        return $"{action}  [nacisk {entry.Priority}]";
+    }
+
+    private static string DescribeJobKind(ActorJobKind kind) => kind switch
+    {
+        ActorJobKind.Forage => "zbierania",
+        ActorJobKind.Haul => "transportu",
+        ActorJobKind.Rest => "odpoczynku",
+        ActorJobKind.Eat => "jedzenia",
+        ActorJobKind.Explore => "zwiadu",
+        ActorJobKind.Move => "marszu",
+        ActorJobKind.Resupply => "uzupełniania zapasów",
+        ActorJobKind.ClearVegetation => "karczowania",
+        ActorJobKind.SupplyConstruction => "dostawy na budowę",
+        ActorJobKind.BuildConstruction => "budowy",
+        ActorJobKind.Collapsed => "przymusowego snu",
+        ActorJobKind.FellTree => "wyrębu",
+        ActorJobKind.QuarryBoulder => "wydobycia kamienia",
+        _ => "bezczynności",
+    };
+
+    private static string DescribeWorkPreference(int preference) => preference switch
+    {
+        -2 => "unika",
+        -1 => "nie lubi",
+        0 => "obojętne",
+        1 => "lubi",
+        2 => "uwielbia",
+        _ => "nieznane",
+    };
 
     private static void UpdateNeedBar(ProgressBar bar, int value, int maximum, string name)
     {
@@ -1678,6 +2506,14 @@ public partial class Main : Node
         {
             AddInventoryIcon(ItemIcon.BoneKnife, "Kościany nóż • broń i narzędzie osobiste");
         }
+        if (actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe))
+        {
+            AddInventoryIcon(ItemIcon.WoodenAxe, "Drewniana siekiera • narzędzie do wyrębu");
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe))
+        {
+            AddInventoryIcon(_pickaxeIcon, "Prymitywny kilof • narzędzie do rozbijania głazów");
+        }
         AddInventoryIcon(
             ItemIcon.Food,
             actor.PersonalFood == 0
@@ -1699,6 +2535,9 @@ public partial class Main : Node
     }
 
     private void AddInventoryIcon(ItemIcon icon, string tooltip, int? quantity = null)
+        => AddInventoryIcon(ItemIcons.CreateTexture(_itemIconAtlas, icon), tooltip, quantity);
+
+    private void AddInventoryIcon(Texture2D texture, string tooltip, int? quantity = null)
     {
         var slot = new VBoxContainer
         {
@@ -1708,7 +2547,7 @@ public partial class Main : Node
         var image = new TextureRect
         {
             CustomMinimumSize = new Vector2(44, 40),
-            Texture = ItemIcons.CreateTexture(_itemIconAtlas, icon),
+            Texture = texture,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             TooltipText = tooltip,
@@ -1781,6 +2620,75 @@ public partial class Main : Node
         traits.HasFlag(GoblinTrait.Nimble) ? "zwinny" : null,
     }.Where(item => item is not null));
 
+    private void ToggleWorldView()
+    {
+        CancelActiveTool();
+        SelectActor(EntityId.None);
+        _use3DView = !_use3DView;
+        _worldView.Visible = !_use3DView;
+        _camera.Enabled = !_use3DView;
+        _worldView3D.SetActive(_use3DView);
+        _cameraModePanel.Visible = _use3DView;
+        if (_use3DView)
+        {
+            _visibleLevel = 0;
+            _worldView.SetVisibleLevel(0);
+            _worldView3D.Refresh(_engine.CreateSnapshot());
+            _viewModeButton.Text = "2D";
+            _viewModeButton.TooltipText = "Wróć do stabilnego renderera 2D • F3";
+            Update3DCameraControls();
+            _inspector.Text = "Prototyp 3D • chunkowe meshe terenu 16×16 • prawdziwe rampy i klify • " +
+                $"woda jako osobna powierzchnia • {_worldView3D.TerrainMeshCount} meshów terenu/wody + " +
+                $"{_worldView3D.StructureMeshCount} wspólny mesh konstrukcji • dachy ukryte dla czytelności wnętrz.";
+        }
+        else
+        {
+            _worldView.Refresh(_engine.CreateSnapshot());
+            _viewModeButton.Text = "3D";
+            _viewModeButton.TooltipText = "Włącz prototypowy renderer 3D • F3";
+            _inspector.Text = "Renderer 2D przywrócony.";
+        }
+
+        UpdateLayerToolAvailability();
+        ConstrainCameraToMap();
+        UpdateStatus();
+    }
+
+    private void Toggle3DCameraAngle()
+    {
+        if (!_use3DView)
+        {
+            return;
+        }
+
+        _worldView3D.ToggleCameraAngle();
+        Update3DCameraControls();
+        ConstrainCameraToMap();
+        _inspector.Text = _worldView3D.CurrentCameraAngle == WorldView3D.CameraAngle.TopDown
+            ? "Kamera 3D: widok całkowicie z góry. Q/E obraca mapę skokowo o 90°."
+            : "Kamera 3D: widok ukośny. Q/E obraca kamerę skokowo o 90°.";
+    }
+
+    private void Rotate3DCamera(int quarterTurns)
+    {
+        if (!_use3DView)
+        {
+            return;
+        }
+
+        _worldView3D.RotateCamera(quarterTurns);
+        Update3DCameraControls();
+        ConstrainCameraToMap();
+        _inspector.Text = $"Kamera 3D obrócona • {_worldView3D.CameraQuarterTurns * 90}°.";
+    }
+
+    private void Update3DCameraControls()
+    {
+        _cameraAngleButton.Text = _worldView3D.CurrentCameraAngle == WorldView3D.CameraAngle.TopDown
+            ? "Z góry"
+            : "Ukośnie";
+    }
+
     private void MoveCamera(double delta)
     {
         var direction = Input.GetVector("ui_left", "ui_right", "ui_up", "ui_down");
@@ -1788,18 +2696,39 @@ public partial class Main : Node
         if (Input.IsKeyPressed(Key.D)) direction.X += 1;
         if (Input.IsKeyPressed(Key.W)) direction.Y -= 1;
         if (Input.IsKeyPressed(Key.S)) direction.Y += 1;
-        _camera.Position += direction.Normalized() * (float)(520 * delta / _camera.Zoom.X);
+        if (_use3DView)
+        {
+            _worldView3D.Pan(direction.Normalized(), delta);
+        }
+        else
+        {
+            _camera.Position += direction.Normalized() * (float)(520 * delta / _camera.Zoom.X);
+        }
         ConstrainCameraToMap();
     }
 
     private void CenterCameraOn(GridPosition position)
     {
-        _camera.Position = _worldView.CellToWorld(position);
+        if (_use3DView)
+        {
+            _worldView3D.CenterOn(position);
+        }
+        else
+        {
+            _camera.Position = _worldView.CellToWorld(position);
+        }
         ConstrainCameraToMap();
     }
 
     private void ChangeCameraZoom(float factor)
     {
+        if (_use3DView)
+        {
+            _worldView3D.ChangeZoom(factor);
+            ConstrainCameraToMap();
+            return;
+        }
+
         var minimumZoom = GetMinimumCameraZoom();
         var maximumZoom = Math.Max(3.5f, minimumZoom);
         var zoom = Math.Clamp(_camera.Zoom.X * factor, minimumZoom, maximumZoom);
@@ -1809,6 +2738,14 @@ public partial class Main : Node
 
     private void ConstrainCameraToMap()
     {
+        if (_use3DView)
+        {
+            _worldView3D.ConstrainCamera();
+            var cameraView = _worldView3D.GetNormalizedCameraView(GetViewport().GetVisibleRect().Size);
+            _minimap.SetCameraView(cameraView.Center, cameraView.Size);
+            return;
+        }
+
         var worldSize = _worldView.WorldSize;
         var viewportSize = GetViewport().GetVisibleRect().Size;
         if (worldSize.X <= 0f || worldSize.Y <= 0f || viewportSize.X <= 0f || viewportSize.Y <= 0f)
@@ -1915,6 +2852,13 @@ public partial class Main : Node
 
     private void ChangeVisibleLevel(int delta)
     {
+        if (_use3DView)
+        {
+            _inspector.Text = "Prototyp 3D pokazuje obecnie całą powierzchnię wraz z wysokościami. " +
+                "Przekrój jaskiń zostanie podłączony w kolejnej iteracji renderera.";
+            return;
+        }
+
         var snapshot = _engine.CreateSnapshot();
         var minimumSurfaceFloor = Enumerable.Range(0, _engine.Map.CellCount)
             .Select(index => _engine.Map.GetCell(new GridPosition(
@@ -1960,7 +2904,8 @@ public partial class Main : Node
     private bool EnsureBuildModeAvailable(BuildMode mode)
     {
         if (_visibleLevel == 0 ||
-            (_visibleLevel < 0 && mode is BuildMode.FoodStorage or BuildMode.WoodStorage))
+            (_visibleLevel < 0 && mode is BuildMode.FoodStorage or BuildMode.WoodStorage or
+                BuildMode.StoneStorage))
         {
             return true;
         }
@@ -1968,7 +2913,7 @@ public partial class Main : Node
         CancelBuildMode(clearInspector: false);
         _buildMenu.Hide();
         _inspector.Text = _visibleLevel < 0
-            ? "W jaskini można obecnie planować składy żywności i drewna. " +
+            ? "W jaskini można obecnie planować składy żywności, drewna i kamienia. " +
               "Pomost oraz obozowisko są blueprintami powierzchniowymi."
             : "Budowanie ponad powierzchnią wymaga blueprintu podpartej konstrukcji.";
         return false;
@@ -2003,6 +2948,7 @@ public partial class Main : Node
     {
         var snapshot = _engine.CreateSnapshot();
         UpdateCalendar(snapshot);
+        UpdateOverviewWindows(snapshot);
         if (_selectedActorId != EntityId.None &&
             snapshot.Actors.All(actor => actor.Id != _selectedActorId))
         {
@@ -2039,6 +2985,10 @@ public partial class Main : Node
             $"  •  cele pracy {snapshot.WorkDesignations.Count}" +
             $"  •  budowy {snapshot.ConstructionSites.Count} ({constructionWorkers} gobl.)" +
             $"  •  transport {haulers}  •  w drodze {traveling}  •  pracuje {working}";
+        if (_use3DView)
+        {
+            _status.Text += "  •  RENDERER 3D: PROTOTYP";
+        }
         if (_engine.DebugSettings.RevealFogFromNonPlayerUnits)
         {
             _status.Text += "  •  DEBUG: widok obcych jednostek";

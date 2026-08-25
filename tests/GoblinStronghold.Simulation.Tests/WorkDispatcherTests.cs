@@ -155,6 +155,230 @@ public sealed class WorkDispatcherTests
     }
 
     [Fact]
+    public void TreeFellingAreaCreatesConcreteJobAndProducesStumpAndWood()
+    {
+        var engine = CreateEngine(goblinCount: 2);
+        var tree = engine.World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.Tree)
+            .Select(worldObject => new
+            {
+                Tree = worldObject,
+                Access = engine.Map.GetCardinalNeighbors(worldObject.Anchor)
+                    .Where(engine.World.IsSurfaceTraversable)
+                    .Select(position => engine.Navigation.FindSurfacePath(
+                        engine.Map.GoblinSpawn,
+                        position))
+                    .Where(route => route is not null)
+                    .OrderBy(route => route!.Count)
+                    .FirstOrDefault(),
+            })
+            .Where(candidate => candidate.Access is not null)
+            .OrderBy(candidate => candidate.Access!.Count)
+            .First();
+        var trunkSections = tree.Tree.Parts.Count(part =>
+            part.Kind == WorldObjectPartKind.TreeTrunk);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var visibilityIndex = (tree.Tree.Anchor.Y * engine.Map.Width) + tree.Tree.Anchor.X;
+        save["visibility"]!.AsArray()[visibilityIndex] = (int)CellVisibility.Explored;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateTreeFelling(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            tree.Tree.Anchor,
+            tree.Tree.Anchor));
+
+        engine.AdvanceTicks(1);
+
+        var designation = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(WorkDesignationKind.FellTree, designation.Kind);
+        Assert.Equal(tree.Tree.Anchor, designation.Target);
+        var logger = Assert.Single(engine.CreateSnapshot().Actors,
+            actor => actor.Job.Kind == ActorJobKind.FellTree);
+        Assert.True(logger.Equipment.HasFlag(PersonalEquipment.WoodenAxe));
+        Assert.NotEqual(tree.Tree.Anchor, logger.Job.Target);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(2_000);
+        restored.AdvanceTicks(2_000);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Contains(engine.World.GetWorldObjectsAt(tree.Tree.Anchor),
+            worldObject => worldObject.Kind == WorldObjectKind.DeadTreeStump);
+        Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations,
+            item => item.Kind == WorkDesignationKind.FellTree);
+        Assert.Equal(trunkSections * 16, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity));
+        Assert.Contains(engine.DrainWorldChanges(), change =>
+            change.Kind == WorldChangeKind.TreeFelled &&
+            change.Position == tree.Tree.Anchor);
+    }
+
+    [Fact]
+    public void FellingAreaHarvestsSwampStumpForDeterministicPartialWoodStack()
+    {
+        var engine = CreateEngine(goblinCount: 2);
+        var stump = engine.World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.DeadTreeStump)
+            .Select(worldObject => new
+            {
+                Stump = worldObject,
+                Route = engine.Map.GetCardinalNeighbors(worldObject.Anchor)
+                    .Where(engine.World.IsSurfaceTraversable)
+                    .Select(position => engine.Navigation.FindSurfacePath(
+                        engine.Map.GoblinSpawn,
+                        position))
+                    .Where(route => route is not null)
+                    .OrderBy(route => route!.Count)
+                    .FirstOrDefault(),
+            })
+            .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var visibilityIndex = (stump.Stump.Anchor.Y * engine.Map.Width) + stump.Stump.Anchor.X;
+        save["visibility"]!.AsArray()[visibilityIndex] = (int)CellVisibility.Explored;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateTreeFelling(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            stump.Stump.Anchor,
+            stump.Stump.Anchor));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Equal(WorkDesignationKind.FellTree,
+            Assert.Single(engine.CreateSnapshot().WorkDesignations).Kind);
+        Assert.Contains(engine.CreateSnapshot().Actors,
+            actor => actor.Job.Kind == ActorJobKind.FellTree);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(2_000);
+        restored.AdvanceTicks(2_000);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.DoesNotContain(engine.World.GetWorldObjectsAt(stump.Stump.Anchor),
+            worldObject => worldObject.Kind == WorldObjectKind.DeadTreeStump);
+        var recoveredWood = engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity);
+        Assert.InRange(recoveredWood, 8, 16);
+        Assert.Contains(engine.DrainWorldChanges(), change =>
+            change.Kind == WorldChangeKind.StumpHarvested &&
+            change.Position == stump.Stump.Anchor &&
+            change.Amount == recoveredWood);
+    }
+
+    [Fact]
+    public void QuarryAreaRequiresPickaxeAndTurnsBoulderIntoLooseStone()
+    {
+        var engine = CreateEngine(goblinCount: 2);
+        var boulder = engine.World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.Boulder)
+            .Select(worldObject => new
+            {
+                Boulder = worldObject,
+                Route = engine.Map.GetCardinalNeighbors(worldObject.Anchor)
+                    .Where(engine.World.IsSurfaceTraversable)
+                    .Select(position => engine.Navigation.FindSurfacePath(
+                        engine.Map.GoblinSpawn,
+                        position))
+                    .Where(route => route is not null)
+                    .OrderBy(route => route!.Count)
+                    .FirstOrDefault(),
+            })
+            .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var visibilityIndex = (boulder.Boulder.Anchor.Y * engine.Map.Width) + boulder.Boulder.Anchor.X;
+        save["visibility"]!.AsArray()[visibilityIndex] = (int)CellVisibility.Explored;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateBoulderQuarrying(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            boulder.Boulder.Anchor,
+            boulder.Boulder.Anchor));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Equal(WorkDesignationKind.QuarryBoulder,
+            Assert.Single(engine.CreateSnapshot().WorkDesignations).Kind);
+        var miner = Assert.Single(engine.CreateSnapshot().Actors,
+            actor => actor.Job.Kind == ActorJobKind.QuarryBoulder);
+        Assert.True(miner.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe));
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(2_500);
+        restored.AdvanceTicks(2_500);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.DoesNotContain(engine.World.GetWorldObjectsAt(boulder.Boulder.Anchor),
+            worldObject => worldObject.Kind == WorldObjectKind.Boulder);
+        var recoveredStone = engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Stone)
+            .Sum(stack => stack.Quantity);
+        Assert.InRange(recoveredStone, 16, 32);
+        Assert.Contains(engine.DrainWorldChanges(), change =>
+            change.Kind == WorldChangeKind.BoulderQuarried &&
+            change.Position == boulder.Boulder.Anchor &&
+            change.Amount == recoveredStone);
+    }
+
+    [Fact]
+    public void DesignatedLooseStoneFeedsStoneStorageWithPullDisabled()
+    {
+        var seed = new WorldSeed(0x53544F5245UL);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 2,
+            initialFoodStock: 0,
+            initialWoodStock: 8,
+            scatterInitialBrushwood: true);
+        var spawn = engine.Map.GoblinSpawn;
+        var zonePosition = engine.Map.GetCardinalNeighbors(spawn)
+            .First(engine.World.IsSurfaceTraversable);
+        engine.QueueCommand(SimulationCommand.BuildStoneStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            zonePosition));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
+        Assert.Equal(ResourceKind.Stone, zone.AcceptedResource);
+        Assert.Equal(0, zone.DesiredQuantity);
+
+        var knownStone = engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Stone &&
+                stack.Location.Kind == ItemLocationKind.Ground &&
+                engine.CreateSnapshot().GetVisibility(
+                    stack.Location.Position,
+                    engine.Map.Width) != CellVisibility.Unknown)
+            .ToArray();
+        Assert.NotEmpty(knownStone);
+        var minimum = new GridPosition(
+            knownStone.Min(stack => stack.Location.Position.X),
+            knownStone.Min(stack => stack.Location.Position.Y));
+        var maximum = new GridPosition(
+            knownStone.Max(stack => stack.Location.Position.X),
+            knownStone.Max(stack => stack.Location.Position.Y));
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            engine.CurrentTick.Next(),
+            sequence: 2,
+            minimum,
+            maximum,
+            ResourceKind.Stone));
+
+        engine.AdvanceTicks(800);
+
+        zone = Assert.Single(engine.CreateSnapshot().StorageZones);
+        Assert.True(zone.StoredQuantity > 0);
+        Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations,
+            designation => designation.Kind == WorkDesignationKind.GatherStone);
+    }
+
+    [Fact]
     public void HungerMayCreateEmergencyForagingOutsideWorkAreas()
     {
         var seed = new WorldSeed(0x48554E475259UL);

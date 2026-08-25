@@ -1,15 +1,30 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://Main.cs" id="1_main"]
 [ext_resource type="Script" path="res://WorldView.cs" id="2_world"]
 [ext_resource type="Script" path="res://MinimapView.cs" id="3_minimap"]
 [ext_resource type="Script" path="res://SeasonCycleView.cs" id="4_seasons"]
+[ext_resource type="Script" path="res://WorldView3D.cs" id="5_world_3d"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
 
 [node name="WorldView" type="Node2D" parent="."]
 script = ExtResource("2_world")
+
+[node name="WorldView3D" type="Node3D" parent="."]
+visible = false
+script = ExtResource("5_world_3d")
+
+[node name="TerrainChunks" type="Node3D" parent="WorldView3D"]
+
+[node name="Structures" type="Node3D" parent="WorldView3D"]
+
+[node name="Actors" type="Node3D" parent="WorldView3D"]
+
+[node name="Camera3D" type="Camera3D" parent="WorldView3D"]
+projection = 1
+size = 42.0
 
 [node name="Camera2D" type="Camera2D" parent="."]
 position = Vector2(640, 640)
@@ -72,7 +87,7 @@ anchor_right = 1.0
 offset_left = -200.0
 offset_top = 16.0
 offset_right = -16.0
-offset_bottom = 280.0
+offset_bottom = 324.0
 grow_horizontal = 0
 theme_override_constants/separation = 6
 
@@ -117,23 +132,52 @@ alignment = 1
 theme_override_constants/separation = 3
 
 [node name="Menu" type="Button" parent="Interface/RightHud/SessionPanel/Controls"]
-custom_minimum_size = Vector2(82, 30)
+custom_minimum_size = Vector2(58, 30)
 text = "Menu"
 tooltip_text = "Otwórz menu gry • Esc"
 
 [node name="SaveGame" type="Button" parent="Interface/RightHud/SessionPanel/Controls"]
-custom_minimum_size = Vector2(82, 30)
+custom_minimum_size = Vector2(58, 30)
 text = "Zapisz"
 tooltip_text = "Zapisz bieżącą sesję • F5"
+
+[node name="ViewMode" type="Button" parent="Interface/RightHud/SessionPanel/Controls"]
+custom_minimum_size = Vector2(48, 30)
+text = "3D"
+tooltip_text = "Przełącz prototypowy renderer 2D/3D • F3"
+
+[node name="CameraPanel" type="PanelContainer" parent="Interface/RightHud"]
+visible = false
+custom_minimum_size = Vector2(184, 38)
+
+[node name="Controls" type="HBoxContainer" parent="Interface/RightHud/CameraPanel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 3
+
+[node name="RotateLeft" type="Button" parent="Interface/RightHud/CameraPanel/Controls"]
+custom_minimum_size = Vector2(36, 30)
+text = "↶"
+tooltip_text = "Obróć kamerę o 90° w lewo • Q"
+
+[node name="Angle" type="Button" parent="Interface/RightHud/CameraPanel/Controls"]
+custom_minimum_size = Vector2(92, 30)
+text = "Z góry"
+tooltip_text = "Przełącz widok z góry/ukośny • F4"
+
+[node name="RotateRight" type="Button" parent="Interface/RightHud/CameraPanel/Controls"]
+custom_minimum_size = Vector2(36, 30)
+text = "↷"
+tooltip_text = "Obróć kamerę o 90° w prawo • E"
 
 [node name="ActionBar" type="PanelContainer" parent="Interface"]
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -210.0
+offset_left = -130.0
 offset_top = -72.0
-offset_right = 210.0
+offset_right = 130.0
 offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -152,6 +196,11 @@ custom_minimum_size = Vector2(48, 48)
 [node name="Raid" type="Button" parent="Interface/ActionBar/Controls"]
 custom_minimum_size = Vector2(48, 48)
 
+[node name="Statistics" type="Button" parent="Interface/ActionBar/Controls"]
+custom_minimum_size = Vector2(48, 48)
+theme_override_font_sizes/font_size = 26
+text = "Σ"
+
 [node name="Inspector" type="PanelContainer" parent="Interface"]
 anchor_top = 1.0
 anchor_bottom = 1.0
@@ -162,7 +211,7 @@ offset_bottom = -88.0
 grow_vertical = 0
 
 [node name="Text" type="Label" parent="Interface/Inspector"]
-text = "LPM: wybór i narzędzia • Buduj/Praca: menu działań • PPM klik: anuluj lub odznacz • PPM przeciągnięty: kamera • PPM na oknie: zamknij • WASD/strzałki: kamera • kółko: zoom • ~: pauza • 1–4: prędkość • Spacja: pauza/wznów • Alt+Enter: pełny ekran\nObszary pracy i pomost: przeciągnij LPM • można oznaczać teren odkryty, choć aktualnie niewidoczny • Esc: anuluj narzędzie"
+text = "LPM: wybór i narzędzia • Buduj/Praca: menu działań • Σ: zestawienia • PPM przeciągnięty: kamera • WASD/strzałki: kamera • kółko: zoom • F3: renderer 2D/3D • F4: z góry/ukośnie • Q/E: obrót 3D • ~: pauza • 1–4: prędkość • Alt+Enter: pełny ekran\nObszary pracy i pomost: przeciągnij LPM • można oznaczać teren odkryty, choć aktualnie niewidoczny • Esc: anuluj narzędzie"
 autowrap_mode = 2
 
 [node name="MainMenu" type="ColorRect" parent="Interface"]
@@ -272,6 +321,25 @@ columns = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
 
+[node name="StatisticsMenu" type="PopupPanel" parent="."]
+size = Vector2i(164, 164)
+
+[node name="Margin" type="MarginContainer" parent="StatisticsMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Grid" type="GridContainer" parent="StatisticsMenu/Margin"]
+columns = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+
 [node name="GoblinDetails" type="Window" parent="."]
 title = "Goblin"
 initial_position = 1
@@ -303,6 +371,115 @@ theme_override_constants/separation = 6
 [node name="Text" type="Label" parent="GoblinDetails/Scroll/Content"]
 size_flags_horizontal = 3
 text = "Goblin"
+autowrap_mode = 2
+
+[node name="StoredResourcesWindow" type="Window" parent="."]
+title = "Zapasy w magazynach"
+initial_position = 1
+size = Vector2i(510, 300)
+min_size = Vector2i(390, 240)
+visible = false
+
+[node name="Margin" type="MarginContainer" parent="StoredResourcesWindow"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 14.0
+offset_top = 14.0
+offset_right = -14.0
+offset_bottom = -14.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Content" type="VBoxContainer" parent="StoredResourcesWindow/Margin"]
+theme_override_constants/separation = 12
+
+[node name="Summary" type="Label" parent="StoredResourcesWindow/Margin/Content"]
+text = "Fizyczna zawartość wszystkich magazynów plemienia."
+autowrap_mode = 2
+
+[node name="Grid" type="GridContainer" parent="StoredResourcesWindow/Margin/Content"]
+size_flags_vertical = 3
+columns = 5
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+
+[node name="LooseResourcesWindow" type="Window" parent="."]
+title = "Luźne towary"
+initial_position = 1
+size = Vector2i(510, 320)
+min_size = Vector2i(390, 250)
+visible = false
+
+[node name="Margin" type="MarginContainer" parent="LooseResourcesWindow"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 14.0
+offset_top = 14.0
+offset_right = -14.0
+offset_bottom = -14.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Content" type="VBoxContainer" parent="LooseResourcesWindow/Margin"]
+theme_override_constants/separation = 12
+
+[node name="Summary" type="Label" parent="LooseResourcesWindow/Margin/Content"]
+text = "Znane towary leżące na ziemi. Nie wliczają się do zapasów magazynowych."
+autowrap_mode = 2
+
+[node name="Grid" type="GridContainer" parent="LooseResourcesWindow/Margin/Content"]
+size_flags_vertical = 3
+columns = 5
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+
+[node name="GoblinRosterWindow" type="Window" parent="."]
+title = "Plemię"
+initial_position = 1
+size = Vector2i(560, 430)
+min_size = Vector2i(430, 300)
+visible = false
+
+[node name="Scroll" type="ScrollContainer" parent="GoblinRosterWindow"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Rows" type="VBoxContainer" parent="GoblinRosterWindow/Scroll"]
+custom_minimum_size = Vector2(510, 0)
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="StatisticsWindow" type="Window" parent="."]
+title = "Statystyki plemienia"
+initial_position = 1
+size = Vector2i(510, 390)
+min_size = Vector2i(400, 280)
+visible = false
+
+[node name="Margin" type="MarginContainer" parent="StatisticsWindow"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Text" type="Label" parent="StatisticsWindow/Margin"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Statystyki"
 autowrap_mode = 2
 
 [node name="StorageDetails" type="Window" parent="."]
@@ -377,4 +554,41 @@ text = "Źródło:"
 size_flags_horizontal = 3
 
 [node name="Apply" type="Button" parent="StorageDetails/Margin/Controls"]
+text = "Zastosuj"
+
+[node name="ConstructionDetails" type="Window" parent="."]
+title = "Plac budowy"
+initial_position = 1
+size = Vector2i(460, 260)
+min_size = Vector2i(400, 220)
+visible = false
+
+[node name="Margin" type="MarginContainer" parent="ConstructionDetails"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 14.0
+offset_top = 14.0
+offset_right = -14.0
+offset_bottom = -14.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Controls" type="VBoxContainer" parent="ConstructionDetails/Margin"]
+theme_override_constants/separation = 10
+
+[node name="Summary" type="Label" parent="ConstructionDetails/Margin/Controls"]
+size_flags_vertical = 3
+text = "Plac budowy"
+autowrap_mode = 2
+
+[node name="PriorityRow" type="HBoxContainer" parent="ConstructionDetails/Margin/Controls"]
+
+[node name="Label" type="Label" parent="ConstructionDetails/Margin/Controls/PriorityRow"]
+text = "Priorytet:"
+
+[node name="Priority" type="OptionButton" parent="ConstructionDetails/Margin/Controls/PriorityRow"]
+size_flags_horizontal = 3
+
+[node name="Apply" type="Button" parent="ConstructionDetails/Margin/Controls"]
 text = "Zastosuj"

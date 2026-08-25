@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "height-transition-atlas",
+  "id": "terrain-height-transitions-v1",
+  "source": {
+    "path": "res://Assets/World/terrain-water-atlas-v1.png",
+    "columns": 4,
+    "rows": 4
+  },
+  "output": {
+    "atlasPath": "res://Assets/Generated/terrain-height-transitions-v1.png",
+    "manifestPath": "res://Assets/Generated/terrain-height-transitions-v1.manifest.json",
+    "tileSize": 192
+  },
+  "materials": [
+    { "id": "meadow", "sourceCell": 0 },
+    { "id": "deciduous-forest-floor", "sourceCell": 1 },
+    { "id": "conifer-forest-floor", "sourceCell": 2 },
+    { "id": "bog-ground", "sourceCell": 3 }
+  ],
+  "sourcePadding": 2,
+  "deformationStrength": 0.045,
+  "shadingStrength": 0.13,
+  "edgeHighlightStrength": 0.12,
+  "edgeShadowStrength": 0.16
+}

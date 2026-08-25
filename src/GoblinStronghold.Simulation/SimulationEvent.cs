@@ -32,6 +32,7 @@ public enum SimulationEventKind
     StorageSourceConfigured = 28,
     StoragePriorityConfigured = 29,
     ResourcePriorityConfigured = 30,
+    ConstructionPriorityConfigured = 31,
 }
 
 public readonly record struct SimulationEvent(

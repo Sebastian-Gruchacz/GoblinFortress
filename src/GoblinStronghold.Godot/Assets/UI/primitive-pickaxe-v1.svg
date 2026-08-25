@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d69a52"/>
+      <stop offset="1" stop-color="#71401f"/>
+    </linearGradient>
+    <linearGradient id="stone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d5d8d2"/>
+      <stop offset="1" stop-color="#59605e"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#21170f" stroke-width="12" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M111 79 L137 82 L113 226 Q105 241 92 232 Q84 226 90 211 Z" fill="url(#wood)"/>
+    <path d="M25 92 Q67 38 143 45 Q196 49 231 82 L216 101 Q184 78 148 76 Q83 74 43 112 Z" fill="url(#stone)"/>
+    <path d="M105 68 Q123 57 145 73 L137 103 Q119 112 101 97 Z" fill="#9c7342"/>
+    <path d="M95 174 L116 180" fill="none" stroke="#e3bd75" stroke-width="7"/>
+    <path d="M101 143 L122 149" fill="none" stroke="#e3bd75" stroke-width="7"/>
+  </g>
+</svg>

@@ -64,6 +64,12 @@ public readonly record struct ResourcePrioritySnapshot(
     ResourceKind Resource,
     StoragePriority Priority);
 
+public readonly record struct ResourceInventorySnapshot(
+    ResourceKind Resource,
+    int StoredQuantity,
+    int KnownLooseQuantity,
+    int CarriedQuantity);
+
 public readonly record struct ItemLocation
 {
     private ItemLocation(ItemLocationKind kind, GridPosition position, EntityId ownerId)

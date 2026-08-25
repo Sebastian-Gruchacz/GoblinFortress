@@ -22,6 +22,10 @@ public enum WorldObjectKind : byte
     GoblinFieldCamp = 7,
     Tree = 8,
     DeadTreeStump = 9,
+    WoodenWall = 10,
+    WoodenDoorFrame = 11,
+    WoodenDoorLeaf = 12,
+    Boulder = 13,
 }
 
 public enum WorldObjectOwner : byte
@@ -45,6 +49,7 @@ public enum SpatialOccupancyChannel : byte
     Solid = 2,
     Overhead = 3,
     Subsurface = 4,
+    Fixture = 5,
 }
 
 public enum WorldObjectPartKind : byte
@@ -59,6 +64,10 @@ public enum WorldObjectPartKind : byte
     TreeTrunk = 8,
     TreeCrown = 9,
     TreeStump = 10,
+    ClosedDoorLeaf = 11,
+    OpenDoorLeaf = 12,
+    AutomaticallyOpenedDoorLeaf = 13,
+    Boulder = 14,
 }
 
 public readonly record struct WorldObjectPartSnapshot(

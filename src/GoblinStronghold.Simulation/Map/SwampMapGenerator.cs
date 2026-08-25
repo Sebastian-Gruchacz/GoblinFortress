@@ -2,11 +2,11 @@ namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
     public const int MinimumDimension = 16;
     public const int MaximumDimension = 2_048;
 
-    public static bool SupportsVersion(int version) => version is 1 or 2 or 3 or 4 or 5 or CurrentVersion;
+    public static bool SupportsVersion(int version) => version is >= 1 and <= CurrentVersion;
 
     public static GeneratedMap Generate(
         WorldSeed seed,
@@ -31,7 +31,7 @@ public static class SwampMapGenerator
             {
                 var index = checked((y * width) + x);
                 cells[index] = generatorVersion >= 4
-                    ? GenerateRegionalCell(seed, x, y, width, height)
+                    ? GenerateRegionalCell(seed, x, y, width, height, generatorVersion)
                     : GenerateLegacyCell(seed, index, generatorVersion);
             }
         }
@@ -68,8 +68,10 @@ public static class SwampMapGenerator
 
         if (generatorVersion >= 2)
         {
-            CarveSettlementPad(cells, width, height, goblinSpawn, goblin: true);
-            CarveSettlementPad(cells, width, height, humanVillage, goblin: false);
+            CarveSettlementPad(
+                cells, seed, width, height, goblinSpawn, goblin: true, generatorVersion);
+            CarveSettlementPad(
+                cells, seed, width, height, humanVillage, goblin: false, generatorVersion);
         }
 
         CarveSettlementAccess(
@@ -165,16 +167,32 @@ public static class SwampMapGenerator
         int x,
         int y,
         int width,
-        int height)
+        int height,
+        int generatorVersion)
     {
         var normalizedX = width == 1 ? 0d : x / (double)(width - 1);
         var normalizedY = height == 1 ? 0d : y / (double)(height - 1);
         var terrainNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 20_000);
         var moistureNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 21_000);
-        var riverMeander = (FractalValueNoise(seed, normalizedX, 0.5d, sampleKey: 22_000) - 0.5d) * 0.11d;
+        var riverMeander =
+            (FractalValueNoise(seed, normalizedX, 0.5d, sampleKey: 22_000) - 0.5d) * 0.11d;
         var riverCenterY = 0.82d - (0.64d * normalizedX) + riverMeander;
         var riverHalfWidth = Math.Max(1.5d, Math.Min(width, height) * 0.035d);
         var riverDistance = Math.Abs(normalizedY - riverCenterY) * height;
+        var swampSampleX = normalizedX;
+        var swampSampleY = normalizedY;
+        if (generatorVersion >= 7)
+        {
+            var boundaryWarpX =
+                FractalValueNoise(seed, normalizedX * 0.68d, normalizedY * 0.68d, 29_000) - 0.5d;
+            var boundaryWarpY =
+                FractalValueNoise(seed, normalizedX * 0.68d, normalizedY * 0.68d, 29_100) - 0.5d;
+            swampSampleX += (boundaryWarpX * 0.18d) + ((terrainNoise - 0.5d) * 0.035d);
+            swampSampleY += (boundaryWarpY * 0.16d) + ((moistureNoise - 0.5d) * 0.03d);
+            var riverBankNoise =
+                FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 29_200) - 0.5d;
+            riverDistance += riverBankNoise * riverHalfWidth * 0.9d;
+        }
 
         if (riverDistance <= riverHalfWidth * 0.48d)
         {
@@ -186,8 +204,8 @@ public static class SwampMapGenerator
             return CreateShallowWater();
         }
 
-        var leftSwamp = Math.Clamp((0.48d - normalizedX) / 0.48d, 0d, 1d);
-        var bottomSwamp = Math.Clamp((normalizedY - 0.58d) / 0.42d, 0d, 1d);
+        var leftSwamp = Math.Clamp((0.48d - swampSampleX) / 0.48d, 0d, 1d);
+        var bottomSwamp = Math.Clamp((swampSampleY - 0.58d) / 0.42d, 0d, 1d);
         var swampInfluence = Math.Max(leftSwamp, bottomSwamp);
         var wetness = (swampInfluence * 0.68d) + (moistureNoise * 0.32d);
         var moisture = checked((byte)Math.Clamp(
@@ -328,10 +346,12 @@ public static class SwampMapGenerator
 
     private static void CarveSettlementPad(
         MapCell[] cells,
+        WorldSeed seed,
         int width,
         int height,
         GridPosition center,
-        bool goblin)
+        bool goblin,
+        int generatorVersion)
     {
         const int padWidth = 8;
         const int padHeight = 9;
@@ -342,6 +362,24 @@ public static class SwampMapGenerator
         {
             for (var x = startX; x < startX + padWidth; x++)
             {
+                if (generatorVersion >= 7 && Math.Min(width, height) >= 32)
+                {
+                    var radiusX = padWidth * 0.54d;
+                    var radiusY = padHeight * 0.54d;
+                    var distanceX = (x - center.X) / radiusX;
+                    var distanceY = (y - center.Y) / radiusY;
+                    var edgeNoise =
+                        (FractalValueNoise(
+                            seed,
+                            x / (double)(width - 1),
+                            y / (double)(height - 1),
+                            goblin ? 29_300UL : 29_400UL) - 0.5d) * 0.42d;
+                    if ((distanceX * distanceX) + (distanceY * distanceY) > 1d + edgeNoise)
+                    {
+                        continue;
+                    }
+                }
+
                 SetCell(
                     cells,
                     width,

@@ -19,6 +19,8 @@ public enum SimulationCommandKind
     ConfigureStorageSource = 12,
     ConfigureStoragePriority = 13,
     ConfigureResourcePriority = 14,
+    ToggleWoodenDoor = 15,
+    ConfigureConstructionPriority = 16,
 }
 
 public enum ConstructionKind : byte
@@ -27,6 +29,10 @@ public enum ConstructionKind : byte
     WoodenWalkway = 2,
     WoodStorage = 3,
     GoblinFieldCamp = 4,
+    WoodenWall = 5,
+    WoodenDoorFrame = 6,
+    WoodenDoor = 7,
+    StoneStorage = 8,
 }
 
 public readonly record struct SimulationCommand(
@@ -41,13 +47,13 @@ public readonly record struct SimulationCommand(
     ResourceKind Resource,
     int Amount)
 {
-    public static IReadOnlyList<GridPosition> GetWalkwayCells(
+    public static IReadOnlyList<GridPosition> GetLinearCells(
         GridPosition start,
         GridPosition end)
     {
         if (start.Z != end.Z)
         {
-            throw new ArgumentException("A walkway must remain on one height level.");
+            throw new ArgumentException("A linear construction must remain on one height level.");
         }
 
         var cells = new List<GridPosition> { start };
@@ -64,6 +70,11 @@ public readonly record struct SimulationCommand(
 
         return cells;
     }
+
+    public static IReadOnlyList<GridPosition> GetWalkwayCells(
+        GridPosition start,
+        GridPosition end) =>
+        GetLinearCells(start, end);
 
     public static SimulationCommand Forage(
         SimulationTick executeAt,
@@ -201,6 +212,22 @@ public readonly record struct SimulationCommand(
             ResourceKind.Wood,
             Amount: 2);
 
+    public static SimulationCommand BuildStoneStorage(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.StoneStorage,
+            ResourceKind.Wood,
+            Amount: 2);
+
     public static SimulationCommand BuildGoblinFieldCamp(
         SimulationTick executeAt,
         ulong sequence,
@@ -216,6 +243,77 @@ public readonly record struct SimulationCommand(
             ConstructionKind.GoblinFieldCamp,
             ResourceKind.Wood,
             Amount: 6);
+
+    public static SimulationCommand BuildWoodenWall(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        BuildWoodenWall(executeAt, sequence, position, position);
+
+    public static SimulationCommand BuildWoodenWall(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            ConstructionKind.WoodenWall,
+            ResourceKind.Wood,
+            Amount: 2);
+
+    public static SimulationCommand BuildWoodenDoorFrame(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.WoodenDoorFrame,
+            ResourceKind.Wood,
+            Amount: 1);
+
+    public static SimulationCommand BuildWoodenDoor(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.WoodenDoor,
+            ResourceKind.Wood,
+            Amount: 1);
+
+    public static SimulationCommand ToggleWoodenDoor(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ToggleWoodenDoor,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
 
     public static SimulationCommand DesignateWork(
         SimulationTick executeAt,
@@ -234,6 +332,40 @@ public readonly record struct SimulationCommand(
             default,
             resource,
             Amount: 0);
+
+    public static SimulationCommand DesignateTreeFelling(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.FellTree);
+
+    public static SimulationCommand DesignateBoulderQuarrying(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.QuarryBoulder);
 
     public static SimulationCommand ClearWorkDesignations(
         SimulationTick executeAt,
@@ -335,6 +467,23 @@ public readonly record struct SimulationCommand(
             default,
             default,
             resource,
+            Amount: (int)priority);
+
+    public static SimulationCommand ConfigureConstructionPriority(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId constructionSite,
+        StoragePriority priority) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureConstructionPriority,
+            EntityId.None,
+            constructionSite,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
             Amount: (int)priority);
 
     public static SimulationCommand AttackHumanVillage(

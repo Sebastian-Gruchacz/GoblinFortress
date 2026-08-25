@@ -358,7 +358,10 @@ internal sealed class HumanVillageState
             occupied.Remove(cohort.Position);
             var target = GetTaskTarget(cohort, world, intruder);
             var cohortRadius = activityRadius + (cohort.Task == HumanCohortTask.GatherBerries ? 4 : 0);
-            var route = navigation.FindSurfacePath(cohort.Position, target);
+            var route = navigation.FindSurfacePath(
+                cohort.Position,
+                target,
+                canOpenDoors: false);
             if (route is { Count: > 0 } && Distance(route[0], Anchor) <= cohortRadius && !occupied.Contains(route[0]))
             {
                 cohort.Position = route[0];

@@ -45,6 +45,14 @@ public sealed record VisionSettings(
     int GoblinNightRadius,
     int GoblinStructureRadius);
 
+public sealed record ActorPlanningSettings(
+    int QueueCapacity,
+    int MaximumNeedPriority,
+    int BackgroundJobCommitment,
+    int OrdinaryJobCommitment,
+    int OrderedJobCommitment,
+    int InterruptHysteresis);
+
 public sealed class SimulationDefinitions
 {
     public static SimulationDefinitions Foundation { get; } = new(
@@ -97,7 +105,14 @@ public sealed class SimulationDefinitions
         edibleRootsNutrition: 4_200,
         fishNutrition: 4_800,
         goblinNightVisionRadius: 3,
-        goblinStructureVisionRadius: 3);
+        goblinStructureVisionRadius: 3,
+        actorPlanning: new(
+            QueueCapacity: 4,
+            MaximumNeedPriority: 100,
+            BackgroundJobCommitment: 20,
+            OrdinaryJobCommitment: 40,
+            OrderedJobCommitment: 70,
+            InterruptHysteresis: 5));
 
     public const int FieldCampCapacity = 5;
 
@@ -151,7 +166,8 @@ public sealed class SimulationDefinitions
         int edibleRootsNutrition = 2_800,
         int fishNutrition = 3_200,
         int? goblinNightVisionRadius = null,
-        int goblinStructureVisionRadius = 0)
+        int goblinStructureVisionRadius = 0,
+        ActorPlanningSettings? actorPlanning = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(clock);
@@ -213,6 +229,33 @@ public sealed class SimulationDefinitions
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(mushroomsNutrition);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(edibleRootsNutrition);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fishNutrition);
+        actorPlanning ??= new(
+            QueueCapacity: 4,
+            MaximumNeedPriority: 100,
+            BackgroundJobCommitment: 20,
+            OrdinaryJobCommitment: 40,
+            OrderedJobCommitment: 70,
+            InterruptHysteresis: 5);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(actorPlanning.QueueCapacity);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(actorPlanning.MaximumNeedPriority);
+        ArgumentOutOfRangeException.ThrowIfNegative(actorPlanning.BackgroundJobCommitment);
+        ArgumentOutOfRangeException.ThrowIfNegative(actorPlanning.OrdinaryJobCommitment);
+        ArgumentOutOfRangeException.ThrowIfNegative(actorPlanning.OrderedJobCommitment);
+        ArgumentOutOfRangeException.ThrowIfNegative(actorPlanning.InterruptHysteresis);
+        if (actorPlanning.BackgroundJobCommitment > actorPlanning.OrdinaryJobCommitment ||
+            actorPlanning.OrdinaryJobCommitment > actorPlanning.OrderedJobCommitment)
+        {
+            throw new ArgumentException(
+                "Actor job commitments must be ordered from background through ordinary to ordered work.",
+                nameof(actorPlanning));
+        }
+        if ((long)actorPlanning.OrderedJobCommitment + actorPlanning.InterruptHysteresis >=
+            actorPlanning.MaximumNeedPriority)
+        {
+            throw new ArgumentException(
+                "Maximum need priority must be able to interrupt ordered work.",
+                nameof(actorPlanning));
+        }
 
         Id = id;
         Clock = clock;
@@ -275,6 +318,7 @@ public sealed class SimulationDefinitions
             GoblinDayRadius: visionRadius,
             GoblinNightRadius: goblinNightVisionRadius ?? Math.Max(2, visionRadius - 1),
             GoblinStructureRadius: goblinStructureVisionRadius);
+        ActorPlanning = actorPlanning;
     }
 
     public string Id { get; }
@@ -288,6 +332,8 @@ public sealed class SimulationDefinitions
     public FoodNutritionSettings Food { get; }
 
     public VisionSettings Vision { get; }
+
+    public ActorPlanningSettings ActorPlanning { get; }
 
     public int MaximumHunger { get; }
 

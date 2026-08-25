@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 3,
+  "kind": "cave-wall-atlas",
+  "id": "cave-walls-v1",
+  "source": {
+    "path": "res://Assets/World/cave-rock-atlas-v1.png",
+    "columns": 2,
+    "rows": 2
+  },
+  "output": {
+    "atlasPath": "res://Assets/Generated/cave-walls-v1.png",
+    "manifestPath": "res://Assets/Generated/cave-walls-v1.manifest.json",
+    "tileSize": 192
+  },
+  "materials": [
+    { "id": "sandstone", "sourceCell": 1 },
+    { "id": "granite", "sourceCell": 3 }
+  ],
+  "sourcePadding": 2,
+  "blendExponent": 3.25,
+  "innerCorners": {
+    "radiusFraction": 1.0,
+    "roughness": 0.055,
+    "featherPixels": 1.5
+  }
+}

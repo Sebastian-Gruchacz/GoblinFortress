@@ -17,6 +17,28 @@ public readonly record struct ConstructionCapabilityRequirements(
     int MinimumBuildingLevel,
     PersonalEquipment RequiredEquipment);
 
+public enum ConstructionReadinessState : byte
+{
+    NoAvailableMaterials = 0,
+    NoAvailableSupplier = 1,
+    NoReachableMaterialSource = 2,
+    WaitingForSupplier = 3,
+    MaterialsInTransit = 4,
+    NoCapableBuilder = 5,
+    NoReachableBuilder = 6,
+    WaitingForBuilder = 7,
+    Building = 8,
+}
+
+public readonly record struct ConstructionReadinessDiagnostic(
+    EntityId SiteId,
+    ConstructionReadinessState State,
+    int MissingMaterialQuantity,
+    int InTransitQuantity,
+    int AvailableMaterialQuantity,
+    int MatchingSourceCount,
+    int CapableBuilderCount);
+
 public sealed class ConstructionSiteSnapshot
 {
     internal ConstructionSiteSnapshot(
@@ -28,7 +50,8 @@ public sealed class ConstructionSiteSnapshot
         IReadOnlyList<ConstructionMaterialSnapshot> materials,
         int remainingWorkTicks,
         int totalWorkTicks,
-        ConstructionCapabilityRequirements capabilities)
+        ConstructionCapabilityRequirements capabilities,
+        StoragePriority priority)
     {
         Id = id;
         Kind = kind;
@@ -39,6 +62,7 @@ public sealed class ConstructionSiteSnapshot
         RemainingWorkTicks = remainingWorkTicks;
         TotalWorkTicks = totalWorkTicks;
         Capabilities = capabilities;
+        Priority = priority;
     }
 
     public EntityId Id { get; }
@@ -59,6 +83,8 @@ public sealed class ConstructionSiteSnapshot
 
     public ConstructionCapabilityRequirements Capabilities { get; }
 
+    public StoragePriority Priority { get; }
+
     public bool HasAllMaterials => Materials.All(material => material.MissingQuantity == 0);
 }
 
@@ -71,7 +97,8 @@ internal sealed class ConstructionSiteState(
     int deliveredWood,
     int remainingWorkTicks,
     int totalWorkTicks,
-    ConstructionCapabilityRequirements capabilities)
+    ConstructionCapabilityRequirements capabilities,
+    StoragePriority priority)
 {
     public EntityId Id { get; } = id;
 
@@ -91,13 +118,16 @@ internal sealed class ConstructionSiteState(
 
     public ConstructionCapabilityRequirements Capabilities { get; } = capabilities;
 
+    public StoragePriority Priority { get; set; } = priority;
+
     public int MissingWood => Math.Max(0, RequiredWood - DeliveredWood);
 
     public bool HasAllMaterials => MissingWood == 0;
 
     public IReadOnlyList<GridPosition> GetFootprint() => Kind switch
     {
-        ConstructionKind.WoodenWalkway => SimulationCommand.GetWalkwayCells(Anchor, End),
+        ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall =>
+            SimulationCommand.GetLinearCells(Anchor, End),
         ConstructionKind.GoblinFieldCamp =>
         [
             Anchor,
@@ -117,7 +147,8 @@ internal sealed class ConstructionSiteState(
         [new ConstructionMaterialSnapshot(ResourceKind.Wood, RequiredWood, DeliveredWood)],
         RemainingWorkTicks,
         TotalWorkTicks,
-        Capabilities);
+        Capabilities,
+        Priority);
 }
 
 internal static class ConstructionBlueprintCatalog
@@ -128,21 +159,29 @@ internal static class ConstructionBlueprintCatalog
         GridPosition anchor,
         GridPosition end)
     {
-        var segmentCount = kind == ConstructionKind.WoodenWalkway
-            ? SimulationCommand.GetWalkwayCells(anchor, end).Count
+        var segmentCount = kind is ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall
+            ? SimulationCommand.GetLinearCells(anchor, end).Count
             : 1;
         var requiredWood = kind switch
         {
-            ConstructionKind.FoodStorage or ConstructionKind.WoodStorage => 2,
+            ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
+                ConstructionKind.StoneStorage => 2,
             ConstructionKind.WoodenWalkway => segmentCount,
             ConstructionKind.GoblinFieldCamp => 6,
+            ConstructionKind.WoodenWall => checked(segmentCount * 2),
+            ConstructionKind.WoodenDoorFrame => 1,
+            ConstructionKind.WoodenDoor => 1,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
         var workTicks = kind switch
         {
-            ConstructionKind.FoodStorage or ConstructionKind.WoodStorage => 40,
+            ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
+                ConstructionKind.StoneStorage => 40,
             ConstructionKind.WoodenWalkway => checked(segmentCount * 25),
             ConstructionKind.GoblinFieldCamp => 120,
+            ConstructionKind.WoodenWall => checked(segmentCount * 45),
+            ConstructionKind.WoodenDoorFrame => 30,
+            ConstructionKind.WoodenDoor => 35,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
         var capabilities = new ConstructionCapabilityRequirements(
@@ -158,6 +197,7 @@ internal static class ConstructionBlueprintCatalog
             deliveredWood: 0,
             remainingWorkTicks: workTicks,
             totalWorkTicks: workTicks,
-            capabilities);
+            capabilities,
+            StoragePriority.Normal);
     }
 }

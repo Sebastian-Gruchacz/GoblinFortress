@@ -121,6 +121,43 @@ public sealed class SwampMapGeneratorTests
     }
 
     [Fact]
+    public void CurrentGeneratorBreaksUpStraightSwampAndSettlementPadEdges()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x4E4F495345UL), 64, 64);
+        var leftSwampEdges = Enumerable.Range(4, 24)
+            .Select(y => Enumerable.Range(0, map.Width / 2)
+                .Where(x => IsWetTerrain(map.GetCell(new GridPosition(x, y))))
+                .DefaultIfEmpty(0)
+                .Max())
+            .ToArray();
+        var humanPadStartX = map.HumanVillage.X - 4;
+        var humanPadStartY = map.HumanVillage.Y - 4;
+        var humanPad = Enumerable.Range(humanPadStartY, 9)
+            .SelectMany(y => Enumerable.Range(humanPadStartX, 8)
+                .Select(x => map.GetCell(new GridPosition(x, y))))
+            .ToArray();
+
+        Assert.True(
+            leftSwampEdges.Distinct().Count() >= 4,
+            $"swamp edge positions: {string.Join(", ", leftSwampEdges)}");
+        Assert.Contains(humanPad, cell =>
+            cell.Terrain != TerrainKind.SolidGround || cell.SurfaceLevel != 0);
+    }
+
+    [Fact]
+    public void VersionSixRetainsItsHistoricalDeterministicLayout()
+    {
+        var first = SwampMapGenerator.Generate(
+            new WorldSeed(0x5636UL), 64, 64, generatorVersion: 6);
+        var second = SwampMapGenerator.Generate(
+            new WorldSeed(0x5636UL), 64, 64, generatorVersion: 6);
+        var current = SwampMapGenerator.Generate(new WorldSeed(0x5636UL), 64, 64);
+
+        Assert.Equal(first.ComputeFingerprint(), second.ComputeFingerprint());
+        Assert.NotEqual(first.ComputeFingerprint(), current.ComputeFingerprint());
+    }
+
+    [Fact]
     public void ShallowsAreWadeableButDeepWaterDropsToTheLowerLevel()
     {
         var map = SwampMapGenerator.Generate(new WorldSeed(456), width: 64, height: 64);

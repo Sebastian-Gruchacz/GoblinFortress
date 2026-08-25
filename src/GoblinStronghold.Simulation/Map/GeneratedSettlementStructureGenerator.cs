@@ -89,9 +89,87 @@ internal static class GeneratedSettlementStructureGenerator
         if (map.GeneratorVersion >= 4)
         {
             AddNaturalVegetation(objects, reservedCells, map, ref nextId);
+            AddNaturalStone(objects, reservedCells, map, ref nextId);
         }
 
         return objects;
+    }
+
+    private static void AddNaturalStone(
+        List<WorldObjectSnapshot> objects,
+        HashSet<GridPosition> reservedCells,
+        GeneratedMap map,
+        ref ulong nextId)
+    {
+        for (var y = 1; y < map.Height - 1; y++)
+        {
+            for (var x = 1; x < map.Width - 1; x++)
+            {
+                var position = new GridPosition(x, y);
+                if (!CanPlaceBoulder(map, position, reservedCells) ||
+                    SamplePercent(map, position, sampleKey: 32_001) >= 2)
+                {
+                    continue;
+                }
+
+                AddBoulder(objects, reservedCells, new WorldObjectId(nextId++), position);
+            }
+        }
+
+        if (objects.Any(item => item.Kind == WorldObjectKind.Boulder &&
+                Distance(item.Anchor, map.GoblinSpawn) <= 7d))
+        {
+            return;
+        }
+
+        var fallback = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(position =>
+                Distance(position, map.GoblinSpawn) is >= 3d and <= 7d &&
+                CanPlaceBoulder(map, position, reservedCells))
+            .OrderBy(position => Distance(position, map.GoblinSpawn))
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .FirstOrDefault();
+        if (fallback != default)
+        {
+            AddBoulder(objects, reservedCells, new WorldObjectId(nextId++), fallback);
+        }
+    }
+
+    private static bool CanPlaceBoulder(
+        GeneratedMap map,
+        GridPosition position,
+        HashSet<GridPosition> reservedCells)
+    {
+        if (!map.IsWithin(position) || reservedCells.Contains(position))
+        {
+            return false;
+        }
+
+        var cell = map.GetCell(position);
+        return cell.Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
+            cell.RampDirection == TerrainRampDirection.None &&
+            map.GetCardinalNeighbors(position).Any(neighbor =>
+                map.GetCell(neighbor).IsTraversable && !reservedCells.Contains(neighbor));
+    }
+
+    private static void AddBoulder(
+        List<WorldObjectSnapshot> objects,
+        HashSet<GridPosition> reservedCells,
+        WorldObjectId id,
+        GridPosition anchor)
+    {
+        var boulder = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.Boulder,
+            WorldObjectOwner.Nature,
+            anchor,
+            CardinalOrientation.North,
+            [new(default, SpatialOccupancyChannel.Solid, WorldObjectPartKind.Boulder)]);
+        ReserveFootprint(boulder, reservedCells);
+        objects.Add(boulder);
     }
 
     private static void AddNaturalVegetation(
@@ -108,7 +186,9 @@ internal static class GeneratedSettlementStructureGenerator
             {
                 var position = new GridPosition(x, y);
                 var distance = Distance(position, map.HumanVillage);
-                if (x < map.Width * 0.42d || y > map.Height * 0.62d ||
+                var outsideForestRegion = map.GeneratorVersion < 7 &&
+                    (x < map.Width * 0.42d || y > map.Height * 0.62d);
+                if (outsideForestRegion ||
                     distance < forestInnerRadius || distance > forestOuterRadius ||
                     !CanPlaceTree(map, position, reservedCells) ||
                     SamplePercent(map, position, sampleKey: 31_001) >= 78)
@@ -125,7 +205,8 @@ internal static class GeneratedSettlementStructureGenerator
             for (var x = 0; x < map.Width; x++)
             {
                 var position = new GridPosition(x, y);
-                var inSwampRegion = x <= map.Width * 0.42d || y >= map.Height * 0.64d;
+                var inSwampRegion = map.GeneratorVersion >= 7 ||
+                    x <= map.Width * 0.42d || y >= map.Height * 0.64d;
                 if (!inSwampRegion || reservedCells.Contains(position) ||
                     map.GetCell(position).Terrain != TerrainKind.Mud ||
                     SamplePercent(map, position, sampleKey: 31_002) >= 5)

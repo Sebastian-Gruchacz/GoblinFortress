@@ -7,7 +7,8 @@ public sealed class SimulationCalendarTests
     [Fact]
     public void DemoTemperateProfileKeepsRequestedDemoTiming()
     {
-        var climate = SimulationDefinitions.Foundation.Clock.Climate;
+        var settings = SimulationDefinitions.Foundation.Clock;
+        var climate = settings.Climate;
 
         Assert.Equal("demo-temperate", climate.Id);
         Assert.Equal(40, climate.DaysPerYear);
@@ -18,18 +19,21 @@ public sealed class SimulationCalendarTests
             Assert.Equal(7_200, season.DaylightTicks);
             Assert.Equal(4_200, season.NightTicks);
             Assert.Equal(5 * 60, season.DawnMinute);
-            Assert.Equal(17 * 60, season.DuskMinute);
+            Assert.Equal((20 * 60) + 9, season.DuskMinute);
+            Assert.Equal((20 * 60 * 60) + (9 * 60) + 28, season.DuskSecond);
+            Assert.Equal(19 * 60, settings.GetRealSecondsPerDayAtNormalSpeed(season.Season));
         });
     }
 
     [Theory]
-    [InlineData(0, 5, 0, false)]
-    [InlineData(7_200, 17, 0, true)]
-    [InlineData(11_399, 4, 59, true)]
+    [InlineData(0, 5, 0, 0, false)]
+    [InlineData(7_200, 20, 9, 28, true)]
+    [InlineData(11_399, 4, 59, 52, true)]
     public void ClockMapsDayAndNightSegmentsToCivilTime(
         long tick,
         int hour,
         int minute,
+        int second,
         bool isNight)
     {
         var calendar = SimulationCalendar.At(
@@ -38,6 +42,7 @@ public sealed class SimulationCalendarTests
 
         Assert.Equal(hour, calendar.Hour);
         Assert.Equal(minute, calendar.Minute);
+        Assert.Equal(second, calendar.Second);
         Assert.Equal(isNight, calendar.IsNight);
     }
 
@@ -48,9 +53,9 @@ public sealed class SimulationCalendarTests
             "test-variable-climate",
             [
                 new(SeasonKind.Spring, Days: 2, DaylightTicks: 100, NightTicks: 50,
-                    DawnMinute: 6 * 60, DuskMinute: 18 * 60),
+                    DawnMinute: 6 * 60),
                 new(SeasonKind.Summer, Days: 3, DaylightTicks: 200, NightTicks: 100,
-                    DawnMinute: 4 * 60, DuskMinute: 20 * 60),
+                    DawnMinute: 4 * 60),
             ]);
         var settings = new SimulationClockSettings(climate);
         var summerStart = climate.GetSeasonStartTick(SeasonKind.Summer);
@@ -75,9 +80,9 @@ public sealed class SimulationCalendarTests
             "test-boundaries",
             [
                 new(SeasonKind.Spring, Days: 1, DaylightTicks: 100, NightTicks: 50,
-                    DawnMinute: 6 * 60, DuskMinute: 18 * 60),
+                    DawnMinute: 6 * 60),
                 new(SeasonKind.Summer, Days: 1, DaylightTicks: 200, NightTicks: 100,
-                    DawnMinute: 4 * 60, DuskMinute: 20 * 60),
+                    DawnMinute: 4 * 60),
             ]);
         var settings = new SimulationClockSettings(climate);
 

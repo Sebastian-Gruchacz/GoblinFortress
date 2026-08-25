@@ -8,7 +8,6 @@ namespace GoblinStronghold.GodotClient;
 
 public partial class Main : Node
 {
-    private const double SecondsPerTick = 0.1;
     private readonly WorldSeed _seed = new(0x474F424C494EUL);
     private SimulationEngine _engine = null!;
     private WorldView _worldView = null!;
@@ -51,6 +50,9 @@ public partial class Main : Node
     private CheckButton _storagePullLoose = null!;
     private SpinBox _storageTarget = null!;
     private EntityId _selectedStorageId = EntityId.None;
+
+    private double SecondsPerTick =>
+        _engine.Definitions.Clock.RealSecondsPerTickAtNormalSpeed;
 
     private enum BuildMode
     {
@@ -1554,7 +1556,8 @@ public partial class Main : Node
             SeasonKind.Winter => "Zima",
             _ => throw new ArgumentOutOfRangeException(),
         };
-        _clock.Text = $"{calendar.Hour:00}:{calendar.Minute:00} • dzień {calendar.DayOfSeason}";
+        _clock.Text =
+            $"{calendar.Hour:00}:{calendar.Minute:00}:{calendar.Second:00} • dzień {calendar.DayOfSeason}";
         _clock.TooltipText = calendar.IsNight
             ? "Noc • gobliny widzą słabiej, ludzie korzystają z latarni"
             : "Dzień";

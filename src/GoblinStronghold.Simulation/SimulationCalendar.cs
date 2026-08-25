@@ -15,19 +15,21 @@ public sealed record ClimateSeasonDefinition(
     int Days,
     int DaylightTicks,
     int NightTicks,
-    int DawnMinute,
-    int DuskMinute)
+    int DawnMinute)
 {
+    private const int SecondsPerDay = 24 * 60 * 60;
+
     public int TicksPerDay => checked(DaylightTicks + NightTicks);
 
     public long TotalTicks => checked((long)Days * TicksPerDay);
 
-    public int DaylightClockMinutes => ForwardMinutes(DawnMinute, DuskMinute);
+    public int DuskSecond =>
+        ((DawnMinute * 60) + ScaleTicks(DaylightTicks, TicksPerDay, SecondsPerDay)) % SecondsPerDay;
 
-    public int NightClockMinutes => 24 * 60 - DaylightClockMinutes;
+    public int DuskMinute => DuskSecond / 60;
 
-    private static int ForwardMinutes(int start, int end) =>
-        (end - start + (24 * 60)) % (24 * 60);
+    private static int ScaleTicks(int tick, int ticksInDay, int clockSeconds) =>
+        checked((int)((long)tick * clockSeconds / ticksInDay));
 }
 
 public readonly record struct ClimateSeasonSpan(
@@ -53,9 +55,7 @@ public sealed class ClimateCalendarProfile
                 item.Days <= 0 ||
                 item.DaylightTicks <= 0 ||
                 item.NightTicks <= 0 ||
-                item.DawnMinute is < 0 or >= 24 * 60 ||
-                item.DuskMinute is < 0 or >= 24 * 60 ||
-                item.DaylightClockMinutes == 0))
+                item.DawnMinute is < 0 or >= 24 * 60))
         {
             throw new ArgumentException("The climate contains invalid or duplicate seasons.", nameof(seasons));
         }
@@ -119,17 +119,38 @@ public static class ClimateCalendarProfiles
         "demo-temperate",
         [
             new(SeasonKind.Spring, Days: 10, DaylightTicks: 7_200, NightTicks: 4_200,
-                DawnMinute: 5 * 60, DuskMinute: 17 * 60),
+                DawnMinute: 5 * 60),
             new(SeasonKind.Summer, Days: 10, DaylightTicks: 7_200, NightTicks: 4_200,
-                DawnMinute: 5 * 60, DuskMinute: 17 * 60),
+                DawnMinute: 5 * 60),
             new(SeasonKind.Autumn, Days: 10, DaylightTicks: 7_200, NightTicks: 4_200,
-                DawnMinute: 5 * 60, DuskMinute: 17 * 60),
+                DawnMinute: 5 * 60),
             new(SeasonKind.Winter, Days: 10, DaylightTicks: 7_200, NightTicks: 4_200,
-                DawnMinute: 5 * 60, DuskMinute: 17 * 60),
+                DawnMinute: 5 * 60),
         ]);
 }
 
-public sealed record SimulationClockSettings(ClimateCalendarProfile Climate);
+public sealed record SimulationClockSettings
+{
+    public SimulationClockSettings(
+        ClimateCalendarProfile climate,
+        int ticksPerRealSecondAtNormalSpeed = 10)
+    {
+        ArgumentNullException.ThrowIfNull(climate);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ticksPerRealSecondAtNormalSpeed);
+        Climate = climate;
+        TicksPerRealSecondAtNormalSpeed = ticksPerRealSecondAtNormalSpeed;
+    }
+
+    public ClimateCalendarProfile Climate { get; }
+
+    public int TicksPerRealSecondAtNormalSpeed { get; }
+
+    public double RealSecondsPerTickAtNormalSpeed =>
+        1d / TicksPerRealSecondAtNormalSpeed;
+
+    public double GetRealSecondsPerDayAtNormalSpeed(SeasonKind season) =>
+        (double)Climate.GetSeason(season).TicksPerDay / TicksPerRealSecondAtNormalSpeed;
+}
 
 public readonly record struct SimulationCalendarSnapshot(
     int AbsoluteDay,
@@ -137,6 +158,7 @@ public readonly record struct SimulationCalendarSnapshot(
     SeasonKind Season,
     int Hour,
     int Minute,
+    int Second,
     bool IsNight,
     bool IsDayStart,
     int TickOfDay,
@@ -167,23 +189,19 @@ public static class SimulationCalendar
                 var dayIndex = (int)(tickOfSeason / season.TicksPerDay);
                 var tickOfDay = (int)(tickOfSeason % season.TicksPerDay);
                 var isNight = tickOfDay >= season.DaylightTicks;
-                var minuteOfDay = isNight
-                    ? season.DuskMinute + ScaleTicksToMinutes(
-                        tickOfDay - season.DaylightTicks,
-                        season.NightTicks,
-                        season.NightClockMinutes)
-                    : season.DawnMinute + ScaleTicksToMinutes(
-                        tickOfDay,
-                        season.DaylightTicks,
-                        season.DaylightClockMinutes);
-                minuteOfDay %= 24 * 60;
+                var secondOfDay = (season.DawnMinute * 60) + ScaleTicks(
+                    tickOfDay,
+                    season.TicksPerDay,
+                    24 * 60 * 60);
+                secondOfDay %= 24 * 60 * 60;
                 var dayProgress = (double)tickOfDay / season.TicksPerDay;
                 return new SimulationCalendarSnapshot(
                     checked((int)(year * climate.DaysPerYear) + elapsedSeasonDays + dayIndex),
                     dayIndex + 1,
                     season.Season,
-                    minuteOfDay / 60,
-                    minuteOfDay % 60,
+                    secondOfDay / (60 * 60),
+                    secondOfDay / 60 % 60,
+                    secondOfDay % 60,
                     isNight,
                     tickOfDay == 0,
                     tickOfDay,
@@ -210,6 +228,6 @@ public static class SimulationCalendar
         return new SimulationTick(checked(tick.Value + calendar.TicksInDay - calendar.TickOfDay));
     }
 
-    private static int ScaleTicksToMinutes(int tick, int ticksInSegment, int clockMinutes) =>
-        checked((int)((long)tick * clockMinutes / ticksInSegment));
+    private static int ScaleTicks(int tick, int ticksInSegment, int clockUnits) =>
+        checked((int)((long)tick * clockUnits / ticksInSegment));
 }

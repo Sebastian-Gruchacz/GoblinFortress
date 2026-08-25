@@ -49,8 +49,8 @@ alignment = 1
 theme_override_constants/separation = 10
 
 [node name="Clock" type="Label" parent="Interface/Calendar/Controls"]
-custom_minimum_size = Vector2(126, 0)
-text = "05:00 • dzień 1"
+custom_minimum_size = Vector2(148, 0)
+text = "05:00:00 • dzień 1"
 horizontal_alignment = 1
 
 [node name="SeasonName" type="Label" parent="Interface/Calendar/Controls"]

@@ -113,7 +113,8 @@ public sealed partial class SimulationEngine
                 {
                     // Deliberate site clearance removes a renewable food source permanently.
                 }
-                else if (activeExplorers < Definitions.MaximumExplorers &&
+                else if (IsBackgroundPlanningTick(actor) &&
+                         activeExplorers < Definitions.MaximumExplorers &&
                          TryPlanExploreJob(actor))
                 {
                     activeExplorers++;
@@ -948,6 +949,12 @@ public sealed partial class SimulationEngine
         ISet<GridPosition> reservedTargets,
         bool requireDesignation)
     {
+        if (requireDesignation && !_workDesignations.Values.Any(designation =>
+                designation.Kind == WorkDesignationKind.GatherFood))
+        {
+            return false;
+        }
+
         var route = World.FindNearestHarvestablePlantPath(
             actor.Position,
             reservedTargets,
@@ -971,6 +978,12 @@ public sealed partial class SimulationEngine
         ActorState actor,
         ISet<GridPosition> reservedTargets)
     {
+        if (!_workDesignations.Values.Any(designation =>
+                designation.Kind == WorkDesignationKind.UprootBerryBush))
+        {
+            return false;
+        }
+
         var route = World.FindNearestBerryBushPath(
             actor.Position,
             reservedTargets,
@@ -1364,16 +1377,36 @@ public sealed partial class SimulationEngine
                 continue;
             }
 
+            var isDesignatedBrushwood = source.Location.Kind == ItemLocationKind.Ground &&
+                source.Resource == ResourceKind.Wood &&
+                IsWorkDesignated(
+                    WorkDesignationKind.GatherBrushwood,
+                    source.Id,
+                    source.Location.Position);
+            var candidateZones = _storageZones.Values.Where(zone =>
+                         ZoneAccepts(zone, source.Resource) &&
+                         CanStoreStack(zone, source, 1) &&
+                         (requiredDestination is null || zone.Id == requiredDestination.Value))
+                .Where(zone =>
+                {
+                    var stored = GetStoredQuantity(zone.Id);
+                    var reservedDestination = destinationReservations.GetValueOrDefault(zone.Id);
+                    return isDesignatedBrushwood ||
+                        zone.DesiredQuantity > stored + reservedDestination;
+                })
+                .ToArray();
+            if (candidateZones.Length == 0)
+            {
+                continue;
+            }
+
             var routeToSource = World.FindSurfacePath(actor.Position, source.Location.Position);
             if (routeToSource is null)
             {
                 continue;
             }
 
-            foreach (var zone in _storageZones.Values.Where(zone =>
-                         ZoneAccepts(zone, source.Resource) &&
-                         CanStoreStack(zone, source, 1) &&
-                         (requiredDestination is null || zone.Id == requiredDestination.Value)))
+            foreach (var zone in candidateZones)
             {
                 if (source.Location.Kind == ItemLocationKind.StorageZone &&
                     source.Location.OwnerId == zone.Id)
@@ -1382,18 +1415,7 @@ public sealed partial class SimulationEngine
                 }
                 var stored = GetStoredQuantity(zone.Id);
                 var reservedDestination = destinationReservations.GetValueOrDefault(zone.Id);
-                var isDesignatedBrushwood = source.Location.Kind == ItemLocationKind.Ground &&
-                    source.Resource == ResourceKind.Wood &&
-                    IsWorkDesignated(
-                        WorkDesignationKind.GatherBrushwood,
-                        source.Id,
-                        source.Location.Position);
                 var isPulledByStorage = zone.DesiredQuantity > stored + reservedDestination;
-                if (!isDesignatedBrushwood && !isPulledByStorage)
-                {
-                    continue;
-                }
-
                 var destinationLimit = isDesignatedBrushwood
                     ? zone.Capacity
                     : Math.Min(zone.Capacity, zone.DesiredQuantity);
@@ -1445,6 +1467,12 @@ public sealed partial class SimulationEngine
         destinationReservations[plan.DestinationZoneId] = checked(
             destinationReservations.GetValueOrDefault(plan.DestinationZoneId) + plan.Quantity);
         return true;
+    }
+
+    private bool IsBackgroundPlanningTick(ActorState actor)
+    {
+        var interval = Definitions.ActorMovementIntervalTicks;
+        return CurrentTick.Value % interval == (long)(actor.Id.Value % (ulong)interval);
     }
 
     private void RemoveExhaustedWorkDesignations()

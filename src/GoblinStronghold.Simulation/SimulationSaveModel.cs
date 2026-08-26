@@ -34,9 +34,13 @@ internal sealed class SimulationSaveModel
 
     public int RaidRallyZ { get; set; }
 
+    public List<ulong> RaidPartyIds { get; set; } = [];
+
     public List<PlantPatchSaveModel> PlantPatches { get; set; } = [];
 
     public List<WorldObjectSaveModel> WorldObjects { get; set; } = [];
+
+    public List<GridPositionSaveModel> ExcavatedCaveCells { get; set; } = [];
 
     public HumanVillageSaveModel HumanVillage { get; set; } = new();
 
@@ -209,6 +213,8 @@ internal sealed class ActorSaveModel
 
     public Resources.FoodKind PersonalFoodKind { get; set; }
 
+    public List<Resources.FoodKind>? PersonalFoodKinds { get; set; }
+
     public int PersonalWater { get; set; }
 
     public int X { get; set; }
@@ -267,6 +273,8 @@ internal sealed class ItemStackSaveModel
 
     public Resources.FoodKind FoodKind { get; set; }
 
+    public Resources.ResourceVariant Variant { get; set; }
+
     public int Quantity { get; set; }
 
     public Resources.ItemLocationKind LocationKind { get; set; }
@@ -301,6 +309,16 @@ internal sealed class StorageZoneSaveModel
     public ulong SourceStorageZoneId { get; set; }
 
     public Resources.StoragePriority Priority { get; set; }
+
+    public Resources.MineralStorageFilter? MineralFilter { get; set; }
+
+    public int? SlotCount { get; set; }
+
+    public int? StackCapacity { get; set; }
+
+    public bool? SeparatesItemTypes { get; set; }
+
+    public Resources.StorageCapability? Capabilities { get; set; }
 }
 
 internal sealed class WorkDesignationSaveModel
@@ -335,6 +353,8 @@ internal sealed class ConstructionSiteSaveModel
     public int EndY { get; set; }
 
     public int EndZ { get; set; }
+
+    public Resources.ResourceKind? RequiredResource { get; set; }
 
     public int RequiredWood { get; set; }
 

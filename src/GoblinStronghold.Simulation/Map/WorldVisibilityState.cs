@@ -32,7 +32,9 @@ public sealed class WorldVisibilityState
     internal static WorldVisibilityState Create(GeneratedMap map)
     {
         ArgumentNullException.ThrowIfNull(map);
-        return new WorldVisibilityState(map, new CellVisibility[map.CellCount]);
+        return new WorldVisibilityState(
+            map,
+            new CellVisibility[checked(map.CellCount * (map.CaveLevelCount + 1))]);
     }
 
     internal static WorldVisibilityState Restore(
@@ -42,9 +44,16 @@ public sealed class WorldVisibilityState
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(visibility);
         var cells = visibility.ToArray();
-        if (cells.Length != map.CellCount || cells.Any(state => !Enum.IsDefined(state)))
+        var expectedLength = checked(map.CellCount * (map.CaveLevelCount + 1));
+        if (cells.Any(state => !Enum.IsDefined(state)) ||
+            cells.Length != map.CellCount && cells.Length != expectedLength)
         {
             throw new InvalidDataException("The save contains invalid fog-of-war state.");
+        }
+
+        if (cells.Length == map.CellCount && expectedLength != map.CellCount)
+        {
+            Array.Resize(ref cells, expectedLength);
         }
 
         return new WorldVisibilityState(map, cells);
@@ -52,7 +61,7 @@ public sealed class WorldVisibilityState
 
     public CellVisibility Get(GridPosition position)
     {
-        if (!Map.IsWithin(position))
+        if (!IsVisibilityPosition(position))
         {
             throw new ArgumentOutOfRangeException(nameof(position));
         }
@@ -98,7 +107,7 @@ public sealed class WorldVisibilityState
                     var distanceSquared = checked(
                         ((x - observer.X) * (x - observer.X)) +
                         ((y - observer.Y) * (y - observer.Y)));
-                    if (distanceSquared <= radiusSquared && Map.IsWithin(position))
+                    if (distanceSquared <= radiusSquared && IsVisibilityPosition(position))
                     {
                         _cells[GetIndex(position)] = CellVisibility.Visible;
                     }
@@ -107,5 +116,9 @@ public sealed class WorldVisibilityState
         }
     }
 
-    private int GetIndex(GridPosition position) => checked((position.Y * Map.Width) + position.X);
+    private bool IsVisibilityPosition(GridPosition position) =>
+        Map.IsWithin(position) || Map.IsCavePosition(position);
+
+    private int GetIndex(GridPosition position) => checked(
+        ((-position.Z) * Map.CellCount) + (position.Y * Map.Width) + position.X);
 }

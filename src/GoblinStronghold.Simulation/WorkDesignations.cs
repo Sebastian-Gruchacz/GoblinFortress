@@ -10,6 +10,7 @@ public enum WorkDesignationKind : byte
     FellTree = 4,
     GatherStone = 5,
     QuarryBoulder = 6,
+    MineRock = 7,
 }
 
 public readonly record struct WorkDesignationSnapshot(

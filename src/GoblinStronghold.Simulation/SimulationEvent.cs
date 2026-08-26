@@ -33,6 +33,7 @@ public enum SimulationEventKind
     StoragePriorityConfigured = 29,
     ResourcePriorityConfigured = 30,
     ConstructionPriorityConfigured = 31,
+    StorageMineralFilterConfigured = 32,
 }
 
 public readonly record struct SimulationEvent(
@@ -41,4 +42,7 @@ public readonly record struct SimulationEvent(
     SimulationEventKind Kind,
     EntityId Subject,
     EntityId Target,
-    int Amount);
+    int Amount)
+{
+    public ConstructionKind? Construction { get; init; }
+}

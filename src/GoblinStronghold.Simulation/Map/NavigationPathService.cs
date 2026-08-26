@@ -32,7 +32,8 @@ public sealed class NavigationPathService
     {
         EnsureCurrentTopology();
         _requests = checked(_requests + 1);
-        var key = new PathKey(start, destination, canOpenDoors);
+        var terrain = start.Z != 0 || destination.Z != 0;
+        var key = new PathKey(start, destination, canOpenDoors, terrain);
         if (_routeCache.TryGetValue(key, out var cached))
         {
             _cacheHits = checked(_cacheHits + 1);
@@ -40,7 +41,9 @@ public sealed class NavigationPathService
         }
 
         _searches = checked(_searches + 1);
-        var route = _world.FindSurfacePath(start, destination, canOpenDoors)?.ToArray();
+        var route = (terrain
+            ? _world.FindTerrainPath(start, destination, canOpenDoors)
+            : _world.FindSurfacePath(start, destination, canOpenDoors))?.ToArray();
         if (_routeCache.Count >= MaximumCachedRoutes)
         {
             _routeCache.Clear();
@@ -49,6 +52,34 @@ public sealed class NavigationPathService
         _routeCache.Add(key, route);
         return route;
     }
+
+    public IReadOnlyList<GridPosition>? FindPath(
+        GridPosition start,
+        GridPosition destination,
+        bool canOpenDoors = true)
+    {
+        EnsureCurrentTopology();
+        _requests = checked(_requests + 1);
+        var key = new PathKey(start, destination, canOpenDoors, Terrain: true);
+        if (_routeCache.TryGetValue(key, out var cached))
+        {
+            _cacheHits = checked(_cacheHits + 1);
+            return cached;
+        }
+
+        _searches = checked(_searches + 1);
+        var route = _world.FindTerrainPath(start, destination, canOpenDoors)?.ToArray();
+        if (_routeCache.Count >= MaximumCachedRoutes)
+        {
+            _routeCache.Clear();
+            _cacheInvalidations = checked(_cacheInvalidations + 1);
+        }
+        _routeCache.Add(key, route);
+        return route;
+    }
+
+    public bool HasPath(GridPosition start, GridPosition destination) =>
+        FindPath(start, destination) is not null;
 
     public bool HasSurfacePath(GridPosition start, GridPosition destination) =>
         FindSurfacePath(start, destination) is not null;
@@ -110,5 +141,6 @@ public sealed class NavigationPathService
     private readonly record struct PathKey(
         GridPosition Start,
         GridPosition Destination,
-        bool CanOpenDoors);
+        bool CanOpenDoors,
+        bool Terrain);
 }

@@ -136,7 +136,9 @@ public static class SwampMapValidator
                 {
                     var position = new GridPosition(x, y, z);
                     var cell = map.GetCaveCell(position);
-                    if (!Enum.IsDefined(cell.Rock) || !Enum.IsDefined(cell.Kind))
+                    if (!Enum.IsDefined(cell.Rock) ||
+                        !Enum.IsDefined(cell.Kind) ||
+                        !Enum.IsDefined(cell.Deposit))
                     {
                         errors.Add("Cave cells must use known rock materials and spatial kinds.");
                         return;

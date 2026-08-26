@@ -20,6 +20,7 @@ public enum ActorJobKind : byte
     Collapsed = 11,
     FellTree = 12,
     QuarryBoulder = 13,
+    MineRock = 14,
 }
 
 public enum ActorJobStage : byte
@@ -125,6 +126,44 @@ public enum PersonalEquipment : ushort
     PrimitivePickaxe = 1 << 4,
 }
 
+public sealed class PersonalFoodContentsSnapshot : IReadOnlyList<FoodKind>,
+    IEquatable<PersonalFoodContentsSnapshot>
+{
+    private readonly FoodKind[] _items;
+
+    public PersonalFoodContentsSnapshot(IEnumerable<FoodKind> items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        _items = items.ToArray();
+    }
+
+    public int Count => _items.Length;
+
+    public FoodKind this[int index] => _items[index];
+
+    public bool Equals(PersonalFoodContentsSnapshot? other) =>
+        other is not null && _items.SequenceEqual(other._items);
+
+    public override bool Equals(object? obj) =>
+        obj is PersonalFoodContentsSnapshot other && Equals(other);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        foreach (var item in _items)
+        {
+            hash.Add(item);
+        }
+        return hash.ToHashCode();
+    }
+
+    public IEnumerator<FoodKind> GetEnumerator() =>
+        ((IEnumerable<FoodKind>)_items).GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+        _items.GetEnumerator();
+}
+
 public readonly record struct ActorSnapshot(
     EntityId Id,
     string Name,
@@ -140,6 +179,7 @@ public readonly record struct ActorSnapshot(
     int Thirst,
     int PersonalFood,
     FoodKind PersonalFoodKind,
+    PersonalFoodContentsSnapshot PersonalFoodKinds,
     int PersonalWater,
     EntityId CarriedStackId,
     ActorJobSnapshot Job,
@@ -293,7 +333,9 @@ public sealed class SimulationSnapshot
         HumanVillageSnapshot humanVillage,
         GoblinRaidPhase raidPhase,
         GridPosition raidRallyPoint,
+        EntityId[] raidPartyIds,
         CellVisibility[] visibility,
+        int visibilityLayerCellCount,
         ulong worldVersion,
         int mapGeneratorVersion,
         string mapFingerprint,
@@ -314,7 +356,9 @@ public sealed class SimulationSnapshot
         HumanVillage = humanVillage;
         RaidPhase = raidPhase;
         RaidRallyPoint = raidRallyPoint;
+        RaidPartyIds = new ReadOnlyCollection<EntityId>(raidPartyIds);
         Visibility = new ReadOnlyCollection<CellVisibility>(visibility);
+        VisibilityLayerCellCount = visibilityLayerCellCount;
         WorldVersion = worldVersion;
         MapGeneratorVersion = mapGeneratorVersion;
         MapFingerprint = mapFingerprint;
@@ -351,10 +395,16 @@ public sealed class SimulationSnapshot
 
     public GridPosition RaidRallyPoint { get; }
 
+    public IReadOnlyList<EntityId> RaidPartyIds { get; }
+
     public IReadOnlyList<CellVisibility> Visibility { get; }
 
+    public int VisibilityLayerCellCount { get; }
+
     public CellVisibility GetVisibility(GridPosition position, int mapWidth) =>
-        Visibility[checked((position.Y * mapWidth) + position.X)];
+        Visibility[checked(
+            (Math.Max(0, -position.Z) * VisibilityLayerCellCount) +
+            (position.Y * mapWidth) + position.X)];
 
     public ulong WorldVersion { get; }
 

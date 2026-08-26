@@ -65,7 +65,16 @@ internal static class ItemIcons
         ResourceKind.Wood => ItemIcon.Wood,
         ResourceKind.Reeds => ItemIcon.Reeds,
         ResourceKind.Stone => ItemIcon.Stone,
+        ResourceKind.Coal => ItemIcon.Stone,
+        ResourceKind.Ore => ItemIcon.Stone,
         ResourceKind.Bone => ItemIcon.Bone,
         _ => ItemIcon.Unknown,
+    };
+
+    public static Color TintForResource(ResourceKind resource) => resource switch
+    {
+        ResourceKind.Coal => new Color("5f6468"),
+        ResourceKind.Ore => new Color("d9783d"),
+        _ => Colors.White,
     };
 }

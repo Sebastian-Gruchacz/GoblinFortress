@@ -265,6 +265,34 @@ public sealed class SwampMapGeneratorTests
     }
 
     [Fact]
+    public void CurrentCavesContainClusteredCoalAndIronDepositsOnlyInSolidRock()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x5645494E53UL), 64, 64);
+        var caveCells = Enumerable.Range(1, map.CaveLevelCount)
+            .SelectMany(level => Enumerable.Range(0, map.Height)
+                .SelectMany(y => Enumerable.Range(0, map.Width)
+                    .Select(x => map.GetCaveCell(new GridPosition(x, y, -level)))))
+            .ToArray();
+
+        Assert.Contains(caveCells, cell => cell.Deposit == MineralDepositKind.Coal);
+        Assert.Contains(caveCells, cell => cell.Deposit == MineralDepositKind.IronOre);
+        Assert.All(caveCells.Where(cell => cell.Deposit != MineralDepositKind.None), cell =>
+            Assert.Equal(CaveCellKind.SolidRock, cell.Kind));
+
+        var historical = SwampMapGenerator.Generate(
+            new WorldSeed(0x5645494E53UL),
+            64,
+            64,
+            generatorVersion: 7);
+        Assert.DoesNotContain(
+            Enumerable.Range(1, historical.CaveLevelCount)
+                .SelectMany(level => Enumerable.Range(0, historical.Height)
+                    .SelectMany(y => Enumerable.Range(0, historical.Width)
+                        .Select(x => historical.GetCaveCell(new GridPosition(x, y, -level))))),
+            cell => cell.Deposit != MineralDepositKind.None);
+    }
+
+    [Fact]
     public void GeneratorVersionFiveKeepsWorldWithoutMaterializedCaves()
     {
         var map = SwampMapGenerator.Generate(

@@ -77,6 +77,30 @@ public sealed class WallEnclosureAnalysisTests
     }
 
     [Fact]
+    public void ClosedRectangleCanBeAnalyzedOnAnUndergroundLevel()
+    {
+        const int level = -1;
+        var barriers = RectanglePerimeter(left: 2, top: 2, width: 5, height: 4)
+            .Select(position => position with { Z = level })
+            .ToHashSet();
+
+        var analysis = WallEnclosureAnalysis.Analyze(
+            10,
+            9,
+            barriers,
+            level: level);
+
+        Assert.Equal(6, analysis.InteriorCells.Count);
+        Assert.All(analysis.InteriorCells, position => Assert.Equal(level, position.Z));
+        Assert.Equal(
+            WallInteriorFacing.South,
+            analysis.GetInteriorFacing(new GridPosition(4, 2, level)));
+        Assert.Equal(
+            WallInteriorFacing.North,
+            analysis.GetInteriorFacing(new GridPosition(4, 5, level)));
+    }
+
+    [Fact]
     public void WallMountUsesTheOnlyRoomFacingSide()
     {
         var wall = new WallRenderSides(

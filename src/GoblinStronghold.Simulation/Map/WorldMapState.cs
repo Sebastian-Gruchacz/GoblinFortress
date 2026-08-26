@@ -21,6 +21,7 @@ public enum WorldChangeKind : byte
     StumpHarvested = 6,
     DoorToggled = 7,
     BoulderQuarried = 8,
+    RockExcavated = 9,
 }
 
 public readonly record struct PlantPatchSnapshot(
@@ -41,19 +42,22 @@ public sealed class WorldMapState
     private readonly SortedDictionary<int, PlantPatchState> _plantPatches;
     private readonly SortedDictionary<WorldObjectId, WorldObjectSnapshot> _worldObjects;
     private readonly Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> _occupancy;
+    private readonly HashSet<GridPosition> _excavatedCaveCells;
 
     private WorldMapState(
         GeneratedMap baseline,
         ulong version,
         SortedDictionary<int, PlantPatchState> plantPatches,
         SortedDictionary<WorldObjectId, WorldObjectSnapshot> worldObjects,
-        Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> occupancy)
+        Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> occupancy,
+        IEnumerable<GridPosition>? excavatedCaveCells = null)
     {
         Baseline = baseline;
         Version = version;
         _plantPatches = plantPatches;
         _worldObjects = worldObjects;
         _occupancy = occupancy;
+        _excavatedCaveCells = excavatedCaveCells?.ToHashSet() ?? [];
     }
 
     public GeneratedMap Baseline { get; }
@@ -65,6 +69,8 @@ public sealed class WorldMapState
     public int PlantPatchCount => _plantPatches.Count;
 
     public int WorldObjectCount => _worldObjects.Count;
+
+    public IReadOnlyCollection<GridPosition> ExcavatedCaveCells => _excavatedCaveCells;
 
     internal static WorldMapState CreateInitial(GeneratedMap baseline)
     {
@@ -119,7 +125,8 @@ public sealed class WorldMapState
         GeneratedMap baseline,
         ulong version,
         IEnumerable<PlantPatchSnapshot> plantPatches,
-        IEnumerable<WorldObjectSnapshot> worldObjects)
+        IEnumerable<WorldObjectSnapshot> worldObjects,
+        IEnumerable<GridPosition>? excavatedCaveCells = null)
     {
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(plantPatches);
@@ -147,8 +154,23 @@ public sealed class WorldMapState
             }
         }
 
+        var excavated = excavatedCaveCells?.ToArray() ?? [];
+        if (excavated.Any(position =>
+                !baseline.IsCavePosition(position) ||
+                baseline.GetCaveCell(position).Kind != CaveCellKind.SolidRock) ||
+            excavated.Distinct().Count() != excavated.Length)
+        {
+            throw new InvalidDataException("The save contains invalid excavated cave cells.");
+        }
+
         var (restoredObjects, occupancy) = ValidateAndIndexObjects(baseline, worldObjects);
-        return new WorldMapState(baseline, version, restored, restoredObjects, occupancy);
+        return new WorldMapState(
+            baseline,
+            version,
+            restored,
+            restoredObjects,
+            occupancy,
+            excavated);
     }
 
     public PlantPatchSnapshot? GetPlantPatch(GridPosition position)
@@ -238,6 +260,130 @@ public sealed class WorldMapState
         return solidIsTraversable && fixtureIsReachable;
     }
 
+    public bool IsTerrainReachable(GridPosition position) => position.Z switch
+    {
+        0 => IsSurfaceReachable(position),
+        < 0 => Baseline.IsCavePosition(position) &&
+            (Baseline.GetCaveCell(position).IsOpen || _excavatedCaveCells.Contains(position)) &&
+            IsSpatiallyReachable(position),
+        _ => false,
+    };
+
+    public bool IsTerrainTraversable(GridPosition position) => position.Z switch
+    {
+        0 => IsSurfaceTraversable(position),
+        < 0 => IsTerrainReachable(position) && !HasClosedDoorLeaf(position),
+        _ => false,
+    };
+
+    private bool IsSpatiallyReachable(GridPosition position)
+    {
+        var solidIsReachable = !_occupancy.TryGetValue(
+                new SpatialOccupancyKey(position, SpatialOccupancyChannel.Solid),
+                out var solidClaim) ||
+            solidClaim.PartKind == WorldObjectPartKind.Door;
+        var fixtureIsReachable = !_occupancy.TryGetValue(
+                new SpatialOccupancyKey(position, SpatialOccupancyChannel.Fixture),
+                out var fixtureClaim) ||
+            fixtureClaim.PartKind is WorldObjectPartKind.OpenDoorLeaf or
+                WorldObjectPartKind.ClosedDoorLeaf or
+                WorldObjectPartKind.AutomaticallyOpenedDoorLeaf;
+        return solidIsReachable && fixtureIsReachable;
+    }
+
+    private bool HasClosedDoorLeaf(GridPosition position) =>
+        _occupancy.TryGetValue(
+            new SpatialOccupancyKey(position, SpatialOccupancyChannel.Fixture),
+            out var fixtureClaim) &&
+        fixtureClaim.PartKind == WorldObjectPartKind.ClosedDoorLeaf;
+
+    public IEnumerable<GridPosition> GetTerrainNeighbors(
+        GridPosition position,
+        bool canOpenDoors = false)
+    {
+        Func<GridPosition, bool> canTraverse = canOpenDoors
+            ? IsTerrainReachable
+            : IsTerrainTraversable;
+        if (!canTraverse(position))
+        {
+            yield break;
+        }
+
+        foreach (var neighbor in GetCardinalWorldNeighbors(position))
+        {
+            if (!canTraverse(neighbor) ||
+                position.Z == 0 && !Baseline.CanTraverseSurfaceEdge(position, neighbor))
+            {
+                continue;
+            }
+
+            yield return neighbor;
+        }
+
+        foreach (var passage in Baseline.VerticalPassages)
+        {
+            var neighbor = passage.Upper == position
+                ? passage.Lower
+                : passage.Lower == position
+                    ? passage.Upper
+                    : (GridPosition?)null;
+            if (neighbor.HasValue && canTraverse(neighbor.Value))
+            {
+                yield return neighbor.Value;
+            }
+        }
+    }
+
+    public bool CanTraverseTerrainEdge(
+        GridPosition from,
+        GridPosition to,
+        bool canOpenDoors = false) =>
+        GetTerrainNeighbors(from, canOpenDoors).Contains(to);
+
+    public IReadOnlyList<GridPosition>? FindTerrainPath(
+        GridPosition start,
+        GridPosition destination,
+        bool canOpenDoors = false)
+    {
+        Func<GridPosition, bool> canTraverse = canOpenDoors
+            ? IsTerrainReachable
+            : IsTerrainTraversable;
+        if (!IsTerrainTraversable(start) || !canTraverse(destination))
+        {
+            return null;
+        }
+
+        var visited = new HashSet<GridPosition> { start };
+        var predecessors = new Dictionary<GridPosition, GridPosition>();
+        var queue = new Queue<GridPosition>();
+        queue.Enqueue(start);
+        while (queue.TryDequeue(out var current))
+        {
+            if (current == destination)
+            {
+                var route = new List<GridPosition>();
+                while (current != start)
+                {
+                    route.Add(current);
+                    current = predecessors[current];
+                }
+                route.Reverse();
+                return route;
+            }
+
+            foreach (var neighbor in GetTerrainNeighbors(current, canOpenDoors))
+            {
+                if (visited.Add(neighbor))
+                {
+                    predecessors[neighbor] = current;
+                    queue.Enqueue(neighbor);
+                }
+            }
+        }
+
+        return null;
+    }
+
     public bool CanBuildWalkway(IReadOnlyList<GridPosition> positions)
     {
         ArgumentNullException.ThrowIfNull(positions);
@@ -287,11 +433,8 @@ public sealed class WorldMapState
     }
 
     public bool CanBuildWoodenBarrier(GridPosition anchor) =>
-        anchor.Z == 0 &&
-        Baseline.IsWithin(anchor) &&
-        Baseline.GetCell(anchor).IsTraversable &&
-        !_occupancy.Keys.Any(key =>
-            key.Position.X == anchor.X && key.Position.Y == anchor.Y);
+        (anchor.Z == 0 ? IsSurfaceTraversable(anchor) : IsTerrainTraversable(anchor)) &&
+        !_occupancy.Keys.Any(key => key.Position == anchor);
 
     public bool CanBuildWoodenWalls(IReadOnlyList<GridPosition> positions)
     {
@@ -301,7 +444,16 @@ public sealed class WorldMapState
             positions.All(CanBuildWoodenBarrier);
     }
 
+    public bool CanBuildStoneWalls(IReadOnlyList<GridPosition> positions) =>
+        CanBuildWoodenWalls(positions);
+
     public bool CanBuildWoodenDoorFrame(GridPosition anchor)
+        => CanBuildDoorFrame(anchor, WorldObjectKind.WoodenWall);
+
+    public bool CanBuildStoneDoorFrame(GridPosition anchor)
+        => CanBuildDoorFrame(anchor, WorldObjectKind.StoneWall);
+
+    private bool CanBuildDoorFrame(GridPosition anchor, WorldObjectKind replaceableWallKind)
     {
         if (CanBuildWoodenBarrier(anchor))
         {
@@ -309,22 +461,26 @@ public sealed class WorldMapState
         }
 
         var claims = _occupancy
-            .Where(item =>
-                item.Key.Position.X == anchor.X &&
-                item.Key.Position.Y == anchor.Y)
+            .Where(item => item.Key.Position == anchor)
             .ToArray();
-        return anchor.Z == 0 &&
-            Baseline.IsWithin(anchor) &&
-            Baseline.GetCell(anchor).IsTraversable &&
+        return HasOpenUnderlyingTerrain(anchor) &&
             claims.Length == 1 &&
             claims[0].Key.Position == anchor &&
             claims[0].Key.Channel == SpatialOccupancyChannel.Solid &&
             claims[0].Value.PartKind == WorldObjectPartKind.Wall &&
             _worldObjects.TryGetValue(claims[0].Value.ObjectId, out var worldObject) &&
-            worldObject.Kind == WorldObjectKind.WoodenWall &&
+            worldObject.Kind == replaceableWallKind &&
             worldObject.Anchor == anchor &&
             worldObject.Parts.Count == 1;
     }
+
+    private bool HasOpenUnderlyingTerrain(GridPosition position) => position.Z switch
+    {
+        0 => Baseline.IsWithin(position) && Baseline.GetCell(position).IsTraversable,
+        < 0 => Baseline.IsCavePosition(position) &&
+            (Baseline.GetCaveCell(position).IsOpen || _excavatedCaveCells.Contains(position)),
+        _ => false,
+    };
 
     internal WorldChangeEvent BuildWoodenWalls(
         IReadOnlyList<GridPosition> positions,
@@ -353,7 +509,46 @@ public sealed class WorldMapState
             _occupancy.Add(
                 new SpatialOccupancyKey(position, SpatialOccupancyChannel.Solid),
                 new SpatialOccupancyClaim(id, WorldObjectPartKind.Wall));
-            _plantPatches.Remove(GetIndex(Baseline, position));
+            if (position.Z == 0)
+            {
+                _plantPatches.Remove(GetIndex(Baseline, position));
+            }
+        }
+
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, positions[0], positions.Count);
+    }
+
+    internal WorldChangeEvent BuildStoneWalls(
+        IReadOnlyList<GridPosition> positions,
+        SimulationTick tick)
+    {
+        if (!CanBuildStoneWalls(positions))
+        {
+            throw new InvalidOperationException("The stone wall placement is invalid.");
+        }
+
+        var nextId = _worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1);
+        _ = checked(nextId + (ulong)positions.Count - 1);
+        foreach (var position in positions)
+        {
+            var id = new WorldObjectId(nextId++);
+            var worldObject = new WorldObjectSnapshot(
+                id,
+                WorldObjectKind.StoneWall,
+                WorldObjectOwner.GoblinTribe,
+                position,
+                CardinalOrientation.North,
+                [new(default, SpatialOccupancyChannel.Solid, WorldObjectPartKind.Wall)]);
+            _worldObjects.Add(id, worldObject);
+            _occupancy.Add(
+                new SpatialOccupancyKey(position, SpatialOccupancyChannel.Solid),
+                new SpatialOccupancyClaim(id, WorldObjectPartKind.Wall));
+            if (position.Z == 0)
+            {
+                _plantPatches.Remove(GetIndex(Baseline, position));
+            }
         }
 
         return CreateChange(tick, WorldChangeKind.StructureBuilt, positions[0], positions.Count);
@@ -361,11 +556,29 @@ public sealed class WorldMapState
 
     internal WorldChangeEvent BuildWoodenDoorFrame(
         GridPosition anchor,
-        SimulationTick tick)
+        SimulationTick tick) => BuildDoorFrame(
+            anchor,
+            tick,
+            WorldObjectKind.WoodenWall,
+            WorldObjectKind.WoodenDoorFrame);
+
+    internal WorldChangeEvent BuildStoneDoorFrame(
+        GridPosition anchor,
+        SimulationTick tick) => BuildDoorFrame(
+            anchor,
+            tick,
+            WorldObjectKind.StoneWall,
+            WorldObjectKind.StoneDoorFrame);
+
+    private WorldChangeEvent BuildDoorFrame(
+        GridPosition anchor,
+        SimulationTick tick,
+        WorldObjectKind replaceableWallKind,
+        WorldObjectKind frameKind)
     {
-        if (!CanBuildWoodenDoorFrame(anchor))
+        if (!CanBuildDoorFrame(anchor, replaceableWallKind))
         {
-            throw new InvalidOperationException("The wooden door-frame placement is invalid.");
+            throw new InvalidOperationException("The door-frame placement is invalid.");
         }
 
         WorldObjectId id;
@@ -375,7 +588,7 @@ public sealed class WorldMapState
             new SpatialOccupancyKey(anchor, SpatialOccupancyChannel.Solid));
         if (existingClaim.PartKind == WorldObjectPartKind.Wall &&
             _worldObjects.TryGetValue(existingClaim.ObjectId, out var existingWall) &&
-            existingWall.Kind == WorldObjectKind.WoodenWall)
+            existingWall.Kind == replaceableWallKind)
         {
             id = existingWall.Id;
             replacesExistingWall = true;
@@ -390,7 +603,7 @@ public sealed class WorldMapState
 
         var worldObject = new WorldObjectSnapshot(
             id,
-            WorldObjectKind.WoodenDoorFrame,
+            frameKind,
             WorldObjectOwner.GoblinTribe,
             anchor,
             ResolveWallMountSide(anchor, preferredSide),
@@ -407,13 +620,16 @@ public sealed class WorldMapState
             _worldObjects.Add(id, worldObject);
             _occupancy.Add(occupancyKey, occupancyClaim);
         }
-        _plantPatches.Remove(GetIndex(Baseline, anchor));
+        if (anchor.Z == 0)
+        {
+            _plantPatches.Remove(GetIndex(Baseline, anchor));
+        }
         return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 1);
     }
 
     public bool CanBuildWoodenDoor(GridPosition anchor)
     {
-        if (anchor.Z != 0 || !Baseline.IsWithin(anchor) ||
+        if (!IsTerrainReachable(anchor) ||
             _occupancy.ContainsKey(new SpatialOccupancyKey(
                 anchor,
                 SpatialOccupancyChannel.Fixture)) ||
@@ -426,7 +642,8 @@ public sealed class WorldMapState
             return false;
         }
 
-        return frame.Kind == WorldObjectKind.WoodenDoorFrame && frame.Anchor == anchor;
+        return frame.Kind is (WorldObjectKind.WoodenDoorFrame or
+            WorldObjectKind.StoneDoorFrame) && frame.Anchor == anchor;
     }
 
     internal WorldChangeEvent BuildWoodenDoor(GridPosition anchor, SimulationTick tick)
@@ -454,31 +671,91 @@ public sealed class WorldMapState
         return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 1);
     }
 
+    public bool CanBuildWallTorch(GridPosition anchor)
+    {
+        if (_occupancy.ContainsKey(new SpatialOccupancyKey(
+                anchor,
+                SpatialOccupancyChannel.Fixture)) ||
+            !GetCardinalWorldNeighbors(anchor).Any(IsTerrainTraversable))
+        {
+            return false;
+        }
+
+        var hasBuiltWall = _occupancy.TryGetValue(
+                new SpatialOccupancyKey(anchor, SpatialOccupancyChannel.Solid),
+                out var wallClaim) &&
+            wallClaim.PartKind == WorldObjectPartKind.Wall &&
+            _worldObjects.TryGetValue(wallClaim.ObjectId, out var wall) &&
+            wall.Kind is WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall;
+        return hasBuiltWall || IsSolidCaveRock(anchor);
+    }
+
+    internal WorldChangeEvent BuildWallTorch(GridPosition anchor, SimulationTick tick)
+    {
+        if (!CanBuildWallTorch(anchor))
+        {
+            throw new InvalidOperationException("The wall-torch placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.WallTorch,
+            WorldObjectOwner.GoblinTribe,
+            anchor,
+            ResolveWallMountSide(anchor, CardinalOrientation.North),
+            [new(default, SpatialOccupancyChannel.Fixture, WorldObjectPartKind.WallTorch)]);
+        _worldObjects.Add(id, worldObject);
+        _occupancy.Add(
+            new SpatialOccupancyKey(anchor, SpatialOccupancyChannel.Fixture),
+            new SpatialOccupancyClaim(id, WorldObjectPartKind.WallTorch));
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 1);
+    }
+
     private CardinalOrientation ResolveWallMountSide(
         GridPosition anchor,
         CardinalOrientation preferredSide)
     {
         var barriers = _worldObjects.Values
             .Where(worldObject => worldObject.Kind is
-                WorldObjectKind.WoodenWall or WorldObjectKind.WoodenDoorFrame)
+                WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall or
+                WorldObjectKind.WoodenDoorFrame or WorldObjectKind.StoneDoorFrame)
             .Select(worldObject => worldObject.Anchor)
             .Where(position => position.Z == anchor.Z)
             .ToHashSet();
         barriers.Add(anchor);
         var structuralSolids = _worldObjects.Values
             .Where(worldObject => worldObject.Kind is not (
-                WorldObjectKind.WoodenWall or WorldObjectKind.WoodenDoorFrame or
+                WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall or
+                WorldObjectKind.WoodenDoorFrame or WorldObjectKind.StoneDoorFrame or
                 WorldObjectKind.WoodenDoorLeaf))
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(item => item.Position.Z == anchor.Z &&
                 item.Part.Kind == WorldObjectPartKind.Wall)
             .Select(item => item.Position)
             .ToHashSet();
+        if (anchor.Z < 0)
+        {
+            for (var y = 0; y < Baseline.Height; y++)
+            {
+                for (var x = 0; x < Baseline.Width; x++)
+                {
+                    var position = new GridPosition(x, y, anchor.Z);
+                    if (IsSolidCaveRock(position))
+                    {
+                        structuralSolids.Add(position);
+                    }
+                }
+            }
+        }
         var wall = WallEnclosureAnalysis.Analyze(
             Baseline.Width,
             Baseline.Height,
             barriers,
-            structuralSolids).GetWallSides(anchor);
+            structuralSolids,
+            anchor.Z).GetWallSides(anchor);
         if (WallMountPlacementResolver.TryResolve(
             wall,
             preferredSide,
@@ -1043,6 +1320,38 @@ public sealed class WorldMapState
         return true;
     }
 
+    public bool IsSolidCaveRock(GridPosition position) =>
+        Baseline.IsCavePosition(position) &&
+        Baseline.GetCaveCell(position).Kind == CaveCellKind.SolidRock &&
+        !_excavatedCaveCells.Contains(position);
+
+    public bool CanExcavateRock(GridPosition position) =>
+        IsSolidCaveRock(position) &&
+        GetCardinalWorldNeighbors(position).Any(IsTerrainTraversable);
+
+    internal bool TryExcavateRock(
+        GridPosition position,
+        SimulationTick tick,
+        out RockKind rock,
+        out MineralDepositKind deposit,
+        out WorldChangeEvent change)
+    {
+        if (!CanExcavateRock(position))
+        {
+            rock = default;
+            deposit = default;
+            change = default;
+            return false;
+        }
+
+        var cell = Baseline.GetCaveCell(position);
+        rock = cell.Rock;
+        deposit = cell.Deposit;
+        _excavatedCaveCells.Add(position);
+        change = CreateChange(tick, WorldChangeKind.RockExcavated, position, 1);
+        return true;
+    }
+
     internal IReadOnlyList<WorldChangeEvent> GrowPlants(
         SimulationTick tick,
         int growthPerPatch,
@@ -1221,11 +1530,19 @@ public sealed class WorldMapState
         Version = checked(Version + 1);
         if (kind is WorldChangeKind.StructureBuilt or WorldChangeKind.TreeFelled or
             WorldChangeKind.StumpHarvested or WorldChangeKind.DoorToggled or
-            WorldChangeKind.BoulderQuarried)
+            WorldChangeKind.BoulderQuarried or WorldChangeKind.RockExcavated)
         {
             TopologyVersion = checked(TopologyVersion + 1);
         }
         return new WorldChangeEvent(Version, tick, kind, position, amount);
+    }
+
+    public IEnumerable<GridPosition> GetCardinalWorldNeighbors(GridPosition position)
+    {
+        if (position.X > 0) yield return position with { X = position.X - 1 };
+        if (position.X + 1 < Baseline.Width) yield return position with { X = position.X + 1 };
+        if (position.Y > 0) yield return position with { Y = position.Y - 1 };
+        if (position.Y + 1 < Baseline.Height) yield return position with { Y = position.Y + 1 };
     }
 
     private static (
@@ -1244,7 +1561,13 @@ public sealed class WorldMapState
                 !Enum.IsDefined(worldObject.Kind) ||
                 !Enum.IsDefined(worldObject.Owner) ||
                 !Enum.IsDefined(worldObject.Orientation) ||
-                worldObject.Anchor.Z != 0 ||
+                (worldObject.Anchor.Z != 0 && worldObject.Kind is not (
+                    WorldObjectKind.WoodenWall or
+                    WorldObjectKind.StoneWall or
+                    WorldObjectKind.WoodenDoorFrame or
+                    WorldObjectKind.StoneDoorFrame or
+                    WorldObjectKind.WoodenDoorLeaf or
+                    WorldObjectKind.WallTorch)) ||
                 worldObject.Parts.Count == 0 ||
                 !restored.TryAdd(worldObject.Id, worldObject))
             {

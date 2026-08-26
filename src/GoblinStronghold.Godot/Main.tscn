@@ -193,6 +193,9 @@ custom_minimum_size = Vector2(48, 48)
 [node name="Work" type="Button" parent="Interface/ActionBar/Controls"]
 custom_minimum_size = Vector2(48, 48)
 
+[node name="Move" type="Button" parent="Interface/ActionBar/Controls"]
+custom_minimum_size = Vector2(48, 48)
+
 [node name="Raid" type="Button" parent="Interface/ActionBar/Controls"]
 custom_minimum_size = Vector2(48, 48)
 
@@ -398,6 +401,10 @@ theme_override_constants/separation = 12
 text = "Fizyczna zawartość wszystkich magazynów plemienia."
 autowrap_mode = 2
 
+[node name="Detailed" type="CheckButton" parent="StoredResourcesWindow/Margin/Content"]
+text = "Pokaż konkretne rodzaje"
+tooltip_text = "Rozdziela żywność, gatunki drewna i rodzaje kamienia."
+
 [node name="Grid" type="GridContainer" parent="StoredResourcesWindow/Margin/Content"]
 size_flags_vertical = 3
 columns = 5
@@ -428,6 +435,10 @@ theme_override_constants/separation = 12
 [node name="Summary" type="Label" parent="LooseResourcesWindow/Margin/Content"]
 text = "Znane towary leżące na ziemi. Nie wliczają się do zapasów magazynowych."
 autowrap_mode = 2
+
+[node name="Detailed" type="CheckButton" parent="LooseResourcesWindow/Margin/Content"]
+text = "Pokaż konkretne rodzaje"
+tooltip_text = "Rozdziela żywność, gatunki drewna i rodzaje kamienia."
 
 [node name="Grid" type="GridContainer" parent="LooseResourcesWindow/Margin/Content"]
 size_flags_vertical = 3
@@ -485,8 +496,8 @@ autowrap_mode = 2
 [node name="StorageDetails" type="Window" parent="."]
 title = "Ustawienia składu"
 initial_position = 1
-size = Vector2i(480, 470)
-min_size = Vector2i(430, 420)
+size = Vector2i(480, 570)
+min_size = Vector2i(430, 510)
 visible = false
 
 [node name="Margin" type="MarginContainer" parent="StorageDetails"]
@@ -506,6 +517,28 @@ theme_override_constants/separation = 10
 [node name="Summary" type="Label" parent="StorageDetails/Margin/Controls"]
 text = "Skład"
 autowrap_mode = 2
+
+[node name="MineralFilters" type="VBoxContainer" parent="StorageDetails/Margin/Controls"]
+visible = false
+tooltip_text = "Filtr dotyczy nowych dostaw. Towary już złożone pozostają na miejscu."
+
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/MineralFilters"]
+text = "Przyjmowany urobek:"
+
+[node name="Choices" type="GridContainer" parent="StorageDetails/Margin/Controls/MineralFilters"]
+columns = 2
+
+[node name="Sandstone" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices"]
+text = "Piaskowiec"
+
+[node name="Granite" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices"]
+text = "Granit"
+
+[node name="Coal" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices"]
+text = "Węgiel"
+
+[node name="IronOre" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices"]
+text = "Ruda żelaza"
 
 [node name="PullLoose" type="CheckButton" parent="StorageDetails/Margin/Controls"]
 text = "Żądaj dostaw zasobów"

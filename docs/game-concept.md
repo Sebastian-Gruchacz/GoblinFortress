@@ -220,6 +220,8 @@ Every detailed person-like actor initially tracks:
 
 Needs change priorities and competence instead of acting only as hard permission checks. A hungry goblin may keep working, then work badly, abandon the job, steal food or take a reckless foraging route.
 
+Health recovery is a layered effect rather than one universal refill. A stable, fed and hydrated body heals slowly on its own; proper sleep adds a recovery bonus; medicinal food, prepared herbs and potions provide stronger discrete treatment; acquired magic may eventually act much faster. Field hospitals and permanent infirmaries should organize beds, supplies, healers and treatment jobs without turning wounds into an abstract settlement-wide number.
+
 Old age, disease, wounds, famine and poison provide predictable pressure on valuable carriers. Death should arise from legible simulation state rather than arbitrary carrier deletion.
 
 ### Community pressures
@@ -255,6 +257,8 @@ Primitive resources include:
 
 Resources exist in locations, inventories, containers and stockpiles rather than only as global counters. Gathering, transport, spoilage and access therefore matter.
 
+A storage slot is a shared physical primitive used by stockpiles, furniture, barrels, workshops, carts and personal inventories. Its policy defines slot count, stack size, whether unlike item types may share space, accepted or excluded identities and physical containment capabilities. An unrestricted filter accepts every compatible item by default; specialist stockpiles narrow that filter. Compatibility remains separate from preference: loose solid goods may fit an open shelf, while a liquid requires a sealed vessel even when neither object applies a resource-name filter. Workshops consume from and produce into the same slots rather than owning a second hidden inventory model.
+
 ### Logistics and stockpile doctrine
 
 Storage is an active logistics network rather than a set of passive containers. A productive settlement should move goods in anticipation of demand instead of waiting until a worker reaches an empty workshop.
@@ -272,6 +276,8 @@ The mature system distinguishes:
 A local priority is not merely a faster hauling job. It expresses that this destination should win competition for a resource, subject to explicit protected reserves and emergency policies. Demand should include current orders and a bounded forecast of near-future consumption, so the system can refill useful buffers without moving the same stack back and forth.
 
 The stockpile interface must support reusable policies, copying, multi-editing, clear inclusions and exclusions, target and minimum quantities, upstream sources and downstream consumers. Every shortage or stalled delivery must expose an explanation: what is requested, what is reserved, where candidates exist, which rule rejected them and what currently outranks the request.
+
+A newly constructed specialist stockpile starts as an active request for its accepted goods instead of an inert empty floor. Its blueprint supplies the default target—normally full capacity, or a smaller operational reserve for structures such as field camps—while player policy can lower or disable that demand.
 
 This full system is a later milestone. The survival foundation establishes physical ownership, reachability, capacity and deterministic reservations without committing the UI to the initial single-cell storage prototype.
 
@@ -297,7 +303,7 @@ The first human village produces food, wood and basic goods over seasons. Its in
 
 Its coarse dispatcher plans fields from population, reserve targets and predicted yield rather than granting fixed daily production. A temperate baseline provisionally has a 240-day year and two long crop cycles; later climate regions alter sowing windows, growth, water demand, frost risk and harvest reliability. Residents normally stay close to the settlement, with shortage-driven gathering as a bounded exception. Spotting a goblin is not itself permission for the tribe to raid: goblin aggression against the village requires an explicit player order, while either side may still flee or defend itself after comparing local strength.
 
-An explicit raid order is an expedition plan, not an immediate destination override. It selects a reachable field camp nearest the target, requests its provisions, lets members eat, refill personal food and water, rest and assemble there, and only then changes the tribe to marching state. This makes a closer camp materially useful while keeping each consumed ration, refill and journey physical and inspectable.
+An explicit raid order is an expedition plan, not an immediate destination override. The player first chooses up to five participants, after which the plan selects a reachable field camp nearest the target, requests its provisions, lets members eat, refill personal food and water, rest and assemble there, and only then changes the tribe to marching state. The preparation view reports what is still blocking departure. This makes a closer camp materially useful while keeping each consumed ration, refill and journey physical and inspectable.
 
 The tribe can eventually scavenge, steal, trade, ambush, capture, raid or destroy. These actions have different costs:
 

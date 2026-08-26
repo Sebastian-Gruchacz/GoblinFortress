@@ -40,6 +40,18 @@ public sealed record FoodNutritionSettings(
     };
 }
 
+public sealed record HealthRecoverySettings(
+    int NaturalIntervalTicks,
+    int SleepingBonusIntervalTicks,
+    int MedicinalRootsHealing)
+{
+    public int GetFoodHealing(Resources.FoodKind kind) => kind switch
+    {
+        Resources.FoodKind.EdibleRoots => MedicinalRootsHealing,
+        _ => 0,
+    };
+}
+
 public sealed record VisionSettings(
     int GoblinDayRadius,
     int GoblinNightRadius,
@@ -104,6 +116,9 @@ public sealed class SimulationDefinitions
         mushroomsNutrition: 3_400,
         edibleRootsNutrition: 4_200,
         fishNutrition: 4_800,
+        naturalHealthRecoveryIntervalTicks: 12,
+        sleepingHealthRecoveryBonusIntervalTicks: 8,
+        medicinalRootsHealing: 500,
         goblinNightVisionRadius: 3,
         goblinStructureVisionRadius: 3,
         actorPlanning: new(
@@ -165,6 +180,9 @@ public sealed class SimulationDefinitions
         int mushroomsNutrition = 2_200,
         int edibleRootsNutrition = 2_800,
         int fishNutrition = 3_200,
+        int naturalHealthRecoveryIntervalTicks = 12,
+        int sleepingHealthRecoveryBonusIntervalTicks = 8,
+        int medicinalRootsHealing = 500,
         int? goblinNightVisionRadius = null,
         int goblinStructureVisionRadius = 0,
         ActorPlanningSettings? actorPlanning = null)
@@ -229,6 +247,9 @@ public sealed class SimulationDefinitions
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(mushroomsNutrition);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(edibleRootsNutrition);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fishNutrition);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(naturalHealthRecoveryIntervalTicks);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sleepingHealthRecoveryBonusIntervalTicks);
+        ArgumentOutOfRangeException.ThrowIfNegative(medicinalRootsHealing);
         actorPlanning ??= new(
             QueueCapacity: 4,
             MaximumNeedPriority: 100,
@@ -314,6 +335,10 @@ public sealed class SimulationDefinitions
             Mushrooms: mushroomsNutrition,
             EdibleRoots: edibleRootsNutrition,
             Fish: fishNutrition);
+        HealthRecovery = new(
+            NaturalIntervalTicks: naturalHealthRecoveryIntervalTicks,
+            SleepingBonusIntervalTicks: sleepingHealthRecoveryBonusIntervalTicks,
+            MedicinalRootsHealing: medicinalRootsHealing);
         Vision = new(
             GoblinDayRadius: visionRadius,
             GoblinNightRadius: goblinNightVisionRadius ?? Math.Max(2, visionRadius - 1),
@@ -330,6 +355,8 @@ public sealed class SimulationDefinitions
     public StorageSettings Storage { get; }
 
     public FoodNutritionSettings Food { get; }
+
+    public HealthRecoverySettings HealthRecovery { get; }
 
     public VisionSettings Vision { get; }
 

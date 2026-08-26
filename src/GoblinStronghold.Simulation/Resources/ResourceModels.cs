@@ -11,6 +11,8 @@ public enum ResourceKind : byte
     Stone = 4,
     Bone = 5,
     Vegetation = 6,
+    Coal = 7,
+    Ore = 8,
 }
 
 public enum FoodKind : byte
@@ -21,6 +23,20 @@ public enum FoodKind : byte
     Mushrooms = 3,
     EdibleRoots = 4,
     Fish = 5,
+}
+
+public enum ResourceVariant : byte
+{
+    None = 0,
+    OakWood = 1,
+    ChestnutWood = 2,
+    BirchWood = 3,
+    WalnutWood = 4,
+    AppleWood = 5,
+    PineWood = 6,
+    Sandstone = 7,
+    Granite = 8,
+    IronOre = 9,
 }
 
 public enum ItemLocationKind : byte
@@ -36,6 +52,48 @@ public enum StoragePriority : byte
     Normal = 1,
     High = 2,
     Urgent = 3,
+}
+
+[Flags]
+public enum StorageCapability : byte
+{
+    None = 0,
+    SolidGoods = 1 << 0,
+    SealedLiquids = 1 << 1,
+    All = SolidGoods | SealedLiquids,
+}
+
+public enum StorageRequirement : byte
+{
+    SolidGoods = 1,
+    SealedLiquid = 2,
+}
+
+public readonly record struct StorageSlotPolicy(
+    int SlotCount,
+    int StackCapacity,
+    bool SeparatesItemTypes,
+    StorageCapability Capabilities)
+{
+    public long TotalCapacity => (long)SlotCount * StackCapacity;
+
+    public bool Supports(StorageRequirement requirement) => requirement switch
+    {
+        StorageRequirement.SolidGoods => Capabilities.HasFlag(StorageCapability.SolidGoods),
+        StorageRequirement.SealedLiquid => Capabilities.HasFlag(StorageCapability.SealedLiquids),
+        _ => false,
+    };
+}
+
+[Flags]
+public enum MineralStorageFilter : byte
+{
+    None = 0,
+    Sandstone = 1 << 0,
+    Granite = 1 << 1,
+    Coal = 1 << 2,
+    IronOre = 1 << 3,
+    All = Sandstone | Granite | Coal | IronOre,
 }
 
 public enum StorageDeliveryState : byte
@@ -99,6 +157,7 @@ public readonly record struct ItemStackSnapshot(
     EntityId Id,
     ResourceKind Resource,
     FoodKind FoodKind,
+    ResourceVariant Variant,
     int Quantity,
     ItemLocation Location);
 
@@ -114,4 +173,7 @@ public readonly record struct StorageZoneSnapshot(
     StoragePriority Priority,
     int TypeSlotCount,
     int StackCapacity,
-    int UsedTypeSlots);
+    int UsedTypeSlots,
+    MineralStorageFilter MineralFilter,
+    bool SeparatesItemTypes,
+    StorageCapability Capabilities);

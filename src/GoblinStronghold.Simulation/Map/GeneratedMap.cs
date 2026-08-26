@@ -300,12 +300,13 @@ public sealed class GeneratedMap
         }
         if (GeneratorVersion >= 6)
         {
-            Span<byte> caveBuffer = stackalloc byte[2];
+            Span<byte> caveBuffer = stackalloc byte[3];
             foreach (var caveCell in _caveCells)
             {
                 caveBuffer[0] = (byte)caveCell.Rock;
                 caveBuffer[1] = (byte)caveCell.Kind;
-                hash.AppendData(caveBuffer);
+                caveBuffer[2] = (byte)caveCell.Deposit;
+                hash.AppendData(GeneratorVersion >= 8 ? caveBuffer : caveBuffer[..2]);
             }
             Span<byte> passageBuffer = stackalloc byte[1];
             foreach (var passage in _verticalPassages)

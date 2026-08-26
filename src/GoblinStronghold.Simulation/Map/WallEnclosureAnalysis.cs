@@ -120,30 +120,31 @@ public sealed class WallEnclosureAnalysis
         int width,
         int height,
         IReadOnlySet<GridPosition> barriers,
-        IReadOnlySet<GridPosition>? solidCells = null)
+        IReadOnlySet<GridPosition>? solidCells = null,
+        int level = 0)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
         ArgumentNullException.ThrowIfNull(barriers);
 
         var walls = barriers
-            .Where(position => position.Z == 0 && IsWithin(position, width, height))
+            .Where(position => position.Z == level && IsWithin(position, width, height))
             .ToHashSet();
         var solids = solidCells?
-            .Where(position => position.Z == 0 && IsWithin(position, width, height))
+            .Where(position => position.Z == level && IsWithin(position, width, height))
             .ToHashSet() ?? [];
         var blocked = walls.Concat(solids).ToHashSet();
         var exterior = new HashSet<GridPosition>();
         var queue = new Queue<GridPosition>();
         for (var x = 0; x < width; x++)
         {
-            EnqueueExterior(new GridPosition(x, 0), blocked, exterior, queue);
-            EnqueueExterior(new GridPosition(x, height - 1), blocked, exterior, queue);
+            EnqueueExterior(new GridPosition(x, 0, level), blocked, exterior, queue);
+            EnqueueExterior(new GridPosition(x, height - 1, level), blocked, exterior, queue);
         }
         for (var y = 0; y < height; y++)
         {
-            EnqueueExterior(new GridPosition(0, y), blocked, exterior, queue);
-            EnqueueExterior(new GridPosition(width - 1, y), blocked, exterior, queue);
+            EnqueueExterior(new GridPosition(0, y, level), blocked, exterior, queue);
+            EnqueueExterior(new GridPosition(width - 1, y, level), blocked, exterior, queue);
         }
 
         while (queue.TryDequeue(out var current))
@@ -164,7 +165,7 @@ public sealed class WallEnclosureAnalysis
         {
             for (var x = 0; x < width; x++)
             {
-                var position = new GridPosition(x, y);
+                var position = new GridPosition(x, y, level);
                 if (!blocked.Contains(position) && !exterior.Contains(position))
                 {
                     interior.Add(position);

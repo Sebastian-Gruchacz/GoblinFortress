@@ -6,6 +6,13 @@ public enum RockKind : byte
     Granite = 2,
 }
 
+public enum MineralDepositKind : byte
+{
+    None = 0,
+    Coal = 1,
+    IronOre = 2,
+}
+
 public enum CaveCellKind : byte
 {
     SolidRock = 1,
@@ -15,7 +22,8 @@ public enum CaveCellKind : byte
 
 public readonly record struct CaveCell(
     RockKind Rock,
-    CaveCellKind Kind)
+    CaveCellKind Kind,
+    MineralDepositKind Deposit = MineralDepositKind.None)
 {
     public bool IsOpen => Kind is CaveCellKind.Floor or CaveCellKind.Ramp;
 }

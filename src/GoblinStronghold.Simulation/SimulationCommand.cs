@@ -21,6 +21,8 @@ public enum SimulationCommandKind
     ConfigureResourcePriority = 14,
     ToggleWoodenDoor = 15,
     ConfigureConstructionPriority = 16,
+    ConfigureStorageMineralFilter = 17,
+    ConfigureRaidMember = 18,
 }
 
 public enum ConstructionKind : byte
@@ -33,6 +35,9 @@ public enum ConstructionKind : byte
     WoodenDoorFrame = 6,
     WoodenDoor = 7,
     StoneStorage = 8,
+    StoneWall = 9,
+    StoneDoorFrame = 10,
+    WallTorch = 11,
 }
 
 public readonly record struct SimulationCommand(
@@ -283,6 +288,61 @@ public readonly record struct SimulationCommand(
             ResourceKind.Wood,
             Amount: 1);
 
+    public static SimulationCommand BuildStoneWall(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        BuildStoneWall(executeAt, sequence, position, position);
+
+    public static SimulationCommand BuildStoneWall(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            ConstructionKind.StoneWall,
+            ResourceKind.Stone,
+            Amount: 2);
+
+    public static SimulationCommand BuildStoneDoorFrame(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.StoneDoorFrame,
+            ResourceKind.Stone,
+            Amount: 1);
+
+    public static SimulationCommand BuildWallTorch(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.WallTorch,
+            ResourceKind.Wood,
+            Amount: 1);
+
     public static SimulationCommand BuildWoodenDoor(
         SimulationTick executeAt,
         ulong sequence,
@@ -366,6 +426,23 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: (int)WorkDesignationKind.QuarryBoulder);
+
+    public static SimulationCommand DesignateRockMining(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.MineRock);
 
     public static SimulationCommand ClearWorkDesignations(
         SimulationTick executeAt,
@@ -452,6 +529,23 @@ public readonly record struct SimulationCommand(
             ResourceKind.Any,
             Amount: (int)priority);
 
+    public static SimulationCommand ConfigureStorageMineralFilter(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZone,
+        MineralStorageFilter filter) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStorageMineralFilter,
+            EntityId.None,
+            storageZone,
+            default,
+            default,
+            default,
+            ResourceKind.Stone,
+            Amount: (int)filter);
+
     public static SimulationCommand ConfigureResourcePriority(
         SimulationTick executeAt,
         ulong sequence,
@@ -500,6 +594,23 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: 0);
+
+    public static SimulationCommand ConfigureRaidMember(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor,
+        bool selected) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureRaidMember,
+            actor,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: selected ? 1 : 0);
 }
 
 internal readonly record struct CommandKey(SimulationTick Tick, ulong Sequence) : IComparable<CommandKey>

@@ -2,7 +2,7 @@ namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
     public const int MinimumDimension = 16;
     public const int MaximumDimension = 2_048;
 
@@ -93,7 +93,14 @@ public static class SwampMapGenerator
             AssignTerrainRamps(cells, seed, width, height);
         }
         var caves = generatorVersion >= 6
-            ? GenerateCaves(cells, seed, width, height, goblinSpawn, humanVillage)
+            ? GenerateCaves(
+                cells,
+                seed,
+                width,
+                height,
+                goblinSpawn,
+                humanVillage,
+                generatorVersion)
             : new CaveGenerationResult([], []);
 
         var map = new GeneratedMap(
@@ -551,7 +558,8 @@ public static class SwampMapGenerator
         int width,
         int height,
         GridPosition goblinSpawn,
-        GridPosition humanVillage)
+        GridPosition humanVillage,
+        int generatorVersion)
     {
         const int depthLevels = 2;
         var cellCount = checked(width * height);
@@ -650,12 +658,61 @@ public static class SwampMapGenerator
         SetCaveKind(caveCells, width, height, firstRoom, CaveCellKind.Ramp);
         SetCaveKind(caveCells, width, height, descent, CaveCellKind.Ramp);
         SetCaveKind(caveCells, width, height, deepStart, CaveCellKind.Ramp);
+        if (generatorVersion >= 8)
+        {
+            AssignMineralDeposits(caveCells, seed, width, height);
+        }
         return new CaveGenerationResult(
             caveCells,
             [
                 new VerticalPassage(entrance, firstRoom, VerticalPassageKind.CaveMouth),
                 new VerticalPassage(descent, deepStart, VerticalPassageKind.NaturalRamp),
             ]);
+    }
+
+    private static void AssignMineralDeposits(
+        CaveCell[] cells,
+        WorldSeed seed,
+        int width,
+        int height)
+    {
+        var cellCount = checked(width * height);
+        for (var levelIndex = 0; levelIndex < 2; levelIndex++)
+        {
+            var coalThreshold = levelIndex == 0 ? 0.68d : 0.62d;
+            var ironThreshold = levelIndex == 0 ? 0.76d : 0.68d;
+            for (var y = 0; y < height; y++)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    var index = (levelIndex * cellCount) + (y * width) + x;
+                    if (cells[index].Kind != CaveCellKind.SolidRock)
+                    {
+                        continue;
+                    }
+
+                    var normalizedX = x / (double)(width - 1);
+                    var normalizedY = y / (double)(height - 1);
+                    var coalNoise = FractalValueNoise(
+                        seed,
+                        normalizedX,
+                        normalizedY,
+                        sampleKey: checked(29_100UL + (ulong)levelIndex));
+                    var ironNoise = FractalValueNoise(
+                        seed,
+                        normalizedX,
+                        normalizedY,
+                        sampleKey: checked(29_200UL + (ulong)levelIndex));
+                    var deposit = ironNoise >= ironThreshold && ironNoise - ironThreshold >=
+                        coalNoise - coalThreshold
+                        ? MineralDepositKind.IronOre
+                        : coalNoise >= coalThreshold
+                            ? MineralDepositKind.Coal
+                            : MineralDepositKind.None;
+                    cells[index] = cells[index] with { Deposit = deposit };
+                }
+            }
+        }
     }
 
     private static GridPosition FindCaveEntrance(

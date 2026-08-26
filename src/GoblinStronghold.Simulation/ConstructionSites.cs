@@ -93,8 +93,9 @@ internal sealed class ConstructionSiteState(
     ConstructionKind kind,
     GridPosition anchor,
     GridPosition end,
-    int requiredWood,
-    int deliveredWood,
+    ResourceKind requiredResource,
+    int requiredQuantity,
+    int deliveredQuantity,
     int remainingWorkTicks,
     int totalWorkTicks,
     ConstructionCapabilityRequirements capabilities,
@@ -108,9 +109,11 @@ internal sealed class ConstructionSiteState(
 
     public GridPosition End { get; } = end;
 
-    public int RequiredWood { get; } = requiredWood;
+    public ResourceKind RequiredResource { get; } = requiredResource;
 
-    public int DeliveredWood { get; set; } = deliveredWood;
+    public int RequiredQuantity { get; } = requiredQuantity;
+
+    public int DeliveredQuantity { get; set; } = deliveredQuantity;
 
     public int RemainingWorkTicks { get; set; } = remainingWorkTicks;
 
@@ -120,13 +123,14 @@ internal sealed class ConstructionSiteState(
 
     public StoragePriority Priority { get; set; } = priority;
 
-    public int MissingWood => Math.Max(0, RequiredWood - DeliveredWood);
+    public int MissingQuantity => Math.Max(0, RequiredQuantity - DeliveredQuantity);
 
-    public bool HasAllMaterials => MissingWood == 0;
+    public bool HasAllMaterials => MissingQuantity == 0;
 
     public IReadOnlyList<GridPosition> GetFootprint() => Kind switch
     {
-        ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall =>
+        ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall or
+            ConstructionKind.StoneWall =>
             SimulationCommand.GetLinearCells(Anchor, End),
         ConstructionKind.GoblinFieldCamp =>
         [
@@ -144,7 +148,7 @@ internal sealed class ConstructionSiteState(
         Anchor,
         End,
         GetFootprint(),
-        [new ConstructionMaterialSnapshot(ResourceKind.Wood, RequiredWood, DeliveredWood)],
+        [new ConstructionMaterialSnapshot(RequiredResource, RequiredQuantity, DeliveredQuantity)],
         RemainingWorkTicks,
         TotalWorkTicks,
         Capabilities,
@@ -159,18 +163,26 @@ internal static class ConstructionBlueprintCatalog
         GridPosition anchor,
         GridPosition end)
     {
-        var segmentCount = kind is ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall
+        var segmentCount = kind is ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall or
+            ConstructionKind.StoneWall
             ? SimulationCommand.GetLinearCells(anchor, end).Count
             : 1;
-        var requiredWood = kind switch
+        var requiredResource = kind is ConstructionKind.StoneWall or
+            ConstructionKind.StoneDoorFrame
+            ? ResourceKind.Stone
+            : ResourceKind.Wood;
+        var requiredQuantity = kind switch
         {
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
                 ConstructionKind.StoneStorage => 2,
             ConstructionKind.WoodenWalkway => segmentCount,
             ConstructionKind.GoblinFieldCamp => 6,
             ConstructionKind.WoodenWall => checked(segmentCount * 2),
+            ConstructionKind.StoneWall => checked(segmentCount * 2),
             ConstructionKind.WoodenDoorFrame => 1,
+            ConstructionKind.StoneDoorFrame => 1,
             ConstructionKind.WoodenDoor => 1,
+            ConstructionKind.WallTorch => 1,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
         var workTicks = kind switch
@@ -180,21 +192,31 @@ internal static class ConstructionBlueprintCatalog
             ConstructionKind.WoodenWalkway => checked(segmentCount * 25),
             ConstructionKind.GoblinFieldCamp => 120,
             ConstructionKind.WoodenWall => checked(segmentCount * 45),
+            ConstructionKind.StoneWall => checked(segmentCount * 60),
             ConstructionKind.WoodenDoorFrame => 30,
+            ConstructionKind.StoneDoorFrame => 45,
             ConstructionKind.WoodenDoor => 35,
+            ConstructionKind.WallTorch => 20,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
-        var capabilities = new ConstructionCapabilityRequirements(
-            RequiredSkills: GoblinSkill.None,
-            MinimumBuildingLevel: 0,
-            RequiredEquipment: PersonalEquipment.None);
+        var capabilities = kind is ConstructionKind.StoneWall or
+            ConstructionKind.StoneDoorFrame
+            ? new ConstructionCapabilityRequirements(
+                RequiredSkills: GoblinSkill.Building,
+                MinimumBuildingLevel: 0,
+                RequiredEquipment: PersonalEquipment.PrimitivePickaxe)
+            : new ConstructionCapabilityRequirements(
+                RequiredSkills: GoblinSkill.None,
+                MinimumBuildingLevel: 0,
+                RequiredEquipment: PersonalEquipment.None);
         return new ConstructionSiteState(
             id,
             kind,
             anchor,
             end,
-            requiredWood,
-            deliveredWood: 0,
+            requiredResource,
+            requiredQuantity,
+            deliveredQuantity: 0,
             remainingWorkTicks: workTicks,
             totalWorkTicks: workTicks,
             capabilities,

@@ -181,6 +181,7 @@ public sealed class SimulationEngineTests
         var foodStorage = Assert.Single(engine.CreateSnapshot().StorageZones, zone =>
             zone.Position == position);
         Assert.Equal(96, foodStorage.Capacity);
+        Assert.Equal(foodStorage.Capacity, foodStorage.DesiredQuantity);
         Assert.Equal(3, foodStorage.TypeSlotCount);
         Assert.Equal(32, foodStorage.StackCapacity);
         Assert.Equal(3, engine.CreateSnapshot().ItemStacks
@@ -216,6 +217,7 @@ public sealed class SimulationEngineTests
 
         var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
         Assert.Equal(ResourceKind.Wood, zone.AcceptedResource);
+        Assert.Equal(zone.Capacity, zone.DesiredQuantity);
         Assert.Equal(3, engine.CreateSnapshot().ItemStacks
             .Where(stack => stack.Resource == ResourceKind.Wood)
             .Sum(stack => stack.Quantity));
@@ -251,6 +253,95 @@ public sealed class SimulationEngineTests
         Assert.Equal(0, engine.CreateSnapshot().ItemStacks
             .Where(stack => stack.Resource == ResourceKind.Wood)
             .Sum(stack => stack.Quantity));
+    }
+
+    [Fact]
+    public void StoneWallBlueprintConsumesStoneAndPreservesWood()
+    {
+        var seed = new WorldSeed(0x53544F4E4557414CUL);
+        var generated = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 2,
+            scatterInitialBrushwood: true);
+        var save = JsonNode.Parse(generated.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        var stone = save["itemStacks"]!.AsArray()
+            .Select(node => node!.AsObject())
+            .First(model => model["resource"]!.GetValue<int>() == (int)ResourceKind.Stone);
+        stone["x"] = generated.Map.GoblinSpawn.X;
+        stone["y"] = generated.Map.GoblinSpawn.Y;
+        stone["z"] = generated.Map.GoblinSpawn.Z;
+        stone["quantity"] = 2;
+        stone["variant"] = (int)ResourceVariant.Sandstone;
+
+        var engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var initialWoodQuantity = engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity);
+        var initialStoneQuantity = engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Stone)
+            .Sum(stack => stack.Quantity);
+        var position = engine.Map.GetCardinalNeighbors(engine.Map.GoblinSpawn)
+            .First(engine.World.CanBuildWoodenBarrier);
+        engine.QueueCommand(SimulationCommand.BuildStoneWall(
+            new SimulationTick(1), sequence: 1, position));
+
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.StoneWall, site.Kind);
+        var material = Assert.Single(site.Materials);
+        Assert.Equal(ResourceKind.Stone, material.Resource);
+        Assert.Equal(2, material.RequiredQuantity);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(restored);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Contains(engine.DrainEvents(), simulationEvent =>
+            simulationEvent.Kind == SimulationEventKind.ConstructionCompleted &&
+            simulationEvent.Construction == ConstructionKind.StoneWall);
+        Assert.Contains(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.StoneWall &&
+            worldObject.Parts.Single().Kind == WorldObjectPartKind.Wall);
+        Assert.False(engine.World.IsSurfaceTraversable(position));
+        Assert.Equal(initialStoneQuantity - 2, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Stone)
+            .Sum(stack => stack.Quantity));
+        Assert.Equal(initialWoodQuantity, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity));
+    }
+
+    [Fact]
+    public void LegacyConstructionSaveWithoutResourceDefaultsToWood()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x4C4547414359574CUL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 2);
+        var position = engine.Map.GetCardinalNeighbors(engine.Map.GoblinSpawn)
+            .First(engine.World.CanBuildWoodenBarrier);
+        engine.QueueCommand(SimulationCommand.BuildWoodenWall(
+            new SimulationTick(1), sequence: 1, position));
+        engine.AdvanceTicks(1);
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        Assert.True(save["constructionSites"]!.AsArray()[0]!.AsObject()
+            .Remove("requiredResource"));
+
+        var restored = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        var material = Assert.Single(Assert.Single(restored.CreateSnapshot().ConstructionSites).Materials);
+        Assert.Equal(ResourceKind.Wood, material.Resource);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
 
     [Fact]
@@ -366,6 +457,145 @@ public sealed class SimulationEngineTests
         Assert.Equal(WorldObjectKind.WoodenDoorFrame, replacement.Kind);
         Assert.Equal(WorldObjectPartKind.Door, Assert.Single(replacement.Parts).Kind);
         Assert.True(engine.World.IsSurfaceTraversable(position));
+    }
+
+    [Fact]
+    public void StoneDoorFrameReplacesStoneWallAndAcceptsWoodenDoorLeaf()
+    {
+        var seed = new WorldSeed(0x53544F4E45444F4FUL);
+        var generated = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 1,
+            scatterInitialBrushwood: true);
+        var save = JsonNode.Parse(generated.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        var stone = save["itemStacks"]!.AsArray()
+            .Select(node => node!.AsObject())
+            .First(model => model["resource"]!.GetValue<int>() == (int)ResourceKind.Stone);
+        stone["x"] = generated.Map.GoblinSpawn.X;
+        stone["y"] = generated.Map.GoblinSpawn.Y;
+        stone["z"] = generated.Map.GoblinSpawn.Z;
+        stone["quantity"] = 3;
+        stone["variant"] = (int)ResourceVariant.Granite;
+
+        var engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var initialStoneQuantity = engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Stone)
+            .Sum(stack => stack.Quantity);
+        var initialWoodQuantity = engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity);
+        var position = engine.Map.GetCardinalNeighbors(engine.Map.GoblinSpawn)
+            .First(engine.World.CanBuildWoodenBarrier);
+        engine.QueueCommand(SimulationCommand.BuildStoneWall(
+            new SimulationTick(1), sequence: 1, position));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        var wallId = Assert.Single(engine.World.GetWorldObjectsAt(position)
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.StoneWall)).Id;
+
+        engine.QueueCommand(SimulationCommand.BuildStoneDoorFrame(
+            engine.CurrentTick.Next(), sequence: 2, position));
+        engine.AdvanceTicks(1);
+
+        var frameSite = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.StoneDoorFrame, frameSite.Kind);
+        Assert.Equal(ResourceKind.Stone, Assert.Single(frameSite.Materials).Resource);
+        Assert.Equal(PersonalEquipment.PrimitivePickaxe,
+            frameSite.Capabilities.RequiredEquipment);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(restored);
+
+        var frame = Assert.Single(engine.World.GetWorldObjectsAt(position));
+        Assert.Equal(wallId, frame.Id);
+        Assert.Equal(WorldObjectKind.StoneDoorFrame, frame.Kind);
+        Assert.True(engine.World.IsSurfaceTraversable(position));
+        engine.QueueCommand(SimulationCommand.BuildWoodenDoor(
+            engine.CurrentTick.Next(), sequence: 3, position));
+        restored.QueueCommand(SimulationCommand.BuildWoodenDoor(
+            restored.CurrentTick.Next(), sequence: 3, position));
+        engine.AdvanceTicks(1);
+        restored.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(restored);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Contains(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.StoneDoorFrame);
+        Assert.Contains(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenDoorLeaf &&
+            worldObject.Parts.Single().Kind == WorldObjectPartKind.ClosedDoorLeaf);
+        Assert.False(engine.World.IsSurfaceTraversable(position));
+        Assert.Equal(initialStoneQuantity - 3, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Stone)
+            .Sum(stack => stack.Quantity));
+        Assert.Equal(initialWoodQuantity - 1, engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Resource == ResourceKind.Wood)
+            .Sum(stack => stack.Quantity));
+    }
+
+    [Fact]
+    public void WallTorchCanBeBuiltOnDiscoveredCaveRockAndSurvivesSaveLoad()
+    {
+        var seed = new WorldSeed(0x544F524348434156UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 1);
+        var placement = (
+                from z in new[] { -1, -2 }
+                from y in Enumerable.Range(0, map.Height)
+                from x in Enumerable.Range(0, map.Width)
+                let wall = new GridPosition(x, y, z)
+                where engine.World.IsSolidCaveRock(wall)
+                from access in engine.World.GetCardinalWorldNeighbors(wall)
+                where engine.World.IsTerrainTraversable(access)
+                let route = engine.Navigation.FindPath(map.GoblinSpawn, access)
+                where route is not null
+                orderby route.Count, z descending, y, x
+                select new { Wall = wall, Access = access })
+            .First();
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        engine.QueueCommand(SimulationCommand.Move(
+            new SimulationTick(1), sequence: 1, actor.Id, placement.Access));
+        for (var tick = 0; tick < 20_000 &&
+             engine.CreateSnapshot().Actors.Single().Position != placement.Access; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+        Assert.Equal(placement.Access, engine.CreateSnapshot().Actors.Single().Position);
+        Assert.True(engine.CreateSnapshot()
+            .GetVisibility(placement.Wall, map.Width)
+            .IsDiscovered());
+
+        engine.QueueCommand(SimulationCommand.BuildWallTorch(
+            engine.CurrentTick.Next(), sequence: 2, placement.Wall));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.WallTorch, site.Kind);
+        Assert.Equal(placement.Wall, site.Anchor);
+        Assert.Equal(ResourceKind.Wood, Assert.Single(site.Materials).Resource);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(restored);
+
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        var torch = Assert.Single(engine.World.GetWorldObjectsAt(placement.Wall), worldObject =>
+            worldObject.Kind == WorldObjectKind.WallTorch);
+        Assert.True(Enum.IsDefined(torch.Orientation));
+        Assert.Equal(WorldObjectPartKind.WallTorch, Assert.Single(torch.Parts).Kind);
+        Assert.True(engine.World.IsSolidCaveRock(placement.Wall));
+        Assert.False(engine.World.CanBuildWallTorch(placement.Wall));
     }
 
     [Fact]
@@ -719,7 +949,7 @@ public sealed class SimulationEngineTests
     }
 
     [Fact]
-    public void UndergroundStorageBlueprintKeepsItsLevelAndWaitsForThreeDimensionalAccess()
+    public void UndergroundStorageBlueprintKeepsItsLevelAndUsesThreeDimensionalAccess()
     {
         var seed = new WorldSeed(0x554E444552UL);
         var map = SwampMapGenerator.Generate(seed, 64, 64);
@@ -745,7 +975,7 @@ public sealed class SimulationEngineTests
         Assert.Equal(caveFloor, site.Anchor);
         Assert.All(site.Footprint, position => Assert.Equal(-1, position.Z));
         Assert.Equal(2, Assert.Single(site.Materials).MissingQuantity);
-        Assert.DoesNotContain(engine.CreateSnapshot().Actors, actor =>
+        Assert.Contains(engine.CreateSnapshot().Actors, actor =>
             actor.Job.Kind is ActorJobKind.SupplyConstruction or ActorJobKind.BuildConstruction);
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());

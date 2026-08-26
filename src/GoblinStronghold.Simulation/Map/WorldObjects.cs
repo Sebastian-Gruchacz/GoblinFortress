@@ -26,6 +26,9 @@ public enum WorldObjectKind : byte
     WoodenDoorFrame = 11,
     WoodenDoorLeaf = 12,
     Boulder = 13,
+    StoneWall = 14,
+    StoneDoorFrame = 15,
+    WallTorch = 16,
 }
 
 public enum WorldObjectOwner : byte
@@ -68,6 +71,7 @@ public enum WorldObjectPartKind : byte
     OpenDoorLeaf = 12,
     AutomaticallyOpenedDoorLeaf = 13,
     Boulder = 14,
+    WallTorch = 15,
 }
 
 public readonly record struct WorldObjectPartSnapshot(

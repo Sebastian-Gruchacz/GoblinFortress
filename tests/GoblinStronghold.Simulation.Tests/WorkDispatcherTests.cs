@@ -347,7 +347,13 @@ public sealed class WorkDispatcherTests
         SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
         var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
         Assert.Equal(ResourceKind.Stone, zone.AcceptedResource);
-        Assert.Equal(0, zone.DesiredQuantity);
+        Assert.Equal(zone.Capacity, zone.DesiredQuantity);
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            engine.CurrentTick.Next(),
+            sequence: 2,
+            zone.Id,
+            desiredQuantity: 0));
+        engine.AdvanceTicks(1);
 
         var knownStone = engine.CreateSnapshot().ItemStacks
             .Where(stack => stack.Resource == ResourceKind.Stone &&
@@ -365,7 +371,7 @@ public sealed class WorkDispatcherTests
             knownStone.Max(stack => stack.Location.Position.Y));
         engine.QueueCommand(SimulationCommand.DesignateWork(
             engine.CurrentTick.Next(),
-            sequence: 2,
+            sequence: 3,
             minimum,
             maximum,
             ResourceKind.Stone));
@@ -408,17 +414,24 @@ public sealed class WorkDispatcherTests
             zonePosition));
         engine.AdvanceTicks(1);
         SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
-        Assert.Equal(0, Assert.Single(engine.CreateSnapshot().StorageZones).DesiredQuantity);
+        var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
+        Assert.Equal(zone.Capacity, zone.DesiredQuantity);
+        engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
+            engine.CurrentTick.Next(),
+            sequence: 2,
+            zone.Id,
+            desiredQuantity: 0));
+        engine.AdvanceTicks(1);
 
         engine.QueueCommand(SimulationCommand.DesignateWork(
             engine.CurrentTick.Next(),
-            sequence: 2,
+            sequence: 3,
             spawn,
             spawn,
             ResourceKind.Wood));
         engine.AdvanceTicks(180);
 
-        var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
+        zone = Assert.Single(engine.CreateSnapshot().StorageZones);
         Assert.True(zone.StoredQuantity > 0);
         Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations, designation =>
             designation.Kind == WorkDesignationKind.GatherBrushwood);

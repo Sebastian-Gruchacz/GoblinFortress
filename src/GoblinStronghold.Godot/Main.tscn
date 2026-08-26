@@ -1,37 +1,102 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene format=3 uid="uid://bqlc87sb3cf2r"]
 
-[ext_resource type="Script" path="res://Main.cs" id="1_main"]
-[ext_resource type="Script" path="res://WorldView.cs" id="2_world"]
-[ext_resource type="Script" path="res://MinimapView.cs" id="3_minimap"]
-[ext_resource type="Script" path="res://SeasonCycleView.cs" id="4_seasons"]
-[ext_resource type="Script" path="res://WorldView3D.cs" id="5_world_3d"]
+[ext_resource type="Script" uid="uid://bs1cxsdjs5hlm" path="res://Main.cs" id="1_main"]
+[ext_resource type="Script" uid="uid://bj3vlm6nwub68" path="res://WorldView.cs" id="2_world"]
+[ext_resource type="Script" uid="uid://b48qk8at1y7er" path="res://MinimapView.cs" id="3_minimap"]
+[ext_resource type="Script" uid="uid://c1b4r0mtuevu7" path="res://SeasonCycleView.cs" id="4_seasons"]
+[ext_resource type="Script" uid="uid://hgf05hai8kbk" path="res://WorldView3D.cs" id="5_world_3d"]
+[ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-menu-background-v1.png" id="6_menu_background"]
+[ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-icon-v1.png" id="7_menu_goblin"]
+[ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-title-v1.png" id="8_menu_title"]
 
-[node name="Main" type="Node"]
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_main_menu"]
+bg_color = Color(0.025, 0.055, 0.047, 0.46)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.58, 0.7, 0.43, 0.42)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+shadow_color = Color(0, 0, 0, 0.52)
+shadow_size = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_menu_button"]
+bg_color = Color(0.025, 0.06, 0.052, 0.58)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.64, 0.73, 0.5, 0.28)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_menu_button_hover"]
+bg_color = Color(0.08, 0.14, 0.105, 0.82)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.77, 0.84, 0.49, 0.75)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_menu_button_pressed"]
+bg_color = Color(0.14, 0.19, 0.09, 0.9)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.9, 0.71, 0.3, 0.8)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_menu_button_disabled"]
+bg_color = Color(0.025, 0.045, 0.04, 0.32)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.5, 0.57, 0.43, 0.16)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="Main" type="Node" unique_id=636844132]
 script = ExtResource("1_main")
 
-[node name="WorldView" type="Node2D" parent="."]
+[node name="WorldView" type="Node2D" parent="." unique_id=425175923]
 script = ExtResource("2_world")
 
-[node name="WorldView3D" type="Node3D" parent="."]
+[node name="WorldView3D" type="Node3D" parent="." unique_id=246426672]
 visible = false
 script = ExtResource("5_world_3d")
 
-[node name="TerrainChunks" type="Node3D" parent="WorldView3D"]
+[node name="TerrainChunks" type="Node3D" parent="WorldView3D" unique_id=920811155]
 
-[node name="Structures" type="Node3D" parent="WorldView3D"]
+[node name="Structures" type="Node3D" parent="WorldView3D" unique_id=184439425]
 
-[node name="Actors" type="Node3D" parent="WorldView3D"]
+[node name="Actors" type="Node3D" parent="WorldView3D" unique_id=1170814609]
 
-[node name="Camera3D" type="Camera3D" parent="WorldView3D"]
+[node name="Camera3D" type="Camera3D" parent="WorldView3D" unique_id=1975381587]
 projection = 1
 size = 42.0
 
-[node name="Camera2D" type="Camera2D" parent="."]
+[node name="Camera2D" type="Camera2D" parent="." unique_id=633925679]
 position = Vector2(640, 640)
 
-[node name="Interface" type="CanvasLayer" parent="."]
+[node name="Interface" type="CanvasLayer" parent="." unique_id=547562144]
 
-[node name="TopBar" type="PanelContainer" parent="Interface"]
+[node name="TopBar" type="PanelContainer" parent="Interface" unique_id=1751452914]
 anchors_preset = 10
 anchor_right = 1.0
 offset_left = 16.0
@@ -40,16 +105,24 @@ offset_right = -216.0
 offset_bottom = 72.0
 grow_horizontal = 2
 
-[node name="Controls" type="HBoxContainer" parent="Interface/TopBar"]
+[node name="Controls" type="HBoxContainer" parent="Interface/TopBar" unique_id=1709334484]
+layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Title" type="Label" parent="Interface/TopBar/Controls"]
+[node name="Title" type="Label" parent="Interface/TopBar/Controls" unique_id=1123238938]
+layout_mode = 2
 text = "GOBLIN STRONGHOLD  •  LIVING SWAMP PROBE"
 
-[node name="Status" type="Label" parent="Interface/TopBar/Controls"]
+[node name="Status" type="Label" parent="Interface/TopBar/Controls" unique_id=704111137]
+custom_maximum_size = Vector2(800, -1)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
 text = "Tick 0"
+autowrap_mode = 2
+max_lines_visible = 3
 
-[node name="Calendar" type="PanelContainer" parent="Interface"]
+[node name="Calendar" type="PanelContainer" parent="Interface" unique_id=891939435]
+anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
 offset_left = -270.0
@@ -58,29 +131,31 @@ offset_right = 270.0
 offset_bottom = 134.0
 grow_horizontal = 2
 
-[node name="Controls" type="HBoxContainer" parent="Interface/Calendar"]
+[node name="Controls" type="HBoxContainer" parent="Interface/Calendar" unique_id=1790690875]
 layout_mode = 2
-alignment = 1
 theme_override_constants/separation = 10
+alignment = 1
 
-[node name="Clock" type="Label" parent="Interface/Calendar/Controls"]
+[node name="Clock" type="Label" parent="Interface/Calendar/Controls" unique_id=126234012]
 custom_minimum_size = Vector2(148, 0)
+layout_mode = 2
 text = "05:00:00 • dzień 1"
 horizontal_alignment = 1
 
-[node name="SeasonName" type="Label" parent="Interface/Calendar/Controls"]
+[node name="SeasonName" type="Label" parent="Interface/Calendar/Controls" unique_id=1032573943]
 custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
 text = "Wiosna"
 horizontal_alignment = 2
 
-[node name="Season" type="Control" parent="Interface/Calendar/Controls"]
+[node name="Season" type="Control" parent="Interface/Calendar/Controls" unique_id=1421095636]
 custom_minimum_size = Vector2(280, 32)
+clip_contents = true
 layout_mode = 2
 mouse_filter = 1
-clip_contents = true
 script = ExtResource("4_seasons")
 
-[node name="RightHud" type="VBoxContainer" parent="Interface"]
+[node name="RightHud" type="VBoxContainer" parent="Interface" unique_id=1815833861]
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
@@ -91,86 +166,102 @@ offset_bottom = 324.0
 grow_horizontal = 0
 theme_override_constants/separation = 6
 
-[node name="MinimapFrame" type="PanelContainer" parent="Interface/RightHud"]
+[node name="MinimapFrame" type="PanelContainer" parent="Interface/RightHud" unique_id=2070672244]
 custom_minimum_size = Vector2(184, 168)
+layout_mode = 2
 
-[node name="Minimap" type="Control" parent="Interface/RightHud/MinimapFrame"]
+[node name="Minimap" type="Control" parent="Interface/RightHud/MinimapFrame" unique_id=1402373717]
 custom_minimum_size = Vector2(176, 160)
 layout_mode = 2
 mouse_filter = 2
 script = ExtResource("3_minimap")
 
-[node name="SpeedPanel" type="PanelContainer" parent="Interface/RightHud"]
+[node name="SpeedPanel" type="PanelContainer" parent="Interface/RightHud" unique_id=1296984009]
 custom_minimum_size = Vector2(184, 38)
-
-[node name="Controls" type="HBoxContainer" parent="Interface/RightHud/SpeedPanel"]
 layout_mode = 2
-alignment = 1
+
+[node name="Controls" type="HBoxContainer" parent="Interface/RightHud/SpeedPanel" unique_id=1568452353]
+layout_mode = 2
 theme_override_constants/separation = 4
-
-[node name="Pause" type="Button" parent="Interface/RightHud/SpeedPanel/Controls"]
-custom_minimum_size = Vector2(30, 30)
-
-[node name="Speed1" type="Button" parent="Interface/RightHud/SpeedPanel/Controls"]
-custom_minimum_size = Vector2(30, 30)
-
-[node name="Speed2" type="Button" parent="Interface/RightHud/SpeedPanel/Controls"]
-custom_minimum_size = Vector2(30, 30)
-
-[node name="Speed4" type="Button" parent="Interface/RightHud/SpeedPanel/Controls"]
-custom_minimum_size = Vector2(30, 30)
-
-[node name="Speed8" type="Button" parent="Interface/RightHud/SpeedPanel/Controls"]
-custom_minimum_size = Vector2(30, 30)
-
-[node name="SessionPanel" type="PanelContainer" parent="Interface/RightHud"]
-custom_minimum_size = Vector2(184, 38)
-
-[node name="Controls" type="HBoxContainer" parent="Interface/RightHud/SessionPanel"]
-layout_mode = 2
 alignment = 1
+
+[node name="Pause" type="Button" parent="Interface/RightHud/SpeedPanel/Controls" unique_id=1181253795]
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+
+[node name="Speed1" type="Button" parent="Interface/RightHud/SpeedPanel/Controls" unique_id=2066496565]
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+
+[node name="Speed2" type="Button" parent="Interface/RightHud/SpeedPanel/Controls" unique_id=1550391040]
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+
+[node name="Speed4" type="Button" parent="Interface/RightHud/SpeedPanel/Controls" unique_id=58263404]
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+
+[node name="Speed8" type="Button" parent="Interface/RightHud/SpeedPanel/Controls" unique_id=1224557205]
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+
+[node name="SessionPanel" type="PanelContainer" parent="Interface/RightHud" unique_id=198872960]
+custom_minimum_size = Vector2(184, 38)
+layout_mode = 2
+
+[node name="Controls" type="HBoxContainer" parent="Interface/RightHud/SessionPanel" unique_id=163201662]
+layout_mode = 2
 theme_override_constants/separation = 3
+alignment = 1
 
-[node name="Menu" type="Button" parent="Interface/RightHud/SessionPanel/Controls"]
+[node name="Menu" type="Button" parent="Interface/RightHud/SessionPanel/Controls" unique_id=2007658015]
 custom_minimum_size = Vector2(58, 30)
-text = "Menu"
+layout_mode = 2
 tooltip_text = "Otwórz menu gry • Esc"
+text = "Menu"
 
-[node name="SaveGame" type="Button" parent="Interface/RightHud/SessionPanel/Controls"]
+[node name="SaveGame" type="Button" parent="Interface/RightHud/SessionPanel/Controls" unique_id=160519995]
 custom_minimum_size = Vector2(58, 30)
-text = "Zapisz"
+layout_mode = 2
 tooltip_text = "Zapisz bieżącą sesję • F5"
+text = "Zapisz"
 
-[node name="ViewMode" type="Button" parent="Interface/RightHud/SessionPanel/Controls"]
+[node name="ViewMode" type="Button" parent="Interface/RightHud/SessionPanel/Controls" unique_id=56364699]
 custom_minimum_size = Vector2(48, 30)
-text = "3D"
+layout_mode = 2
 tooltip_text = "Przełącz prototypowy renderer 2D/3D • F3"
+text = "3D"
 
-[node name="CameraPanel" type="PanelContainer" parent="Interface/RightHud"]
+[node name="CameraPanel" type="PanelContainer" parent="Interface/RightHud" unique_id=233505374]
 visible = false
 custom_minimum_size = Vector2(184, 38)
-
-[node name="Controls" type="HBoxContainer" parent="Interface/RightHud/CameraPanel"]
 layout_mode = 2
-alignment = 1
+
+[node name="Controls" type="HBoxContainer" parent="Interface/RightHud/CameraPanel" unique_id=569675615]
+layout_mode = 2
 theme_override_constants/separation = 3
+alignment = 1
 
-[node name="RotateLeft" type="Button" parent="Interface/RightHud/CameraPanel/Controls"]
+[node name="RotateLeft" type="Button" parent="Interface/RightHud/CameraPanel/Controls" unique_id=892681762]
 custom_minimum_size = Vector2(36, 30)
-text = "↶"
+layout_mode = 2
 tooltip_text = "Obróć kamerę o 90° w lewo • Q"
+text = "↶"
 
-[node name="Angle" type="Button" parent="Interface/RightHud/CameraPanel/Controls"]
+[node name="Angle" type="Button" parent="Interface/RightHud/CameraPanel/Controls" unique_id=819323311]
 custom_minimum_size = Vector2(92, 30)
-text = "Z góry"
+layout_mode = 2
 tooltip_text = "Przełącz widok z góry/ukośny • F4"
+text = "Z góry"
 
-[node name="RotateRight" type="Button" parent="Interface/RightHud/CameraPanel/Controls"]
+[node name="RotateRight" type="Button" parent="Interface/RightHud/CameraPanel/Controls" unique_id=1469607870]
 custom_minimum_size = Vector2(36, 30)
-text = "↷"
+layout_mode = 2
 tooltip_text = "Obróć kamerę o 90° w prawo • E"
+text = "↷"
 
-[node name="ActionBar" type="PanelContainer" parent="Interface"]
+[node name="ActionBar" type="PanelContainer" parent="Interface" unique_id=1205617361]
+anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
@@ -182,29 +273,35 @@ offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="Controls" type="HBoxContainer" parent="Interface/ActionBar"]
+[node name="Controls" type="HBoxContainer" parent="Interface/ActionBar" unique_id=2056242583]
 layout_mode = 2
-alignment = 1
 theme_override_constants/separation = 8
+alignment = 1
 
-[node name="Build" type="Button" parent="Interface/ActionBar/Controls"]
+[node name="Build" type="Button" parent="Interface/ActionBar/Controls" unique_id=108997841]
 custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
 
-[node name="Work" type="Button" parent="Interface/ActionBar/Controls"]
+[node name="Work" type="Button" parent="Interface/ActionBar/Controls" unique_id=1527927285]
 custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
 
-[node name="Move" type="Button" parent="Interface/ActionBar/Controls"]
+[node name="Move" type="Button" parent="Interface/ActionBar/Controls" unique_id=1524776560]
 custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
 
-[node name="Raid" type="Button" parent="Interface/ActionBar/Controls"]
+[node name="Raid" type="Button" parent="Interface/ActionBar/Controls" unique_id=494717570]
 custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
 
-[node name="Statistics" type="Button" parent="Interface/ActionBar/Controls"]
+[node name="Statistics" type="Button" parent="Interface/ActionBar/Controls" unique_id=947741888]
 custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
 theme_override_font_sizes/font_size = 26
 text = "Σ"
 
-[node name="Inspector" type="PanelContainer" parent="Interface"]
+[node name="Inspector" type="PanelContainer" parent="Interface" unique_id=2023997075]
+anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 16.0
@@ -213,177 +310,249 @@ offset_right = 760.0
 offset_bottom = -88.0
 grow_vertical = 0
 
-[node name="Text" type="Label" parent="Interface/Inspector"]
-text = "LPM: wybór i narzędzia • Buduj/Praca: menu działań • Σ: zestawienia • PPM przeciągnięty: kamera • WASD/strzałki: kamera • kółko: zoom • F3: renderer 2D/3D • F4: z góry/ukośnie • Q/E: obrót 3D • ~: pauza • 1–4: prędkość • Alt+Enter: pełny ekran\nObszary pracy i pomost: przeciągnij LPM • można oznaczać teren odkryty, choć aktualnie niewidoczny • Esc: anuluj narzędzie"
+[node name="Text" type="Label" parent="Interface/Inspector" unique_id=1309675021]
+layout_mode = 2
+text = "LPM: wybór i narzędzia • Buduj/Praca: menu działań • Σ: zestawienia • PPM przeciągnięty: kamera • WASD/strzałki: kamera • kółko: zoom • F3: renderer 2D/3D • F4: z góry/ukośnie • Q/E: obrót 3D • ~: pauza • 1–4: prędkość • Alt+Enter: pełny ekran
+Obszary pracy i pomost: przeciągnij LPM • można oznaczać teren odkryty, choć aktualnie niewidoczny • Esc: anuluj narzędzie"
 autowrap_mode = 2
 
-[node name="MainMenu" type="ColorRect" parent="Interface"]
+[node name="MainMenu" type="ColorRect" parent="Interface" unique_id=219492972]
 visible = false
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
-color = Color(0.018, 0.027, 0.024, 0.94)
+color = Color(0.018, 0.027, 0.024, 1)
 
-[node name="Center" type="CenterContainer" parent="Interface/MainMenu"]
-anchors_preset = 15
+[node name="Background" type="TextureRect" parent="Interface/MainMenu"]
+layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("6_menu_background")
+expand_mode = 1
+stretch_mode = 6
 
-[node name="Panel" type="PanelContainer" parent="Interface/MainMenu/Center"]
-custom_minimum_size = Vector2(520, 430)
-layout_mode = 2
+[node name="Shade" type="ColorRect" parent="Interface/MainMenu"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.005, 0.012, 0.011, 0.06)
 
-[node name="Margin" type="MarginContainer" parent="Interface/MainMenu/Center/Panel"]
-layout_mode = 2
-theme_override_constants/margin_left = 48
-theme_override_constants/margin_top = 40
-theme_override_constants/margin_right = 48
-theme_override_constants/margin_bottom = 40
+[node name="Center" type="MarginContainer" parent="Interface/MainMenu" unique_id=226558359]
+layout_mode = 0
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 32.0
+offset_top = -470.0
+offset_right = 552.0
+offset_bottom = -28.0
+grow_vertical = 0
 
-[node name="Controls" type="VBoxContainer" parent="Interface/MainMenu/Center/Panel/Margin"]
+[node name="Panel" type="PanelContainer" parent="Interface/MainMenu/Center" unique_id=1668188897]
+custom_minimum_size = Vector2(520, 442)
 layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_main_menu")
+
+[node name="Margin" type="MarginContainer" parent="Interface/MainMenu/Center/Panel" unique_id=566143964]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="Controls" type="VBoxContainer" parent="Interface/MainMenu/Center/Panel/Margin" unique_id=434358161]
+layout_mode = 2
+theme_override_constants/separation = 9
 alignment = 1
-theme_override_constants/separation = 14
 
-[node name="Title" type="Label" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+[node name="Title" type="HBoxContainer" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=189286781]
+custom_minimum_size = Vector2(0, 120)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.68, 0.9, 0.48, 1)
-theme_override_font_sizes/font_size = 38
-text = "GOBLIN STRONGHOLD"
-horizontal_alignment = 1
+theme_override_constants/separation = 8
+alignment = 1
 
-[node name="Subtitle" type="Label" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+[node name="Words" type="TextureRect" parent="Interface/MainMenu/Center/Panel/Margin/Controls/Title"]
+custom_minimum_size = Vector2(332, 120)
 layout_mode = 2
+size_flags_horizontal = 3
+texture = ExtResource("8_menu_title")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Goblin" type="TextureRect" parent="Interface/MainMenu/Center/Panel/Margin/Controls/Title"]
+custom_minimum_size = Vector2(120, 120)
+layout_mode = 2
+texture = ExtResource("7_menu_goblin")
+expand_mode = 1
+stretch_mode = 5
+tooltip_text = "On już wie, gdzie trzymasz kilof."
+
+[node name="Subtitle" type="Label" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=542316023]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.82, 0.87, 0.76, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 17
 text = "Plemię pamięta to, co zdoła pożreć."
 horizontal_alignment = 1
 
-[node name="Spacer" type="Control" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
-custom_minimum_size = Vector2(0, 28)
+[node name="Spacer" type="Control" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=594241916]
+custom_minimum_size = Vector2(0, 2)
 layout_mode = 2
 
-[node name="Resume" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
-custom_minimum_size = Vector2(0, 48)
+[node name="Resume" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=1511492896]
+custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
 text = "Wróć do gry"
 
-[node name="NewGame" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
-custom_minimum_size = Vector2(0, 48)
+[node name="NewGame" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=154478644]
+custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
 text = "Nowa gra"
 
-[node name="LoadGame" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
-custom_minimum_size = Vector2(0, 48)
+[node name="LoadGame" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=615510638]
+custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
 text = "Wczytaj ostatni zapis"
 
-[node name="Quit" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
-custom_minimum_size = Vector2(0, 48)
+[node name="Quit" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=1146755296]
+custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
 text = "Wyjście"
 
-[node name="BuildMenu" type="PopupPanel" parent="."]
+[node name="BuildMenu" type="PopupPanel" parent="." unique_id=1640149946]
 size = Vector2i(164, 164)
 
-[node name="Margin" type="MarginContainer" parent="BuildMenu"]
+[node name="Margin" type="MarginContainer" parent="BuildMenu" unique_id=1205575898]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 8.0
-offset_top = 8.0
-offset_right = -8.0
-offset_bottom = -8.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 160.0
+offset_bottom = 160.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Grid" type="GridContainer" parent="BuildMenu/Margin"]
-columns = 2
+[node name="Grid" type="GridContainer" parent="BuildMenu/Margin" unique_id=1910722532]
+layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
+columns = 2
 
-[node name="WorkMenu" type="PopupPanel" parent="."]
+[node name="WorkMenu" type="PopupPanel" parent="." unique_id=1464302998]
 size = Vector2i(164, 164)
 
-[node name="Margin" type="MarginContainer" parent="WorkMenu"]
+[node name="Margin" type="MarginContainer" parent="WorkMenu" unique_id=276597709]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 8.0
-offset_top = 8.0
-offset_right = -8.0
-offset_bottom = -8.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 160.0
+offset_bottom = 160.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Grid" type="GridContainer" parent="WorkMenu/Margin"]
-columns = 2
+[node name="Grid" type="GridContainer" parent="WorkMenu/Margin" unique_id=15274208]
+layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
+columns = 2
 
-[node name="StatisticsMenu" type="PopupPanel" parent="."]
+[node name="StatisticsMenu" type="PopupPanel" parent="." unique_id=1749311103]
 size = Vector2i(164, 164)
 
-[node name="Margin" type="MarginContainer" parent="StatisticsMenu"]
+[node name="Margin" type="MarginContainer" parent="StatisticsMenu" unique_id=657869977]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 8.0
-offset_top = 8.0
-offset_right = -8.0
-offset_bottom = -8.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 160.0
+offset_bottom = 160.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Grid" type="GridContainer" parent="StatisticsMenu/Margin"]
-columns = 2
+[node name="Grid" type="GridContainer" parent="StatisticsMenu/Margin" unique_id=1070570946]
+layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
+columns = 2
 
-[node name="GoblinDetails" type="Window" parent="."]
+[node name="GoblinDetails" type="Window" parent="." unique_id=1844639358]
 title = "Goblin"
 initial_position = 1
 size = Vector2i(430, 520)
-min_size = Vector2i(320, 280)
 visible = false
+min_size = Vector2i(320, 280)
 
-[node name="Scroll" type="ScrollContainer" parent="GoblinDetails"]
+[node name="Scroll" type="ScrollContainer" parent="GoblinDetails" unique_id=811536555]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Content" type="VBoxContainer" parent="GoblinDetails/Scroll"]
+[node name="Content" type="VBoxContainer" parent="GoblinDetails/Scroll" unique_id=1431645263]
 custom_minimum_size = Vector2(390, 0)
+layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="Needs" type="GridContainer" parent="GoblinDetails/Scroll/Content"]
-columns = 2
+[node name="Needs" type="GridContainer" parent="GoblinDetails/Scroll/Content" unique_id=142321658]
+layout_mode = 2
 theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 4
+columns = 2
 
-[node name="Inventory" type="HBoxContainer" parent="GoblinDetails/Scroll/Content"]
+[node name="Inventory" type="HBoxContainer" parent="GoblinDetails/Scroll/Content" unique_id=609019645]
 custom_minimum_size = Vector2(0, 58)
+layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="Text" type="Label" parent="GoblinDetails/Scroll/Content"]
+[node name="Text" type="Label" parent="GoblinDetails/Scroll/Content" unique_id=559625139]
+layout_mode = 2
 size_flags_horizontal = 3
 text = "Goblin"
 autowrap_mode = 2
 
-[node name="StoredResourcesWindow" type="Window" parent="."]
+[node name="StoredResourcesWindow" type="Window" parent="." unique_id=607521404]
 title = "Zapasy w magazynach"
 initial_position = 1
 size = Vector2i(510, 300)
-min_size = Vector2i(390, 240)
 visible = false
+min_size = Vector2i(390, 240)
 
-[node name="Margin" type="MarginContainer" parent="StoredResourcesWindow"]
+[node name="Margin" type="MarginContainer" parent="StoredResourcesWindow" unique_id=302640677]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -394,31 +563,35 @@ offset_bottom = -14.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Content" type="VBoxContainer" parent="StoredResourcesWindow/Margin"]
+[node name="Content" type="VBoxContainer" parent="StoredResourcesWindow/Margin" unique_id=1819149769]
+layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="Summary" type="Label" parent="StoredResourcesWindow/Margin/Content"]
+[node name="Summary" type="Label" parent="StoredResourcesWindow/Margin/Content" unique_id=1400319247]
+layout_mode = 2
 text = "Fizyczna zawartość wszystkich magazynów plemienia."
 autowrap_mode = 2
 
-[node name="Detailed" type="CheckButton" parent="StoredResourcesWindow/Margin/Content"]
-text = "Pokaż konkretne rodzaje"
+[node name="Detailed" type="CheckButton" parent="StoredResourcesWindow/Margin/Content" unique_id=1215984233]
+layout_mode = 2
 tooltip_text = "Rozdziela żywność, gatunki drewna i rodzaje kamienia."
+text = "Pokaż konkretne rodzaje"
 
-[node name="Grid" type="GridContainer" parent="StoredResourcesWindow/Margin/Content"]
+[node name="Grid" type="GridContainer" parent="StoredResourcesWindow/Margin/Content" unique_id=957772829]
+layout_mode = 2
 size_flags_vertical = 3
-columns = 5
 theme_override_constants/h_separation = 10
 theme_override_constants/v_separation = 10
+columns = 5
 
-[node name="LooseResourcesWindow" type="Window" parent="."]
+[node name="LooseResourcesWindow" type="Window" parent="." unique_id=131620878]
 title = "Luźne towary"
 initial_position = 1
 size = Vector2i(510, 320)
-min_size = Vector2i(390, 250)
 visible = false
+min_size = Vector2i(390, 250)
 
-[node name="Margin" type="MarginContainer" parent="LooseResourcesWindow"]
+[node name="Margin" type="MarginContainer" parent="LooseResourcesWindow" unique_id=1643046695]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -429,31 +602,35 @@ offset_bottom = -14.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Content" type="VBoxContainer" parent="LooseResourcesWindow/Margin"]
+[node name="Content" type="VBoxContainer" parent="LooseResourcesWindow/Margin" unique_id=1426414940]
+layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="Summary" type="Label" parent="LooseResourcesWindow/Margin/Content"]
+[node name="Summary" type="Label" parent="LooseResourcesWindow/Margin/Content" unique_id=373679706]
+layout_mode = 2
 text = "Znane towary leżące na ziemi. Nie wliczają się do zapasów magazynowych."
 autowrap_mode = 2
 
-[node name="Detailed" type="CheckButton" parent="LooseResourcesWindow/Margin/Content"]
-text = "Pokaż konkretne rodzaje"
+[node name="Detailed" type="CheckButton" parent="LooseResourcesWindow/Margin/Content" unique_id=1072924780]
+layout_mode = 2
 tooltip_text = "Rozdziela żywność, gatunki drewna i rodzaje kamienia."
+text = "Pokaż konkretne rodzaje"
 
-[node name="Grid" type="GridContainer" parent="LooseResourcesWindow/Margin/Content"]
+[node name="Grid" type="GridContainer" parent="LooseResourcesWindow/Margin/Content" unique_id=1242702497]
+layout_mode = 2
 size_flags_vertical = 3
-columns = 5
 theme_override_constants/h_separation = 10
 theme_override_constants/v_separation = 10
+columns = 5
 
-[node name="GoblinRosterWindow" type="Window" parent="."]
+[node name="GoblinRosterWindow" type="Window" parent="." unique_id=295736424]
 title = "Plemię"
 initial_position = 1
 size = Vector2i(560, 430)
-min_size = Vector2i(430, 300)
 visible = false
+min_size = Vector2i(430, 300)
 
-[node name="Scroll" type="ScrollContainer" parent="GoblinRosterWindow"]
+[node name="Scroll" type="ScrollContainer" parent="GoblinRosterWindow" unique_id=752536458]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -464,19 +641,20 @@ offset_bottom = -12.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Rows" type="VBoxContainer" parent="GoblinRosterWindow/Scroll"]
+[node name="Rows" type="VBoxContainer" parent="GoblinRosterWindow/Scroll" unique_id=535568238]
 custom_minimum_size = Vector2(510, 0)
+layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 5
 
-[node name="StatisticsWindow" type="Window" parent="."]
+[node name="StatisticsWindow" type="Window" parent="." unique_id=366169888]
 title = "Statystyki plemienia"
 initial_position = 1
 size = Vector2i(510, 390)
-min_size = Vector2i(400, 280)
 visible = false
+min_size = Vector2i(400, 280)
 
-[node name="Margin" type="MarginContainer" parent="StatisticsWindow"]
+[node name="Margin" type="MarginContainer" parent="StatisticsWindow" unique_id=238898885]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -487,20 +665,21 @@ offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Text" type="Label" parent="StatisticsWindow/Margin"]
+[node name="Text" type="Label" parent="StatisticsWindow/Margin" unique_id=369480313]
+layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 text = "Statystyki"
 autowrap_mode = 2
 
-[node name="StorageDetails" type="Window" parent="."]
+[node name="StorageDetails" type="Window" parent="." unique_id=225702360]
 title = "Ustawienia składu"
 initial_position = 1
 size = Vector2i(480, 570)
-min_size = Vector2i(430, 510)
 visible = false
+min_size = Vector2i(430, 510)
 
-[node name="Margin" type="MarginContainer" parent="StorageDetails"]
+[node name="Margin" type="MarginContainer" parent="StorageDetails" unique_id=330984714]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -511,92 +690,116 @@ offset_bottom = -14.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Controls" type="VBoxContainer" parent="StorageDetails/Margin"]
+[node name="Controls" type="VBoxContainer" parent="StorageDetails/Margin" unique_id=872059310]
+layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Summary" type="Label" parent="StorageDetails/Margin/Controls"]
+[node name="Summary" type="Label" parent="StorageDetails/Margin/Controls" unique_id=1802370466]
+layout_mode = 2
 text = "Skład"
 autowrap_mode = 2
 
-[node name="MineralFilters" type="VBoxContainer" parent="StorageDetails/Margin/Controls"]
+[node name="MineralFilters" type="VBoxContainer" parent="StorageDetails/Margin/Controls" unique_id=1250907985]
 visible = false
+layout_mode = 2
 tooltip_text = "Filtr dotyczy nowych dostaw. Towary już złożone pozostają na miejscu."
 
-[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/MineralFilters"]
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/MineralFilters" unique_id=968030906]
+layout_mode = 2
 text = "Przyjmowany urobek:"
 
-[node name="Choices" type="GridContainer" parent="StorageDetails/Margin/Controls/MineralFilters"]
+[node name="Choices" type="GridContainer" parent="StorageDetails/Margin/Controls/MineralFilters" unique_id=962507172]
+layout_mode = 2
 columns = 2
 
-[node name="Sandstone" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices"]
+[node name="Sandstone" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices" unique_id=726179243]
+layout_mode = 2
 text = "Piaskowiec"
 
-[node name="Granite" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices"]
+[node name="Granite" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices" unique_id=253357390]
+layout_mode = 2
 text = "Granit"
 
-[node name="Coal" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices"]
+[node name="Coal" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices" unique_id=1485077479]
+layout_mode = 2
 text = "Węgiel"
 
-[node name="IronOre" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices"]
+[node name="IronOre" type="CheckButton" parent="StorageDetails/Margin/Controls/MineralFilters/Choices" unique_id=420807710]
+layout_mode = 2
 text = "Ruda żelaza"
 
-[node name="PullLoose" type="CheckButton" parent="StorageDetails/Margin/Controls"]
+[node name="PullLoose" type="CheckButton" parent="StorageDetails/Margin/Controls" unique_id=819521604]
+layout_mode = 2
 text = "Żądaj dostaw zasobów"
 
-[node name="TargetRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+[node name="TargetRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls" unique_id=289337932]
+layout_mode = 2
 
-[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/TargetRow"]
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/TargetRow" unique_id=1237211814]
+layout_mode = 2
 text = "Docelowa ilość:"
 
-[node name="Target" type="SpinBox" parent="StorageDetails/Margin/Controls/TargetRow"]
+[node name="Target" type="SpinBox" parent="StorageDetails/Margin/Controls/TargetRow" unique_id=888460585]
+layout_mode = 2
 max_value = 64.0
 value = 64.0
-allow_greater = false
-allow_lesser = false
 
-[node name="PriorityRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+[node name="PriorityRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls" unique_id=1259673742]
+layout_mode = 2
 
-[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/PriorityRow"]
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/PriorityRow" unique_id=103012873]
+layout_mode = 2
 text = "Priorytet:"
 
-[node name="Priority" type="OptionButton" parent="StorageDetails/Margin/Controls/PriorityRow"]
+[node name="Priority" type="OptionButton" parent="StorageDetails/Margin/Controls/PriorityRow" unique_id=384865247]
+layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="GlobalPriorityRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+[node name="GlobalPriorityRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls" unique_id=232587657]
+layout_mode = 2
 
-[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/GlobalPriorityRow"]
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/GlobalPriorityRow" unique_id=2078728155]
+layout_mode = 2
 text = "Priorytet towaru:"
 
-[node name="Priority" type="OptionButton" parent="StorageDetails/Margin/Controls/GlobalPriorityRow"]
+[node name="Priority" type="OptionButton" parent="StorageDetails/Margin/Controls/GlobalPriorityRow" unique_id=2021755760]
+layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HaulerRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+[node name="HaulerRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls" unique_id=1082242860]
+layout_mode = 2
 
-[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/HaulerRow"]
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/HaulerRow" unique_id=933428233]
+layout_mode = 2
 text = "Tragarz:"
 
-[node name="Hauler" type="OptionButton" parent="StorageDetails/Margin/Controls/HaulerRow"]
+[node name="Hauler" type="OptionButton" parent="StorageDetails/Margin/Controls/HaulerRow" unique_id=239362689]
+layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="SourceRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls"]
+[node name="SourceRow" type="HBoxContainer" parent="StorageDetails/Margin/Controls" unique_id=1324635277]
+layout_mode = 2
 
-[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/SourceRow"]
+[node name="Label" type="Label" parent="StorageDetails/Margin/Controls/SourceRow" unique_id=1334033564]
+layout_mode = 2
 text = "Źródło:"
 
-[node name="Source" type="OptionButton" parent="StorageDetails/Margin/Controls/SourceRow"]
+[node name="Source" type="OptionButton" parent="StorageDetails/Margin/Controls/SourceRow" unique_id=1722236843]
+layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Apply" type="Button" parent="StorageDetails/Margin/Controls"]
+[node name="Apply" type="Button" parent="StorageDetails/Margin/Controls" unique_id=441598042]
+layout_mode = 2
 text = "Zastosuj"
 
-[node name="ConstructionDetails" type="Window" parent="."]
+[node name="ConstructionDetails" type="Window" parent="." unique_id=1375969617]
 title = "Plac budowy"
 initial_position = 1
 size = Vector2i(460, 260)
-min_size = Vector2i(400, 220)
 visible = false
+min_size = Vector2i(400, 220)
 
-[node name="Margin" type="MarginContainer" parent="ConstructionDetails"]
+[node name="Margin" type="MarginContainer" parent="ConstructionDetails" unique_id=1461509407]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -607,21 +810,27 @@ offset_bottom = -14.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Controls" type="VBoxContainer" parent="ConstructionDetails/Margin"]
+[node name="Controls" type="VBoxContainer" parent="ConstructionDetails/Margin" unique_id=1401998133]
+layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Summary" type="Label" parent="ConstructionDetails/Margin/Controls"]
+[node name="Summary" type="Label" parent="ConstructionDetails/Margin/Controls" unique_id=2123563582]
+layout_mode = 2
 size_flags_vertical = 3
 text = "Plac budowy"
 autowrap_mode = 2
 
-[node name="PriorityRow" type="HBoxContainer" parent="ConstructionDetails/Margin/Controls"]
+[node name="PriorityRow" type="HBoxContainer" parent="ConstructionDetails/Margin/Controls" unique_id=1573005514]
+layout_mode = 2
 
-[node name="Label" type="Label" parent="ConstructionDetails/Margin/Controls/PriorityRow"]
+[node name="Label" type="Label" parent="ConstructionDetails/Margin/Controls/PriorityRow" unique_id=1033480308]
+layout_mode = 2
 text = "Priorytet:"
 
-[node name="Priority" type="OptionButton" parent="ConstructionDetails/Margin/Controls/PriorityRow"]
+[node name="Priority" type="OptionButton" parent="ConstructionDetails/Margin/Controls/PriorityRow" unique_id=1423336471]
+layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Apply" type="Button" parent="ConstructionDetails/Margin/Controls"]
+[node name="Apply" type="Button" parent="ConstructionDetails/Margin/Controls" unique_id=1997880176]
+layout_mode = 2
 text = "Zastosuj"

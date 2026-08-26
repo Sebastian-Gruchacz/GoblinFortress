@@ -13,6 +13,7 @@ config_version=5
 config/name="Goblin Stronghold"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "C#")
+config/icon="res://Assets/Branding/goblin-stronghold-icon-v1.png"
 
 [display]
 

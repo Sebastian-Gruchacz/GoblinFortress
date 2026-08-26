@@ -8,7 +8,6 @@ namespace GoblinStronghold.GodotClient;
 
 public partial class Main : Node
 {
-    private static readonly WorldSeed InitialSeed = new(0x474F424C494EUL);
     private SimulationEngine _engine = null!;
     private WorldView _worldView = null!;
     private WorldView3D _worldView3D = null!;
@@ -141,8 +140,6 @@ public partial class Main : Node
     public override void _Ready()
     {
         _saveStore = new GameSaveStore(ProjectSettings.GlobalizePath("user://saves"));
-        _engine = CreateNewEngine(InitialSeed);
-        var map = _engine.Map;
 
         _worldView = GetNode<WorldView>("WorldView");
         _worldView3D = GetNode<WorldView3D>("WorldView3D");
@@ -352,15 +349,11 @@ public partial class Main : Node
         _newGameButton.Pressed += StartNewGame;
         _loadMenuButton.Pressed += LoadGame;
         GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Quit").Pressed += () => GetTree().Quit();
-        _worldView.SetWorld(_engine);
-        _worldView3D.SetWorld(_engine);
+        _worldView.Hide();
+        _camera.Enabled = false;
         _worldView3D.SetActive(false);
-        _minimap.SetWorld(_engine);
-        _worldView.SetSimulationSpeed(_speed, SecondsPerTick);
         _minimap.NavigationRequested += CenterCameraOn;
         GetViewport().SizeChanged += ConstrainCameraToMap;
-        _camera.Position = _worldView.CellToWorld(map.GoblinSpawn);
-        ConstrainCameraToMap();
 
         BindButton("Pause", 0);
         BindButton("Speed1", 1);
@@ -387,15 +380,12 @@ public partial class Main : Node
         statisticsButton.Pressed += ShowStatisticsMenu;
         CreateRaidWindow();
         UpdateSpeedButtons();
-        UpdateLayerToolAvailability();
-        ScheduleNextAutosave();
-        UpdateStatus();
         ShowMainMenu();
     }
 
     public override void _Process(double delta)
     {
-        if (_mainMenu.Visible)
+        if (!_hasActiveSession || _mainMenu.Visible)
         {
             return;
         }
@@ -711,8 +701,11 @@ public partial class Main : Node
         }
 
         CancelActiveTool();
-        _speedBeforeMenu = _speed;
-        SetSpeed(0);
+        if (_hasActiveSession)
+        {
+            _speedBeforeMenu = _speed;
+            SetSpeed(0);
+        }
         _resumeGameButton.Visible = _hasActiveSession;
         _loadMenuButton.Disabled = !_saveStore.HasAnySave;
         _mainMenu.Show();
@@ -797,6 +790,9 @@ public partial class Main : Node
         _worldView.SetSimulationSpeed(_speed, SecondsPerTick);
         _worldView3D.SetWorld(engine);
         _minimap.SetWorld(engine);
+        _worldView.Visible = !_use3DView;
+        _camera.Enabled = !_use3DView;
+        _worldView3D.SetActive(_use3DView);
         _camera.Position = _worldView.CellToWorld(engine.Map.GoblinSpawn);
         UpdateLayerToolAvailability();
         ScheduleNextAutosave();
@@ -1044,15 +1040,16 @@ public partial class Main : Node
 
     private void CreateNeedIndicators()
     {
+        var definitions = SimulationDefinitions.Foundation;
         var grid = GetNode<GridContainer>("GoblinDetails/Scroll/Content/Needs");
         _healthBar = CreateNeedIndicator(
-            grid, UiIcon.Health, "Zdrowie", _engine.Definitions.MaximumHealth);
+            grid, UiIcon.Health, "Zdrowie", definitions.MaximumHealth);
         _hungerBar = CreateNeedIndicator(
-            grid, UiIcon.Hunger, "Nasycenie", _engine.Definitions.MaximumHunger);
+            grid, UiIcon.Hunger, "Nasycenie", definitions.MaximumHunger);
         _thirstBar = CreateNeedIndicator(
-            grid, UiIcon.Thirst, "Nawodnienie", _engine.Definitions.MaximumThirst);
+            grid, UiIcon.Thirst, "Nawodnienie", definitions.MaximumThirst);
         _fatigueBar = CreateNeedIndicator(
-            grid, UiIcon.FieldCamp, "Wytrzymałość", _engine.Definitions.MaximumFatigue);
+            grid, UiIcon.FieldCamp, "Wytrzymałość", definitions.MaximumFatigue);
     }
 
     private ProgressBar CreateNeedIndicator(
@@ -3189,9 +3186,11 @@ public partial class Main : Node
             Size = new Vector2I(500, 560),
             MinSize = new Vector2I(420, 420),
             Unresizable = false,
+            Visible = false,
         };
         _raidWindow.CloseRequested += _raidWindow.Hide;
         AddChild(_raidWindow);
+        _raidWindow.Hide();
 
         var margin = new MarginContainer();
         margin.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);

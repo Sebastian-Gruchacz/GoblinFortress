@@ -32,6 +32,7 @@ public partial class WorldView : Node2D
     private Texture2D _humanStructureAtlas = null!;
     private Texture2D _walkwayAtlas = null!;
     private Texture2D _structureWallAtlas = null!;
+    private Texture2D _bloodAtlas = null!;
     private int _visibleLevel;
     private double _waterAnimationElapsed;
     private double _waterAnimationRedrawElapsed;
@@ -57,6 +58,7 @@ public partial class WorldView : Node2D
         _humanStructureAtlas = HumanStructureSprites.LoadAtlas();
         _walkwayAtlas = WalkwaySprites.LoadAtlas();
         _structureWallAtlas = StructureWallSprites.LoadAtlas();
+        _bloodAtlas = BloodSprites.LoadAtlas();
     }
 
     public void SetWorld(SimulationEngine engine)
@@ -69,7 +71,7 @@ public partial class WorldView : Node2D
         _wallEnclosureBarriers.Clear();
         _wallEnclosureSolids.Clear();
         _engine = engine;
-        Refresh(engine.CreateSnapshot());
+        Refresh(engine.CreatePresentationSnapshot());
     }
 
     public void Refresh(SimulationSnapshot snapshot)
@@ -187,6 +189,7 @@ public partial class WorldView : Node2D
         }
 
         DrawStructures();
+        DrawBloodStains();
         if (_visibleLevel >= 0)
         {
             DrawHumanCohorts();
@@ -223,9 +226,10 @@ public partial class WorldView : Node2D
             .Where(passage => passage.Upper.Z == 0)
             .Select(passage => passage.Upper)
             .ToHashSet();
-        for (var y = 0; y < _engine.Map.Height; y++)
+        var bounds = GetVisibleCellBounds();
+        for (var y = bounds.MinimumY; y < bounds.MaximumY; y++)
         {
-            for (var x = 0; x < _engine.Map.Width; x++)
+            for (var x = bounds.MinimumX; x < bounds.MaximumX; x++)
             {
                 var position = new GridPosition(x, y, _visibleLevel);
                 var cell = _engine.Map.GetColumnCell(position);
@@ -254,7 +258,7 @@ public partial class WorldView : Node2D
 
                 if (cell.SurfaceLevel > _visibleLevel)
                 {
-                    DrawHillInterior(position, cell);
+                    DrawHillInterior(position);
                     continue;
                 }
 
@@ -263,32 +267,110 @@ public partial class WorldView : Node2D
         }
     }
 
-    private void DrawHillInterior(GridPosition position, MapCell column)
+    private void DrawBloodStains()
+    {
+        foreach (var stain in _snapshot.BloodStains.Where(stain =>
+                     stain.Position.Z == _visibleLevel &&
+                     _snapshot.GetVisibility(stain.Position, _engine.Map.Width).IsDiscovered()))
+        {
+            var variant = unchecked(
+                (stain.Position.X * 73_856_093) ^
+                (stain.Position.Y * 19_349_663) ^
+                (stain.Position.Z * 83_492_791));
+            var alpha = stain.Volume <= 3
+                ? 0.58f
+                : stain.Surface == BloodSurfaceKind.ConstructedFloor
+                    ? 0.88f
+                    : Math.Clamp(0.28f + stain.Volume / 80f, 0.32f, 0.86f);
+            var rect = CellRect(stain.Position.X, stain.Position.Y);
+            var scale = stain.Volume switch
+            {
+                <= 3 => 0.42f,
+                <= 8 => 0.68f,
+                _ => 0.96f,
+            };
+            var size = rect.Size * scale;
+            var destination = new Rect2(rect.GetCenter() - size / 2f, size);
+            DrawTextureRectRegion(
+                _bloodAtlas,
+                destination,
+                BloodSprites.GetRegion(_bloodAtlas, stain.Volume, variant),
+                new Color(1f, 1f, 1f, alpha));
+        }
+    }
+
+    private void DrawHillInterior(GridPosition position)
     {
         var rect = CellRect(position.X, position.Y);
-        var depth = column.SurfaceLevel - position.Z;
-        if (depth == 1)
+        if (!_engine.Map.IsHillRockPosition(position))
         {
-            DrawTextureRectRegion(
-                _terrainAtlas,
-                rect,
-                TerrainSprites.GetRegion(_terrainAtlas, TerrainSprite.BogGround));
-            DrawRect(rect, new Color(0.14f, 0.11f, 0.07f, 0.58f));
+            DrawRect(rect, new Color("17130f"));
             return;
         }
 
-        if (_engine.Map.IsHillRockPosition(position))
+        var rock = _engine.Map.GetHillRockCell(position).Rock;
+        var openNeighborMask = GetOpenHillNeighborMask(position);
+        if (openNeighborMask != 0)
         {
-            var rock = _engine.Map.GetHillRockCell(position).Rock;
             DrawTextureRectRegion(
-                _caveAtlas,
+                _caveWallAtlas,
                 rect,
-                CaveSprites.GetFloorRegion(_caveAtlas, rock));
-            DrawRect(rect, CaveSprites.GetFloorShade(rock).Darkened(0.28f));
-            return;
+                CaveSprites.GetWallRegion(_caveWallAtlas, rock, openNeighborMask));
+            DrawHillInnerCorners(position, rock);
+        }
+        else
+        {
+            var rockTint = rock == RockKind.Sandstone
+                ? new Color("19140f")
+                : new Color("101216");
+            DrawRect(rect, rockTint);
+        }
+    }
+
+    private void DrawHillInnerCorners(GridPosition position, RockKind rock)
+    {
+        var corners = CaveWallTopology.GetInnerOpenCorners(position, IsOpenHillCell);
+        foreach (var corner in new[]
+                 {
+                     CaveInnerCorner.NorthWest,
+                     CaveInnerCorner.NorthEast,
+                     CaveInnerCorner.SouthEast,
+                     CaveInnerCorner.SouthWest,
+                 })
+        {
+            if ((corners & corner) == 0)
+            {
+                continue;
+            }
+
+            DrawTextureRectRegion(
+                _caveWallAtlas,
+                CellRect(position.X, position.Y),
+                CaveSprites.GetInnerCornerRegion(_caveWallAtlas, rock, corner));
+        }
+    }
+
+    private bool IsOpenHillCell(GridPosition position) =>
+        _engine.Map.IsColumnWithin(position) &&
+        !_engine.Map.IsHillRockPosition(position);
+
+    private int GetOpenHillNeighborMask(GridPosition position)
+    {
+        ReadOnlySpan<(int X, int Y, int Bit)> offsets =
+            [(0, -1, 1), (1, 0, 2), (0, 1, 4), (-1, 0, 8)];
+        var mask = 0;
+        foreach (var offset in offsets)
+        {
+            if (IsOpenHillCell(new GridPosition(
+                    position.X + offset.X,
+                    position.Y + offset.Y,
+                    position.Z)))
+            {
+                mask |= offset.Bit;
+            }
         }
 
-        DrawRect(rect, new Color("17130f"));
+        return mask;
     }
 
     private void DrawCaveMouth(int x, int y, ISet<GridPosition> caveMouths)
@@ -310,9 +392,10 @@ public partial class WorldView : Node2D
         var passagePositions = _engine.World.CreateVerticalPassageSnapshot()
             .SelectMany(passage => new[] { passage.Upper, passage.Lower })
             .ToHashSet();
-        for (var y = 0; y < _engine.Map.Height; y++)
+        var bounds = GetVisibleCellBounds();
+        for (var y = bounds.MinimumY; y < bounds.MaximumY; y++)
         {
-            for (var x = 0; x < _engine.Map.Width; x++)
+            for (var x = bounds.MinimumX; x < bounds.MaximumX; x++)
             {
                 var position = new GridPosition(x, y, _visibleLevel);
                 if (!_engine.Map.IsCavePosition(position))
@@ -1488,6 +1571,7 @@ public partial class WorldView : Node2D
                 WorkDesignationKind.CarveRampUp => new Color(0.96f, 0.74f, 0.3f, 0.94f),
                 WorkDesignationKind.Scout => new Color(0.38f, 0.78f, 0.94f, 0.68f),
                 WorkDesignationKind.HuntAnimal => new Color(0.96f, 0.32f, 0.18f, 0.88f),
+                WorkDesignationKind.CleanBlood => new Color(0.86f, 0.76f, 1f, 0.9f),
                 _ => Colors.Magenta,
             };
             if (designation.IsSuspended)
@@ -1518,6 +1602,7 @@ public partial class WorldView : Node2D
             WorkDesignationKind.CarveRampUp => new Color(1f, 0.82f, 0.34f, 0.98f),
             WorkDesignationKind.Scout => new Color(0.42f, 0.86f, 1f, 0.88f),
             WorkDesignationKind.HuntAnimal => new Color(1f, 0.36f, 0.2f, 0.96f),
+            WorkDesignationKind.CleanBlood => new Color(0.92f, 0.84f, 1f, 0.98f),
             _ => new Color(0.95f, 0.28f, 0.24f, 0.9f),
         };
         foreach (var cell in _workPreview.Where(cell => cell.Z == _visibleLevel))
@@ -1789,6 +1874,7 @@ public partial class WorldView : Node2D
                 ActorJobKind.Explore => new Color(0.78f, 0.82f, 0.86f, 0.72f),
                 ActorJobKind.Move => new Color(0.98f, 0.84f, 0.34f, 0.82f),
                 ActorJobKind.Resupply => new Color(0.36f, 0.78f, 0.92f, 0.78f),
+                ActorJobKind.CleanBlood => new Color(0.86f, 0.76f, 1f, 0.84f),
                 _ => new Color(0.86f, 0.93f, 0.45f, 0.58f),
             };
             DrawDashedLine(from, target, color with { A = 0.28f }, 1f, 5f);
@@ -1855,13 +1941,13 @@ public partial class WorldView : Node2D
 
     private void DrawFog()
     {
-        for (var y = 0; y < _engine.Map.Height; y++)
+        var bounds = GetVisibleCellBounds();
+        for (var y = bounds.MinimumY; y < bounds.MaximumY; y++)
         {
-            for (var x = 0; x < _engine.Map.Width; x++)
+            for (var x = bounds.MinimumX; x < bounds.MaximumX; x++)
             {
-                var visibility = _snapshot.GetVisibility(
-                    new GridPosition(x, y, _visibleLevel),
-                    _engine.Map.Width);
+                var position = new GridPosition(x, y, _visibleLevel);
+                var visibility = GetRenderedVisibility(position);
                 var color = visibility switch
                 {
                     CellVisibility.Unknown => new Color(0.035f, 0.045f, 0.04f, 0.97f),
@@ -1874,6 +1960,38 @@ public partial class WorldView : Node2D
                 }
             }
         }
+    }
+
+    private CellVisibility GetRenderedVisibility(GridPosition position)
+    {
+        var visibility = _snapshot.GetVisibility(position, _engine.Map.Width);
+        if (!_engine.Map.IsHillRockPosition(position))
+        {
+            return visibility;
+        }
+
+        ReadOnlySpan<(int X, int Y)> offsets =
+            [(0, -1), (1, 0), (0, 1), (-1, 0)];
+        foreach (var offset in offsets)
+        {
+            var neighbor = new GridPosition(
+                position.X + offset.X,
+                position.Y + offset.Y,
+                position.Z);
+            if (!_engine.Map.IsColumnWithin(neighbor) ||
+                _engine.Map.IsHillRockPosition(neighbor))
+            {
+                continue;
+            }
+
+            var neighborVisibility = _snapshot.GetVisibility(neighbor, _engine.Map.Width);
+            if (neighborVisibility > visibility)
+            {
+                visibility = neighborVisibility;
+            }
+        }
+
+        return visibility;
     }
 
     private void DrawOrderedDestination()
@@ -1911,6 +2029,7 @@ public partial class WorldView : Node2D
             ActorJobKind.CarveRamp => UiIcon.Work,
             ActorJobKind.TendBud => UiIcon.GatherFood,
             ActorJobKind.HuntAnimal => UiIcon.Expedition,
+            ActorJobKind.CleanBlood => UiIcon.ClearOrders,
             ActorJobKind.Haul => UiIcon.FoodStorage,
             ActorJobKind.ClearConstructionSite => UiIcon.GatherBrushwood,
             ActorJobKind.SupplyConstruction => UiIcon.GatherBrushwood,
@@ -1995,6 +2114,32 @@ public partial class WorldView : Node2D
 
     private Vector2 GetVisualAnimalPosition(AnimalSnapshot animal) =>
         _visualAnimalPositions.GetValueOrDefault(animal.Id, CellCenter(animal.Position));
+
+    private (int MinimumX, int MinimumY, int MaximumX, int MaximumY) GetVisibleCellBounds(
+        int padding = 2)
+    {
+        var viewportSize = GetViewport().GetVisibleRect().Size;
+        var viewportToLocal = GetGlobalTransformWithCanvas().AffineInverse();
+        var first = viewportToLocal * Vector2.Zero;
+        var second = viewportToLocal * viewportSize;
+        var minimumX = Math.Clamp(
+            Mathf.FloorToInt(Math.Min(first.X, second.X) / TileSize) - padding,
+            0,
+            _engine.Map.Width);
+        var minimumY = Math.Clamp(
+            Mathf.FloorToInt(Math.Min(first.Y, second.Y) / TileSize) - padding,
+            0,
+            _engine.Map.Height);
+        var maximumX = Math.Clamp(
+            Mathf.CeilToInt(Math.Max(first.X, second.X) / TileSize) + padding,
+            0,
+            _engine.Map.Width);
+        var maximumY = Math.Clamp(
+            Mathf.CeilToInt(Math.Max(first.Y, second.Y) / TileSize) + padding,
+            0,
+            _engine.Map.Height);
+        return (minimumX, minimumY, maximumX, maximumY);
+    }
 
     private static Rect2 CellRect(int x, int y) => new(
         x * TileSize,

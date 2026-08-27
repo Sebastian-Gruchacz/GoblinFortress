@@ -518,8 +518,9 @@ public sealed class WorldMapState
     {
         ArgumentNullException.ThrowIfNull(positions);
         return positions.Count > 0 && positions.All(position =>
-            position.Z == 0 &&
-            Baseline.IsWithin(position) &&
+            Baseline.IsColumnWithin(position) &&
+            position.Z >= Baseline.MinimumWorldLevel &&
+            position.Z <= Baseline.MaximumWorldLevel &&
             !_occupancy.ContainsKey(new SpatialOccupancyKey(
                 position,
                 SpatialOccupancyChannel.Surface)) &&

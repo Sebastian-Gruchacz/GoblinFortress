@@ -11,6 +11,64 @@ public sealed class SimulationEngineTests
     private static readonly SimulationTick FinalTick = new(480);
 
     [Fact]
+    public void PresentationSnapshotCanSkipTheAuthoritativeStateHash()
+    {
+        var seed = new WorldSeed(0x50524553454E54UL);
+        var map = SwampMapGenerator.Generate(seed, 48, 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 2,
+            initialFoodStock: 4);
+
+        var presentation = engine.CreateSnapshot(includeStateHash: false);
+        var authoritative = engine.CreateSnapshot();
+
+        Assert.Empty(presentation.StateHash);
+        Assert.NotEmpty(authoritative.StateHash);
+        Assert.Equal(authoritative.Tick, presentation.Tick);
+        Assert.Equal(authoritative.Actors, presentation.Actors);
+        Assert.Equal(authoritative.MapFingerprint, presentation.MapFingerprint);
+    }
+
+    [Fact]
+    public void LoadClearsAStaleTransientJobInsteadOfRejectingTheSave()
+    {
+        var seed = new WorldSeed(0x5354414C454A4FUL);
+        var map = SwampMapGenerator.Generate(seed, 48, 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        var actor = save["actors"]?.AsArray()[0]?.AsObject()
+            ?? throw new InvalidOperationException("The save does not contain its initial actor.");
+        actor["jobKind"] = (int)ActorJobKind.Move;
+        actor["jobPhase"] = (int)ActorJobPhase.Traveling;
+        actor["jobTargetX"] = -1;
+        actor["jobTargetY"] = -1;
+        actor["remainingRoute"] = new JsonArray(new JsonObject
+        {
+            ["x"] = -1,
+            ["y"] = -1,
+            ["z"] = 0,
+        });
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        var restoredActor = Assert.Single(restored.CreateSnapshot().Actors);
+        Assert.Equal(ActorJobKind.None, restoredActor.Job.Kind);
+        Assert.Equal(ActorJobPhase.None, restoredActor.Job.Phase);
+        Assert.Equal(0, restoredActor.Job.RemainingRouteSteps);
+    }
+
+    [Fact]
     public void DefaultActiveMapUsesTheExpandedNinetySixCellRegion()
     {
         var engine = SimulationEngine.Create(
@@ -112,7 +170,8 @@ public sealed class SimulationEngineTests
         Assert.All(brushwood, stack =>
         {
             Assert.Equal(ItemLocationKind.Ground, stack.Location.Kind);
-            Assert.True(first.Map.GetCell(stack.Location.Position).Terrain is
+            Assert.True(first.Map.IsTerrainSurfacePosition(stack.Location.Position));
+            Assert.True(first.Map.GetColumnCell(stack.Location.Position).Terrain is
                 TerrainKind.SolidGround or TerrainKind.Mud);
         });
         Assert.Contains(brushwood, stack =>
@@ -908,11 +967,12 @@ public sealed class SimulationEngineTests
         var moveDestination = Enumerable.Range(0, engine.Map.Height)
             .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
                 .Select(x => new GridPosition(x, y)))
+            .Select(engine.Map.GetTerrainSurfacePosition)
             .OrderByDescending(position =>
                 Math.Abs(position.X - actor.Position.X) + Math.Abs(position.Y - actor.Position.Y))
             .ThenBy(position => position.Y)
             .ThenBy(position => position.X)
-            .First(position => engine.Navigation.HasSurfacePath(actor.Position, position));
+            .First(position => engine.Navigation.HasPath(actor.Position, position));
         var executeAt = new SimulationTick(1);
         engine.QueueCommand(SimulationCommand.Move(
             executeAt, sequence: 1, actor.Id, moveDestination));

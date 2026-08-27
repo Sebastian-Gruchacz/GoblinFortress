@@ -8,17 +8,32 @@ public sealed partial class SimulationEngine
     private const int MaximumConstructionRouteCandidatesPerPlanningTick = 12;
     private const int SpecialistPublicWorkBonus =
         GoblinWorkPreferences.Maximum - GoblinWorkPreferences.Minimum + 1;
+    private const int FastidiousCleaningPreferenceBonus = SpecialistPublicWorkBonus;
+    private long[] _lastActorJobStageStopwatchTicks = new long[6];
+
+    public ActorJobUpdateProfile GetLastActorJobUpdateProfile() => new(
+        Reproduction: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[0]),
+        Reservations: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[1]),
+        NeedInterrupts: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[2]),
+        IdlePlanning: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[3]),
+        ActiveJobs: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[4]),
+        Finalization: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[5]));
 
     private void UpdateActorJobs()
     {
+        var stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         TryCreateGoblinBud();
+        _lastActorJobStageStopwatchTicks[0] =
+            System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
+        stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         var reservedForageTargets = _actors.Values
             .Where(actor => actor.JobKind is ActorJobKind.Forage or ActorJobKind.ClearVegetation)
             .Select(actor => actor.JobTarget)
             .ToHashSet();
         var reservedFellingDesignations = _actors.Values
             .Where(actor => actor.JobKind is ActorJobKind.FellTree or ActorJobKind.QuarryBoulder or
-                ActorJobKind.MineRock or ActorJobKind.CarveRamp or ActorJobKind.HuntAnimal)
+                ActorJobKind.MineRock or ActorJobKind.CarveRamp or ActorJobKind.HuntAnimal or
+                ActorJobKind.CleanBlood)
             .Select(actor => actor.SourceStackId)
             .Where(id => id != EntityId.None)
             .ToHashSet();
@@ -30,6 +45,11 @@ public sealed partial class SimulationEngine
         var raidPartyIds = _raidPhase == GoblinRaidPhase.Preparing
             ? GetRaidParty().Select(actor => actor.Id).ToHashSet()
             : [];
+        _lastActorJobStageStopwatchTicks[1] =
+            System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
+        var needInterruptTicks = 0L;
+        var idlePlanningTicks = 0L;
+        var activeJobTicks = 0L;
 
         foreach (var actor in _actors.Values)
         {
@@ -39,18 +59,21 @@ public sealed partial class SimulationEngine
                 continue;
             }
 
+            stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             TryInterruptForNeeds(
                 actor,
                 reservedForageTargets,
                 reservedSourceQuantities,
                 reservedDestinationQuantities);
+            needInterruptTicks += System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
 
+            stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             if (actor.JobKind == ActorJobKind.None)
             {
                 var needsFood = actor.Hunger >= Definitions.FoodSeekThreshold;
                 var needsWater = actor.Thirst >= Definitions.DrinkThreshold && actor.PersonalWater == 0;
-                var reserveForExploration =
-                    IsBackgroundPlanningTick(actor) &&
+                var shouldPlanBackgroundWork = IsBackgroundPlanningTick(actor);
+                var reserveForExploration = shouldPlanBackgroundWork &&
                     activeExplorers < Definitions.MaximumExplorers;
                 if (_raidPhase == GoblinRaidPhase.Preparing &&
                     raidPartyIds.Contains(actor.Id) &&
@@ -98,6 +121,10 @@ public sealed partial class SimulationEngine
                 {
                     // Young goblins eat, drink, sleep and observe for one local season.
                 }
+                else if (!shouldPlanBackgroundWork)
+                {
+                    // Expensive public planning is staggered between actors instead of repeated every tick.
+                }
                 else if (TryPlanTendBudJob(actor))
                 {
                     // A living bud is finite, already-paid-for work and receives prompt care.
@@ -112,7 +139,6 @@ public sealed partial class SimulationEngine
                     // A named hauler services assigned stockpiles before public settlement work.
                 }
                 else if (GetWorkDesignationPriority(WorkDesignationKind.Scout) >= StoragePriority.High &&
-                         IsBackgroundPlanningTick(actor) &&
                          activeExplorers < Definitions.MaximumExplorers &&
                          TryPlanExploreJob(actor))
                 {
@@ -130,6 +156,10 @@ public sealed partial class SimulationEngine
                 {
                     // Public priority dominates preference; preference breaks comparable work apart.
                 }
+                else if (TryPlanFastidiousCleaning(actor, reservedFellingDesignations))
+                {
+                    // A fastidious goblin may publish one low-priority housekeeping task while idle.
+                }
                 else if (TryPlanFoodResupply(actor, reservedSourceQuantities))
                 {
                     // A small carried ration avoids a trip home for every meal.
@@ -142,8 +172,7 @@ public sealed partial class SimulationEngine
                 {
                     // A few physical stones become personal thrown ammunition.
                 }
-                else if (IsBackgroundPlanningTick(actor) &&
-                         activeExplorers < Definitions.MaximumExplorers &&
+                else if (activeExplorers < Definitions.MaximumExplorers &&
                          TryPlanExploreJob(actor))
                 {
                     activeExplorers++;
@@ -156,7 +185,9 @@ public sealed partial class SimulationEngine
                         requireDesignation: true);
                 }
             }
+            idlePlanningTicks += System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
 
+            stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             switch (actor.JobKind)
             {
                 case ActorJobKind.Forage:
@@ -204,6 +235,9 @@ public sealed partial class SimulationEngine
                 case ActorJobKind.HuntAnimal:
                     UpdateHuntAnimalJob(actor);
                     break;
+                case ActorJobKind.CleanBlood:
+                    UpdateCleanBloodJob(actor);
+                    break;
                 case ActorJobKind.SupplyConstruction:
                     UpdateConstructionSupplyJob(actor);
                     break;
@@ -220,11 +254,21 @@ public sealed partial class SimulationEngine
                     UpdateCollapsedJob(actor);
                     break;
             }
+            activeJobTicks += System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
         }
 
+        _lastActorJobStageStopwatchTicks[2] = needInterruptTicks;
+        _lastActorJobStageStopwatchTicks[3] = idlePlanningTicks;
+        _lastActorJobStageStopwatchTicks[4] = activeJobTicks;
+        stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         FinalizeMatureGoblinBuds();
         TryLaunchPreparedRaid();
-        RemoveExhaustedWorkDesignations();
+        if (CurrentTick.Value % Definitions.ActorPlanning.BackgroundPlanningIntervalTicks == 0)
+        {
+            RemoveExhaustedWorkDesignations();
+        }
+        _lastActorJobStageStopwatchTicks[5] =
+            System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
     }
 
     private bool TryPlanRaidPreparation(
@@ -514,6 +558,9 @@ public sealed partial class SimulationEngine
             (Score(GetWorkDesignationPriority(WorkDesignationKind.HuntAnimal),
                     actor.WorkPreferences.Foraging), 13,
                 () => TryPlanHuntAnimalJob(actor, reservedFellingDesignations)),
+            (Score(GetWorkDesignationPriority(WorkDesignationKind.CleanBlood),
+                    GetCleaningPreference(actor)), 14,
+                () => TryPlanCleanBloodJob(actor, reservedFellingDesignations)),
         };
         return options
             .OrderByDescending(option => option.Score)
@@ -638,6 +685,7 @@ public sealed partial class SimulationEngine
                 Visibility.Get(designation.Target) == CellVisibility.Unknown,
             WorkDesignationKind.HuntAnimal =>
                 _animals.ContainsKey(designation.TargetEntityId.Value),
+            WorkDesignationKind.CleanBlood => HasCleanableBlood(designation.Target),
             _ => false,
         };
     }
@@ -653,8 +701,15 @@ public sealed partial class SimulationEngine
             WorkDesignationKind.CarveRampUp =>
             actor.WorkPreferences.Building + SpecialistPublicWorkBonus,
         WorkDesignationKind.Scout => actor.KnownSkills.HasFlag(GoblinSkill.Scouting) ? 2 : 0,
+        WorkDesignationKind.CleanBlood => GetCleaningPreference(actor),
         _ => actor.WorkPreferences.Foraging,
     };
+
+    private static int GetCleaningPreference(ActorState actor) => checked(
+        actor.WorkPreferences.Hauling +
+        (actor.KnownTraits.HasFlag(GoblinTrait.Fastidious)
+            ? FastidiousCleaningPreferenceBonus
+            : 0));
 
     private static int GetForecastDistance(GridPosition first, GridPosition second) =>
         Math.Abs(first.X - second.X) + Math.Abs(first.Y - second.Y) +
@@ -672,6 +727,7 @@ public sealed partial class SimulationEngine
             ActorJobKind.CarveRamp,
         WorkDesignationKind.Scout => ActorJobKind.Explore,
         WorkDesignationKind.HuntAnimal => ActorJobKind.HuntAnimal,
+        WorkDesignationKind.CleanBlood => ActorJobKind.CleanBlood,
         _ => ActorJobKind.None,
     };
 
@@ -1116,6 +1172,21 @@ public sealed partial class SimulationEngine
                 actor.JobKind = kind;
                 actor.JobTarget = target;
                 BeginJobLeg(actor, route, GetClearVegetationWorkTicks());
+                return true;
+            case ActorJobKind.CleanBlood:
+                var cleaningDesignation = _workDesignations.Values
+                    .Where(item => item.Kind == WorkDesignationKind.CleanBlood &&
+                        !item.IsSuspended && item.Target == target && HasCleanableBlood(target))
+                    .OrderBy(item => item.Id)
+                    .FirstOrDefault();
+                if (cleaningDesignation == default)
+                {
+                    return false;
+                }
+                actor.JobKind = kind;
+                actor.JobTarget = target;
+                actor.SourceStackId = cleaningDesignation.Id;
+                BeginJobLeg(actor, route, BloodCleaningWorkTicks);
                 return true;
             case ActorJobKind.FellTree:
                 if (!actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe))
@@ -1716,6 +1787,143 @@ public sealed partial class SimulationEngine
             GainBuildingExperience(actor, 15);
         }
 
+        actor.ClearJob();
+    }
+
+    private bool TryPlanCleanBloodJob(
+        ActorState actor,
+        ISet<EntityId> reservedDesignations)
+    {
+        var best = _workDesignations.Values
+            .Where(designation => designation.Kind == WorkDesignationKind.CleanBlood &&
+                !designation.IsSuspended &&
+                !reservedDesignations.Contains(designation.Id) &&
+                HasCleanableBlood(designation.Target))
+            .Select(designation => new
+            {
+                Designation = designation,
+                Route = FindActorPath(actor, designation.Target),
+            })
+            .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .ThenBy(candidate => candidate.Designation.Id)
+            .FirstOrDefault();
+        if (best is null)
+        {
+            return false;
+        }
+
+        actor.JobKind = ActorJobKind.CleanBlood;
+        actor.JobTarget = best.Designation.Target;
+        actor.SourceStackId = best.Designation.Id;
+        BeginJobLeg(actor, best.Route!, BloodCleaningWorkTicks);
+        reservedDesignations.Add(best.Designation.Id);
+        return true;
+    }
+
+    private bool TryPlanFastidiousCleaning(
+        ActorState actor,
+        ISet<EntityId> reservedDesignations)
+    {
+        if (!actor.KnownTraits.HasFlag(GoblinTrait.Fastidious) ||
+            (_raidPhase != GoblinRaidPhase.None && _raidPartyIds.Contains(actor.Id)))
+        {
+            return false;
+        }
+
+        var best = _bloodStains.Values
+            .Where(stain => stain.Surface == BloodSurfaceKind.ConstructedFloor &&
+                stain.Volume > 0 &&
+                Visibility.Get(stain.Position).IsDiscovered() &&
+                IsGoblinOwnedFloor(stain.Position) &&
+                !_workDesignations.Values.Any(designation =>
+                    designation.Kind == WorkDesignationKind.CleanBlood &&
+                    designation.Target == stain.Position))
+            .Select(stain => new
+            {
+                stain.Position,
+                Route = FindActorPath(actor, stain.Position),
+            })
+            .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .ThenBy(candidate => candidate.Position.Z)
+            .ThenBy(candidate => candidate.Position.Y)
+            .ThenBy(candidate => candidate.Position.X)
+            .FirstOrDefault();
+        if (best is null)
+        {
+            return false;
+        }
+
+        var orderId = AllocateEntityId();
+        var designationId = AllocateEntityId();
+        _workDesignations.Add(
+            designationId,
+            new WorkDesignationSnapshot(
+                designationId,
+                WorkDesignationKind.CleanBlood,
+                best.Position,
+                EntityId.None)
+            {
+                OrderId = orderId,
+                Priority = StoragePriority.Low,
+            });
+        Publish(
+            SimulationEventKind.WorkDesignationCreated,
+            actor.Id,
+            designationId,
+            (int)WorkDesignationKind.CleanBlood);
+
+        actor.JobKind = ActorJobKind.CleanBlood;
+        actor.JobTarget = best.Position;
+        actor.SourceStackId = designationId;
+        BeginJobLeg(actor, best.Route!, BloodCleaningWorkTicks);
+        reservedDesignations.Add(designationId);
+        return true;
+    }
+
+    private bool IsGoblinOwnedFloor(GridPosition position) =>
+        World.GetWorldObjectsAt(position).Any(worldObject =>
+            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            worldObject.GetAbsoluteParts().Any(part =>
+                part.Position == position &&
+                part.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Walkway));
+
+    private void UpdateCleanBloodJob(ActorState actor)
+    {
+        if (actor.CarriedStackId != EntityId.None ||
+            !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
+            designation.Kind != WorkDesignationKind.CleanBlood ||
+            designation.IsSuspended ||
+            designation.Target != actor.JobTarget ||
+            !HasCleanableBlood(actor.JobTarget))
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        if (actor.JobPhase == ActorJobPhase.Traveling)
+        {
+            AdvanceTravel(actor);
+        }
+
+        if (actor.JobKind != ActorJobKind.CleanBlood ||
+            actor.JobPhase != ActorJobPhase.Working)
+        {
+            return;
+        }
+
+        actor.RemainingWorkTicks--;
+        if (actor.RemainingWorkTicks > 0)
+        {
+            return;
+        }
+
+        var cleaned = CleanBlood(actor.Position);
+        if (cleaned > 0)
+        {
+            GainHaulingExperience(actor, Math.Max(1, cleaned / 4));
+        }
         actor.ClearJob();
     }
 
@@ -2992,7 +3200,12 @@ public sealed partial class SimulationEngine
 
     private bool IsBackgroundPlanningTick(ActorState actor)
     {
-        var interval = Definitions.ActorMovementIntervalTicks;
+        if (CurrentTick.Value == 1 || _lastCommandExecutionTick == CurrentTick.Value)
+        {
+            return true;
+        }
+
+        var interval = Definitions.ActorPlanning.BackgroundPlanningIntervalTicks;
         return CurrentTick.Value % interval == (long)(actor.Id.Value % (ulong)interval);
     }
 
@@ -3032,6 +3245,7 @@ public sealed partial class SimulationEngine
                     Visibility.Get(designation.Target) != CellVisibility.Unknown,
                 WorkDesignationKind.HuntAnimal =>
                     !_animals.ContainsKey(designation.TargetEntityId.Value),
+                WorkDesignationKind.CleanBlood => !HasCleanableBlood(designation.Target),
                 _ => false,
             })
             .Select(designation => designation.Id)
@@ -3321,7 +3535,7 @@ public sealed partial class SimulationEngine
         }
 
         ObserveNavigationEdge(actor, next, NavigationBeliefStatus.Passable);
-        actor.Position = next;
+        MoveActor(actor, next);
         actor.RemainingRoute.RemoveAt(0);
         if (actor.RemainingRoute.Count == 0)
         {
@@ -3460,93 +3674,95 @@ public sealed partial class SimulationEngine
 
         if (actor.JobKind == ActorJobKind.None)
         {
-            if (actor.JobPhase != ActorJobPhase.None ||
-                actor.JobStage != ActorJobStage.None ||
-                actor.RemainingWorkTicks != 0 ||
-                actor.RemainingRoute.Count != 0 ||
-                actor.JobTarget != default ||
-                actor.SourceStackId != EntityId.None ||
-                actor.DestinationZoneId != EntityId.None ||
-                actor.ReservedQuantity != 0)
-            {
-                throw new InvalidDataException("The save contains inconsistent idle actor state.");
-            }
-
+            actor.ClearJob();
             return;
         }
 
         if (!World.IsTerrainTraversable(actor.JobTarget))
         {
-            throw new InvalidDataException("The save contains an invalid job target.");
+            actor.ClearJob();
+            return;
         }
 
-        switch (actor.JobKind)
+        try
         {
-            case ActorJobKind.Forage:
-                ValidateLoadedForageJob(actor);
-                break;
-            case ActorJobKind.Haul:
-                ValidateLoadedHaulJob(actor);
-                break;
-            case ActorJobKind.ClearConstructionSite:
-                ValidateLoadedConstructionClearanceJob(actor);
-                break;
-            case ActorJobKind.Rest:
-                ValidateLoadedRestJob(actor);
-                break;
-            case ActorJobKind.Eat:
-                ValidateLoadedEatJob(actor);
-                break;
-            case ActorJobKind.Explore:
-                ValidateLoadedExploreJob(actor);
-                break;
-            case ActorJobKind.Move:
-                ValidateLoadedMoveJob(actor);
-                break;
-            case ActorJobKind.Resupply:
-                ValidateLoadedResupplyJob(actor);
-                break;
-            case ActorJobKind.ClearVegetation:
-                ValidateLoadedClearVegetationJob(actor);
-                break;
-            case ActorJobKind.FellTree:
-                ValidateLoadedFellTreeJob(actor);
-                break;
-            case ActorJobKind.QuarryBoulder:
-                ValidateLoadedQuarryBoulderJob(actor);
-                break;
-            case ActorJobKind.MineRock:
-                ValidateLoadedMineRockJob(actor);
-                break;
-            case ActorJobKind.CarveRamp:
-                ValidateLoadedCarveRampJob(actor);
-                break;
-            case ActorJobKind.SupplyConstruction:
-                ValidateLoadedConstructionSupplyJob(actor);
-                break;
-            case ActorJobKind.BuildConstruction:
-                ValidateLoadedConstructionBuildJob(actor);
-                break;
-            case ActorJobKind.Collapsed:
-                ValidateLoadedCollapsedJob(actor);
-                break;
-            case ActorJobKind.TendBud:
-                ValidateLoadedTendBudJob(actor);
-                break;
-            case ActorJobKind.HuntAnimal:
-                ValidateLoadedHuntAnimalJob(actor);
-                break;
-            case ActorJobKind.SupplyCrafting:
-                ValidateLoadedCraftingSupplyJob(actor);
-                break;
-            case ActorJobKind.Craft:
-                ValidateLoadedCraftingWorkJob(actor);
-                break;
-            default:
-                throw new InvalidDataException("The save contains an unsupported actor job.");
-        }
+            switch (actor.JobKind)
+            {
+                case ActorJobKind.Forage:
+                    ValidateLoadedForageJob(actor);
+                    break;
+                case ActorJobKind.Haul:
+                    ValidateLoadedHaulJob(actor);
+                    break;
+                case ActorJobKind.ClearConstructionSite:
+                    ValidateLoadedConstructionClearanceJob(actor);
+                    break;
+                case ActorJobKind.Rest:
+                    ValidateLoadedRestJob(actor);
+                    break;
+                case ActorJobKind.Eat:
+                    ValidateLoadedEatJob(actor);
+                    break;
+                case ActorJobKind.Explore:
+                    ValidateLoadedExploreJob(actor);
+                    break;
+                case ActorJobKind.Move:
+                    ValidateLoadedMoveJob(actor);
+                    break;
+                case ActorJobKind.Resupply:
+                    ValidateLoadedResupplyJob(actor);
+                    break;
+                case ActorJobKind.ClearVegetation:
+                    ValidateLoadedClearVegetationJob(actor);
+                    break;
+                case ActorJobKind.FellTree:
+                    ValidateLoadedFellTreeJob(actor);
+                    break;
+                case ActorJobKind.QuarryBoulder:
+                    ValidateLoadedQuarryBoulderJob(actor);
+                    break;
+                case ActorJobKind.MineRock:
+                    ValidateLoadedMineRockJob(actor);
+                    break;
+                case ActorJobKind.CarveRamp:
+                    ValidateLoadedCarveRampJob(actor);
+                    break;
+                case ActorJobKind.SupplyConstruction:
+                    ValidateLoadedConstructionSupplyJob(actor);
+                    break;
+                case ActorJobKind.BuildConstruction:
+                    ValidateLoadedConstructionBuildJob(actor);
+                    break;
+                case ActorJobKind.Collapsed:
+                    ValidateLoadedCollapsedJob(actor);
+                    break;
+                case ActorJobKind.TendBud:
+                    ValidateLoadedTendBudJob(actor);
+                    break;
+                case ActorJobKind.HuntAnimal:
+                    ValidateLoadedHuntAnimalJob(actor);
+                    break;
+                case ActorJobKind.SupplyCrafting:
+                    ValidateLoadedCraftingSupplyJob(actor);
+                    break;
+                case ActorJobKind.Craft:
+                    ValidateLoadedCraftingWorkJob(actor);
+                    break;
+                case ActorJobKind.CleanBlood:
+                    ValidateLoadedCleanBloodJob(actor);
+                    break;
+                default:
+                    throw new InvalidDataException("The save contains an unsupported actor job.");
+            }
 
-        ValidateLoadedJobExecution(actor);
+            ValidateLoadedJobExecution(actor);
+        }
+        catch (InvalidDataException)
+        {
+            // Jobs are transient derived state. If newer geometry or rules invalidate one,
+            // release its reservations and let the dispatcher plan it again after loading.
+            actor.ClearJob();
+        }
     }
 
     private static void ValidateLoadedCollapsedJob(ActorState actor)
@@ -3586,6 +3802,21 @@ public sealed partial class SimulationEngine
             World.GetPlantPatch(actor.JobTarget) is not { Kind: PlantKind.BerryBush })
         {
             throw new InvalidDataException("The save contains an invalid vegetation-clearing job.");
+        }
+    }
+
+    private void ValidateLoadedCleanBloodJob(ActorState actor)
+    {
+        if (actor.JobStage != ActorJobStage.None ||
+            actor.CarriedStackId != EntityId.None ||
+            actor.DestinationZoneId != EntityId.None ||
+            actor.ReservedQuantity != 0 ||
+            !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
+            designation.Kind != WorkDesignationKind.CleanBlood ||
+            designation.Target != actor.JobTarget ||
+            !HasCleanableBlood(actor.JobTarget))
+        {
+            throw new InvalidDataException("The save contains an invalid blood-cleaning job.");
         }
     }
 
@@ -3893,6 +4124,7 @@ public sealed partial class SimulationEngine
             ActorJobKind.Craft when
                 _craftingOrders.TryGetValue(actor.DestinationZoneId, out var craftingOrder) =>
                 craftingOrder.TotalWorkTicks,
+            ActorJobKind.CleanBlood => BloodCleaningWorkTicks,
             _ => 0,
         };
         if (actor.JobPhase == ActorJobPhase.Working)
@@ -4046,6 +4278,7 @@ public sealed partial class SimulationEngine
         ActorJobKind.Craft when
             _craftingOrders.TryGetValue(actor.DestinationZoneId, out var craftingOrder) =>
             craftingOrder.RemainingWorkTicks,
+        ActorJobKind.CleanBlood => BloodCleaningWorkTicks,
         _ => throw new InvalidOperationException("An idle actor cannot begin work."),
     };
 

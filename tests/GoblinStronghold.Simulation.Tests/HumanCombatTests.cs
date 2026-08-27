@@ -157,6 +157,8 @@ public sealed class HumanCombatTests
         var snapshot = engine.CreateSnapshot();
         Assert.Equal(0, snapshot.Actors[0].PersonalStoneAmmo);
         Assert.True(snapshot.HumanVillage.GuardHitPoints < guardHealth);
+        Assert.Contains(snapshot.BloodStains, stain =>
+            stain.Position == guard.Position && stain.Volume > 0);
         Assert.Contains(engine.DrainEvents(), simulationEvent =>
             simulationEvent.Kind == SimulationEventKind.GoblinHitHumanGuard);
     }

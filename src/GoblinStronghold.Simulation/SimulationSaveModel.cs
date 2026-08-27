@@ -48,6 +48,8 @@ internal sealed class SimulationSaveModel
 
     public List<WorldObjectSaveModel> WorldObjects { get; set; } = [];
 
+    public List<BloodStainSaveModel> BloodStains { get; set; } = [];
+
     public List<GridPositionSaveModel> ExcavatedCaveCells { get; set; } = [];
 
     public List<VerticalPassageSaveModel> ExcavatedVerticalPassages { get; set; } = [];
@@ -77,6 +79,23 @@ internal sealed class SimulationSaveModel
     public List<EventSaveModel> UndeliveredEvents { get; set; } = [];
 
     public List<WorldChangeSaveModel> UndeliveredWorldChanges { get; set; } = [];
+}
+
+internal sealed class BloodStainSaveModel
+{
+    public int X { get; set; }
+
+    public int Y { get; set; }
+
+    public int Z { get; set; }
+
+    public int Volume { get; set; }
+
+    public BloodSurfaceKind Surface { get; set; }
+
+    public long CreatedAtTick { get; set; }
+
+    public long LastChangedAtTick { get; set; }
 }
 
 internal sealed class VerticalPassageSaveModel
@@ -278,6 +297,10 @@ internal sealed class ActorSaveModel
     public int PersonalWater { get; set; }
 
     public int PersonalStoneAmmo { get; set; }
+
+    public int BloodFootprintSteps { get; set; }
+
+    public int BleedingTicksRemaining { get; set; }
 
     public long? BirthTick { get; set; }
 

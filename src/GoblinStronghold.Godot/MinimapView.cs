@@ -21,7 +21,7 @@ public partial class MinimapView : Control
     public void SetWorld(SimulationEngine engine)
     {
         _engine = engine;
-        Refresh(engine.CreateSnapshot());
+        Refresh(engine.CreatePresentationSnapshot());
     }
 
     public void Refresh(SimulationSnapshot snapshot)

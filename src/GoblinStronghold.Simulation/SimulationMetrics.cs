@@ -17,4 +17,25 @@ public readonly record struct SimulationMetrics(
     int UndeliveredWorldChanges,
     NavigationPathMetrics Navigation,
     TimeSpan LastTickDuration,
-    TimeSpan TotalTickDuration);
+    TimeSpan TotalTickDuration,
+    SimulationTickBreakdown LastTickBreakdown);
+
+public readonly record struct SimulationTickBreakdown(
+    TimeSpan World,
+    TimeSpan Commands,
+    TimeSpan ActorJobs,
+    TimeSpan Animals,
+    TimeSpan Doors,
+    TimeSpan HumanVillage,
+    TimeSpan Combat,
+    TimeSpan Actors,
+    TimeSpan Raid,
+    TimeSpan Visibility);
+
+public readonly record struct ActorJobUpdateProfile(
+    TimeSpan Reproduction,
+    TimeSpan Reservations,
+    TimeSpan NeedInterrupts,
+    TimeSpan IdlePlanning,
+    TimeSpan ActiveJobs,
+    TimeSpan Finalization);

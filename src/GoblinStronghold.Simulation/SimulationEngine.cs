@@ -44,8 +44,10 @@ public sealed partial class SimulationEngine
     private long _commandsExecuted;
     private long _eventsPublished;
     private long _actorUpdates;
+    private long _lastCommandExecutionTick = -1;
     private long _lastTickStopwatchTicks;
     private long _totalTickStopwatchTicks;
+    private long[] _lastTickStageStopwatchTicks = new long[10];
 
     private SimulationEngine(
         WorldSeed worldSeed,
@@ -313,6 +315,7 @@ public sealed partial class SimulationEngine
                 model.Kind)));
         engine.Navigation = new NavigationPathService(engine.World);
         loadPlan.MigrateWorldState(engine.World);
+        engine.LoadBloodStains(save.BloodStains);
         engine.Visibility = WorldVisibilityState.Restore(map, save.Visibility);
         engine._humanVillage = HumanVillageState.Restore(
             engine.World,
@@ -379,9 +382,16 @@ public sealed partial class SimulationEngine
         }
     }
 
-    public SimulationSnapshot CreateSnapshot()
+    public SimulationSnapshot CreatePresentationSnapshot() =>
+        CreateSnapshot(includeStateHash: false, includePlanningForecasts: false);
+
+    public SimulationSnapshot CreateSnapshot(
+        bool includeStateHash = true,
+        bool includePlanningForecasts = true)
     {
-        var futurePublicWork = CreateFuturePublicWorkPlans();
+        var futurePublicWork = includePlanningForecasts
+            ? CreateFuturePublicWorkPlans()
+            : new Dictionary<EntityId, ActorPlanEntrySnapshot>();
         var currentDay = SimulationCalendar.At(CurrentTick, Definitions.Clock).AbsoluteDay;
         var actors = _actors.Values
             .Select(actor => new ActorSnapshot(
@@ -399,6 +409,7 @@ public sealed partial class SimulationEngine
                 actor.Hunger,
                 actor.Fatigue,
                 actor.Health,
+                actor.BleedingTicksRemaining,
                 actor.Thirst,
                 actor.PersonalFood,
                 actor.PersonalFoodKind,
@@ -472,6 +483,7 @@ public sealed partial class SimulationEngine
             .ToArray();
         var plantPatches = World.CreatePlantSnapshot().ToArray();
         var worldObjects = World.CreateWorldObjectSnapshot().ToArray();
+        var bloodStains = CreateBloodStainSnapshot();
         var humanVillage = _humanVillage.CreateSnapshot();
         var visibility = Visibility.CreateSnapshot().ToArray();
         var resourceInventory = CreateResourceInventorySnapshot().ToArray();
@@ -494,6 +506,7 @@ public sealed partial class SimulationEngine
             workDesignations,
             plantPatches,
             worldObjects,
+            bloodStains,
             humanVillage,
             _raidPhase,
             _raidRallyPoint,
@@ -504,7 +517,7 @@ public sealed partial class SimulationEngine
             World.Version,
             Map.GeneratorVersion,
             Map.ComputeFingerprint(),
-            ComputeStateHash());
+            includeStateHash ? ComputeStateHash() : string.Empty);
     }
 
     public StorageDeliveryDiagnostic InspectStorageDelivery(EntityId zoneId)
@@ -799,7 +812,18 @@ public sealed partial class SimulationEngine
         UndeliveredWorldChanges: _undeliveredWorldChanges.Count,
         Navigation: Navigation.GetMetrics(),
         LastTickDuration: StopwatchTicksToTimeSpan(_lastTickStopwatchTicks),
-        TotalTickDuration: StopwatchTicksToTimeSpan(_totalTickStopwatchTicks));
+        TotalTickDuration: StopwatchTicksToTimeSpan(_totalTickStopwatchTicks),
+        LastTickBreakdown: new SimulationTickBreakdown(
+            World: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[0]),
+            Commands: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[1]),
+            ActorJobs: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[2]),
+            Animals: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[3]),
+            Doors: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[4]),
+            HumanVillage: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[5]),
+            Combat: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[6]),
+            Actors: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[7]),
+            Raid: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[8]),
+            Visibility: StopwatchTicksToTimeSpan(_lastTickStageStopwatchTicks[9])));
 
     public string Save()
     {
@@ -862,6 +886,16 @@ public sealed partial class SimulationEngine
                         Kind = part.Kind,
                     }).ToList(),
                 }).ToList(),
+            BloodStains = _bloodStains.Values.Select(stain => new BloodStainSaveModel
+            {
+                X = stain.Position.X,
+                Y = stain.Position.Y,
+                Z = stain.Position.Z,
+                Volume = stain.Volume,
+                Surface = stain.Surface,
+                CreatedAtTick = stain.CreatedAt.Value,
+                LastChangedAtTick = stain.LastChangedAt.Value,
+            }).ToList(),
             ExcavatedCaveCells = World.ExcavatedCaveCells
                 .OrderBy(position => position.Z)
                 .ThenBy(position => position.Y)
@@ -1034,6 +1068,16 @@ public sealed partial class SimulationEngine
             }
         }
 
+        Append(canonical, _bloodStains.Count);
+        foreach (var stain in _bloodStains.Values)
+        {
+            Append(canonical, stain.Position);
+            Append(canonical, stain.Volume);
+            Append(canonical, (int)stain.Surface);
+            Append(canonical, stain.CreatedAt.Value);
+            Append(canonical, stain.LastChangedAt.Value);
+        }
+
         var excavatedCaveCells = World.ExcavatedCaveCells
             .OrderBy(position => position.Z)
             .ThenBy(position => position.Y)
@@ -1122,6 +1166,7 @@ public sealed partial class SimulationEngine
             Append(canonical, actor.Hunger);
             Append(canonical, actor.Fatigue);
             Append(canonical, actor.Health);
+            Append(canonical, actor.BleedingTicksRemaining);
             Append(canonical, actor.Thirst);
             Append(canonical, actor.PersonalFood);
             foreach (var foodKind in actor.PersonalFoodKinds)
@@ -1130,6 +1175,7 @@ public sealed partial class SimulationEngine
             }
             Append(canonical, actor.PersonalWater);
             Append(canonical, actor.PersonalStoneAmmo);
+            Append(canonical, actor.BloodFootprintSteps);
             Append(canonical, actor.BirthTick ?? -1);
             Append(canonical, actor.MaturesAtTick ?? -1);
             Append(canonical, actor.AgeOffsetTicks);
@@ -1312,7 +1358,7 @@ public sealed partial class SimulationEngine
             if (id == EntityId.None ||
                 string.IsNullOrWhiteSpace(actorModel.Name) ||
                 !HasOnlyKnownFlags(actorModel.KnownSkills, GoblinSkill.Building) ||
-                !HasOnlyKnownFlags(actorModel.KnownTraits, GoblinTrait.Nimble) ||
+                !HasOnlyKnownFlags(actorModel.KnownTraits, GoblinTrait.Fastidious) ||
                 !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.ReedClothes) ||
                 actorModel.ForagingExperience < 0 ||
                 actorModel.HaulingExperience < 0 ||
@@ -1331,6 +1377,8 @@ public sealed partial class SimulationEngine
                 actorModel.PersonalWater < 0 || actorModel.PersonalWater > Definitions.PersonalWaterCapacity ||
                 actorModel.PersonalStoneAmmo < 0 ||
                 actorModel.PersonalStoneAmmo > GetStoneAmmoCapacity(actorModel.Equipment) ||
+                actorModel.BloodFootprintSteps is < 0 or > BloodFootprintMaximumSteps ||
+                actorModel.BleedingTicksRemaining is < 0 or > MaximumBleedingTicks ||
                 actorModel.BirthTick is < 0 ||
                 actorModel.MaturesAtTick is < 0 ||
                 actorModel.AgeOffsetTicks is < 0 ||
@@ -1369,6 +1417,8 @@ public sealed partial class SimulationEngine
                 Thirst = actorModel.Thirst,
                 PersonalWater = actorModel.PersonalWater,
                 PersonalStoneAmmo = actorModel.PersonalStoneAmmo,
+                BloodFootprintSteps = actorModel.BloodFootprintSteps,
+                BleedingTicksRemaining = actorModel.BleedingTicksRemaining,
                 BirthTick = actorModel.BirthTick,
                 MaturesAtTick = actorModel.MaturesAtTick,
                 AgeOffsetTicks = actorModel.AgeOffsetTicks ??
@@ -1571,7 +1621,7 @@ public sealed partial class SimulationEngine
                     WorkDesignationKind.UprootBerryBush or WorkDesignationKind.FellTree or
                     WorkDesignationKind.QuarryBoulder or WorkDesignationKind.MineRock or
                     WorkDesignationKind.Scout or WorkDesignationKind.CarveRampDown or
-                    WorkDesignationKind.CarveRampUp &&
+                    WorkDesignationKind.CarveRampUp or WorkDesignationKind.CleanBlood &&
                  targetEntityId != EntityId.None) ||
                 (model.Kind is WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone or
                     WorkDesignationKind.HuntAnimal &&
@@ -1765,6 +1815,7 @@ public sealed partial class SimulationEngine
                 WorkDesignationKind.HuntAnimal =>
                     _animals.TryGetValue(designation.TargetEntityId.Value, out var animal) &&
                     animal.Position == designation.Target,
+                WorkDesignationKind.CleanBlood => HasCleanableBlood(designation.Target),
                 _ => false,
             };
             if (!valid)
@@ -1945,24 +1996,32 @@ public sealed partial class SimulationEngine
         var startedAt = Stopwatch.GetTimestamp();
         CurrentTick = CurrentTick.Next();
 
-        UpdateWorld();
-        ExecuteScheduledCommands();
-        UpdateActorJobs();
-        UpdateAnimals();
-        UpdateAutomaticDoors();
-        UpdateHumanVillage();
-        ResolveHumanCombat();
-        UpdateActors();
-        TryCompleteRaid();
-        UpdateVisibility();
+        MeasureStage(0, UpdateWorld);
+        MeasureStage(1, ExecuteScheduledCommands);
+        MeasureStage(2, UpdateActorJobs);
+        MeasureStage(3, UpdateAnimals);
+        MeasureStage(4, UpdateAutomaticDoors);
+        MeasureStage(5, UpdateHumanVillage);
+        MeasureStage(6, ResolveHumanCombat);
+        MeasureStage(7, UpdateActors);
+        MeasureStage(8, TryCompleteRaid);
+        MeasureStage(9, UpdateVisibility);
 
         _ticksExecuted = checked(_ticksExecuted + 1);
         _lastTickStopwatchTicks = Stopwatch.GetTimestamp() - startedAt;
         _totalTickStopwatchTicks = checked(_totalTickStopwatchTicks + _lastTickStopwatchTicks);
+
+        void MeasureStage(int index, Action action)
+        {
+            var stageStartedAt = Stopwatch.GetTimestamp();
+            action();
+            _lastTickStageStopwatchTicks[index] = Stopwatch.GetTimestamp() - stageStartedAt;
+        }
     }
 
     private void UpdateWorld()
     {
+        UpdateBloodStains();
         if (CurrentTick.Value % Definitions.PlantGrowthIntervalTicks == 0)
         {
             var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
@@ -2055,6 +2114,7 @@ public sealed partial class SimulationEngine
             }
 
             _commandsExecuted = checked(_commandsExecuted + 1);
+            _lastCommandExecutionTick = CurrentTick.Value;
         }
     }
 
@@ -2288,6 +2348,7 @@ public sealed partial class SimulationEngine
             (int)WorkDesignationKind.HuntAnimal => WorkDesignationKind.HuntAnimal,
             (int)WorkDesignationKind.CarveRampDown => WorkDesignationKind.CarveRampDown,
             (int)WorkDesignationKind.CarveRampUp => WorkDesignationKind.CarveRampUp,
+            (int)WorkDesignationKind.CleanBlood => WorkDesignationKind.CleanBlood,
             _ => command.Resource switch
         {
             ResourceKind.Food => WorkDesignationKind.GatherFood,
@@ -2382,6 +2443,11 @@ public sealed partial class SimulationEngine
                 .Where(animal => IsInside(animal.Position, minimum, maximum) &&
                     Visibility.Get(animal.Position) != CellVisibility.Unknown)
                 .Select(animal => (animal.Position, new EntityId(animal.Id))),
+            WorkDesignationKind.CleanBlood => _bloodStains.Values
+                .Where(stain => stain.Surface == BloodSurfaceKind.ConstructedFloor &&
+                    IsInside(stain.Position, minimum, maximum) &&
+                    Visibility.Get(stain.Position) != CellVisibility.Unknown)
+                .Select(stain => (stain.Position, EntityId.None)),
             _ => [],
         };
         var concreteTargets = targets
@@ -2505,6 +2571,9 @@ public sealed partial class SimulationEngine
         WorkDesignationKind.Scout =>
             actor.SuspendedJobKind == ActorJobKind.Explore &&
             actor.SuspendedJobTarget == designation.Target,
+        WorkDesignationKind.CleanBlood =>
+            actor.SuspendedJobKind == ActorJobKind.CleanBlood &&
+            actor.SuspendedJobTarget == designation.Target,
         _ => false,
     };
 
@@ -2532,6 +2601,8 @@ public sealed partial class SimulationEngine
             actor.JobKind == ActorJobKind.Explore && actor.JobTarget == designation.Target,
         WorkDesignationKind.HuntAnimal =>
             actor.JobKind == ActorJobKind.HuntAnimal && actor.SourceStackId == designation.Id,
+        WorkDesignationKind.CleanBlood =>
+            actor.JobKind == ActorJobKind.CleanBlood && actor.SourceStackId == designation.Id,
         _ => false,
     };
 
@@ -2824,7 +2895,7 @@ public sealed partial class SimulationEngine
     }
 
     private bool IsPotentialConstructionPosition(GridPosition position) =>
-        position.Z == 0 ? Map.IsWithin(position) : Map.IsCavePosition(position);
+        IsAddressableMapPosition(position);
 
     private bool HasGroundStackInConstructionFootprint(ConstructionSiteState site)
     {
@@ -3081,7 +3152,7 @@ public sealed partial class SimulationEngine
                 source.Variant);
         }
 
-        actor.Position = sourcePosition;
+        MoveActor(actor, sourcePosition);
         actor.CarriedStackId = carried.Id;
         actor.ClearJob();
         Publish(SimulationEventKind.ItemPickedUp, actor.Id, carried.Id, carried.Quantity);
@@ -3100,7 +3171,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        actor.Position = zone.Position;
+        MoveActor(actor, zone.Position);
         actor.CarriedStackId = EntityId.None;
         actor.ClearJob();
         var stored = StoreStackInZone(carried, zone);
@@ -3114,6 +3185,7 @@ public sealed partial class SimulationEngine
         foreach (var actor in _actors.Values)
         {
             TryShareNavigationReports(actor);
+            UpdateActorBleeding(actor);
             if (actor.JobKind is not (ActorJobKind.Rest or ActorJobKind.Collapsed) ||
                 actor.JobPhase != ActorJobPhase.Working)
             {
@@ -3536,6 +3608,7 @@ public sealed partial class SimulationEngine
                     (int)WorkDesignationKind.HuntAnimal => WorkDesignationKind.HuntAnimal,
                     (int)WorkDesignationKind.CarveRampDown => WorkDesignationKind.CarveRampDown,
                     (int)WorkDesignationKind.CarveRampUp => WorkDesignationKind.CarveRampUp,
+                    (int)WorkDesignationKind.CleanBlood => WorkDesignationKind.CleanBlood,
                     _ => command.Resource switch
                     {
                         ResourceKind.Food => WorkDesignationKind.GatherFood,
@@ -3553,7 +3626,8 @@ public sealed partial class SimulationEngine
                         (int)WorkDesignationKind.Scout or
                         (int)WorkDesignationKind.HuntAnimal or
                         (int)WorkDesignationKind.CarveRampDown or
-                        (int)WorkDesignationKind.CarveRampUp;
+                        (int)WorkDesignationKind.CarveRampUp or
+                        (int)WorkDesignationKind.CleanBlood;
                 var isLegacyDesignation =
                     command.Resource is ResourceKind.Food or ResourceKind.Reeds or ResourceKind.Wood or
                         ResourceKind.Stone or ResourceKind.Vegetation &&
@@ -3887,7 +3961,7 @@ public sealed partial class SimulationEngine
             SimulationTick.Zero,
             sampleKey: 5,
             minimumInclusive: 0,
-            maximumExclusive: 5);
+            maximumExclusive: 6);
         var second = DeterministicRandom.NextInt(
             WorldSeed,
             RandomDomain.GoblinIdentity,
@@ -3895,7 +3969,7 @@ public sealed partial class SimulationEngine
             SimulationTick.Zero,
             sampleKey: 6,
             minimumInclusive: 0,
-            maximumExclusive: 5);
+            maximumExclusive: 6);
         return (GoblinTrait)(1 << first) | (GoblinTrait)(1 << second);
     }
 
@@ -3960,11 +4034,12 @@ public sealed partial class SimulationEngine
         {
             for (var x = 0; x < Map.Width; x++)
             {
-                var position = new GridPosition(x, y);
-                var cell = Map.GetCell(position);
+                var column = new GridPosition(x, y);
+                var position = Map.GetTerrainSurfacePosition(column);
+                var cell = Map.GetCell(column);
                 if (cell.Terrain is not (TerrainKind.SolidGround or TerrainKind.Mud) ||
                     cell.Fertility < 45 ||
-                    !World.IsSurfaceTraversable(position))
+                    !World.IsTerrainTraversable(position))
                 {
                     continue;
                 }
@@ -4013,9 +4088,10 @@ public sealed partial class SimulationEngine
         var fallback = Enumerable.Range(0, Map.Height)
             .SelectMany(y => Enumerable.Range(0, Map.Width)
                 .Select(x => new GridPosition(x, y)))
+            .Select(Map.GetTerrainSurfacePosition)
             .Where(position =>
-                Map.GetCell(position).Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
-                World.IsSurfaceTraversable(position))
+                Map.GetColumnCell(position).Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
+                World.IsTerrainTraversable(position))
             .OrderBy(position => ManhattanDistance(position, Map.GoblinSpawn))
             .ThenBy(position => position.Y)
             .ThenBy(position => position.X)
@@ -4033,10 +4109,11 @@ public sealed partial class SimulationEngine
         {
             for (var x = 0; x < Map.Width; x++)
             {
-                var position = new GridPosition(x, y);
-                var cell = Map.GetCell(position);
+                var column = new GridPosition(x, y);
+                var position = Map.GetTerrainSurfacePosition(column);
+                var cell = Map.GetCell(column);
                 if (cell.Terrain is not (TerrainKind.SolidGround or TerrainKind.Mud) ||
-                    !World.IsSurfaceTraversable(position))
+                    !World.IsTerrainTraversable(position))
                 {
                     continue;
                 }
@@ -4082,7 +4159,8 @@ public sealed partial class SimulationEngine
         var fallback = Enumerable.Range(0, Map.Height)
             .SelectMany(y => Enumerable.Range(0, Map.Width)
                 .Select(x => new GridPosition(x, y)))
-            .Where(position => World.IsSurfaceTraversable(position))
+            .Select(Map.GetTerrainSurfacePosition)
+            .Where(World.IsTerrainTraversable)
             .OrderBy(position => ManhattanDistance(position, Map.GoblinSpawn))
             .ThenBy(position => position.Y)
             .ThenBy(position => position.X)
@@ -4123,9 +4201,13 @@ public sealed partial class SimulationEngine
 
     private bool IsValidArea(GridPosition first, GridPosition second) =>
         first.Z == second.Z &&
-        ((Map.IsTerrainSurfacePosition(first) || Map.IsHillRockPosition(first)) &&
-         (Map.IsTerrainSurfacePosition(second) || Map.IsHillRockPosition(second)) ||
-         Map.IsCavePosition(first) && Map.IsCavePosition(second));
+        IsAddressableMapPosition(first) &&
+        IsAddressableMapPosition(second);
+
+    private bool IsAddressableMapPosition(GridPosition position) =>
+        Map.IsColumnWithin(position) &&
+        position.Z >= Map.MinimumWorldLevel &&
+        position.Z <= Map.MaximumWorldLevel;
 
     private static (GridPosition Minimum, GridPosition Maximum) NormalizeArea(
         GridPosition first,
@@ -4594,6 +4676,8 @@ public sealed partial class SimulationEngine
         PersonalFoodKinds = actor.PersonalFoodKinds.ToList(),
         PersonalWater = actor.PersonalWater,
         PersonalStoneAmmo = actor.PersonalStoneAmmo,
+        BloodFootprintSteps = actor.BloodFootprintSteps,
+        BleedingTicksRemaining = actor.BleedingTicksRemaining,
         BirthTick = actor.BirthTick,
         MaturesAtTick = actor.MaturesAtTick,
         AgeOffsetTicks = actor.AgeOffsetTicks,
@@ -4812,6 +4896,10 @@ public sealed partial class SimulationEngine
         public int PersonalWater { get; set; }
 
         public int PersonalStoneAmmo { get; set; }
+
+        public int BloodFootprintSteps { get; set; }
+
+        public int BleedingTicksRemaining { get; set; }
 
         public long? BirthTick { get; set; }
 

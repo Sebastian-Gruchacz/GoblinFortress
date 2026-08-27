@@ -115,7 +115,7 @@ public sealed partial class SimulationEngine
             if (target.Distance <= 1)
             {
                 const int damage = 90;
-                target.Actor.Health = Math.Max(0, target.Actor.Health - damage);
+                ApplyTraumaDamage(target.Actor, damage);
                 animal.Activity = AnimalActivity.Threatening;
                 Publish(SimulationEventKind.AnimalHitGoblin, EntityId.None, target.Actor.Id, damage);
                 return;

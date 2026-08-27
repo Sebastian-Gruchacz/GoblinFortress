@@ -27,6 +27,7 @@ public enum ActorJobKind : byte
     Craft = 18,
     ClearConstructionSite = 19,
     CarveRamp = 20,
+    CleanBlood = 21,
 }
 
 public readonly record struct GoblinBudSnapshot(
@@ -190,6 +191,7 @@ public enum GoblinTrait : ushort
     Hardy = 1 << 2,
     Gluttonous = 1 << 3,
     Nimble = 1 << 4,
+    Fastidious = 1 << 5,
 }
 
 [Flags]
@@ -258,6 +260,7 @@ public readonly record struct ActorSnapshot(
     int Hunger,
     int Fatigue,
     int Health,
+    int BleedingTicksRemaining,
     int Thirst,
     int PersonalFood,
     FoodKind PersonalFoodKind,
@@ -423,6 +426,7 @@ public sealed class SimulationSnapshot
         WorkDesignationSnapshot[] workDesignations,
         PlantPatchSnapshot[] plantPatches,
         WorldObjectSnapshot[] worldObjects,
+        BloodStainSnapshot[] bloodStains,
         HumanVillageSnapshot humanVillage,
         GoblinRaidPhase raidPhase,
         GridPosition raidRallyPoint,
@@ -452,6 +456,7 @@ public sealed class SimulationSnapshot
         WorkDesignations = new ReadOnlyCollection<WorkDesignationSnapshot>(workDesignations);
         PlantPatches = new ReadOnlyCollection<PlantPatchSnapshot>(plantPatches);
         WorldObjects = new ReadOnlyCollection<WorldObjectSnapshot>(worldObjects);
+        BloodStains = new ReadOnlyCollection<BloodStainSnapshot>(bloodStains);
         HumanVillage = humanVillage;
         RaidPhase = raidPhase;
         RaidRallyPoint = raidRallyPoint;
@@ -498,6 +503,8 @@ public sealed class SimulationSnapshot
     public IReadOnlyList<PlantPatchSnapshot> PlantPatches { get; }
 
     public IReadOnlyList<WorldObjectSnapshot> WorldObjects { get; }
+
+    public IReadOnlyList<BloodStainSnapshot> BloodStains { get; }
 
     public HumanVillageSnapshot HumanVillage { get; }
 

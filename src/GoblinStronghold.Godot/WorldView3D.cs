@@ -54,7 +54,7 @@ public partial class WorldView3D : Node3D
     public void SetWorld(SimulationEngine engine)
     {
         _engine = engine;
-        _snapshot = engine.CreateSnapshot();
+        _snapshot = engine.CreatePresentationSnapshot();
         _renderedStructureSignature = ulong.MaxValue;
         ClearChildren(_terrainRoot);
         ClearChildren(_structureRoot);

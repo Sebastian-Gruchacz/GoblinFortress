@@ -83,7 +83,7 @@ public sealed partial class SimulationEngine
                     minimumInclusive: 0,
                     maximumExclusive: Definitions.HumanGuardDamageVariance + 1);
             var guardDamage = checked(guards.Population * guardDamagePerFighter);
-            guardTarget.Health = Math.Max(0, guardTarget.Health - guardDamage);
+            ApplyTraumaDamage(guardTarget, guardDamage);
             Publish(
                 SimulationEventKind.HumanGuardHitGoblin,
                 EntityId.None,
@@ -106,6 +106,7 @@ public sealed partial class SimulationEngine
             var humanDeaths = _humanVillage.ApplyGuardDamage(
                 goblinDamage,
                 Definitions.HumanGuardHealth);
+            AddBlood(guards.Position, goblinDamage, Math.Max(1, humanDeaths));
             Publish(
                 SimulationEventKind.GoblinHitHumanGuard,
                 goblin.Id,
@@ -149,6 +150,7 @@ public sealed partial class SimulationEngine
             var humanDeaths = _humanVillage.ApplyGuardDamage(
                 goblinDamage,
                 Definitions.HumanGuardHealth);
+            AddBlood(guards.Position, goblinDamage, Math.Max(1, humanDeaths));
             Publish(
                 SimulationEventKind.GoblinHitHumanGuard,
                 goblin.Id,

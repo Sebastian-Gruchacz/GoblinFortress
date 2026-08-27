@@ -575,6 +575,23 @@ public readonly record struct SimulationCommand(
             ResourceKind.Any,
             Amount: (int)WorkDesignationKind.Scout);
 
+    public static SimulationCommand DesignateBloodCleaning(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.CleanBlood);
+
     public SimulationCommand WithWorkPriority(StoragePriority priority) =>
         this with { Amount = (Amount & 0xff) | (((int)priority + 1) << 8) };
 

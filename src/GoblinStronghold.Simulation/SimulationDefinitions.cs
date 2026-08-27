@@ -61,6 +61,7 @@ public sealed record VisionSettings(
 
 public sealed record ActorPlanningSettings(
     int QueueCapacity,
+    int BackgroundPlanningIntervalTicks,
     int MaximumNeedPriority,
     int BackgroundJobCommitment,
     int OrdinaryJobCommitment,
@@ -157,6 +158,7 @@ public sealed class SimulationDefinitions
         goblinStructureVisionRadius: 3,
         actorPlanning: new(
             QueueCapacity: 4,
+            BackgroundPlanningIntervalTicks: 20,
             MaximumNeedPriority: 100,
             BackgroundJobCommitment: 20,
             OrdinaryJobCommitment: 40,
@@ -286,12 +288,15 @@ public sealed class SimulationDefinitions
         ArgumentOutOfRangeException.ThrowIfNegative(medicinalRootsHealing);
         actorPlanning ??= new(
             QueueCapacity: 4,
+            BackgroundPlanningIntervalTicks: 20,
             MaximumNeedPriority: 100,
             BackgroundJobCommitment: 20,
             OrdinaryJobCommitment: 40,
             OrderedJobCommitment: 70,
             InterruptHysteresis: 5);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(actorPlanning.QueueCapacity);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
+            actorPlanning.BackgroundPlanningIntervalTicks);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(actorPlanning.MaximumNeedPriority);
         ArgumentOutOfRangeException.ThrowIfNegative(actorPlanning.BackgroundJobCommitment);
         ArgumentOutOfRangeException.ThrowIfNegative(actorPlanning.OrdinaryJobCommitment);

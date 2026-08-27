@@ -166,9 +166,9 @@ The `WildMiner` prototype already models actions with a remaining duration rathe
 - binaries, build outputs, upgrade logs and Visual Studio user files;
 - provenance-uncertain art and copied reference documents.
 
-## Proposed minimal reboot
+## Minimal reboot boundary
 
-Before removing tracked legacy files, preserve the current repository state under an explicit archival Git tag or branch. The active branch can then be reduced to:
+The active branch was reduced to the modern implementation after the legacy state had already been preserved in Git commit `09ba2db`. It retains:
 
 - `README.md` — current pitch and development status;
 - `LICENSE` — reviewed for the intended release model;
@@ -181,12 +181,8 @@ Before removing tracked legacy files, preserve the current repository state unde
 
 The first implementation milestone should contain a headless deterministic world with generated terrain, basic goblin survival, one coarse human village and fog-of-war state. Combat and knowledge acquisition follow once the world provides valuable carriers and persistent consequences. Godot presentation should be added only after the relevant headless scenarios are testable.
 
-## Reset gate
+## Reset record
 
-The destructive repository cleanup should happen only after:
+The active-tree cleanup was explicitly confirmed and performed on 2026-08-27. It removed the tracked XNA, d20, WinForms, old test-shell and bundled-binary trees plus `Goblin Fortress.sln`. The historical source remains recoverable from commit `09ba2db`; no separate archive tag was required. The active Godot, simulation, headless and test projects do not reference the removed material.
 
-1. the archive tag or branch is verified;
-2. the desired license is confirmed;
-3. the exact Godot and .NET versions are selected;
-4. the first-playable knowledge-transfer rules are answered;
-5. the user explicitly confirms the removal list.
+The repository license should still be reviewed before a public or commercial release; removing the legacy implementation does not by itself settle the release model or third-party asset provenance.

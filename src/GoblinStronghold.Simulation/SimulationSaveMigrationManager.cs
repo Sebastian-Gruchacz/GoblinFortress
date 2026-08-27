@@ -32,7 +32,7 @@ internal sealed class SimulationSaveLoadPlan(
 
 internal static class SimulationSaveMigrationManager
 {
-    public const int CurrentVersion = 36;
+    public const int CurrentVersion = 42;
 
     private static readonly ISimulationSaveMigration[] Migrations =
     [
@@ -42,6 +42,12 @@ internal static class SimulationSaveMigrationManager
         new SimulationSaveMigration33To34(),
         new SimulationSaveMigration34To35(),
         new SimulationSaveMigration35To36(),
+        new SimulationSaveMigration36To37(),
+        new SimulationSaveMigration37To38(),
+        new SimulationSaveMigration38To39(),
+        new SimulationSaveMigration39To40(),
+        new SimulationSaveMigration40To41(),
+        new SimulationSaveMigration41To42(),
     ];
 
     public static SimulationSaveLoadPlan Prepare(
@@ -75,6 +81,171 @@ internal static class SimulationSaveMigrationManager
         }
 
         return new SimulationSaveLoadPlan(save, applied);
+    }
+}
+
+internal sealed class SimulationSaveMigration41To42 : ISimulationSaveMigration
+{
+    public int SourceVersion => 41;
+
+    public int TargetVersion => 42;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration40To41 : ISimulationSaveMigration
+{
+    public int SourceVersion => 40;
+
+    public int TargetVersion => 41;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration39To40 : ISimulationSaveMigration
+{
+    public int SourceVersion => 39;
+
+    public int TargetVersion => 40;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration38To39 : ISimulationSaveMigration
+{
+    public int SourceVersion => 38;
+
+    public int TargetVersion => 39;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration37To38 : ISimulationSaveMigration
+{
+    public int SourceVersion => 37;
+
+    public int TargetVersion => 38;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        save.BloodStains ??= [];
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration36To37 : ISimulationSaveMigration
+{
+    public int SourceVersion => 36;
+
+    public int TargetVersion => 37;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+        foreach (var actor in save.Actors)
+        {
+            if (!TryProjectLegacySurfacePosition(
+                    world,
+                    new GridPosition(actor.X, actor.Y, actor.Z),
+                    out var projected))
+            {
+                continue;
+            }
+
+            actor.X = projected.X;
+            actor.Y = projected.Y;
+            actor.Z = projected.Z;
+            actor.RemainingRoute.Clear();
+            actor.JobKind = ActorJobKind.None;
+            actor.JobPhase = ActorJobPhase.None;
+            actor.JobStage = ActorJobStage.None;
+        }
+
+        foreach (var zone in save.StorageZones)
+        {
+            if (!TryProjectLegacySurfacePosition(
+                    world,
+                    new GridPosition(zone.X, zone.Y, zone.Z),
+                    out var projected))
+            {
+                continue;
+            }
+
+            zone.X = projected.X;
+            zone.Y = projected.Y;
+            zone.Z = projected.Z;
+            foreach (var stack in save.ItemStacks.Where(stack =>
+                         stack.LocationKind == ItemLocationKind.StorageZone &&
+                         stack.OwnerId == zone.Id))
+            {
+                stack.X = projected.X;
+                stack.Y = projected.Y;
+                stack.Z = projected.Z;
+            }
+        }
+
+        foreach (var stack in save.ItemStacks.Where(stack =>
+                     stack.LocationKind == ItemLocationKind.Ground))
+        {
+            if (!TryProjectLegacySurfacePosition(
+                    world,
+                    new GridPosition(stack.X, stack.Y, stack.Z),
+                    out var projected))
+            {
+                continue;
+            }
+
+            stack.X = projected.X;
+            stack.Y = projected.Y;
+            stack.Z = projected.Z;
+        }
+    }
+
+    private static bool TryProjectLegacySurfacePosition(
+        WorldMapState world,
+        GridPosition position,
+        out GridPosition projected)
+    {
+        projected = position;
+        if (position.Z != 0 ||
+            world.IsTerrainTraversable(position) ||
+            !world.Baseline.IsColumnWithin(position))
+        {
+            return false;
+        }
+
+        projected = world.Baseline.GetTerrainSurfacePosition(position);
+        return projected != position && world.IsTerrainTraversable(projected);
     }
 }
 

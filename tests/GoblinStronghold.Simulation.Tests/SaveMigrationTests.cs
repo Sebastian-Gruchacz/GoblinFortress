@@ -23,7 +23,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
         var migrated = JsonNode.Parse(restored.Save())!.AsObject();
 
-        Assert.Equal(36, migrated["formatVersion"]!.GetValue<int>());
+        Assert.Equal(42, migrated["formatVersion"]!.GetValue<int>());
         Assert.Contains(migrated["resourcePriorities"]!.AsArray(), priority =>
             priority!["resource"]!.GetValue<int>() == (int)ResourceKind.Hide &&
             priority["priority"]!.GetValue<int>() == (int)StoragePriority.Normal);
@@ -56,7 +56,7 @@ public sealed class SaveMigrationTests
         Assert.NotEqual(blockedPosition, restoredActor.Position);
         Assert.True(restored.World.IsTerrainTraversable(restoredActor.Position));
         Assert.Equal(ActorJobKind.None, restoredActor.Job.Kind);
-        Assert.Equal(36, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(42, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
 
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
-        Assert.Equal(36, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(42, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class SaveMigrationTests
             animal.Kind == AnimalKind.MarshHare);
 
         Assert.Equal(restoredHare.MaximumFatigue, restoredHare.Fatigue);
-        Assert.Equal(36, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(42, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -114,13 +114,13 @@ public sealed class SaveMigrationTests
     public void SaveFromNewerFormatIsRejectedClearly()
     {
         var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
-        save["formatVersion"] = 37;
+        save["formatVersion"] = 43;
 
         var exception = Assert.Throws<InvalidDataException>(() => SimulationEngine.Load(
             save.ToJsonString(),
             SimulationDefinitions.Foundation));
 
-        Assert.Contains("newer than supported version 36", exception.Message);
+        Assert.Contains("newer than supported version 42", exception.Message);
     }
 
     private static SimulationEngine CreateEngine() => SimulationEngine.Create(

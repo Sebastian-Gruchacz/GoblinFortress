@@ -3,6 +3,16 @@ using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 
+if (args.Contains("--profile-startup", StringComparer.OrdinalIgnoreCase))
+{
+    var pathIndex = Array.FindIndex(args, argument =>
+        argument.Equals("--save", StringComparison.OrdinalIgnoreCase));
+    var savePath = pathIndex >= 0 && pathIndex + 1 < args.Length
+        ? args[pathIndex + 1]
+        : null;
+    return RunStartupProfile(savePath);
+}
+
 if (args.Contains("--benchmark-day", StringComparer.OrdinalIgnoreCase))
 {
     return RunFullDayBenchmark();
@@ -211,5 +221,100 @@ static int RunFullDayBenchmark()
         $"Paths: {navigation.Requests:N0} requests, {navigation.Searches:N0} searches, " +
         $"{navigation.CacheHits:N0} hits ({hitRate:F1}%), " +
         $"{navigation.CachedRoutes:N0} cached, {navigation.CacheInvalidations:N0} invalidations");
+    return 0;
+}
+
+static int RunStartupProfile(string? savePath)
+{
+    var definitions = SimulationDefinitions.Foundation;
+    SimulationEngine engine;
+    if (savePath is not null)
+    {
+        var load = Stopwatch.StartNew();
+        engine = SimulationEngine.Load(
+            File.ReadAllText(savePath),
+            definitions,
+            SimulationDebugSettings.ForCurrentBuild);
+        Console.WriteLine($"Load: {load.Elapsed.TotalMilliseconds:F1} ms");
+    }
+    else
+    {
+        var seed = new WorldSeed(0x50524F46494C45UL);
+        var generation = Stopwatch.StartNew();
+        var map = SwampMapGenerator.Generate(
+            seed,
+            SwampMapGenerator.DefaultDimension,
+            SwampMapGenerator.DefaultDimension);
+        Console.WriteLine($"Map generation: {generation.Elapsed.TotalMilliseconds:F1} ms");
+        var creation = Stopwatch.StartNew();
+        engine = SimulationEngine.Create(
+            seed,
+            definitions,
+            map,
+            initialGoblinCount: 8,
+            initialFoodStock: 16,
+            scatterInitialBrushwood: true,
+            debugSettings: SimulationDebugSettings.ForCurrentBuild);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            new SimulationTick(1),
+            sequence: 1,
+            map.GoblinSpawn,
+            ResourceKind.Food,
+            definitions.Storage.SmallFoodCapacity));
+        Console.WriteLine($"Engine creation: {creation.Elapsed.TotalMilliseconds:F1} ms");
+    }
+
+    engine.CreatePresentationSnapshot();
+    var presentationTimes = Enumerable.Range(0, 10)
+        .Select(_ =>
+        {
+            var stopwatch = Stopwatch.StartNew();
+            engine.CreatePresentationSnapshot();
+            return stopwatch.Elapsed.TotalMilliseconds;
+        })
+        .ToArray();
+    Console.WriteLine(
+        $"Presentation snapshot avg/max: {presentationTimes.Average():F1}/" +
+        $"{presentationTimes.Max():F1} ms");
+    var authoritativeTimes = Enumerable.Range(0, 3)
+        .Select(_ =>
+        {
+            var stopwatch = Stopwatch.StartNew();
+            engine.CreateSnapshot();
+            return stopwatch.Elapsed.TotalMilliseconds;
+        })
+        .ToArray();
+    Console.WriteLine(
+        $"Authoritative snapshot avg/max: {authoritativeTimes.Average():F1}/" +
+        $"{authoritativeTimes.Max():F1} ms");
+
+    var tickTimes = new double[100];
+    for (var index = 0; index < tickTimes.Length; index++)
+    {
+        var tick = Stopwatch.StartNew();
+        engine.AdvanceTicks(1);
+        tickTimes[index] = tick.Elapsed.TotalMilliseconds;
+        if (index < 20 || tickTimes[index] >= 10)
+        {
+            var stages = engine.GetMetrics().LastTickBreakdown;
+            var jobs = engine.GetLastActorJobUpdateProfile();
+            Console.WriteLine(
+                $"Tick {engine.CurrentTick.Value}: {tickTimes[index]:F1} ms • " +
+                $"jobs {stages.ActorJobs.TotalMilliseconds:F1}, " +
+                $"interrupt {jobs.NeedInterrupts.TotalMilliseconds:F1}, " +
+                $"plan {jobs.IdlePlanning.TotalMilliseconds:F1}, " +
+                $"active {jobs.ActiveJobs.TotalMilliseconds:F1}, " +
+                $"job final {jobs.Finalization.TotalMilliseconds:F1}, " +
+                $"visibility {stages.Visibility.TotalMilliseconds:F1}, " +
+                $"humans {stages.HumanVillage.TotalMilliseconds:F1}, " +
+                $"animals {stages.Animals.TotalMilliseconds:F1}, " +
+                $"actors {stages.Actors.TotalMilliseconds:F1}");
+        }
+    }
+
+    var ordered = tickTimes.Order().ToArray();
+    Console.WriteLine(
+        $"Ticks avg/p95/max: {tickTimes.Average():F2}/" +
+        $"{ordered[(int)(ordered.Length * 0.95)]:F2}/{tickTimes.Max():F2} ms");
     return 0;
 }

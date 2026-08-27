@@ -17,6 +17,7 @@ public enum WorkDesignationKind : byte
     GatherReeds = 10,
     CarveRampDown = 11,
     CarveRampUp = 12,
+    CleanBlood = 13,
 }
 
 public readonly record struct WorkDesignationSnapshot(

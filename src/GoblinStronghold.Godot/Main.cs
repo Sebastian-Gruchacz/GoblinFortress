@@ -8,7 +8,11 @@ namespace GoblinStronghold.GodotClient;
 
 public partial class Main : Node
 {
+    private const int MaximumSimulationTicksPerFrame = 8;
+    private const double PresentationRefreshIntervalSeconds = 1d / 5d;
+    private const double MinimumAutosaveIntervalSeconds = 10d * 60d;
     private SimulationEngine _engine = null!;
+    private SimulationSnapshot _latestSnapshot = null!;
     private WorldView _worldView = null!;
     private WorldView3D _worldView3D = null!;
     private MinimapView _minimap = null!;
@@ -71,6 +75,7 @@ public partial class Main : Node
     private int _speed = 1;
     private int _visibleLevel;
     private double _accumulator;
+    private double _presentationRefreshElapsed;
     private ulong _commandSequence = 1;
     private EntityId _selectedActorId = EntityId.None;
     private readonly HashSet<EntityId> _selectedActorIds = [];
@@ -110,6 +115,7 @@ public partial class Main : Node
     private GridPosition? _selectedWorkshop;
     private GameSaveStore _saveStore = null!;
     private SimulationTick _nextAutosaveTick;
+    private double _autosaveElapsedRealSeconds;
     private Control _mainMenu = null!;
     private Button _resumeGameButton = null!;
     private Button _newGameButton = null!;
@@ -157,6 +163,7 @@ public partial class Main : Node
         CarveRampUp,
         HuntAnimals,
         Scout,
+        CleanBlood,
         Clear,
     }
 
@@ -287,6 +294,9 @@ public partial class Main : Node
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.Expedition,
             "Wyznacz obszar zwiadu\nSkauci nie wejdą w nieznany teren poza zaznaczeniem",
             () => SelectWorkMode((long)WorkMode.Scout));
+        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
+            "Zmyj zaschniętą krew\nWskaż plamy na podłogach i pomostach",
+            () => SelectWorkMode((long)WorkMode.CleanBlood));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
             "Usuń zlecenia\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.Clear));
         CreateItemTileButton(
@@ -465,19 +475,25 @@ public partial class Main : Node
             return;
         }
 
+        _autosaveElapsedRealSeconds += delta;
+        _presentationRefreshElapsed += delta;
         _accumulator += delta * _speed;
         var changed = false;
-        while (_accumulator >= SecondsPerTick)
+        var ticksAdvanced = 0;
+        while (_accumulator >= SecondsPerTick &&
+               ticksAdvanced < MaximumSimulationTicksPerFrame)
         {
             _engine.AdvanceTicks(1);
             _accumulator -= SecondsPerTick;
+            ticksAdvanced++;
             changed = true;
         }
 
-        if (changed)
+        if (changed && _presentationRefreshElapsed >= PresentationRefreshIntervalSeconds)
         {
             HandleEvents(_engine.DrainEvents());
-            var snapshot = _engine.CreateSnapshot();
+            var snapshot = _engine.CreatePresentationSnapshot();
+            _latestSnapshot = snapshot;
             if (_use3DView)
             {
                 _worldView3D.Refresh(snapshot);
@@ -487,7 +503,11 @@ public partial class Main : Node
                 _worldView.Refresh(snapshot);
             }
             _minimap.Refresh(snapshot);
-            UpdateStatus();
+            UpdateStatus(snapshot);
+            _presentationRefreshElapsed %= PresentationRefreshIntervalSeconds;
+        }
+        if (changed)
+        {
             TryAutosave();
         }
     }
@@ -837,7 +857,8 @@ public partial class Main : Node
 
     private void TryAutosave()
     {
-        if (_engine.CurrentTick.Value < _nextAutosaveTick.Value)
+        if (_engine.CurrentTick.Value < _nextAutosaveTick.Value ||
+            _autosaveElapsedRealSeconds < MinimumAutosaveIntervalSeconds)
         {
             return;
         }
@@ -861,6 +882,7 @@ public partial class Main : Node
     private void SaveAutosave()
     {
         _saveStore.SaveAuto(_engine.Save());
+        _autosaveElapsedRealSeconds = 0;
     }
 
     private void ScheduleNextAutosave() => _nextAutosaveTick =
@@ -886,8 +908,11 @@ public partial class Main : Node
         _looseResourcesSignature = string.Empty;
         _goblinRosterSignature = string.Empty;
         _engine = engine;
+        _latestSnapshot = engine.CreatePresentationSnapshot();
         _commandSequence = engine.NextAvailableCommandSequence;
         _accumulator = 0;
+        _presentationRefreshElapsed = 0;
+        _autosaveElapsedRealSeconds = 0;
         _visibleLevel = 0;
         _worldView.SetWorld(engine);
         _worldView.SetVisibleLevel(0);
@@ -901,7 +926,7 @@ public partial class Main : Node
         UpdateLayerToolAvailability();
         ScheduleNextAutosave();
         ConstrainCameraToMap();
-        UpdateStatus();
+        UpdateStatus(_latestSnapshot);
     }
 
     private void CloseWindowOnSecondaryInput(InputEvent inputEvent, Window window)
@@ -939,12 +964,6 @@ public partial class Main : Node
 
     private void ShowBuildMenu()
     {
-        if (_visibleLevel > 0)
-        {
-            _inspector.Text = "Budowanie ponad powierzchnią wymaga blueprintu podpartej konstrukcji.";
-            return;
-        }
-
         ShowToolbarMenu(_buildMenu, "Build");
     }
 
@@ -952,12 +971,6 @@ public partial class Main : Node
 
     private void ShowWorkMenu()
     {
-        if (_visibleLevel > 0)
-        {
-            _inspector.Text = "Zlecenia pracy ponad powierzchnią nie są jeszcze dostępne.";
-            return;
-        }
-
         ShowToolbarMenu(_workMenu, "Work");
     }
 
@@ -982,7 +995,7 @@ public partial class Main : Node
 
     private void IssueMoveOrder(GridPosition clickedDestination)
     {
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = _latestSnapshot;
         if (!IsBuildableLayerCell(clickedDestination) ||
             !snapshot.GetVisibility(clickedDestination, _engine.Map.Width).IsDiscovered())
         {
@@ -1333,22 +1346,6 @@ public partial class Main : Node
     private void SelectWorkMode(long id)
     {
         var mode = (WorkMode)id;
-        var availableUnderground = mode is WorkMode.GatherBrushwood or
-            WorkMode.GatherStone or WorkMode.MineRock or WorkMode.CarveRampDown or
-            WorkMode.CarveRampUp or WorkMode.Clear;
-        if (mode == WorkMode.CarveRampUp && _visibleLevel >= 0)
-        {
-            _inspector.Text = "Pochylnię w górę wyznacza się z podziemnego poziomu.";
-            return;
-        }
-        if (_visibleLevel != 0 && !(_visibleLevel < 0 && availableUnderground))
-        {
-            _inspector.Text = _visibleLevel < 0
-                ? "W jaskini można zbierać luźne drewno i urobek, kopać oraz usuwać zlecenia."
-                : "Na tej warstwie nie ma jeszcze pasujących zleceń pracy.";
-            return;
-        }
-
         CancelBuildMode(clearInspector: false);
         _isMoveMode = false;
         _workMode = mode;
@@ -1368,6 +1365,7 @@ public partial class Main : Node
             WorkMode.CarveRampUp => "Praca: wskaż odkrytą podłogę jaskini • goblin z kilofem wykopie pochylnię na poziom wyżej • Esc anuluje",
             WorkMode.HuntAnimals => "Polowanie: przeciągnij obszar • pozostaną konkretne zwierzęta • Esc anuluje",
             WorkMode.Scout => "Zwiad: przeciągnij dozwolony obszar • skauci mogą przechodzić przez znany teren, ale nie wejdą w nieznany teren poza zaznaczeniem",
+            WorkMode.CleanBlood => "Praca: przeciągnij obszar sprzątania zaschniętej krwi z wykonanych podłóg • Esc anuluje",
             WorkMode.Clear => "Praca: przeciągnij obszar usuwania zleceń • Esc anuluje",
             _ => _inspector.Text,
         };
@@ -1471,12 +1469,9 @@ public partial class Main : Node
     {
         var end = ScreenToVisibleCell(screenPosition);
         _isDraggingLinearBuild = false;
-        if (!IsBuildableLayerCell(end) || end.Z != _linearBuildStart.Z ||
-            (_buildMode == BuildMode.Walkway && end.Z != 0))
+        if (!IsBuildableLayerCell(end) || end.Z != _linearBuildStart.Z)
         {
-            _inspector.Text = _buildMode == BuildMode.Walkway && end.Z != 0
-                ? "Pomost jest obecnie blueprintem powierzchniowym."
-                : "Cała konstrukcja musi leżeć na jednym dostępnym poziomie.";
+            _inspector.Text = "Cała konstrukcja musi leżeć na jednym dostępnym poziomie.";
             CancelBuildMode(clearInspector: false);
             return;
         }
@@ -1580,7 +1575,7 @@ public partial class Main : Node
         var cells = _isDraggingWorkArea
             ? GetAreaCells(_workAreaStart, cell)
             : new[] { cell };
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = _latestSnapshot;
         cells = _workMode switch
         {
             WorkMode.GatherFood => cells.Where(position =>
@@ -1598,6 +1593,10 @@ public partial class Main : Node
                     _engine.World.CanCarveRampUp(position)).ToArray(),
             WorkMode.Scout => cells.Where(position =>
                 position.Z == 0 && _engine.World.IsSurfaceTraversable(position)).ToArray(),
+            WorkMode.CleanBlood => cells.Where(position =>
+                snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
+                snapshot.BloodStains.Any(stain => stain.Position == position &&
+                    stain.Surface == BloodSurfaceKind.ConstructedFloor)).ToArray(),
             _ => cells.Where(position =>
                 snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered()).ToArray(),
         };
@@ -1619,9 +1618,12 @@ public partial class Main : Node
     {
         var end = ScreenToVisibleCell(screenPosition);
         _isDraggingWorkArea = false;
-        if (!IsBuildableLayerCell(end))
+        if (!IsBuildableLayerCell(end) || !IsValidWorkAreaSelection(_workAreaStart, end))
         {
-            CancelWorkMode();
+            _worldView.SetWorkPreview(default, []);
+            _inspector.Text = _workAreaStart.Z != end.Z
+                ? "Zlecenie pracy musi mieścić się na jednym poziomie."
+                : "Zaznaczenie wychodzi poza obszar mapy na oglądanym poziomie.";
             return;
         }
 
@@ -1691,6 +1693,11 @@ public partial class Main : Node
                 _commandSequence++,
                 _workAreaStart,
                 end),
+            WorkMode.CleanBlood => SimulationCommand.DesignateBloodCleaning(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end),
             WorkMode.Clear => SimulationCommand.ClearWorkDesignations(
                 executeAt,
                 _commandSequence++,
@@ -1711,7 +1718,19 @@ public partial class Main : Node
                 replacementPriority,
                 _replacementWorkSuspended);
         }
-        _engine.QueueCommand(command);
+        try
+        {
+            _engine.QueueCommand(command);
+        }
+        catch (ArgumentException exception)
+        {
+            GD.PushWarning(
+                $"Odrzucono zlecenie {_workMode} z {_workAreaStart} do {end}: " +
+                exception.Message);
+            _worldView.SetWorkPreview(default, []);
+            _inspector.Text = "Nie można utworzyć tego zlecenia na wskazanym obszarze.";
+            return;
+        }
         _inspector.Text = _workMode switch
         {
             WorkMode.Clear => "Zlecono usunięcie celów pracy z zaznaczenia.",
@@ -1719,6 +1738,7 @@ public partial class Main : Node
                 "Zlecono obszar tunelu; dispatcher będzie udostępniał kolejne ściany wraz z postępem kopania.",
             WorkMode.CarveRampDown => "Zlecono wykopanie pochylni na poziom niżej.",
             WorkMode.CarveRampUp => "Zlecono wykopanie pochylni na poziom wyżej.",
+            WorkMode.CleanBlood => "Zlecono sprzątanie zaschniętych plam z wykonanych podłóg.",
             _ => "Zlecono wskazanie pasujących obiektów; cele pojawią się po następnym ticku.",
         };
         CancelWorkMode(clearInspector: false);
@@ -1766,6 +1786,7 @@ public partial class Main : Node
         WorkMode.CarveRampUp => WorkDesignationKind.CarveRampUp,
         WorkMode.HuntAnimals => WorkDesignationKind.HuntAnimal,
         WorkMode.Scout => WorkDesignationKind.Scout,
+        WorkMode.CleanBlood => WorkDesignationKind.CleanBlood,
         _ => default,
     };
 
@@ -1783,6 +1804,7 @@ public partial class Main : Node
         WorkDesignationKind.CarveRampUp => WorkMode.CarveRampUp,
         WorkDesignationKind.HuntAnimal => WorkMode.HuntAnimals,
         WorkDesignationKind.Scout => WorkMode.Scout,
+        WorkDesignationKind.CleanBlood => WorkMode.CleanBlood,
         _ => WorkMode.None,
     };
 
@@ -1871,6 +1893,7 @@ public partial class Main : Node
                 WorkDesignationKind.CarveRampUp => "Dispatcher dodał pochylnię w górę do wykopania.",
                 WorkDesignationKind.Scout => "Dispatcher ograniczył zwiad do wskazanego obszaru.",
                 WorkDesignationKind.HuntAnimal => "Dispatcher dodał wskazane zwierzę do upolowania.",
+                WorkDesignationKind.CleanBlood => "Dispatcher dodał zaschniętą plamę do sprzątnięcia.",
                 _ => "Dispatcher dodał cel pracy.",
             };
         }
@@ -2462,6 +2485,9 @@ public partial class Main : Node
         ActorJobKind.HuntAnimal when job.Phase == ActorJobPhase.Traveling =>
             $"ściga zwierzę → {job.Target}",
         ActorJobKind.HuntAnimal => $"poluje ({job.RemainingWorkTicks})",
+        ActorJobKind.CleanBlood when job.Phase == ActorJobPhase.Traveling =>
+            $"idzie zmyć krew → {job.Target}",
+        ActorJobKind.CleanBlood => $"szoruje podłogę ({job.RemainingWorkTicks})",
         _ => "bez zadania",
     };
 
@@ -2870,6 +2896,7 @@ public partial class Main : Node
         ActorJobKind.SupplyCrafting => "⇥",
         ActorJobKind.Craft => "⚒",
         ActorJobKind.ClearConstructionSite => "↗",
+        ActorJobKind.CleanBlood => "✦",
         _ => "·",
     };
 
@@ -3384,6 +3411,9 @@ public partial class Main : Node
                       $"{actor.EffectiveMaximumHealth:N0}/{_engine.Definitions.MaximumHealth:N0}"
                     : $"Wiek: {actor.AgeDays} dni " +
                       $"({(double)actor.AgeDays / _engine.Definitions.Clock.Climate.DaysPerYear:0.0} lat) • dorosły")
+            .AppendLine(actor.BleedingTicksRemaining > 0
+                ? $"Stan: krwawi ({actor.BleedingTicksRemaining} ticków do samoistnego ustania)"
+                : "Stan: nie krwawi")
             .AppendLine()
             .AppendLine($"Znane umiejętności: {DescribeSkills(actor.KnownSkills)}")
             .AppendLine($"Doświadczenie: {DescribeExperience(actor.Experience)}")
@@ -3460,6 +3490,7 @@ public partial class Main : Node
         ActorJobKind.CarveRamp => "wykuwania pochylni",
         ActorJobKind.TendBud => "opieki nad pąkiem",
         ActorJobKind.HuntAnimal => "polowania",
+        ActorJobKind.CleanBlood => "sprzątania krwi",
         _ => "bezczynności",
     };
 
@@ -3645,6 +3676,7 @@ public partial class Main : Node
         traits.HasFlag(GoblinTrait.Hardy) ? "wytrzymały" : null,
         traits.HasFlag(GoblinTrait.Gluttonous) ? "żarłoczny" : null,
         traits.HasFlag(GoblinTrait.Nimble) ? "zwinny" : null,
+        traits.HasFlag(GoblinTrait.Fastidious) ? "porządnicki" : null,
     }.Where(item => item is not null));
 
     private void ToggleWorldView()
@@ -4306,6 +4338,8 @@ public partial class Main : Node
             targets.Any(target => target.Target == actor.Job.Target),
         WorkDesignationKind.HuntAnimal => actor.Job.Kind == ActorJobKind.HuntAnimal &&
             targets.Any(target => target.Id == actor.Job.SourceStackId),
+        WorkDesignationKind.CleanBlood => actor.Job.Kind == ActorJobKind.CleanBlood &&
+            targets.Any(target => target.Id == actor.Job.SourceStackId),
         _ => false,
     };
 
@@ -4365,6 +4399,7 @@ public partial class Main : Node
         WorkDesignationKind.CarveRampUp => "pochylnia w górę",
         WorkDesignationKind.Scout => "zwiad",
         WorkDesignationKind.HuntAnimal => "polowanie",
+        WorkDesignationKind.CleanBlood => "sprzątanie krwi",
         _ => "praca",
     };
 
@@ -4660,7 +4695,7 @@ public partial class Main : Node
             return;
         }
 
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = _engine.CreatePresentationSnapshot();
         var minimumSurfaceFloor = Enumerable.Range(0, _engine.Map.CellCount)
             .Select(index => _engine.Map.GetCell(new GridPosition(
                 index % _engine.Map.Width,
@@ -4700,7 +4735,7 @@ public partial class Main : Node
             ? $"Widoczna warstwa z={next}. Wskaż odkryty cel marszu lub przejście między poziomami."
             : $"Widoczna warstwa mapy: z={next}. Page Up / Page Down zmienia poziom.") +
             selection;
-        UpdateStatus();
+        UpdateStatus(snapshot);
     }
 
     private bool EnsureSurfaceToolAvailable(string toolName)
@@ -4720,55 +4755,51 @@ public partial class Main : Node
 
     private bool EnsureBuildModeAvailable(BuildMode mode)
     {
-        if (_visibleLevel == 0 ||
-            (_visibleLevel < 0 && mode is BuildMode.FoodStorage or BuildMode.WoodStorage or
-                BuildMode.StoneStorage or BuildMode.FieldCamp or
-                BuildMode.WoodenWall or BuildMode.StoneWall or
-                BuildMode.WoodenDoorFrame or BuildMode.StoneDoorFrame or BuildMode.WoodenDoor or
-                BuildMode.WallTorch or BuildMode.PrimitiveWorkshop))
+        if (_visibleLevel >= _engine.Map.MinimumWorldLevel &&
+            _visibleLevel <= _engine.Map.MaximumWorldLevel)
         {
             return true;
         }
 
         CancelBuildMode(clearInspector: false);
         _buildMenu.Hide();
-        _inspector.Text = _visibleLevel < 0
-            ? "W jaskini można planować składy, obozowiska, ściany, mury, drzwi, pochodnie i warsztaty. " +
-              "Pomost pozostaje blueprintem powierzchniowym."
-            : "Budowanie ponad powierzchnią wymaga blueprintu podpartej konstrukcji.";
+        _inspector.Text = $"Warstwa z={_visibleLevel} leży poza obszarem mapy.";
         return false;
     }
 
-    private bool IsBuildableLayerCell(GridPosition position) => position.Z switch
-    {
-        0 => _engine.Map.IsWithin(position),
-        < 0 => _engine.Map.IsCavePosition(position),
-        _ => false,
-    };
+    private bool IsBuildableLayerCell(GridPosition position) =>
+        _engine.Map.IsColumnWithin(position) &&
+        position.Z >= _engine.Map.MinimumWorldLevel &&
+        position.Z <= _engine.Map.MaximumWorldLevel;
+
+    private bool IsValidWorkAreaSelection(GridPosition first, GridPosition second) =>
+        first.Z == second.Z &&
+        IsBuildableLayerCell(first) &&
+        IsBuildableLayerCell(second);
 
     private void UpdateLayerToolAvailability()
     {
         var build = GetToolbarButton("Build");
         var work = GetToolbarButton("Work");
-        build.Disabled = _visibleLevel > 0;
-        work.Disabled = _visibleLevel > 0;
+        build.Disabled = false;
+        work.Disabled = false;
         build.TooltipText = _visibleLevel switch
         {
             0 => "Budowanie",
             < 0 => "Budowanie pod ziemią • składy, drewniane ściany i drzwi",
-            _ => "Budowanie niedostępne: brak blueprintów konstrukcji nadziemnych",
+            _ => $"Budowanie na warstwie z={_visibleLevel}",
         };
         work.TooltipText = _visibleLevel switch
         {
             0 => "Zlecenia pracy",
             < 0 => "Zlecenia podziemne • zbieranie urobku, kopanie i czyszczenie",
-            _ => "Zlecenia pracy niedostępne na tej warstwie",
+            _ => $"Zlecenia pracy na warstwie z={_visibleLevel}",
         };
     }
 
-    private void UpdateStatus()
+    private void UpdateStatus(SimulationSnapshot? currentSnapshot = null)
     {
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = currentSnapshot ?? _engine.CreatePresentationSnapshot();
         UpdateCalendar(snapshot);
         UpdateOverviewWindows(snapshot);
         if (_selectedActorId != EntityId.None &&

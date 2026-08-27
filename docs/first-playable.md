@@ -87,9 +87,9 @@ Generation must validate its own result. A seed is rejected or repaired when eit
 
 Generation produces only the versioned baseline and initial ecological state. Each spatial sample is keyed by generator version, region or cell coordinates, feature domain and pass, so generating chunks or depths in a different order cannot change their contents. Runtime world state is mutable and layered: ground and water, vegetation and habitat, construction and damage, plus derived traversal and visibility data. Harvesting a plant, felling a tree or completing a structure changes authoritative world state and emits a compact dirty-region record.
 
-The first milestone does not require full mining, structural collapse, spreading fire or dynamic multi-level water. Its data ownership must nevertheless allow later excavation, fill, burned and demolished structures, constructed height transitions and underground layers without replacing cell identity or invalidating existing saves.
+The first milestone does not require full mining, structural collapse, spreading fire or dynamic multi-level fluids. Its data ownership must nevertheless allow later excavation, fill, burned and demolished structures, constructed height transitions, underground rivers, flooded caves and lava channels without replacing cell identity or invalidating existing saves. Intact solids may later transmit bounded moisture or heat clues from a hidden neighboring fluid body without exposing that body's cells. Breaching the final wall creates a normal fluid connection; seepage through it does not require a fake traversable opening. Drainage, diversion, sumps and later pumps must conserve fluid and provide a physical destination instead of deleting water through an abstract dry-room command.
 
-Navigation, visibility and rendering track separate change versions. A visual-only change need not discard paths, while a felled tree, new wall or excavated passage invalidates the affected topology. Derived caches can be rebuilt and are not authoritative save data.
+Navigation, visibility and rendering track separate change versions. A visual-only change need not discard paths, while a felled tree, new wall or excavated passage invalidates the affected authoritative topology. Derived caches can be rebuilt and are not authoritative save data. Later actor routing deliberately separates that truth from personal and tribal beliefs: distant planning may use a stale region edge, while a bounded local search verifies the next part of the route. Discovering a blocked gate, collapse, chasm or fluid hazard creates an observation and local replan; other goblins learn only after a deterministic report reaches their group or dispatcher.
 
 ### Fog of war
 
@@ -114,7 +114,7 @@ The first ecology should be deliberately small:
 - one harmless prey animal;
 - one animal able to injure an isolated goblin.
 
-Plants grow from local moisture, fertility and season. Animals need only forage, rest, flee, reproduce at an aggregate rate and die. Detailed genetics, food webs and individual animal skills are deferred.
+Plants grow from local moisture, fertility and season. Animals share baseline actor vitals such as health and fatigue, then species traits set their capacities and movement costs. A hare has little health and only enough stamina for a short burst before it must recover, while a boar is substantially tougher and more enduring. Animals otherwise need only forage, rest, flee, reproduce at an aggregate rate and die. Detailed genetics, food webs and individual animal skills are deferred.
 
 The first implemented vegetation probe uses deterministic berry patches with local capacity. Gathering depletes the patch under the actor, exhausted patches reject further gathering, and bounded regrowth occurs at stable logical intervals. This validates mutable overlays, world versions, dirty-cell delivery and save/load before seasons or additional species are introduced.
 
@@ -145,7 +145,7 @@ Initial jobs are:
 - rest, eat and seek safety;
 - tend a weakened goblin or a basic living bud.
 
-The first expedition structure is a physical 2×2 field camp costing six wood. It must be placed within reach of shallow water, counts as a rest shelter and creates a food buffer with capacity 48. Its pull target is at least 24 food and grows with the current tribe, so a larger war band budgets both carried rations and meals consumed while assembling.
+The first expedition structure is a physical 2×2 field camp costing six wood. It does not require adjacent water: goblins continue to fetch water from a reachable source. The camp counts as a rest shelter and creates a food buffer with capacity 48. Its pull target is at least 24 food and grows with the current tribe, so a larger war band budgets both carried rations and meals consumed while assembling.
 
 The first skill set is:
 
@@ -158,7 +158,7 @@ The first skill set is:
 
 Skills affect time, yield, waste, safety and product quality. Practice can improve a skill slowly, but ordinary practice alone cannot unlock unavailable cultural capabilities such as agriculture or advanced woodworking. Primitive woodcraft covers breaking, trimming, bundling and crude construction; advanced woodworking covers fitted components, joinery, reliable tools and human-style facilities.
 
-The survival milestone includes only voluntary budding by a living goblin. Budding consumes food, requires suitable moist space and weakens the parent. The descendant begins with innate goblin aptitudes but no inherited learned skill. Skill leakage, corpse blooms and carcass seeding are added only after the knowledge model exists.
+The survival milestone includes voluntary budding by a living goblin. Budding consumes food, requires suitable moist space and weakens the parent. The descendant receives a deliberately lossy fragment of parental skills, traits, experience and preferences, then remains outside the workforce for one climate-defined season. Corpse blooms and carcass seeding are added only after the broader knowledge model exists.
 
 ### Individual needs
 

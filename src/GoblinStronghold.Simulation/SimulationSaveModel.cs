@@ -26,6 +26,14 @@ internal sealed class SimulationSaveModel
 
     public ulong WorldVersion { get; set; }
 
+    public int PopulationTarget { get; set; }
+
+    public List<GoblinBudSaveModel> GoblinBuds { get; set; } = [];
+
+    public ulong NextAnimalId { get; set; }
+
+    public List<AnimalSaveModel>? Animals { get; set; }
+
     public GoblinRaidPhase RaidPhase { get; set; }
 
     public int RaidRallyX { get; set; }
@@ -42,11 +50,15 @@ internal sealed class SimulationSaveModel
 
     public List<GridPositionSaveModel> ExcavatedCaveCells { get; set; } = [];
 
+    public List<VerticalPassageSaveModel> ExcavatedVerticalPassages { get; set; } = [];
+
     public HumanVillageSaveModel HumanVillage { get; set; } = new();
 
     public List<Map.CellVisibility> Visibility { get; set; } = [];
 
     public List<ActorSaveModel> Actors { get; set; } = [];
+
+    public List<NavigationBeliefSaveModel> TribeNavigationBeliefs { get; set; } = [];
 
     public List<ItemStackSaveModel> ItemStacks { get; set; } = [];
 
@@ -56,6 +68,8 @@ internal sealed class SimulationSaveModel
 
     public List<ConstructionSiteSaveModel> ConstructionSites { get; set; } = [];
 
+    public List<CraftingOrderSaveModel> CraftingOrders { get; set; } = [];
+
     public List<WorkDesignationSaveModel> WorkDesignations { get; set; } = [];
 
     public List<CommandSaveModel> PendingCommands { get; set; } = [];
@@ -63,6 +77,52 @@ internal sealed class SimulationSaveModel
     public List<EventSaveModel> UndeliveredEvents { get; set; } = [];
 
     public List<WorldChangeSaveModel> UndeliveredWorldChanges { get; set; } = [];
+}
+
+internal sealed class VerticalPassageSaveModel
+{
+    public int UpperX { get; set; }
+
+    public int UpperY { get; set; }
+
+    public int UpperZ { get; set; }
+
+    public int LowerX { get; set; }
+
+    public int LowerY { get; set; }
+
+    public int LowerZ { get; set; }
+
+    public Map.VerticalPassageKind Kind { get; set; }
+}
+
+internal sealed class AnimalSaveModel
+{
+    public ulong Id { get; set; }
+    public AnimalKind Kind { get; set; }
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Z { get; set; }
+    public AnimalActivity Activity { get; set; }
+    public int Health { get; set; }
+    public int Hunger { get; set; }
+    public int Fatigue { get; set; }
+    public long AgeTicks { get; set; }
+}
+
+internal sealed class GoblinBudSaveModel
+{
+    public ulong Id { get; set; }
+
+    public ulong ParentId { get; set; }
+
+    public int X { get; set; }
+
+    public int Y { get; set; }
+
+    public int Z { get; set; }
+
+    public int RemainingCareTicks { get; set; }
 }
 
 internal sealed class ResourcePrioritySaveModel
@@ -217,6 +277,14 @@ internal sealed class ActorSaveModel
 
     public int PersonalWater { get; set; }
 
+    public int PersonalStoneAmmo { get; set; }
+
+    public long? BirthTick { get; set; }
+
+    public long? MaturesAtTick { get; set; }
+
+    public long? AgeOffsetTicks { get; set; }
+
     public int X { get; set; }
 
     public int Y { get; set; }
@@ -254,6 +322,52 @@ internal sealed class ActorSaveModel
     public int SuspendedTargetY { get; set; }
 
     public int SuspendedTargetZ { get; set; }
+
+    public List<NavigationBeliefSaveModel> NavigationBeliefs { get; set; } = [];
+
+    public List<NavigationEdgeSaveModel> PendingNavigationReports { get; set; } = [];
+}
+
+internal sealed class NavigationEdgeSaveModel
+{
+    public int FirstX { get; set; }
+
+    public int FirstY { get; set; }
+
+    public int FirstZ { get; set; }
+
+    public int SecondX { get; set; }
+
+    public int SecondY { get; set; }
+
+    public int SecondZ { get; set; }
+}
+
+internal sealed class NavigationBeliefSaveModel
+{
+    public int FirstX { get; set; }
+
+    public int FirstY { get; set; }
+
+    public int FirstZ { get; set; }
+
+    public int SecondX { get; set; }
+
+    public int SecondY { get; set; }
+
+    public int SecondZ { get; set; }
+
+    public Map.NavigationBeliefStatus Status { get; set; }
+
+    public long ObservedAt { get; set; }
+
+    public long ReceivedAt { get; set; }
+
+    public ulong SourceActorId { get; set; }
+
+    public byte Confidence { get; set; }
+
+    public bool IsDirectObservation { get; set; }
 }
 
 internal sealed class GridPositionSaveModel
@@ -334,6 +448,12 @@ internal sealed class WorkDesignationSaveModel
     public int TargetZ { get; set; }
 
     public ulong TargetEntityId { get; set; }
+
+    public ulong OrderId { get; set; }
+
+    public Resources.StoragePriority? Priority { get; set; }
+
+    public bool IsSuspended { get; set; }
 }
 
 internal sealed class ConstructionSiteSaveModel
@@ -371,6 +491,31 @@ internal sealed class ConstructionSiteSaveModel
     public PersonalEquipment RequiredEquipment { get; set; }
 
     public Resources.StoragePriority? Priority { get; set; }
+}
+
+internal sealed class CraftingOrderSaveModel
+{
+    public ulong Id { get; set; }
+
+    public CraftingRecipeKind Recipe { get; set; }
+
+    public int WorkshopX { get; set; }
+
+    public int WorkshopY { get; set; }
+
+    public int WorkshopZ { get; set; }
+
+    public int DeliveredHide { get; set; }
+
+    public int DeliveredBone { get; set; }
+
+    public int DeliveredWood { get; set; }
+
+    public int DeliveredStone { get; set; }
+
+    public int DeliveredReeds { get; set; }
+
+    public int RemainingWorkTicks { get; set; }
 }
 
 internal sealed class CommandSaveModel

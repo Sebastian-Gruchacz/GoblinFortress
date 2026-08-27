@@ -28,6 +28,7 @@ public enum ConstructionReadinessState : byte
     NoReachableBuilder = 6,
     WaitingForBuilder = 7,
     Building = 8,
+    AwaitingSiteClearance = 9,
 }
 
 public readonly record struct ConstructionReadinessDiagnostic(
@@ -183,6 +184,7 @@ internal static class ConstructionBlueprintCatalog
             ConstructionKind.StoneDoorFrame => 1,
             ConstructionKind.WoodenDoor => 1,
             ConstructionKind.WallTorch => 1,
+            ConstructionKind.PrimitiveWorkshop => 4,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
         var workTicks = kind switch
@@ -197,6 +199,7 @@ internal static class ConstructionBlueprintCatalog
             ConstructionKind.StoneDoorFrame => 45,
             ConstructionKind.WoodenDoor => 35,
             ConstructionKind.WallTorch => 20,
+            ConstructionKind.PrimitiveWorkshop => 90,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
         var capabilities = kind is ConstructionKind.StoneWall or

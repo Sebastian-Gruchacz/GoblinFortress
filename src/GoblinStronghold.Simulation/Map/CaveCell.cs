@@ -32,6 +32,7 @@ public enum VerticalPassageKind : byte
 {
     CaveMouth = 1,
     NaturalRamp = 2,
+    ExcavatedRamp = 3,
 }
 
 public readonly record struct VerticalPassage(

@@ -18,15 +18,18 @@ public partial class Main : Node
     private Label _seasonName = null!;
     private SeasonCycleView _seasonProgress = null!;
     private Label _inspector = null!;
+    private PopupPanel _managementMenu = null!;
     private PopupPanel _buildMenu = null!;
     private PopupPanel _workMenu = null!;
     private PopupPanel _statisticsMenu = null!;
+    private GridContainer _managementMenuGrid = null!;
     private GridContainer _buildMenuGrid = null!;
     private GridContainer _workMenuGrid = null!;
     private GridContainer _statisticsMenuGrid = null!;
     private Texture2D _iconAtlas = null!;
     private Texture2D _itemIconAtlas = null!;
     private Texture2D _pickaxeIcon = null!;
+    private Texture2D _commandingHandIcon = null!;
     private Window _goblinDetails = null!;
     private Label _goblinDetailsText = null!;
     private ProgressBar _healthBar = null!;
@@ -50,17 +53,27 @@ public partial class Main : Node
     private string _goblinRosterSignature = string.Empty;
     private Window _statisticsWindow = null!;
     private Label _statisticsText = null!;
+    private Label _populationTargetText = null!;
+    private int _populationTargetDraft;
     private Window _raidWindow = null!;
     private Label _raidSummary = null!;
     private VBoxContainer _raidRows = null!;
     private Button _raidStartButton = null!;
     private readonly HashSet<EntityId> _raidDraftIds = [];
     private bool _updatingRaidSelection;
+    private Window _plannerWindow = null!;
+    private VBoxContainer _plannerRows = null!;
+    private Label _plannerSummary = null!;
+    private string _plannerSignature = string.Empty;
+    private EntityId _replacingWorkOrderId = EntityId.None;
+    private StoragePriority? _replacementWorkPriority;
+    private bool _replacementWorkSuspended;
     private int _speed = 1;
     private int _visibleLevel;
     private double _accumulator;
     private ulong _commandSequence = 1;
     private EntityId _selectedActorId = EntityId.None;
+    private readonly HashSet<EntityId> _selectedActorIds = [];
     private BuildMode _buildMode;
     private bool _isDraggingLinearBuild;
     private GridPosition _linearBuildStart;
@@ -92,12 +105,16 @@ public partial class Main : Node
     private Label _constructionSummary = null!;
     private OptionButton _constructionPriority = null!;
     private EntityId _selectedConstructionId = EntityId.None;
+    private Window _workshopDetails = null!;
+    private Label _workshopSummary = null!;
+    private GridPosition? _selectedWorkshop;
     private GameSaveStore _saveStore = null!;
     private SimulationTick _nextAutosaveTick;
     private Control _mainMenu = null!;
     private Button _resumeGameButton = null!;
     private Button _newGameButton = null!;
     private Button _loadMenuButton = null!;
+    private AudioStreamPlayer _titleMusic = null!;
     private bool _hasActiveSession;
     private int _speedBeforeMenu = 1;
     private Button _viewModeButton = null!;
@@ -122,18 +139,24 @@ public partial class Main : Node
         StoneDoorFrame,
         WoodenDoor,
         WallTorch,
+        PrimitiveWorkshop,
     }
 
     private enum WorkMode
     {
         None,
         GatherFood,
+        GatherReeds,
         GatherBrushwood,
         GatherStone,
         UprootBerryBushes,
         FellTrees,
         QuarryBoulders,
         MineRock,
+        CarveRampDown,
+        CarveRampUp,
+        HuntAnimals,
+        Scout,
         Clear,
     }
 
@@ -145,14 +168,16 @@ public partial class Main : Node
         _worldView3D = GetNode<WorldView3D>("WorldView3D");
         _minimap = GetNode<MinimapView>("Interface/RightHud/MinimapFrame/Minimap");
         _camera = GetNode<Camera2D>("Camera2D");
-        _status = GetNode<Label>("Interface/TopBar/Controls/Status");
+        _status = GetNode<Label>("Interface/StatusBar/Status");
         _clock = GetNode<Label>("Interface/Calendar/Controls/Clock");
         _seasonName = GetNode<Label>("Interface/Calendar/Controls/SeasonName");
         _seasonProgress = GetNode<SeasonCycleView>("Interface/Calendar/Controls/Season");
         _inspector = GetNode<Label>("Interface/Inspector/Text");
+        _managementMenu = GetNode<PopupPanel>("ManagementMenu");
         _buildMenu = GetNode<PopupPanel>("BuildMenu");
         _workMenu = GetNode<PopupPanel>("WorkMenu");
         _statisticsMenu = GetNode<PopupPanel>("StatisticsMenu");
+        _managementMenuGrid = GetNode<GridContainer>("ManagementMenu/Margin/Grid");
         _buildMenuGrid = GetNode<GridContainer>("BuildMenu/Margin/Grid");
         _workMenuGrid = GetNode<GridContainer>("WorkMenu/Margin/Grid");
         _statisticsMenuGrid = GetNode<GridContainer>("StatisticsMenu/Margin/Grid");
@@ -160,12 +185,18 @@ public partial class Main : Node
         _resumeGameButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Resume");
         _newGameButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/NewGame");
         _loadMenuButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/LoadGame");
+        var titleSplash = GetNode<Label>("Interface/MainMenu/Center/Panel/Margin/Controls/Subtitle");
+        titleSplash.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        titleSplash.Text = TitleSplashCatalog.Pick("Plemię pamięta to, co zdoła pożreć.");
+        _titleMusic = GetNode<AudioStreamPlayer>("TitleMusic");
+        _titleMusic.Finished += ReplayTitleMusic;
         _viewModeButton = GetNode<Button>("Interface/RightHud/SessionPanel/Controls/ViewMode");
         _cameraModePanel = GetNode<Control>("Interface/RightHud/CameraPanel");
         _cameraAngleButton = GetNode<Button>("Interface/RightHud/CameraPanel/Controls/Angle");
         _iconAtlas = UiIcons.LoadAtlas();
         _itemIconAtlas = ItemIcons.LoadAtlas();
         _pickaxeIcon = GD.Load<Texture2D>("res://Assets/UI/primitive-pickaxe-v1.svg");
+        _commandingHandIcon = GD.Load<Texture2D>("res://Assets/UI/commanding-hand-v1.svg");
         _goblinDetails = GetNode<Window>("GoblinDetails");
         _goblinDetailsText = GetNode<Label>("GoblinDetails/Scroll/Content/Text");
         _inventoryIcons = GetNode<HBoxContainer>("GoblinDetails/Scroll/Content/Inventory");
@@ -182,8 +213,20 @@ public partial class Main : Node
         _goblinRosterWindow = GetNode<Window>("GoblinRosterWindow");
         _goblinRosterRows = GetNode<VBoxContainer>("GoblinRosterWindow/Scroll/Rows");
         _statisticsWindow = GetNode<Window>("StatisticsWindow");
-        _statisticsText = GetNode<Label>("StatisticsWindow/Margin/Text");
+        _statisticsText = GetNode<Label>("StatisticsWindow/Margin/Content/Text");
+        _populationTargetText = GetNode<Label>(
+            "StatisticsWindow/Margin/Content/Population/Target");
+        GetNode<Button>("StatisticsWindow/Margin/Content/Population/Decrease").Pressed +=
+            () => ChangePopulationTarget(-1);
+        GetNode<Button>("StatisticsWindow/Margin/Content/Population/Increase").Pressed +=
+            () => ChangePopulationTarget(1);
         GetViewport().GuiEmbedSubwindows = true;
+        CreateTextureTileButton(
+            _managementMenuGrid,
+            _managementMenu,
+            _commandingHandIcon,
+            "Planer plemienia\nPriorytety, obszary i stan zleceń",
+            ShowPlanner);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FoodStorage,
             "Skład żywności\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.FoodStorage));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodStorage,
@@ -210,8 +253,15 @@ public partial class Main : Node
         CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateWallTorchIcon(),
             "Pochodnia ścienna\nKoszt: 1 drewno • wskaż ścianę",
             () => SelectBuildMode((long)BuildMode.WallTorch));
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreatePrimitiveWorkshopIcon(),
+            "Prymitywny warsztat\nKoszt: 4 drewna",
+            () => SelectBuildMode((long)BuildMode.PrimitiveWorkshop));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherFood,
-            "Zbierz żywność\nJagody, grzyby, korzonki i ryby", () => SelectWorkMode((long)WorkMode.GatherFood));
+            "Zbierz żywność\nJagody, grzyby, korzonki i ryby",
+            () => SelectWorkMode((long)WorkMode.GatherFood));
+        CreateItemTileButton(_workMenuGrid, _workMenu, ItemIcon.Reeds,
+            "Zbierz sitowie\nWskaż trzcinowiska na płytkiej wodzie",
+            () => SelectWorkMode((long)WorkMode.GatherReeds));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherBrushwood,
             "Zbierz chrust\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.GatherBrushwood));
         CreateItemTileButton(_workMenuGrid, _workMenu, ItemIcon.Stone,
@@ -225,6 +275,18 @@ public partial class Main : Node
             "Rozbij głazy\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.QuarryBoulders));
         CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
             "Kop w skale\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.MineRock));
+        CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
+            "Wykop pochylnię w dół\nWskaż odkrytą podłogę; wymaga kilofa",
+            () => SelectWorkMode((long)WorkMode.CarveRampDown));
+        CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
+            "Wykop pochylnię w górę\nWskaż odkrytą podłogę jaskini; wymaga kilofa",
+            () => SelectWorkMode((long)WorkMode.CarveRampUp));
+        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.Expedition,
+            "Poluj na zwierzęta\nPrzeciągnij obszar; pozostaną konkretne cele",
+            () => SelectWorkMode((long)WorkMode.HuntAnimals));
+        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.Expedition,
+            "Wyznacz obszar zwiadu\nSkauci nie wejdą w nieznany teren poza zaznaczeniem",
+            () => SelectWorkMode((long)WorkMode.Scout));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
             "Usuń zlecenia\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.Clear));
         CreateItemTileButton(
@@ -316,6 +378,8 @@ public partial class Main : Node
             CloseWindowOnSecondaryInput(inputEvent, _constructionDetails);
         _buildMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
             CloseWindowOnSecondaryInput(inputEvent, _buildMenu);
+        _managementMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
+            CloseWindowOnSecondaryInput(inputEvent, _managementMenu);
         _workMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
             CloseWindowOnSecondaryInput(inputEvent, _workMenu);
         _statisticsMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
@@ -353,7 +417,7 @@ public partial class Main : Node
         _camera.Enabled = false;
         _worldView3D.SetActive(false);
         _minimap.NavigationRequested += CenterCameraOn;
-        GetViewport().SizeChanged += ConstrainCameraToMap;
+        GetViewport().SizeChanged += HandleViewportSizeChanged;
 
         BindButton("Pause", 0);
         BindButton("Speed1", 1);
@@ -366,19 +430,24 @@ public partial class Main : Node
         ConfigureActionButton("Speed4", UiIcon.Fastest, "Przyspieszenie • klawisz 3 • 4×");
         ConfigureActionButton("Speed8", UiIcon.Fastest, "Maksymalne przyspieszenie • klawisz 4 • 8×");
         GetToolbarButton("Speed8").Icon = UiIcons.LoadSpeed8Texture();
+        ConfigureActionButton("Management", UiIcon.Work, "Zarządzanie plemieniem");
+        GetToolbarButton("Management").Icon = _commandingHandIcon;
         ConfigureActionButton("Build", UiIcon.Build, "Budowanie");
         ConfigureActionButton("Work", UiIcon.Work, "Zlecenia pracy");
-        ConfigureActionButton("Move", UiIcon.Expedition, "Rozkaż wybranemu goblinowi przejść we wskazane miejsce");
-        ConfigureActionButton("Raid", UiIcon.Expedition, "Przygotuj najazd na wieś");
+        ConfigureActionButton("Move", UiIcon.Expedition, "Rozkaż wybranemu goblinowi lub grupie przejść we wskazane miejsce");
+        ConfigureActionButton("Raid", UiIcon.Expedition, "Przygotuj najazd • bieżąca grupa będzie proponowanym składem oddziału");
         var statisticsButton = GetToolbarButton("Statistics");
         statisticsButton.FocusMode = Control.FocusModeEnum.None;
         statisticsButton.TooltipText = "Zestawienia i statystyki";
+        GetToolbarButton("Management").Pressed += ShowManagementMenu;
         GetToolbarButton("Build").Pressed += ShowBuildMenu;
         GetToolbarButton("Work").Pressed += ShowWorkMenu;
         GetToolbarButton("Move").Pressed += SelectMoveMode;
         GetToolbarButton("Raid").Pressed += ShowRaidWindow;
         statisticsButton.Pressed += ShowStatisticsMenu;
+        CreatePlannerWindow();
         CreateRaidWindow();
+        CreateWorkshopWindow();
         UpdateSpeedButtons();
         ShowMainMenu();
     }
@@ -556,9 +625,13 @@ public partial class Main : Node
                 {
                     IssueMoveOrder(mouse.Position);
                 }
+                else if (_selectedActorIds.Count > 0 && TryIssuePassageMove(mouse.Position))
+                {
+                    // A selected party treats a discovered stair, ramp or cave mouth as a contextual move.
+                }
                 else
                 {
-                    InspectWorld(mouse.Position);
+                    InspectWorld(mouse.Position, mouse.CtrlPressed || mouse.ShiftPressed);
                 }
                 break;
             case InputEventMouseButton { Pressed: false, ButtonIndex: MouseButton.Left } mouse
@@ -607,7 +680,10 @@ public partial class Main : Node
 
     private SimulationEngine CreateNewEngine(WorldSeed seed)
     {
-        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var map = SwampMapGenerator.Generate(
+            seed,
+            SwampMapGenerator.DefaultDimension,
+            SwampMapGenerator.DefaultDimension);
         var engine = SimulationEngine.Create(
             seed,
             SimulationDefinitions.Foundation,
@@ -670,6 +746,7 @@ public partial class Main : Node
 
     private void LoadGame()
     {
+        string? newestFailure = null;
         foreach (var candidate in _saveStore.LoadNewestFirst())
         {
             try
@@ -686,11 +763,14 @@ public partial class Main : Node
             }
             catch (Exception exception) when (exception is InvalidDataException or System.Text.Json.JsonException)
             {
+                newestFailure ??= $"{Path.GetFileName(candidate.Path)}: {exception.Message}";
                 // Try an older rotating slot if the newest save is incompatible or damaged.
             }
         }
 
-        _inspector.Text = "Nie znaleziono zgodnego zapisu do wczytania.";
+        _inspector.Text = newestFailure is null
+            ? "Nie znaleziono zapisu do wczytania."
+            : $"Nie znaleziono zgodnego zapisu • {newestFailure}";
     }
 
     private void ShowMainMenu()
@@ -706,6 +786,7 @@ public partial class Main : Node
             _speedBeforeMenu = _speed;
             SetSpeed(0);
         }
+        _workshopDetails.Hide();
         _resumeGameButton.Visible = _hasActiveSession;
         _loadMenuButton.Disabled = !_saveStore.HasAnySave;
         _mainMenu.Show();
@@ -730,7 +811,28 @@ public partial class Main : Node
         }
 
         _mainMenu.Hide();
+        FadeOutTitleMusic();
         SetSpeed(_speedBeforeMenu);
+    }
+
+    private void ReplayTitleMusic()
+    {
+        if (!_hasActiveSession && _mainMenu.Visible)
+        {
+            _titleMusic.Play();
+        }
+    }
+
+    private void FadeOutTitleMusic()
+    {
+        if (!_titleMusic.Playing)
+        {
+            return;
+        }
+
+        var tween = CreateTween();
+        tween.TweenProperty(_titleMusic, "volume_db", -40.0, 1.5);
+        tween.TweenCallback(Callable.From(() => _titleMusic.Stop()));
     }
 
     private void TryAutosave()
@@ -770,8 +872,10 @@ public partial class Main : Node
         SelectActor(EntityId.None);
         _selectedStorageId = EntityId.None;
         _selectedConstructionId = EntityId.None;
+        _selectedWorkshop = null;
         _storageDetails.Hide();
         _constructionDetails.Hide();
+        _workshopDetails.Hide();
         _storedResourcesWindow.Hide();
         _looseResourcesWindow.Hide();
         _goblinRosterWindow.Hide();
@@ -826,8 +930,10 @@ public partial class Main : Node
         SelectActor(EntityId.None);
         _selectedStorageId = EntityId.None;
         _selectedConstructionId = EntityId.None;
+        _selectedWorkshop = null;
         _storageDetails.Hide();
         _constructionDetails.Hide();
+        _workshopDetails.Hide();
         _inspector.Text = "Zaznaczenie wyczyszczone. PPM przeciągnięty przesuwa mapę.";
     }
 
@@ -842,6 +948,8 @@ public partial class Main : Node
         ShowToolbarMenu(_buildMenu, "Build");
     }
 
+    private void ShowManagementMenu() => ShowToolbarMenu(_managementMenu, "Management");
+
     private void ShowWorkMenu()
     {
         if (_visibleLevel > 0)
@@ -855,9 +963,9 @@ public partial class Main : Node
 
     private void SelectMoveMode()
     {
-        if (_selectedActorId == EntityId.None)
+        if (_selectedActorIds.Count == 0)
         {
-            _inspector.Text = "Najpierw wybierz goblina, któremu chcesz wydać rozkaz marszu.";
+            _inspector.Text = "Najpierw wybierz goblina albo grupę goblinów. Ctrl/Shift+LPM rozszerza zaznaczenie.";
             return;
         }
 
@@ -869,31 +977,105 @@ public partial class Main : Node
 
     private void IssueMoveOrder(Vector2 screenPosition)
     {
-        var destination = ScreenToVisibleCell(screenPosition);
+        IssueMoveOrder(ScreenToVisibleCell(screenPosition));
+    }
+
+    private void IssueMoveOrder(GridPosition clickedDestination)
+    {
         var snapshot = _engine.CreateSnapshot();
-        if (!IsBuildableLayerCell(destination) ||
-            !snapshot.GetVisibility(destination, _engine.Map.Width).IsDiscovered() ||
-            !_engine.World.IsTerrainReachable(destination))
+        if (!IsBuildableLayerCell(clickedDestination) ||
+            !snapshot.GetVisibility(clickedDestination, _engine.Map.Width).IsDiscovered())
         {
             _inspector.Text = "Cel marszu musi być odkrytym, dostępnym polem.";
             return;
         }
 
-        _engine.QueueCommand(SimulationCommand.Move(
-            _engine.CurrentTick.Next(),
-            _commandSequence++,
-            _selectedActorId,
-            destination));
+        var executeAt = _engine.CurrentTick.Next();
+        var ordered = 0;
+        var usedPassage = false;
+        foreach (var actor in snapshot.Actors
+                     .Where(actor => _selectedActorIds.Contains(actor.Id) && actor.Health > 0)
+                     .OrderBy(actor => actor.Id))
+        {
+            var destination = ResolveContextualMoveDestination(
+                clickedDestination,
+                actor.Position,
+                out var actorUsesPassage);
+            if ((!actorUsesPassage &&
+                 !snapshot.GetVisibility(destination, _engine.Map.Width).IsDiscovered()) ||
+                !_engine.World.IsTerrainReachable(destination))
+            {
+                continue;
+            }
+            _engine.QueueCommand(SimulationCommand.Move(
+                executeAt,
+                _commandSequence++,
+                actor.Id,
+                destination));
+            ordered++;
+            usedPassage |= actorUsesPassage || destination.Z != actor.Position.Z;
+        }
+        if (ordered == 0)
+        {
+            _inspector.Text = "Żaden zaznaczony goblin nie może dotrzeć do wskazanego przejścia.";
+            return;
+        }
         _isMoveMode = false;
-        _inspector.Text = $"Wydano rozkaz marszu do {destination}." +
+        _inspector.Text = ordered == 1
+            ? $"Wydano rozkaz marszu do {clickedDestination}" +
+              (usedPassage ? " przez przejście między poziomami." : ".")
+            : $"Wydano {ordered} goblinom rozkaz zbiórki przy {clickedDestination}" +
+              (usedPassage ? " z użyciem przejścia między poziomami." : ".");
+        _inspector.Text +=
             (_speed == 0 ? " Zostanie wykonany po wznowieniu czasu." : string.Empty);
+    }
+
+    private bool TryIssuePassageMove(Vector2 screenPosition)
+    {
+        var clicked = ScreenToVisibleCell(screenPosition);
+        var snapshot = _engine.CreateSnapshot();
+        if (!snapshot.GetVisibility(clicked, _engine.Map.Width).IsDiscovered() ||
+            !_engine.World.CreateVerticalPassageSnapshot().Any(passage =>
+                passage.Upper == clicked || passage.Lower == clicked))
+        {
+            return false;
+        }
+
+        IssueMoveOrder(clicked);
+        return true;
+    }
+
+    private GridPosition ResolveContextualMoveDestination(
+        GridPosition clicked,
+        GridPosition actorPosition,
+        out bool usesPassage)
+    {
+        foreach (var passage in _engine.World.CreateVerticalPassageSnapshot())
+        {
+            if (passage.Upper == clicked)
+            {
+                usesPassage = true;
+                return actorPosition.Z == passage.Upper.Z ? passage.Lower : passage.Upper;
+            }
+            if (passage.Lower == clicked)
+            {
+                usesPassage = true;
+                return actorPosition.Z == passage.Lower.Z ? passage.Upper : passage.Lower;
+            }
+        }
+
+        usesPassage = false;
+        return clicked;
     }
 
     private void ShowStatisticsMenu() => ShowToolbarMenu(_statisticsMenu, "Statistics");
 
     private void ShowToolbarMenu(PopupPanel menu, string buttonName)
     {
-        foreach (var candidate in new[] { _buildMenu, _workMenu, _statisticsMenu })
+        foreach (var candidate in new[]
+                 {
+                     _managementMenu, _buildMenu, _workMenu, _statisticsMenu,
+                 })
         {
             if (candidate != menu)
             {
@@ -1015,6 +1197,45 @@ public partial class Main : Node
         return ImageTexture.CreateFromImage(image);
     }
 
+    private static Texture2D CreatePrimitiveWorkshopIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <rect x="7" y="25" width="50" height="17" rx="3" fill="#8b6038" stroke="#342318" stroke-width="4"/>
+              <path d="M14 41 L11 59 M50 41 L53 59" stroke="#5a3b26" stroke-width="6" stroke-linecap="round"/>
+              <path d="M12 30 L52 30" stroke="#c18a50" stroke-width="3"/>
+              <path d="M22 23 L41 10" stroke="#9ca4a1" stroke-width="5" stroke-linecap="round"/>
+              <path d="M36 8 L47 15 L40 20 Z" fill="#5f6768" stroke="#252a2b" stroke-width="2"/>
+              <ellipse cx="20" cy="21" rx="7" ry="5" fill="#d8cfad" stroke="#6b5d43" stroke-width="2"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "primitive workshop");
+    }
+
+    private static Texture2D CreateSlingIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <path d="M13 7 C18 22 24 29 31 36" fill="none" stroke="#b88759" stroke-width="5" stroke-linecap="round"/>
+              <path d="M51 7 C46 22 40 29 33 36" fill="none" stroke="#b88759" stroke-width="5" stroke-linecap="round"/>
+              <path d="M23 34 Q32 29 41 34 L38 44 Q32 49 26 44 Z" fill="#7b4c31" stroke="#342118" stroke-width="3"/>
+              <path d="M28 45 C25 51 21 56 17 60" fill="none" stroke="#b88759" stroke-width="4" stroke-linecap="round"/>
+              <circle cx="32" cy="38" r="5" fill="#777d7f" stroke="#292d2e" stroke-width="2"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "primitive sling");
+    }
+
+    private static Texture2D CreateSvgIcon(string svg, string name)
+    {
+        var image = new Image();
+        if (image.LoadSvgFromString(svg) != Error.Ok)
+        {
+            throw new InvalidOperationException($"Cannot create the {name} icon.");
+        }
+        return ImageTexture.CreateFromImage(image);
+    }
+
     private static void CreateTextTileButton(
         GridContainer grid,
         PopupPanel menu,
@@ -1097,13 +1318,14 @@ public partial class Main : Node
             BuildMode.WoodStorage => "Budowa składu drewna: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
             BuildMode.StoneStorage => "Budowa składu kamienia: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
             BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • Esc anuluje",
-            BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik przy płytkiej wodzie • koszt 6 drewna • zawiera skład prowiantu",
+            BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu",
             BuildMode.WoodenWall => "Budowa drewnianej ściany: przeciągnij LPM od początku do końca • 2 drewna/segment • blokuje przejście",
             BuildMode.StoneWall => "Budowa kamiennego muru: przeciągnij LPM od początku do końca • 2 jednostki kamienia/segment • wymaga kilofa",
             BuildMode.WoodenDoorFrame => "Budowa drewnianej ościeżnicy: wskaż pole LPM • koszt 1 drewna • może zastąpić gotową ścianę",
             BuildMode.StoneDoorFrame => "Budowa kamiennej ościeżnicy: wskaż pole LPM • koszt 1 kamienia • wymaga kilofa • może zastąpić gotowy kamienny mur",
             BuildMode.WoodenDoor => "Budowa drewnianych drzwi: wskaż gotową ościeżnicę LPM • koszt 1 drewna • po budowie kliknij skrzydło, aby je otworzyć",
             BuildMode.WallTorch => "Budowa pochodni: wskaż odkrytą ścianę LPM • koszt 1 drewna • strona montażu wynika z wnętrza i sąsiedztwa",
+            BuildMode.PrimitiveWorkshop => "Budowa prymitywnego warsztatu: wskaż pole LPM • koszt 4 drewna • Esc anuluje",
             _ => _inspector.Text,
         };
     }
@@ -1112,7 +1334,13 @@ public partial class Main : Node
     {
         var mode = (WorkMode)id;
         var availableUnderground = mode is WorkMode.GatherBrushwood or
-            WorkMode.GatherStone or WorkMode.MineRock or WorkMode.Clear;
+            WorkMode.GatherStone or WorkMode.MineRock or WorkMode.CarveRampDown or
+            WorkMode.CarveRampUp or WorkMode.Clear;
+        if (mode == WorkMode.CarveRampUp && _visibleLevel >= 0)
+        {
+            _inspector.Text = "Pochylnię w górę wyznacza się z podziemnego poziomu.";
+            return;
+        }
         if (_visibleLevel != 0 && !(_visibleLevel < 0 && availableUnderground))
         {
             _inspector.Text = _visibleLevel < 0
@@ -1129,12 +1357,17 @@ public partial class Main : Node
         _inspector.Text = _workMode switch
         {
             WorkMode.GatherFood => "Praca: przeciągnij obszar zbierania żywności • Esc anuluje",
+            WorkMode.GatherReeds => "Praca: przeciągnij obszar zbierania sitowia • Esc anuluje",
             WorkMode.GatherBrushwood => "Praca: przeciągnij obszar zbierania chrustu • Esc anuluje",
             WorkMode.GatherStone => "Praca: przeciągnij obszar zbierania małych kamieni • Esc anuluje",
             WorkMode.UprootBerryBushes => "Praca: przeciągnij obszar karczowania krzaków • usuwa je trwale • Esc anuluje",
             WorkMode.FellTrees => "Praca: przeciągnij obszar wyrębu • pozostaną konkretne drzewa i martwe pnie • Esc anuluje",
             WorkMode.QuarryBoulders => "Praca: przeciągnij obszar wydobycia • pozostaną konkretne głazy • wymaga kilofa • Esc anuluje",
-            WorkMode.MineRock => "Praca: przeciągnij obszar kopania • pozostaną możliwe do wydobycia ściany • wymaga kilofa • Esc anuluje",
+            WorkMode.MineRock => "Praca: przeciągnij obszar tunelu • nieznane pola pozostaną w planie aż front kopania je odsłoni • wymaga kilofa • Esc anuluje",
+            WorkMode.CarveRampDown => "Praca: wskaż odkrytą podłogę • goblin z kilofem wykopie pochylnię na poziom niżej • Esc anuluje",
+            WorkMode.CarveRampUp => "Praca: wskaż odkrytą podłogę jaskini • goblin z kilofem wykopie pochylnię na poziom wyżej • Esc anuluje",
+            WorkMode.HuntAnimals => "Polowanie: przeciągnij obszar • pozostaną konkretne zwierzęta • Esc anuluje",
+            WorkMode.Scout => "Zwiad: przeciągnij dozwolony obszar • skauci mogą przechodzić przez znany teren, ale nie wejdą w nieznany teren poza zaznaczeniem",
             WorkMode.Clear => "Praca: przeciągnij obszar usuwania zleceń • Esc anuluje",
             _ => _inspector.Text,
         };
@@ -1170,7 +1403,7 @@ public partial class Main : Node
         }
 
         if (_buildMode is BuildMode.WoodenDoorFrame or BuildMode.StoneDoorFrame or
-            BuildMode.WoodenDoor or BuildMode.WallTorch)
+            BuildMode.WoodenDoor or BuildMode.WallTorch or BuildMode.PrimitiveWorkshop)
         {
             var snapshot = _engine.CreateSnapshot();
             if (!snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered())
@@ -1188,6 +1421,8 @@ public partial class Main : Node
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
                 BuildMode.WallTorch => SimulationCommand.BuildWallTorch(
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
+                BuildMode.PrimitiveWorkshop => SimulationCommand.BuildPrimitiveWorkshop(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
                 _ => SimulationCommand.BuildWoodenDoor(
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
             };
@@ -1200,6 +1435,8 @@ public partial class Main : Node
                     "Zlecono przechodnią kamienną ościeżnicę • koszt 1 kamienia",
                 BuildMode.WallTorch =>
                     "Zlecono pochodnię ścienną • koszt 1 drewna",
+                BuildMode.PrimitiveWorkshop =>
+                    "Zlecono prymitywny warsztat • koszt 4 drewna",
                 _ => "Zlecono zamknięte drewniane drzwi w ościeżnicy • koszt 1 drewna",
             };
             CancelBuildMode(clearInspector: false);
@@ -1211,10 +1448,10 @@ public partial class Main : Node
             var cells = GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 });
             var snapshot = _engine.CreateSnapshot();
             if (cells.Any(item =>
-                    !_engine.Map.IsWithin(item) ||
+                    !IsBuildableLayerCell(item) ||
                     !snapshot.GetVisibility(item, _engine.Map.Width).IsDiscovered()))
             {
-                _inspector.Text = "Całe obozowisko musi mieścić się na odkrytym terenie.";
+                _inspector.Text = "Całe obozowisko musi mieścić się na odkrytej, dostępnej warstwie.";
                 CancelBuildMode(clearInspector: false);
                 return;
             }
@@ -1344,12 +1581,37 @@ public partial class Main : Node
             ? GetAreaCells(_workAreaStart, cell)
             : new[] { cell };
         var snapshot = _engine.CreateSnapshot();
-        cells = cells.Where(position =>
-            snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered()).ToArray();
+        cells = _workMode switch
+        {
+            WorkMode.GatherFood => cells.Where(position =>
+                snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
+                _engine.World.GetPlantPatch(position) is { Biomass: > 0, Kind: not PlantKind.ReedBed }).ToArray(),
+            WorkMode.GatherReeds => cells.Where(position =>
+                snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
+                _engine.World.GetPlantPatch(position) is { Biomass: > 0, Kind: PlantKind.ReedBed }).ToArray(),
+            WorkMode.MineRock => cells,
+            WorkMode.CarveRampDown => new[] { _isDraggingWorkArea ? _workAreaStart : cell }
+                .Where(position => snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
+                    _engine.World.CanCarveRampDown(position)).ToArray(),
+            WorkMode.CarveRampUp => new[] { _isDraggingWorkArea ? _workAreaStart : cell }
+                .Where(position => snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
+                    _engine.World.CanCarveRampUp(position)).ToArray(),
+            WorkMode.Scout => cells.Where(position =>
+                position.Z == 0 && _engine.World.IsSurfaceTraversable(position)).ToArray(),
+            _ => cells.Where(position =>
+                snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered()).ToArray(),
+        };
         _worldView.SetWorkPreview(ToDesignationKind(_workMode), cells);
         if (_isDraggingWorkArea)
         {
-            _inspector.Text = $"Zaznaczanie pracy: {cells.Count} pól; po zatwierdzeniu pozostaną tylko pasujące obiekty.";
+            _inspector.Text = _workMode switch
+            {
+                WorkMode.MineRock => $"Planowany obszar tunelu: {cells.Count} pól; nieznane komórki będą rozstrzygane wraz z odsłanianiem.",
+                WorkMode.CarveRampDown or WorkMode.CarveRampUp => cells.Count == 1
+                    ? "Pochylnia połączy tę komórkę z sąsiednim poziomem."
+                    : "Tu nie można wykopać pochylni: potrzebna jest wolna podłoga i pełna skała po drugiej stronie.",
+                _ => $"Zaznaczanie pracy: {cells.Count} pól; po zatwierdzeniu pozostaną tylko pasujące obiekty.",
+            };
         }
     }
 
@@ -1372,6 +1634,12 @@ public partial class Main : Node
                 _workAreaStart,
                 end,
                 ResourceKind.Food),
+            WorkMode.GatherReeds => SimulationCommand.DesignateWork(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end,
+                ResourceKind.Reeds),
             WorkMode.GatherBrushwood => SimulationCommand.DesignateWork(
                 executeAt,
                 _commandSequence++,
@@ -1405,6 +1673,24 @@ public partial class Main : Node
                 _commandSequence++,
                 _workAreaStart,
                 end),
+            WorkMode.CarveRampDown => SimulationCommand.DesignateRampDown(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart),
+            WorkMode.CarveRampUp => SimulationCommand.DesignateRampUp(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart),
+            WorkMode.HuntAnimals => SimulationCommand.DesignateAnimalHunting(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end),
+            WorkMode.Scout => SimulationCommand.DesignateScouting(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end),
             WorkMode.Clear => SimulationCommand.ClearWorkDesignations(
                 executeAt,
                 _commandSequence++,
@@ -1417,10 +1703,24 @@ public partial class Main : Node
             return;
         }
 
+        if (_replacingWorkOrderId != EntityId.None &&
+            _replacementWorkPriority is { } replacementPriority)
+        {
+            command = command.ReplacingWorkOrder(
+                _replacingWorkOrderId,
+                replacementPriority,
+                _replacementWorkSuspended);
+        }
         _engine.QueueCommand(command);
-        _inspector.Text = _workMode == WorkMode.Clear
-            ? "Zlecono usunięcie celów pracy z zaznaczenia."
-            : "Zlecono wskazanie pasujących obiektów; cele pojawią się po następnym ticku.";
+        _inspector.Text = _workMode switch
+        {
+            WorkMode.Clear => "Zlecono usunięcie celów pracy z zaznaczenia.",
+            WorkMode.MineRock =>
+                "Zlecono obszar tunelu; dispatcher będzie udostępniał kolejne ściany wraz z postępem kopania.",
+            WorkMode.CarveRampDown => "Zlecono wykopanie pochylni na poziom niżej.",
+            WorkMode.CarveRampUp => "Zlecono wykopanie pochylni na poziom wyżej.",
+            _ => "Zlecono wskazanie pasujących obiektów; cele pojawią się po następnym ticku.",
+        };
         CancelWorkMode(clearInspector: false);
     }
 
@@ -1428,6 +1728,9 @@ public partial class Main : Node
     {
         var wasActive = _workMode != WorkMode.None;
         _workMode = WorkMode.None;
+        _replacingWorkOrderId = EntityId.None;
+        _replacementWorkPriority = null;
+        _replacementWorkSuspended = false;
         _isDraggingWorkArea = false;
         _worldView.SetWorkPreview(default, []);
         if (clearInspector && wasActive)
@@ -1452,13 +1755,35 @@ public partial class Main : Node
     private static WorkDesignationKind ToDesignationKind(WorkMode mode) => mode switch
     {
         WorkMode.GatherFood => WorkDesignationKind.GatherFood,
+        WorkMode.GatherReeds => WorkDesignationKind.GatherReeds,
         WorkMode.GatherBrushwood => WorkDesignationKind.GatherBrushwood,
         WorkMode.GatherStone => WorkDesignationKind.GatherStone,
         WorkMode.UprootBerryBushes => WorkDesignationKind.UprootBerryBush,
         WorkMode.FellTrees => WorkDesignationKind.FellTree,
         WorkMode.QuarryBoulders => WorkDesignationKind.QuarryBoulder,
         WorkMode.MineRock => WorkDesignationKind.MineRock,
+        WorkMode.CarveRampDown => WorkDesignationKind.CarveRampDown,
+        WorkMode.CarveRampUp => WorkDesignationKind.CarveRampUp,
+        WorkMode.HuntAnimals => WorkDesignationKind.HuntAnimal,
+        WorkMode.Scout => WorkDesignationKind.Scout,
         _ => default,
+    };
+
+    private static WorkMode ToWorkMode(WorkDesignationKind kind) => kind switch
+    {
+        WorkDesignationKind.GatherFood => WorkMode.GatherFood,
+        WorkDesignationKind.GatherReeds => WorkMode.GatherReeds,
+        WorkDesignationKind.GatherBrushwood => WorkMode.GatherBrushwood,
+        WorkDesignationKind.GatherStone => WorkMode.GatherStone,
+        WorkDesignationKind.UprootBerryBush => WorkMode.UprootBerryBushes,
+        WorkDesignationKind.FellTree => WorkMode.FellTrees,
+        WorkDesignationKind.QuarryBoulder => WorkMode.QuarryBoulders,
+        WorkDesignationKind.MineRock => WorkMode.MineRock,
+        WorkDesignationKind.CarveRampDown => WorkMode.CarveRampDown,
+        WorkDesignationKind.CarveRampUp => WorkMode.CarveRampUp,
+        WorkDesignationKind.HuntAnimal => WorkMode.HuntAnimals,
+        WorkDesignationKind.Scout => WorkMode.Scout,
+        _ => WorkMode.None,
     };
 
     private static IReadOnlyList<GridPosition> GetAreaCells(GridPosition first, GridPosition second)
@@ -1486,9 +1811,19 @@ public partial class Main : Node
             ? _engine.World.IsSurfaceTraversable(cell)
             : _engine.World.IsTerrainTraversable(cell);
         var discovered = snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered();
-        if (!terrainAvailable || !discovered)
+        if (!discovered)
         {
-            _inspector.Text = $"{cell} • tu nie można wyznaczyć składu.";
+            _inspector.Text = $"{cell} • skład można zaplanować dopiero na odkrytym polu.";
+            return;
+        }
+        if (cell.Z < 0 && _engine.World.IsSolidCaveRock(cell))
+        {
+            _inspector.Text = $"{cell} • to ściana jaskini; najpierw oznacz ją do wykopania.";
+            return;
+        }
+        if (!terrainAvailable)
+        {
+            _inspector.Text = $"{cell} • pole jest zablokowane i nie może przyjąć składu.";
             return;
         }
 
@@ -1525,12 +1860,17 @@ public partial class Main : Node
             _inspector.Text = (WorkDesignationKind)workEvent.Amount switch
             {
                 WorkDesignationKind.GatherFood => "Dispatcher dodał wskazane źródło żywności do zebrania.",
+                WorkDesignationKind.GatherReeds => "Dispatcher dodał wskazane trzcinowisko do zebrania.",
                 WorkDesignationKind.GatherBrushwood => "Dispatcher dodał wskazany stos chrustu do transportu.",
                 WorkDesignationKind.GatherStone => "Dispatcher dodał wskazany stos kamieni do transportu.",
                 WorkDesignationKind.UprootBerryBush => "Dispatcher dodał krzak do trwałego wykarczowania.",
                 WorkDesignationKind.FellTree => "Dispatcher dodał drzewo lub martwy pień do wyrębu.",
                 WorkDesignationKind.QuarryBoulder => "Dispatcher dodał głaz do rozbicia kilofem.",
                 WorkDesignationKind.MineRock => "Dispatcher dodał ścianę jaskini do wykopania.",
+                WorkDesignationKind.CarveRampDown => "Dispatcher dodał pochylnię w dół do wykopania.",
+                WorkDesignationKind.CarveRampUp => "Dispatcher dodał pochylnię w górę do wykopania.",
+                WorkDesignationKind.Scout => "Dispatcher ograniczył zwiad do wskazanego obszaru.",
+                WorkDesignationKind.HuntAnimal => "Dispatcher dodał wskazane zwierzę do upolowania.",
                 _ => "Dispatcher dodał cel pracy.",
             };
         }
@@ -1559,7 +1899,8 @@ public partial class Main : Node
 
         if (_selectedStorageId != EntityId.None &&
             events.Any(item => item.Kind is
-                SimulationEventKind.ItemPickedUp or SimulationEventKind.ItemStored))
+                SimulationEventKind.ItemPickedUp or SimulationEventKind.ItemStored or
+                SimulationEventKind.ItemDropped))
         {
             var selectedStorage = _engine.CreateSnapshot().StorageZones
                 .FirstOrDefault(zone => zone.Id == _selectedStorageId);
@@ -1627,6 +1968,32 @@ public partial class Main : Node
             }
         }
 
+        var craftingEvent = events.LastOrDefault(item =>
+            item.Kind is SimulationEventKind.CraftingOrdered or
+                SimulationEventKind.CraftingMaterialDelivered or
+                SimulationEventKind.CraftingCompleted ||
+            item.Kind == SimulationEventKind.CommandRejected &&
+                item.Amount == (int)SimulationCommandKind.QueueCraftingOrder);
+        if (craftingEvent.Kind == SimulationEventKind.CraftingOrdered)
+        {
+            _inspector.Text = $"Warsztat przyjął zlecenie: " +
+                DescribeCraftingRecipe((CraftingRecipeKind)craftingEvent.Amount) + ".";
+        }
+        else if (craftingEvent.Kind == SimulationEventKind.CraftingMaterialDelivered)
+        {
+            _inspector.Text = "Dostarczono składnik do prymitywnego warsztatu.";
+        }
+        else if (craftingEvent.Kind == SimulationEventKind.CraftingCompleted)
+        {
+            _inspector.Text = $"Goblin ukończył: " +
+                DescribeCraftingRecipe((CraftingRecipeKind)craftingEvent.Amount) +
+                " • przedmiot trafił do osobistego ekwipunku.";
+        }
+        else if (craftingEvent.Kind == SimulationEventKind.CommandRejected)
+        {
+            _inspector.Text = "Nie można dodać receptury: we wskazanym miejscu nie ma warsztatu.";
+        }
+
         var selectedEvent = events.LastOrDefault(item =>
             item.Subject == _selectedActorId &&
             (item.Kind == SimulationEventKind.MoveCompleted ||
@@ -1648,9 +2015,20 @@ public partial class Main : Node
         {
             _inspector.Text = $"{selectedEvent.Subject} • dotarł do celu marszu";
         }
+
+        var raidEvent = events.LastOrDefault(item => item.Kind is
+            SimulationEventKind.RaidVictory or SimulationEventKind.RaidDefeated);
+        if (raidEvent.Kind == SimulationEventKind.RaidVictory)
+        {
+            _inspector.Text = $"Najazd zakończony zwycięstwem • wróciło {raidEvent.Amount} goblinów.";
+        }
+        else if (raidEvent.Kind == SimulationEventKind.RaidDefeated)
+        {
+            _inspector.Text = "Najazd zakończony klęską • oddział został rozbity.";
+        }
     }
 
-    private void InspectWorld(Vector2 screenPosition)
+    private void InspectWorld(Vector2 screenPosition, bool extendActorSelection)
     {
         var cell = ScreenToCell(screenPosition);
         if (!_engine.Map.IsWithin(cell))
@@ -1677,8 +2055,8 @@ public partial class Main : Node
                     item.Footprint.Contains(levelPosition));
                 if (actor.Id != EntityId.None)
                 {
-                    SelectActor(actor.Id);
-                    _inspector.Text = $"{actor.Name} • {levelPosition} • {DescribeJob(actor.Job)}";
+                    SelectOrToggleActor(actor.Id, extendActorSelection);
+                    _inspector.Text = DescribeActorSelection(actor, levelPosition);
                     return;
                 }
                 if (zone.Id != EntityId.None)
@@ -1693,9 +2071,15 @@ public partial class Main : Node
                     ShowConstructionDetails(construction);
                     return;
                 }
+                if (_engine.World.HasPrimitiveWorkshop(levelPosition))
+                {
+                    SelectActor(EntityId.None);
+                    ShowWorkshopDetails(levelPosition);
+                    return;
+                }
 
                 var caveCell = _engine.Map.GetCaveCell(levelPosition);
-                var passages = _engine.Map.VerticalPassages
+                var passages = _engine.World.CreateVerticalPassageSnapshot()
                     .Where(passage => passage.Upper == levelPosition || passage.Lower == levelPosition)
                     .Select(passage => passage.Kind == VerticalPassageKind.CaveMouth
                         ? "wejście na powierzchnię"
@@ -1737,6 +2121,8 @@ public partial class Main : Node
         var plant = _engine.World.GetPlantPatch(cell);
         var objects = _engine.World.GetWorldObjectsAt(cell);
         var actors = snapshot.Actors.Where(actor => actor.Position == cell).ToArray();
+        var buds = snapshot.GoblinBuds.Where(bud => bud.Position == cell).ToArray();
+        var animals = snapshot.Animals.Where(animal => animal.Position == cell).ToArray();
         var humanCohorts = snapshot.HumanVillage.Cohorts
             .Where(cohort => cohort.Population > 0 && cohort.Position == cell)
             .ToArray();
@@ -1752,6 +2138,9 @@ public partial class Main : Node
         var constructionSites = snapshot.ConstructionSites
             .Where(site => site.Footprint.Contains(cell))
             .ToArray();
+        var craftingOrders = snapshot.CraftingOrders
+            .Where(order => order.Workshop == cell)
+            .ToArray();
         if (objects.Any(item => item.Kind == WorldObjectKind.WoodenDoorLeaf) &&
             _engine.World.TryGetWoodenDoorState(cell, out var isDoorOpen))
         {
@@ -1765,7 +2154,15 @@ public partial class Main : Node
                   (_speed == 0 ? " • zostanie wykonane po wznowieniu czasu" : string.Empty);
             return;
         }
-        SelectActor(actors.OrderBy(actor => actor.Id).FirstOrDefault().Id);
+        var clickedActor = actors.OrderBy(actor => actor.Id).FirstOrDefault();
+        if (clickedActor.Id != EntityId.None)
+        {
+            SelectOrToggleActor(clickedActor.Id, extendActorSelection);
+        }
+        else
+        {
+            SelectActor(EntityId.None);
+        }
         if (actors.Length == 0 && zones.Length > 0)
         {
             ShowStorageDetails(zones[0]);
@@ -1773,6 +2170,10 @@ public partial class Main : Node
         else if (actors.Length == 0 && constructionSites.Length > 0)
         {
             ShowConstructionDetails(constructionSites[0]);
+        }
+        else if (actors.Length == 0 && _engine.World.HasPrimitiveWorkshop(cell))
+        {
+            ShowWorkshopDetails(cell);
         }
 
         _inspector.Text = $"{cell}" +
@@ -1805,6 +2206,17 @@ public partial class Main : Node
             (constructionSites.Length == 0
                 ? string.Empty
                 : $" • {string.Join(" • ", constructionSites.Select(DescribeConstructionSite))}") +
+            (craftingOrders.Length == 0
+                ? string.Empty
+                : $" • warsztat: {string.Join(", ", craftingOrders.Select(DescribeCraftingOrder))}") +
+            (buds.Length == 0
+                ? string.Empty
+                : $" • żywy pąk: opieka " +
+                  $"{buds.Min(bud => bud.TotalCareTicks - bud.RemainingCareTicks)}/" +
+                  $"{buds.Max(bud => bud.TotalCareTicks)}") +
+            (animals.Length == 0
+                ? string.Empty
+                : $" • zwierzęta: {string.Join(", ", animals.Select(DescribeAnimal))}") +
             (actors.Length == 0
                 ? string.Empty
                 : $" • gobliny ×{actors.Length}, nasycenie " +
@@ -1823,6 +2235,16 @@ public partial class Main : Node
             (carriedStacks.Length == 0
                 ? string.Empty
                 : $" • w kieszeniach: {string.Join(", ", carriedStacks.Select(DescribeStack))}");
+    }
+
+    private static string DescribeCraftingOrder(CraftingOrderSnapshot order)
+    {
+        var materials = string.Join(", ", order.Materials.Select(material =>
+            $"{DescribeResource(material.Resource)} " +
+            $"{material.DeliveredQuantity}/{material.RequiredQuantity}"));
+        return $"{DescribeCraftingRecipe(order.Recipe)} • {materials} • praca " +
+            $"{order.TotalWorkTicks - order.RemainingWorkTicks}/" +
+            order.TotalWorkTicks;
     }
 
     private static string DescribeCaveRock(RockKind rock) => rock switch
@@ -1869,6 +2291,7 @@ public partial class Main : Node
         FoodKind.Mushrooms => "grzyby",
         FoodKind.EdibleRoots => "jadalne korzonki",
         FoodKind.Fish => "ryby",
+        FoodKind.RawMeat => "surowe mięso",
         _ => "żywność",
     };
 
@@ -1881,8 +2304,20 @@ public partial class Main : Node
         ResourceKind.Coal => "węgla",
         ResourceKind.Ore => "rudy",
         ResourceKind.Bone => "kości",
+        ResourceKind.Hide => "skór",
         ResourceKind.Vegetation => "roślinności",
         _ => "towarów",
+    };
+
+    private static string DescribeCraftingRecipe(CraftingRecipeKind recipe) => recipe switch
+    {
+        CraftingRecipeKind.PrimitiveSling => "prymitywna proca",
+        CraftingRecipeKind.BoneKnife => "kościany nóż",
+        CraftingRecipeKind.FightingStick => "kij bojowy",
+        CraftingRecipeKind.StoneClub => "kamienna maczuga",
+        CraftingRecipeKind.HideClothes => "skórzany ubiór",
+        CraftingRecipeKind.ReedClothes => "sitowiowy ubiór",
+        _ => recipe.ToString(),
     };
 
     private static string DescribeResourceVariant(ResourceVariant variant) => variant switch
@@ -1968,6 +2403,25 @@ public partial class Main : Node
         ActorJobKind.BuildConstruction when job.Phase == ActorJobPhase.Traveling =>
             $"idzie budować → {job.Target}",
         ActorJobKind.BuildConstruction => $"buduje ({job.RemainingWorkTicks})",
+        ActorJobKind.SupplyCrafting when job.Stage == ActorJobStage.Collecting &&
+            job.Phase == ActorJobPhase.Traveling =>
+            $"idzie po składnik do warsztatu ×{job.ReservedQuantity}",
+        ActorJobKind.SupplyCrafting when job.Stage == ActorJobStage.Collecting =>
+            $"pobiera składnik ×{job.ReservedQuantity}",
+        ActorJobKind.SupplyCrafting when job.Phase == ActorJobPhase.Traveling =>
+            $"niesie składnik do warsztatu ×{job.ReservedQuantity}",
+        ActorJobKind.SupplyCrafting => $"odkłada składnik ({job.RemainingWorkTicks})",
+        ActorJobKind.Craft when job.Phase == ActorJobPhase.Traveling =>
+            $"idzie do warsztatu → {job.Target}",
+        ActorJobKind.Craft => $"wytwarza przedmiot ({job.RemainingWorkTicks})",
+        ActorJobKind.ClearConstructionSite when job.Stage == ActorJobStage.Collecting &&
+            job.Phase == ActorJobPhase.Traveling => "idzie uprzątnąć plac budowy",
+        ActorJobKind.ClearConstructionSite when job.Stage == ActorJobStage.Collecting =>
+            $"podnosi przeszkodę ({job.RemainingWorkTicks})",
+        ActorJobKind.ClearConstructionSite when job.Phase == ActorJobPhase.Traveling =>
+            $"wynosi przedmiot z placu ×{job.ReservedQuantity}",
+        ActorJobKind.ClearConstructionSite =>
+            $"odkłada przedmiot z placu ({job.RemainingWorkTicks})",
         ActorJobKind.Rest when job.Phase == ActorJobPhase.Traveling => $"idzie odpocząć → {job.Target}",
         ActorJobKind.Rest => $"odpoczywa ({job.RemainingWorkTicks})",
         ActorJobKind.Collapsed => $"padł ze zmęczenia i śpi na ziemi ({job.RemainingWorkTicks})",
@@ -1983,6 +2437,10 @@ public partial class Main : Node
             job.Phase == ActorJobPhase.Traveling => $"idzie napełnić wodę → {job.Target}",
         ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningWater =>
             $"napełnia bukłak ({job.RemainingWorkTicks})",
+        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningAmmo &&
+            job.Phase == ActorJobPhase.Traveling => $"idzie po kamienie do rzucania → {job.Target}",
+        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningAmmo =>
+            $"pakuje kamienie ×{job.ReservedQuantity} ({job.RemainingWorkTicks})",
         ActorJobKind.ClearVegetation when job.Phase == ActorJobPhase.Traveling =>
             $"idzie wykarczować krzak → {job.Target}",
         ActorJobKind.ClearVegetation => $"karczuje krzak ({job.RemainingWorkTicks})",
@@ -1995,6 +2453,15 @@ public partial class Main : Node
         ActorJobKind.MineRock when job.Phase == ActorJobPhase.Traveling =>
             $"idzie kopać w skale → {job.Target}",
         ActorJobKind.MineRock => $"kopie w skale ({job.RemainingWorkTicks})",
+        ActorJobKind.CarveRamp when job.Phase == ActorJobPhase.Traveling =>
+            $"idzie wykopać pochylnię → {job.Target}",
+        ActorJobKind.CarveRamp => $"wykuwa pochylnię ({job.RemainingWorkTicks})",
+        ActorJobKind.TendBud when job.Phase == ActorJobPhase.Traveling =>
+            $"idzie opiekować się pąkiem → {job.Target}",
+        ActorJobKind.TendBud => $"dogląda pąka ({job.RemainingWorkTicks})",
+        ActorJobKind.HuntAnimal when job.Phase == ActorJobPhase.Traveling =>
+            $"ściga zwierzę → {job.Target}",
+        ActorJobKind.HuntAnimal => $"poluje ({job.RemainingWorkTicks})",
         _ => "bez zadania",
     };
 
@@ -2023,6 +2490,8 @@ public partial class Main : Node
             $"oczekuje na dostawcę; dostępny materiał: {diagnostic.AvailableMaterialQuantity}",
         ConstructionReadinessState.MaterialsInTransit =>
             $"materiały w drodze: {diagnostic.InTransitQuantity}",
+        ConstructionReadinessState.AwaitingSiteClearance =>
+            "oczekuje na uprzątnięcie luźnych przedmiotów z placu",
         ConstructionReadinessState.NoCapableBuilder =>
             "wstrzymana: brak budowniczego z wymaganą wiedzą, umiejętnością lub narzędziem",
         ConstructionReadinessState.NoReachableBuilder =>
@@ -2046,6 +2515,7 @@ public partial class Main : Node
         ConstructionKind.StoneDoorFrame => "kamiennej ościeżnicy",
         ConstructionKind.WoodenDoor => "drewnianych drzwi",
         ConstructionKind.WallTorch => "pochodni ściennej",
+        ConstructionKind.PrimitiveWorkshop => "prymitywnego warsztatu",
         _ => "konstrukcji",
     };
 
@@ -2055,6 +2525,7 @@ public partial class Main : Node
         PlantKind.MushroomCluster => "grzyby",
         PlantKind.EdibleRoots => "korzonki",
         PlantKind.FishShoal => "ryby",
+        PlantKind.ReedBed => "sitowie",
         _ => "żywność",
     };
 
@@ -2085,8 +2556,20 @@ public partial class Main : Node
 
     private void ShowStatistics()
     {
-        UpdateStatistics(_engine.CreateSnapshot());
+        var snapshot = _engine.CreateSnapshot();
+        _populationTargetDraft = snapshot.PopulationTarget;
+        UpdateStatistics(snapshot);
         _statisticsWindow.Popup();
+    }
+
+    private void ChangePopulationTarget(int delta)
+    {
+        _populationTargetDraft = Math.Clamp(_populationTargetDraft + delta, 0, 1_000);
+        _populationTargetText.Text = $"Docelowa liczebność: {_populationTargetDraft}";
+        _engine.QueueCommand(SimulationCommand.ConfigurePopulationTarget(
+            _engine.CurrentTick.Next(),
+            _commandSequence++,
+            _populationTargetDraft));
     }
 
     private void UpdateOverviewWindows(SimulationSnapshot snapshot)
@@ -2110,6 +2593,10 @@ public partial class Main : Node
         if (_raidWindow.Visible)
         {
             UpdateRaidWindowSummary(snapshot);
+        }
+        if (_plannerWindow.Visible)
+        {
+            UpdatePlanner(snapshot);
         }
     }
 
@@ -2377,11 +2864,20 @@ public partial class Main : Node
         ActorJobKind.FellTree => "♣",
         ActorJobKind.QuarryBoulder => "◆",
         ActorJobKind.MineRock => "⛏",
+        ActorJobKind.CarveRamp => "⇅",
+        ActorJobKind.TendBud => "♧",
+        ActorJobKind.HuntAnimal => "⚔",
+        ActorJobKind.SupplyCrafting => "⇥",
+        ActorJobKind.Craft => "⚒",
+        ActorJobKind.ClearConstructionSite => "↗",
         _ => "·",
     };
 
     private void UpdateStatistics(SimulationSnapshot snapshot)
     {
+        _populationTargetText.Text =
+            $"Docelowa liczebność: {_populationTargetDraft} • pąki: {snapshot.GoblinBuds.Count}";
+        var needs = snapshot.TribeNeeds;
         var metrics = _engine.GetMetrics();
         var navigation = metrics.Navigation;
         var cacheHitRate = navigation.Requests == 0
@@ -2394,7 +2890,20 @@ public partial class Main : Node
         var stored = snapshot.ResourceInventory.Sum(item => item.StoredQuantity);
         var loose = snapshot.ResourceInventory.Sum(item => item.KnownLooseQuantity);
         _statisticsText.Text =
-            $"Plemię: {snapshot.Actors.Count}\n" +
+            $"Plemię: {snapshot.Actors.Count} • pąki {snapshot.GoblinBuds.Count} " +
+            $"• cel {snapshot.PopulationTarget}\n" +
+            $"Żywność: {needs.FoodUnits}/{needs.ExpectedDailyFoodUnits} szt. " +
+            $"(zapas / przewidywana doba)\n" +
+            $"Miejsca do spania: {needs.ShelterCapacity}/{snapshot.Actors.Count}\n" +
+            $"Magazyny: {needs.StoredUnits}/{needs.StorageCapacity} • " +
+            $"luźne towary {needs.KnownLooseUnits}\n" +
+            $"Wilgotne miejsca lęgowe: {needs.SuitableMoistSites}\n" +
+            $"Zdrowi robotnicy: {needs.HealthyWorkers}/{snapshot.Actors.Count} • " +
+            $"otwarte prace {needs.WorkDemand}\n" +
+            $"Rozmnażanie: {DescribeReproductionReadiness(needs.Reproduction)}\n" +
+            $"Wrogość wsi: {needs.HumanHostility}/100\n\n" +
+            $"Zwierzęta: zające {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.MarshHare)} " +
+            $"• dziki {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.SwampBoar)}\n" +
             $"Magazyny: {snapshot.StorageZones.Count} • towary {stored:N0}\n" +
             $"Znane luźne towary: {loose:N0}\n" +
             $"Budowy: {snapshot.ConstructionSites.Count}\n" +
@@ -2409,11 +2918,71 @@ public partial class Main : Node
             $"• cache {cacheHitRate:N1}% ({navigation.CachedRoutes:N0})";
     }
 
+    private static string DescribeReproductionReadiness(
+        GoblinReproductionReadinessSnapshot readiness) => readiness.Kind switch
+    {
+        GoblinReproductionReadinessKind.AtTarget => "osiągnięto docelową liczebność",
+        GoblinReproductionReadinessKind.Ready =>
+            $"gotowe ({readiness.AvailableFood}/{readiness.RequiredFood} żywności, " +
+            $"rodzice {readiness.EligibleParents}, miejsca {readiness.SuitableMoistSites})",
+        GoblinReproductionReadinessKind.InsufficientFood =>
+            $"za mało dostępnej żywności ({readiness.AvailableFood}/{readiness.RequiredFood})",
+        GoblinReproductionReadinessKind.NoMoistSpace => "brak wolnego wilgotnego miejsca w chacie",
+        GoblinReproductionReadinessKind.NoEligibleParent =>
+            "brak wolnego, zdrowego, najedzonego i wypoczętego rodzica",
+        GoblinReproductionReadinessKind.BudWaitingForCare =>
+            $"pąk czeka na opiekuna ({readiness.UntendedBuds})",
+        GoblinReproductionReadinessKind.BudBeingTended => "opiekun zajmuje się pąkiem",
+        _ => "stan nieznany",
+    };
+
+    private static string DescribeAnimal(AnimalSnapshot animal)
+    {
+        var name = animal.Kind == AnimalKind.MarshHare ? "zając bagienny" : "dzik bagienny";
+        var activity = animal.Activity switch
+        {
+            AnimalActivity.Foraging => "żeruje",
+            AnimalActivity.Resting => "odpoczywa",
+            AnimalActivity.Fleeing => "ucieka",
+            AnimalActivity.Threatening => "atakuje",
+            _ => "wędruje",
+        };
+        return $"{name} • {activity} • zdrowie {animal.Health}";
+    }
+
     private void SelectActor(EntityId actorId)
     {
+        _selectedActorIds.Clear();
+        if (actorId != EntityId.None)
+        {
+            _selectedActorIds.Add(actorId);
+        }
+        ApplyActorSelection(actorId);
+    }
+
+    private void SelectOrToggleActor(EntityId actorId, bool extendSelection)
+    {
+        if (!extendSelection)
+        {
+            SelectActor(actorId);
+            return;
+        }
+
+        if (!_selectedActorIds.Add(actorId))
+        {
+            _selectedActorIds.Remove(actorId);
+        }
+        var primary = _selectedActorIds.Contains(actorId)
+            ? actorId
+            : _selectedActorIds.OrderBy(id => id).FirstOrDefault();
+        ApplyActorSelection(primary);
+    }
+
+    private void ApplyActorSelection(EntityId actorId)
+    {
         _selectedActorId = actorId;
-        _worldView.SetSelectedActor(actorId);
-        _worldView3D.SetSelectedActor(actorId);
+        _worldView.SetSelectedActors(_selectedActorIds);
+        _worldView3D.SetSelectedActors(_selectedActorIds);
         if (actorId == EntityId.None)
         {
             _goblinDetails.Hide();
@@ -2422,7 +2991,34 @@ public partial class Main : Node
 
         UpdateGoblinDetails(_engine.CreateSnapshot());
         _storageDetails.Hide();
-        _goblinDetails.Popup();
+        PositionGoblinDetailsWindow();
+        _goblinDetails.Show();
+    }
+
+    private string DescribeActorSelection(ActorSnapshot actor, GridPosition position) =>
+        !_selectedActorIds.Contains(actor.Id)
+            ? $"{actor.Name} usunięty z bieżącej grupy • pozostało {_selectedActorIds.Count}"
+            : _selectedActorIds.Count <= 1
+            ? $"{actor.Name} • {position} • {DescribeJob(actor.Job)}"
+            : $"Wybrano grupę {_selectedActorIds.Count} goblinów • główny: {actor.Name} • " +
+              "Ruch wyda rozkaz całej grupie; Najazd użyje jej jako składu oddziału.";
+
+    private void PositionGoblinDetailsWindow()
+    {
+        var viewportSize = (Vector2I)GetViewport().GetVisibleRect().Size;
+        var margin = 18;
+        _goblinDetails.Position = new Vector2I(
+            Math.Max(margin, viewportSize.X - _goblinDetails.Size.X - margin),
+            Math.Max(margin, viewportSize.Y - _goblinDetails.Size.Y - 88));
+    }
+
+    private void HandleViewportSizeChanged()
+    {
+        ConstrainCameraToMap();
+        if (_goblinDetails.Visible)
+        {
+            PositionGoblinDetailsWindow();
+        }
     }
 
     private void ShowStorageDetails(StorageZoneSnapshot zone)
@@ -2759,7 +3355,8 @@ public partial class Main : Node
             _engine.Definitions.MaximumFatigue - actor.Fatigue,
             _engine.Definitions.MaximumFatigue,
             "Wytrzymałość");
-        _healthBar.TooltipText += " • obecnie brak naturalnej regeneracji";
+        _healthBar.TooltipText += $" • aktualna wydolność maksymalna: " +
+            $"{actor.EffectiveMaximumHealth:N0}/{_engine.Definitions.MaximumHealth:N0}";
         _hungerBar.TooltipText += " • obrażenia z głodu zaczynają się poniżej 500";
         _thirstBar.TooltipText += " • obrażenia z odwodnienia zaczynają się poniżej 500";
 
@@ -2778,6 +3375,15 @@ public partial class Main : Node
         var text = new StringBuilder()
             .AppendLine($"{actor.Name}  [#{actor.Id}]")
             .AppendLine($"Pozycja: {actor.Position}")
+            .AppendLine(actor.IsJuvenile
+                ? $"Wiek: {actor.AgeDays} dni • młode, nie pracuje przez pierwszy sezon"
+                : actor.IsElderly
+                    ? $"Wiek: {actor.AgeDays} dni " +
+                      $"({(double)actor.AgeDays / _engine.Definitions.Clock.Climate.DaysPerYear:0.0} lat) • " +
+                      $"starość {actor.SenescenceProgress:P0}, wydolność " +
+                      $"{actor.EffectiveMaximumHealth:N0}/{_engine.Definitions.MaximumHealth:N0}"
+                    : $"Wiek: {actor.AgeDays} dni " +
+                      $"({(double)actor.AgeDays / _engine.Definitions.Clock.Climate.DaysPerYear:0.0} lat) • dorosły")
             .AppendLine()
             .AppendLine($"Znane umiejętności: {DescribeSkills(actor.KnownSkills)}")
             .AppendLine($"Doświadczenie: {DescribeExperience(actor.Experience)}")
@@ -2824,6 +3430,9 @@ public partial class Main : Node
             ActorPlanIntentKind.Rest => "pójdzie odpocząć",
             ActorPlanIntentKind.ResumeSuspendedJob =>
                 $"wróci do: {DescribeJobKind(entry.JobKind)} → {entry.Target}",
+            ActorPlanIntentKind.NextPublicWork =>
+                $"następnie: {DescribeJobKind(entry.JobKind)} → {entry.Target} " +
+                $"(zlecenie {entry.WorkOrderId})",
             _ => "nieznany zamiar",
         };
         return $"{action}  [nacisk {entry.Priority}]";
@@ -2838,6 +3447,9 @@ public partial class Main : Node
         ActorJobKind.Explore => "zwiadu",
         ActorJobKind.Move => "marszu",
         ActorJobKind.Resupply => "uzupełniania zapasów",
+        ActorJobKind.SupplyCrafting => "dostawy do warsztatu",
+        ActorJobKind.Craft => "rzemiosła",
+        ActorJobKind.ClearConstructionSite => "uprzątania placu budowy",
         ActorJobKind.ClearVegetation => "karczowania",
         ActorJobKind.SupplyConstruction => "dostawy na budowę",
         ActorJobKind.BuildConstruction => "budowy",
@@ -2845,6 +3457,9 @@ public partial class Main : Node
         ActorJobKind.FellTree => "wyrębu",
         ActorJobKind.QuarryBoulder => "wydobycia kamienia",
         ActorJobKind.MineRock => "kopania w skale",
+        ActorJobKind.CarveRamp => "wykuwania pochylni",
+        ActorJobKind.TendBud => "opieki nad pąkiem",
+        ActorJobKind.HuntAnimal => "polowania",
         _ => "bezczynności",
     };
 
@@ -2867,7 +3482,7 @@ public partial class Main : Node
     private void UpdateInventoryIcons(ActorSnapshot actor, ItemStackSnapshot? cargo)
     {
         var signature = $"{(int)actor.Equipment}:{string.Join(',', actor.PersonalFoodKinds)}:" +
-            $"{actor.PersonalWater}:" +
+            $"{actor.PersonalWater}:{actor.PersonalStoneAmmo}:" +
             (cargo is null ? "none" : $"{cargo.Value.Id}:{cargo.Value.Resource}:{cargo.Value.Quantity}");
         if (_inventorySignature == signature)
         {
@@ -2897,6 +3512,32 @@ public partial class Main : Node
         {
             AddInventoryIcon(_pickaxeIcon, "Prymitywny kilof • narzędzie do rozbijania głazów");
         }
+        if (actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling))
+        {
+            AddInventoryIcon(
+                CreateSlingIcon(),
+                "Prymitywna proca • broń dystansowa na małe kamienie");
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.FightingStick))
+        {
+            AddInventoryIcon(ItemIcon.Wood, "Kij bojowy • prymitywna broń osobista");
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.StoneClub))
+        {
+            AddInventoryIcon(ItemIcon.Stone, "Kamienna maczuga • ciężka broń osobista");
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.HideClothes))
+        {
+            AddInventoryIcon(ItemIcon.RagClothes, "Skórzany ubiór • ubranie osobiste");
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.ReedClothes))
+        {
+            AddInventoryIcon(ItemIcon.Reeds, "Sitowiowy ubiór • lekkie ubranie osobiste");
+        }
+        AddInventoryIcon(
+            ItemIcon.Stone,
+            "Osobiste kamienie do rzucania i procy",
+            actor.PersonalStoneAmmo);
         AddInventoryIcon(
             ItemIcon.Food,
             actor.PersonalFood == 0
@@ -3178,6 +3819,555 @@ public partial class Main : Node
         return GetNode<Button>($"{parent}/{name}");
     }
 
+    private void CreateWorkshopWindow()
+    {
+        _workshopDetails = new Window
+        {
+            Title = "Prymitywny warsztat",
+            Size = new Vector2I(480, 500),
+            MinSize = new Vector2I(410, 360),
+            Unresizable = false,
+            Visible = false,
+        };
+        _workshopDetails.CloseRequested += _workshopDetails.Hide;
+        AddChild(_workshopDetails);
+        _workshopDetails.Hide();
+
+        var margin = new MarginContainer();
+        margin.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        margin.AddThemeConstantOverride("margin_left", 14);
+        margin.AddThemeConstantOverride("margin_top", 14);
+        margin.AddThemeConstantOverride("margin_right", 14);
+        margin.AddThemeConstantOverride("margin_bottom", 14);
+        _workshopDetails.AddChild(margin);
+        margin.GuiInput += inputEvent => CloseWindowOnSecondaryInput(inputEvent, _workshopDetails);
+
+        var content = new VBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        content.AddThemeConstantOverride("separation", 10);
+        margin.AddChild(content);
+        _workshopSummary = new Label
+        {
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        };
+        content.AddChild(_workshopSummary);
+        content.AddChild(new Label { Text = "Dodaj recepturę do kolejki:" });
+        var recipeScroll = new ScrollContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        content.AddChild(recipeScroll);
+        var recipes = new VBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        recipes.AddThemeConstantOverride("separation", 5);
+        recipeScroll.AddChild(recipes);
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.PrimitiveSling,
+            CreateSlingIcon(), "Proca",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.RagClothes), "Skóra", 1),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Bone), "Kość", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.BoneKnife,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.BoneKnife), "Kościany nóż",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Bone), "Kość", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.FightingStick,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Kij bojowy",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 3));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.StoneClub,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Maczuga",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 1),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Kamień", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.HideClothes,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.RagClothes), "Skórzany ubiór",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.RagClothes), "Skóra", 2));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.ReedClothes,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowiowy ubiór",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 3));
+        var close = new Button
+        {
+            Text = "Zamknij",
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
+        };
+        close.Pressed += _workshopDetails.Hide;
+        content.AddChild(close);
+    }
+
+    private void AddWorkshopRecipeButton(
+        VBoxContainer recipes,
+        CraftingRecipeKind recipe,
+        Texture2D productIcon,
+        string name,
+        params (Texture2D Icon, string Name, int Quantity)[] ingredients)
+    {
+        var row = new HBoxContainer
+        {
+            CustomMinimumSize = new Vector2(0, 56),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        row.AddThemeConstantOverride("separation", 8);
+        var button = new Button
+        {
+            Icon = productIcon,
+            ExpandIcon = true,
+            FocusMode = Control.FocusModeEnum.None,
+            CustomMinimumSize = new Vector2(52, 52),
+            TooltipText = $"Zleć: {name.ToLowerInvariant()}",
+        };
+        button.Pressed += () => QueueWorkshopRecipe(recipe);
+        row.AddChild(button);
+        var productName = new Label
+        {
+            Text = name,
+            CustomMinimumSize = new Vector2(130, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            TooltipText = $"Produkt: {name}",
+        };
+        row.AddChild(productName);
+        row.AddChild(new Label
+        {
+            Text = "←",
+            VerticalAlignment = VerticalAlignment.Center,
+            TooltipText = "Wymagane materiały",
+        });
+        foreach (var ingredient in ingredients)
+        {
+            AddWorkshopIngredient(row, ingredient.Icon, ingredient.Name, ingredient.Quantity);
+        }
+        recipes.AddChild(row);
+    }
+
+    private static void AddWorkshopIngredient(
+        HBoxContainer row,
+        Texture2D icon,
+        string name,
+        int quantity)
+    {
+        var tooltip = $"{name} • wymagane: {quantity}";
+        var ingredient = new HBoxContainer
+        {
+            TooltipText = tooltip,
+        };
+        ingredient.AddThemeConstantOverride("separation", 2);
+        ingredient.AddChild(new TextureRect
+        {
+            CustomMinimumSize = new Vector2(28, 28),
+            Texture = icon,
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            TooltipText = tooltip,
+        });
+        ingredient.AddChild(new Label
+        {
+            Text = $"×{quantity}",
+            VerticalAlignment = VerticalAlignment.Center,
+            TooltipText = tooltip,
+        });
+        row.AddChild(ingredient);
+    }
+
+    private void ShowWorkshopDetails(GridPosition workshop)
+    {
+        _selectedWorkshop = workshop;
+        UpdateWorkshopDetails(_engine.CreateSnapshot());
+        _workshopDetails.PopupCentered();
+    }
+
+    private void QueueWorkshopRecipe(CraftingRecipeKind recipe)
+    {
+        if (_selectedWorkshop is not { } workshop ||
+            !_engine.World.HasPrimitiveWorkshop(workshop))
+        {
+            _selectedWorkshop = null;
+            _workshopDetails.Hide();
+            _inspector.Text = "Wybrany prymitywny warsztat już nie istnieje.";
+            return;
+        }
+
+        _engine.QueueCommand(SimulationCommand.QueueCraftingRecipe(
+            _engine.CurrentTick.Next(), _commandSequence++, workshop, recipe));
+        _inspector.Text = $"Warsztat {workshop}: dodano do kolejki " +
+            DescribeCraftingRecipe(recipe) +
+            (_speed == 0 ? " • zlecenie ruszy po wznowieniu czasu." : ".");
+    }
+
+    private void UpdateWorkshopDetails(SimulationSnapshot snapshot)
+    {
+        if (_selectedWorkshop is not { } workshop ||
+            !_engine.World.HasPrimitiveWorkshop(workshop))
+        {
+            _selectedWorkshop = null;
+            _workshopDetails.Hide();
+            return;
+        }
+
+        var orders = snapshot.CraftingOrders
+            .Where(order => order.Workshop == workshop)
+            .OrderBy(order => order.Id)
+            .ToArray();
+        var stocks = new[]
+        {
+            ResourceKind.Wood, ResourceKind.Stone, ResourceKind.Reeds,
+            ResourceKind.Bone, ResourceKind.Hide,
+        }.Select(resource => $"{DescribeResource(resource)} " +
+            snapshot.ItemStacks.Where(stack => stack.Resource == resource)
+                .Sum(stack => stack.Quantity));
+        _workshopSummary.Text = $"Pozycja: {workshop}\n" +
+            $"Znane zasoby: {string.Join(", ", stocks)}\n" +
+            (orders.Length == 0
+                ? "Kolejka jest pusta."
+                : "Kolejka:\n" + string.Join("\n", orders.Select((order, index) =>
+                    $"{index + 1}. {DescribeCraftingOrder(order)}")));
+    }
+
+    private void CreatePlannerWindow()
+    {
+        _plannerWindow = new Window
+        {
+            Title = "Planer plemienia",
+            Size = new Vector2I(760, 600),
+            MinSize = new Vector2I(600, 380),
+            Unresizable = false,
+            Visible = false,
+        };
+        _plannerWindow.CloseRequested += _plannerWindow.Hide;
+        AddChild(_plannerWindow);
+        _plannerWindow.Hide();
+
+        var margin = new MarginContainer();
+        margin.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        foreach (var side in new[] { "left", "top", "right", "bottom" })
+        {
+            margin.AddThemeConstantOverride($"margin_{side}", 14);
+        }
+        _plannerWindow.AddChild(margin);
+
+        var content = new VBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        content.AddThemeConstantOverride("separation", 10);
+        margin.AddChild(content);
+        _plannerSummary = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
+        content.AddChild(_plannerSummary);
+        var scroll = new ScrollContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        content.AddChild(scroll);
+        _plannerRows = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        _plannerRows.AddThemeConstantOverride("separation", 7);
+        scroll.AddChild(_plannerRows);
+        var close = new Button { Text = "Zamknij", SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd };
+        close.Pressed += _plannerWindow.Hide;
+        content.AddChild(close);
+    }
+
+    private void ShowPlanner()
+    {
+        UpdatePlanner(_engine.CreateSnapshot(), force: true);
+        _plannerWindow.PopupCentered();
+    }
+
+    private void UpdatePlanner(SimulationSnapshot snapshot, bool force = false)
+    {
+        var signature = string.Join('|', snapshot.WorkDesignations.Select(item =>
+                $"{item.Id}:{item.OrderId}:{item.Kind}:{item.Target}:{item.Priority}:{item.IsSuspended}")) + "#" +
+            string.Join('|', snapshot.ConstructionSites.Select(site =>
+                $"{site.Id}:{site.Priority}:{site.Materials.Sum(material => material.DeliveredQuantity)}:{site.RemainingWorkTicks}"));
+        if (!force && signature == _plannerSignature)
+        {
+            return;
+        }
+        _plannerSignature = signature;
+        foreach (var child in _plannerRows.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        var workGroups = snapshot.WorkDesignations
+            .GroupBy(item => item.OrderId)
+            .OrderByDescending(group => group.Max(item => item.Priority))
+            .ThenBy(group => group.Key)
+            .ToArray();
+        _plannerSummary.Text = $"Zlecenia obszarowe: {workGroups.Length} grup / " +
+            $"{snapshot.WorkDesignations.Count} celów • budowy: {snapshot.ConstructionSites.Count}.\n" +
+            "Strzałki zmieniają priorytet dispatchera. „Obszar” zachowuje stare cele aż do zatwierdzenia nowego zaznaczenia.";
+        if (workGroups.Length == 0 && snapshot.ConstructionSites.Count == 0)
+        {
+            _plannerRows.AddChild(new Label { Text = "Planer jest pusty." });
+            return;
+        }
+
+        foreach (var group in workGroups)
+        {
+            var targets = group.ToArray();
+            var kind = targets[0].Kind;
+            var priority = targets.Max(item => item.Priority);
+            var isSuspended = targets.All(item => item.IsSuspended);
+            var minimum = new GridPosition(
+                targets.Min(item => item.Target.X),
+                targets.Min(item => item.Target.Y),
+                targets.Min(item => item.Target.Z));
+            var maximum = new GridPosition(
+                targets.Max(item => item.Target.X),
+                targets.Max(item => item.Target.Y),
+                targets.Max(item => item.Target.Z));
+            var active = snapshot.Actors.Count(actor => IsActorDoing(actor, kind, targets));
+            var readiness = isSuspended
+                ? "wstrzymane przez gracza"
+                : DescribeWorkOrderReadiness(snapshot, kind, active);
+            AddPlannerRow(
+                $"{DescribeWorkDesignation(kind)} • {targets.Length} celów • " +
+                $"zasięg {minimum}–{maximum} • {DescribeStoragePriority(priority)}" +
+                $" • {readiness}",
+                priority,
+                value => SetWorkPriority(group.Key, kind, value),
+                isSuspended,
+                () => SetWorkSuspension(group.Key, kind, !isSuspended),
+                () => BeginPlannerAreaEdit(
+                    group.Key, kind, priority, isSuspended, targets[0].Target),
+                () => CancelWorkGroup(group.Key, kind),
+                () => FocusPlannerTarget(targets[0].Target));
+        }
+
+        foreach (var site in snapshot.ConstructionSites
+                     .OrderByDescending(site => site.Priority)
+                     .ThenBy(site => site.Id))
+        {
+            AddPlannerRow(
+                $"Budowa {DescribeConstruction(site.Kind)} • {site.Anchor} • " +
+                $"{DescribeStoragePriority(site.Priority)} • " +
+                DescribeConstructionReadiness(_engine.InspectConstructionReadiness(site.Id)),
+                site.Priority,
+                value => SetConstructionPriority(site.Id, value),
+                isSuspended: false,
+                toggleSuspension: null,
+                edit: null,
+                cancel: null,
+                () => FocusPlannerTarget(site.Anchor));
+        }
+    }
+
+    private void AddPlannerRow(
+        string description,
+        StoragePriority priority,
+        Action<StoragePriority> setPriority,
+        bool isSuspended,
+        Action? toggleSuspension,
+        Action? edit,
+        Action? cancel,
+        Action focus)
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 6);
+        var label = new Label
+        {
+            Text = description,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        };
+        row.AddChild(label);
+        var down = new Button { Text = "↓", TooltipText = "Obniż priorytet", Disabled = priority == StoragePriority.Low };
+        down.Pressed += () => setPriority((StoragePriority)((int)priority - 1));
+        row.AddChild(down);
+        var up = new Button { Text = "↑", TooltipText = "Podnieś priorytet", Disabled = priority == StoragePriority.Urgent };
+        up.Pressed += () => setPriority((StoragePriority)((int)priority + 1));
+        row.AddChild(up);
+        var show = new Button { Text = "Pokaż" };
+        show.Pressed += focus;
+        row.AddChild(show);
+        if (toggleSuspension is not null)
+        {
+            var suspension = new Button
+            {
+                Text = isSuspended ? "Wznów" : "Wstrzymaj",
+                TooltipText = isSuspended
+                    ? "Ponownie udostępnij zlecenie dispatcherowi"
+                    : "Zachowaj zlecenie, ale przerwij i nie przydzielaj pracy",
+            };
+            suspension.Pressed += toggleSuspension;
+            row.AddChild(suspension);
+        }
+        if (edit is not null)
+        {
+            var editButton = new Button { Text = "Obszar", TooltipText = "Ponownie wskaż obszar zlecenia" };
+            editButton.Pressed += edit;
+            row.AddChild(editButton);
+        }
+        if (cancel is not null)
+        {
+            var cancelButton = new Button { Text = "Anuluj" };
+            cancelButton.Pressed += cancel;
+            row.AddChild(cancelButton);
+        }
+        _plannerRows.AddChild(row);
+    }
+
+    private void SetWorkPriority(
+        EntityId orderId,
+        WorkDesignationKind kind,
+        StoragePriority priority)
+    {
+        _engine.QueueCommand(SimulationCommand.ConfigureWorkPriority(
+            _engine.CurrentTick.Next(), _commandSequence++, orderId, priority));
+        _plannerSignature = string.Empty;
+        _inspector.Text = $"Zlecenie „{DescribeWorkDesignation(kind)}”: priorytet {DescribeStoragePriority(priority)}.";
+    }
+
+    private void SetConstructionPriority(EntityId id, StoragePriority priority)
+    {
+        _engine.QueueCommand(SimulationCommand.ConfigureConstructionPriority(
+            _engine.CurrentTick.Next(), _commandSequence++, id, priority));
+        _plannerSignature = string.Empty;
+    }
+
+    private void SetWorkSuspension(
+        EntityId orderId,
+        WorkDesignationKind kind,
+        bool isSuspended)
+    {
+        _engine.QueueCommand(SimulationCommand.ConfigureWorkSuspension(
+            _engine.CurrentTick.Next(), _commandSequence++, orderId, isSuspended));
+        _plannerSignature = string.Empty;
+        _inspector.Text = isSuspended
+            ? $"Wstrzymano zlecenie „{DescribeWorkDesignation(kind)}”."
+            : $"Wznowiono zlecenie „{DescribeWorkDesignation(kind)}”.";
+    }
+
+    private void BeginPlannerAreaEdit(
+        EntityId orderId,
+        WorkDesignationKind kind,
+        StoragePriority priority,
+        bool isSuspended,
+        GridPosition target)
+    {
+        var mode = ToWorkMode(kind);
+        if (mode == WorkMode.None)
+        {
+            return;
+        }
+        FocusPlannerTarget(target);
+        SelectWorkMode((long)mode);
+        _replacingWorkOrderId = orderId;
+        _replacementWorkPriority = priority;
+        _replacementWorkSuspended = isSuspended;
+        _plannerWindow.Hide();
+        _inspector.Text = $"Nowy obszar: {DescribeWorkDesignation(kind)}. Stare cele pozostaną aktywne do zatwierdzenia zaznaczenia.";
+    }
+
+    private void FocusPlannerTarget(GridPosition target)
+    {
+        if (!_use3DView && _visibleLevel != target.Z)
+        {
+            _visibleLevel = target.Z;
+            _worldView.SetVisibleLevel(_visibleLevel);
+            UpdateLayerToolAvailability();
+        }
+        CenterCameraOn(target);
+    }
+
+    private void CancelWorkGroup(EntityId orderId, WorkDesignationKind kind)
+    {
+        _engine.QueueCommand(SimulationCommand.ClearWorkDesignationOrder(
+            _engine.CurrentTick.Next(), _commandSequence++, orderId));
+        _plannerSignature = string.Empty;
+        _inspector.Text = $"Anulowano wszystkie cele: {DescribeWorkDesignation(kind)}.";
+    }
+
+    private static bool IsActorDoing(
+        ActorSnapshot actor,
+        WorkDesignationKind kind,
+        IReadOnlyList<WorkDesignationSnapshot> targets) => kind switch
+    {
+        WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds =>
+            actor.Job.Kind == ActorJobKind.Forage &&
+            targets.Any(target => target.Target == actor.Job.Target),
+        WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone =>
+            actor.Job.Kind == ActorJobKind.Haul &&
+            targets.Any(target => target.TargetEntityId == actor.Job.SourceStackId),
+        WorkDesignationKind.UprootBerryBush => actor.Job.Kind == ActorJobKind.ClearVegetation &&
+            targets.Any(target => target.Target == actor.Job.Target),
+        WorkDesignationKind.FellTree => actor.Job.Kind == ActorJobKind.FellTree &&
+            targets.Any(target => target.Id == actor.Job.SourceStackId),
+        WorkDesignationKind.QuarryBoulder => actor.Job.Kind == ActorJobKind.QuarryBoulder &&
+            targets.Any(target => target.Id == actor.Job.SourceStackId),
+        WorkDesignationKind.MineRock => actor.Job.Kind == ActorJobKind.MineRock &&
+            targets.Any(target => target.Id == actor.Job.SourceStackId),
+        WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
+            actor.Job.Kind == ActorJobKind.CarveRamp &&
+            targets.Any(target => target.Id == actor.Job.SourceStackId),
+        WorkDesignationKind.Scout => actor.Job.Kind == ActorJobKind.Explore &&
+            targets.Any(target => target.Target == actor.Job.Target),
+        WorkDesignationKind.HuntAnimal => actor.Job.Kind == ActorJobKind.HuntAnimal &&
+            targets.Any(target => target.Id == actor.Job.SourceStackId),
+        _ => false,
+    };
+
+    private static string DescribeWorkOrderReadiness(
+        SimulationSnapshot snapshot,
+        WorkDesignationKind kind,
+        int activeWorkers)
+    {
+        if (activeWorkers > 0)
+        {
+            return $"w toku: {activeWorkers}";
+        }
+
+        var living = snapshot.Actors.Where(actor => actor.Health > 0).ToArray();
+        if (living.Length == 0)
+        {
+            return "wstrzymane: brak żywych robotników";
+        }
+        if (kind == WorkDesignationKind.FellTree &&
+            living.All(actor => !actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe)))
+        {
+            return "wstrzymane: brak siekiery";
+        }
+        if (kind is WorkDesignationKind.QuarryBoulder or WorkDesignationKind.MineRock or
+                WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp &&
+            living.All(actor => !actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe)))
+        {
+            return "wstrzymane: brak kilofa";
+        }
+        if (kind is WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone)
+        {
+            var resource = kind == WorkDesignationKind.GatherBrushwood
+                ? ResourceKind.Wood
+                : ResourceKind.Stone;
+            if (!snapshot.StorageZones.Any(zone =>
+                    zone.StoredQuantity < zone.Capacity &&
+                    (zone.AcceptedResource is ResourceKind.Any ||
+                     zone.AcceptedResource == resource)))
+            {
+                return "wstrzymane: brak miejsca w pasującym składzie";
+            }
+        }
+        return "wykonalne; oczekuje na dispatchera";
+    }
+
+    private static string DescribeWorkDesignation(WorkDesignationKind kind) => kind switch
+    {
+        WorkDesignationKind.GatherFood => "zbieranie żywności",
+        WorkDesignationKind.GatherReeds => "zbieranie sitowia",
+        WorkDesignationKind.GatherBrushwood => "zbieranie chrustu",
+        WorkDesignationKind.GatherStone => "zbieranie kamienia",
+        WorkDesignationKind.UprootBerryBush => "karczowanie krzaków",
+        WorkDesignationKind.FellTree => "wyrąb",
+        WorkDesignationKind.QuarryBoulder => "rozbijanie głazów",
+        WorkDesignationKind.MineRock => "wydobycie skały",
+        WorkDesignationKind.CarveRampDown => "pochylnia w dół",
+        WorkDesignationKind.CarveRampUp => "pochylnia w górę",
+        WorkDesignationKind.Scout => "zwiad",
+        WorkDesignationKind.HuntAnimal => "polowanie",
+        _ => "praca",
+    };
+
     private void CreateRaidWindow()
     {
         _raidWindow = new Window
@@ -3247,6 +4437,13 @@ public partial class Main : Node
         if (snapshot.RaidPartyIds.Count > 0)
         {
             _raidDraftIds.UnionWith(snapshot.RaidPartyIds);
+        }
+        else if (_selectedActorIds.Count > 0)
+        {
+            _raidDraftIds.UnionWith(_selectedActorIds
+                .Where(id => snapshot.Actors.Any(actor => actor.Id == id && actor.Health > 0))
+                .OrderBy(id => id)
+                .Take(SimulationDefinitions.FieldCampCapacity));
         }
         else
         {
@@ -3470,11 +4667,13 @@ public partial class Main : Node
                 index / _engine.Map.Width)).FloorLevel)
             .Min(level => (int)level);
         var minimumLevel = Math.Min(minimumSurfaceFloor, _engine.Map.DeepestCaveLevel);
-        var maximumLevel = Math.Max(0, snapshot.WorldObjects
-            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
-            .Select(part => part.Position.Z)
-            .DefaultIfEmpty(0)
-            .Max());
+        var maximumLevel = Math.Max(
+            _engine.Map.MaximumTerrainLevel,
+            snapshot.WorldObjects
+                .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+                .Select(part => part.Position.Z)
+                .DefaultIfEmpty(0)
+                .Max());
         var next = Math.Clamp(_visibleLevel + delta, minimumLevel, maximumLevel);
         if (next == _visibleLevel)
         {
@@ -3486,9 +4685,21 @@ public partial class Main : Node
         _visibleLevel = next;
         _worldView.SetVisibleLevel(next);
         UpdateLayerToolAvailability();
-        _inspector.Text = _isMoveMode
-            ? $"Widoczna warstwa z={next}. Wskaż odkryty cel marszu dla wybranego goblina."
-            : $"Widoczna warstwa mapy: z={next}. Page Up / Page Down zmienia poziom.";
+        var selectedActors = snapshot.Actors
+            .Where(actor => _selectedActorIds.Contains(actor.Id))
+            .OrderBy(actor => actor.Id)
+            .ToArray();
+        var selection = selectedActors.Length switch
+        {
+            0 => string.Empty,
+            1 => $" Zaznaczenie zachowane: {selectedActors[0].Name} jest na z={selectedActors[0].Position.Z}.",
+            _ => $" Zaznaczenie grupy {selectedActors.Length} goblinów zachowane; poziomy: " +
+                 string.Join(", ", selectedActors.Select(actor => actor.Position.Z).Distinct().Order()) + ".",
+        };
+        _inspector.Text = (_isMoveMode
+            ? $"Widoczna warstwa z={next}. Wskaż odkryty cel marszu lub przejście między poziomami."
+            : $"Widoczna warstwa mapy: z={next}. Page Up / Page Down zmienia poziom.") +
+            selection;
         UpdateStatus();
     }
 
@@ -3511,9 +4722,10 @@ public partial class Main : Node
     {
         if (_visibleLevel == 0 ||
             (_visibleLevel < 0 && mode is BuildMode.FoodStorage or BuildMode.WoodStorage or
-                BuildMode.StoneStorage or BuildMode.WoodenWall or BuildMode.StoneWall or
+                BuildMode.StoneStorage or BuildMode.FieldCamp or
+                BuildMode.WoodenWall or BuildMode.StoneWall or
                 BuildMode.WoodenDoorFrame or BuildMode.StoneDoorFrame or BuildMode.WoodenDoor or
-                BuildMode.WallTorch))
+                BuildMode.WallTorch or BuildMode.PrimitiveWorkshop))
         {
             return true;
         }
@@ -3521,8 +4733,8 @@ public partial class Main : Node
         CancelBuildMode(clearInspector: false);
         _buildMenu.Hide();
         _inspector.Text = _visibleLevel < 0
-            ? "W jaskini można planować składy, ściany, mury, ościeżnice, drzwi i pochodnie. " +
-              "Pomost i obozowisko pozostają blueprintami powierzchniowymi."
+            ? "W jaskini można planować składy, obozowiska, ściany, mury, drzwi, pochodnie i warsztaty. " +
+              "Pomost pozostaje blueprintem powierzchniowym."
             : "Budowanie ponad powierzchnią wymaga blueprintu podpartej konstrukcji.";
         return false;
     }
@@ -3588,6 +4800,7 @@ public partial class Main : Node
                  snapshot.GetVisibility(stack.Location.Position, _engine.Map.Width) == CellVisibility.Visible))
             .Sum(stack => stack.Quantity);
         _status.Text = $"Tick {snapshot.Tick.Value:N0}  •  z={_visibleLevel}  •  plemię {snapshot.Actors.Count}" +
+            $" + {snapshot.GoblinBuds.Count} pąk. / cel {snapshot.PopulationTarget}" +
             $"  •  żywność {snapshot.FoodStock}" +
             $" (skł. {storedFood}, racje {personalFood}/{personalWater})" +
             $"  •  drewno {wood}" +
@@ -3617,8 +4830,14 @@ public partial class Main : Node
         }
         if (_selectedActorId != EntityId.None)
         {
-            _status.Text += $"  •  wybrany {_selectedActorId}";
+            _status.Text += _selectedActorIds.Count <= 1
+                ? $"  •  wybrany {_selectedActorId}"
+                : $"  •  wybrana grupa {_selectedActorIds.Count}";
             UpdateGoblinDetails(snapshot);
+        }
+        if (_workshopDetails.Visible)
+        {
+            UpdateWorkshopDetails(snapshot);
         }
         if (villageVisibility == CellVisibility.Visible)
         {

@@ -12,9 +12,11 @@ public partial class WorldView : Node2D
     private const double WaterAnimationRedrawSeconds = 1d / 20d;
     private readonly Dictionary<EntityId, Vector2> _visualActorPositions = [];
     private readonly Dictionary<EntityId, Vector2> _targetActorPositions = [];
+    private readonly Dictionary<ulong, Vector2> _visualAnimalPositions = [];
+    private readonly Dictionary<ulong, Vector2> _targetAnimalPositions = [];
     private SimulationEngine _engine = null!;
     private SimulationSnapshot _snapshot = null!;
-    private EntityId _selectedActorId = EntityId.None;
+    private HashSet<EntityId> _selectedActorIds = [];
     private int _simulationSpeed = 1;
     private double _secondsPerTick = 0.1;
     private IReadOnlyList<GridPosition> _constructionPreview = [];
@@ -61,6 +63,8 @@ public partial class WorldView : Node2D
     {
         _visualActorPositions.Clear();
         _targetActorPositions.Clear();
+        _visualAnimalPositions.Clear();
+        _targetAnimalPositions.Clear();
         _wallEnclosure = null;
         _wallEnclosureBarriers.Clear();
         _wallEnclosureSolids.Clear();
@@ -72,6 +76,7 @@ public partial class WorldView : Node2D
     {
         _snapshot = snapshot;
         SynchronizeActorPositions();
+        SynchronizeAnimalPositions();
         QueueRedraw();
     }
 
@@ -89,9 +94,9 @@ public partial class WorldView : Node2D
         QueueRedraw();
     }
 
-    public void SetSelectedActor(EntityId actorId)
+    public void SetSelectedActors(IEnumerable<EntityId> actorIds)
     {
-        _selectedActorId = actorId;
+        _selectedActorIds = actorIds.ToHashSet();
         QueueRedraw();
     }
 
@@ -118,13 +123,14 @@ public partial class WorldView : Node2D
     {
         _waterAnimationElapsed = (_waterAnimationElapsed + delta) % WaterAnimationCycleSeconds;
         _waterAnimationRedrawElapsed += delta;
-        if (_visibleLevel == 0 && _waterAnimationRedrawElapsed >= WaterAnimationRedrawSeconds)
+        if (_visibleLevel <= 0 && _waterAnimationRedrawElapsed >= WaterAnimationRedrawSeconds)
         {
             _waterAnimationRedrawElapsed %= WaterAnimationRedrawSeconds;
             QueueRedraw();
         }
 
-        if (_engine is null || _simulationSpeed == 0 || _visualActorPositions.Count == 0)
+        if (_engine is null || _simulationSpeed == 0 ||
+            (_visualActorPositions.Count == 0 && _visualAnimalPositions.Count == 0))
         {
             return;
         }
@@ -141,6 +147,21 @@ public partial class WorldView : Node2D
             if (!next.IsEqualApprox(current))
             {
                 _visualActorPositions[id] = next;
+                changed = true;
+            }
+        }
+
+        var animalMovementDuration = SimulationEngine.AnimalUpdateIntervalTicks *
+            _secondsPerTick / _simulationSpeed;
+        var maximumAnimalDistance = (float)(TileSize * delta / animalMovementDuration);
+        foreach (var id in _visualAnimalPositions.Keys.ToArray())
+        {
+            var current = _visualAnimalPositions[id];
+            var target = _targetAnimalPositions[id];
+            var next = current.MoveToward(target, maximumAnimalDistance);
+            if (!next.IsEqualApprox(current))
+            {
+                _visualAnimalPositions[id] = next;
                 changed = true;
             }
         }
@@ -172,8 +193,11 @@ public partial class WorldView : Node2D
         }
         DrawStorageZones();
         DrawConstructionSites();
+        DrawCraftingOrders();
         DrawItems();
         DrawJobTargets();
+        DrawGoblinBuds();
+        DrawAnimals();
         DrawActors();
         DrawNightLighting();
         DrawFog();
@@ -195,12 +219,17 @@ public partial class WorldView : Node2D
             .Where(worldObject => worldObject.Kind == WorldObjectKind.Tree)
             .Select(worldObject => worldObject.Anchor)
             .ToHashSet();
+        var caveMouths = _engine.World.CreateVerticalPassageSnapshot()
+            .Where(passage => passage.Upper.Z == 0)
+            .Select(passage => passage.Upper)
+            .ToHashSet();
         for (var y = 0; y < _engine.Map.Height; y++)
         {
             for (var x = 0; x < _engine.Map.Width; x++)
             {
-                var cell = _engine.Map.GetCell(new GridPosition(x, y));
-                if (_visibleLevel == 0)
+                var position = new GridPosition(x, y, _visibleLevel);
+                var cell = _engine.Map.GetColumnCell(position);
+                if (cell.SurfaceLevel == _visibleLevel)
                 {
                     if (cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater)
                     {
@@ -219,23 +248,53 @@ public partial class WorldView : Node2D
                                 _terrainTransitionAtlas, sprite, cell.RampDirection)
                             : TerrainSprites.GetRegion(_terrainAtlas, sprite));
                     DrawTerrainRelief(x, y, cell, drawSlopeOverlay: !useGeneratedTransition);
-                    DrawCaveMouth(x, y);
+                    DrawCaveMouth(x, y, caveMouths);
                     continue;
                 }
 
-                DrawRect(
-                    CellRect(x, y),
-                    cell.FloorLevel == _visibleLevel
-                        ? new Color("35443d")
-                        : new Color("101719"));
+                if (cell.SurfaceLevel > _visibleLevel)
+                {
+                    DrawHillInterior(position, cell);
+                    continue;
+                }
+
+                DrawRect(CellRect(x, y), new Color("101719"));
             }
         }
     }
 
-    private void DrawCaveMouth(int x, int y)
+    private void DrawHillInterior(GridPosition position, MapCell column)
+    {
+        var rect = CellRect(position.X, position.Y);
+        var depth = column.SurfaceLevel - position.Z;
+        if (depth == 1)
+        {
+            DrawTextureRectRegion(
+                _terrainAtlas,
+                rect,
+                TerrainSprites.GetRegion(_terrainAtlas, TerrainSprite.BogGround));
+            DrawRect(rect, new Color(0.14f, 0.11f, 0.07f, 0.58f));
+            return;
+        }
+
+        if (_engine.Map.IsHillRockPosition(position))
+        {
+            var rock = _engine.Map.GetHillRockCell(position).Rock;
+            DrawTextureRectRegion(
+                _caveAtlas,
+                rect,
+                CaveSprites.GetFloorRegion(_caveAtlas, rock));
+            DrawRect(rect, CaveSprites.GetFloorShade(rock).Darkened(0.28f));
+            return;
+        }
+
+        DrawRect(rect, new Color("17130f"));
+    }
+
+    private void DrawCaveMouth(int x, int y, ISet<GridPosition> caveMouths)
     {
         var position = new GridPosition(x, y);
-        if (!_engine.Map.CaveEntrances.Contains(position))
+        if (!caveMouths.Contains(position))
         {
             return;
         }
@@ -248,6 +307,9 @@ public partial class WorldView : Node2D
 
     private void DrawCaveTerrain()
     {
+        var passagePositions = _engine.World.CreateVerticalPassageSnapshot()
+            .SelectMany(passage => new[] { passage.Upper, passage.Lower })
+            .ToHashSet();
         for (var y = 0; y < _engine.Map.Height; y++)
         {
             for (var x = 0; x < _engine.Map.Width; x++)
@@ -259,6 +321,16 @@ public partial class WorldView : Node2D
                     continue;
                 }
 
+                if (_engine.World.TryGetFluid(position, out var fluid, out var depthLevels) &&
+                    fluid == CellFluidKind.Water)
+                {
+                    DrawWaterTile(x, y, TerrainKind.DeepWater);
+                    DrawRect(
+                        CellRect(x, y),
+                        new Color(0.015f, 0.035f, 0.045f, Math.Min(0.34f, depthLevels * 0.17f)));
+                    continue;
+                }
+
                 var cell = _engine.Map.GetCaveCell(position);
                 if (cell.IsOpen || _engine.World.ExcavatedCaveCells.Contains(position))
                 {
@@ -267,7 +339,7 @@ public partial class WorldView : Node2D
                         CellRect(x, y),
                         CaveSprites.GetFloorRegion(_caveAtlas, cell.Rock));
                     DrawRect(CellRect(x, y), CaveSprites.GetFloorShade(cell.Rock));
-                    if (cell.Kind == CaveCellKind.Ramp)
+                    if (passagePositions.Contains(position))
                     {
                         DrawCavePassage(position);
                     }
@@ -384,8 +456,9 @@ public partial class WorldView : Node2D
     private void DrawCavePassage(GridPosition position)
     {
         var center = CellCenter(position);
-        var connectsUp = _engine.Map.VerticalPassages.Any(passage => passage.Lower == position);
-        var connectsDown = _engine.Map.VerticalPassages.Any(passage => passage.Upper == position);
+        var passages = _engine.World.CreateVerticalPassageSnapshot();
+        var connectsUp = passages.Any(passage => passage.Lower == position);
+        var connectsDown = passages.Any(passage => passage.Upper == position);
         var color = connectsUp ? new Color("d8b36a") : new Color("7394ad");
         DrawCircle(center, 6.5f, new Color(0.035f, 0.04f, 0.04f, 0.7f));
         DrawArc(center, 6.5f, 0f, Mathf.Tau, 20, color, 1.5f);
@@ -406,11 +479,11 @@ public partial class WorldView : Node2D
         var rect = CellRect(x, y);
         if (cell.SurfaceLevel > 0)
         {
-            DrawRect(rect, new Color(1f, 0.96f, 0.78f, 0.035f * cell.SurfaceLevel));
+            DrawRect(rect, new Color(1f, 0.94f, 0.68f, 0.085f * cell.SurfaceLevel));
         }
         else if (cell.SurfaceLevel < 0)
         {
-            DrawRect(rect, new Color(0.02f, 0.04f, 0.07f, 0.12f));
+            DrawRect(rect, new Color(0.02f, 0.04f, 0.07f, 0.2f));
         }
 
         if (drawSlopeOverlay && cell.RampDirection != TerrainRampDirection.None)
@@ -593,13 +666,14 @@ public partial class WorldView : Node2D
 
     private void DrawPlants()
     {
-        if (_visibleLevel != 0)
+        if (_visibleLevel < 0)
         {
             return;
         }
 
         foreach (var plant in _snapshot.PlantPatches.Where(item =>
-                     item.Biomass > 0 || item.Kind == PlantKind.BerryBush))
+                     (item.Biomass > 0 || item.Kind == PlantKind.BerryBush) &&
+                     _engine.Map.GetTerrainSurfacePosition(item.Position).Z == _visibleLevel))
         {
             var center = CellCenter(plant.Position);
             if (plant.Kind == PlantKind.FishShoal)
@@ -619,6 +693,7 @@ public partial class WorldView : Node2D
                 PlantKind.BerryBush => EnvironmentSprite.BareBerryBush,
                 PlantKind.MushroomCluster => EnvironmentSprite.MushroomCluster,
                 PlantKind.EdibleRoots => EnvironmentSprite.EdibleRoots,
+                PlantKind.ReedBed => EnvironmentSprite.Reeds,
                 _ => throw new ArgumentOutOfRangeException(),
             };
             var size = plant.Kind is PlantKind.MushroomCluster or PlantKind.EdibleRoots
@@ -686,6 +761,13 @@ public partial class WorldView : Node2D
                 continue;
             }
 
+            if (worldObject.Kind == WorldObjectKind.PrimitiveWorkshop &&
+                worldObject.Anchor.Z == _visibleLevel)
+            {
+                DrawPrimitiveWorkshop(worldObject.Anchor);
+                continue;
+            }
+
             var baseColor = worldObject.Kind == WorldObjectKind.WoodenWalkway
                 ? new Color("b8894c")
                 : worldObject.Owner == WorldObjectOwner.GoblinTribe
@@ -708,6 +790,27 @@ public partial class WorldView : Node2D
                     color);
             }
         }
+    }
+
+    private void DrawPrimitiveWorkshop(GridPosition position)
+    {
+        var rect = CellRect(position.X, position.Y).Grow(-2.5f);
+        DrawRect(rect, new Color("37281d"));
+        var bench = new Rect2(
+            rect.Position + new Vector2(1.5f, rect.Size.Y * 0.28f),
+            new Vector2(rect.Size.X - 3f, rect.Size.Y * 0.38f));
+        DrawRect(bench, new Color("8b6038"));
+        DrawLine(bench.Position, new Vector2(bench.End.X, bench.Position.Y),
+            new Color("c18a50"), 1.2f);
+        DrawLine(bench.Position + new Vector2(3f, bench.Size.Y),
+            bench.Position + new Vector2(2f, rect.Size.Y * 0.62f),
+            new Color("5a3b26"), 2f);
+        DrawLine(new Vector2(bench.End.X - 3f, bench.End.Y),
+            new Vector2(bench.End.X - 2f, rect.End.Y - 1f),
+            new Color("5a3b26"), 2f);
+        DrawCircle(bench.GetCenter() + new Vector2(-3f, -1f), 2.2f, new Color("d7d0b2"));
+        DrawLine(bench.GetCenter(), bench.GetCenter() + new Vector2(5f, -4f),
+            new Color("8e9594"), 1.5f);
     }
 
     private void DrawWalkways(IReadOnlySet<GridPosition> walkwayCells)
@@ -852,7 +955,8 @@ public partial class WorldView : Node2D
 
     private void DrawIllustratedHumanStructure(WorldObjectSnapshot worldObject)
     {
-        var sprite = (worldObject.Kind, _visibleLevel) switch
+        var relativeLevel = _visibleLevel - worldObject.Anchor.Z;
+        var sprite = (worldObject.Kind, relativeLevel) switch
         {
             (WorldObjectKind.HumanCottage, 0) => HumanStructureSprite.CottageGround,
             (WorldObjectKind.HumanCottage, 1) => HumanStructureSprite.CottageRoof,
@@ -1210,9 +1314,12 @@ public partial class WorldView : Node2D
     private void DrawIllustratedNaturalStructure(WorldObjectSnapshot worldObject)
     {
         var center = CellCenter(worldObject.Anchor);
+        var surfaceOffset = worldObject.Anchor.Z == 0
+            ? _engine.Map.GetColumnCell(worldObject.Anchor).SurfaceLevel
+            : 0;
         if (worldObject.Kind == WorldObjectKind.Boulder)
         {
-            if (_visibleLevel == 0)
+            if (_visibleLevel == worldObject.Anchor.Z + surfaceOffset)
             {
                 const float boulderSize = 25f;
                 DrawCircle(center + new Vector2(1.5f, 2f), 10.5f, new Color(0, 0, 0, 0.45f));
@@ -1228,7 +1335,7 @@ public partial class WorldView : Node2D
 
         if (worldObject.Kind == WorldObjectKind.DeadTreeStump)
         {
-            if (_visibleLevel == 0)
+            if (_visibleLevel == worldObject.Anchor.Z + surfaceOffset)
             {
                 const float stumpSize = 17f;
                 DrawTextureRectRegion(
@@ -1240,7 +1347,7 @@ public partial class WorldView : Node2D
         }
 
         var visibleParts = worldObject.GetAbsoluteParts()
-            .Where(item => item.Position.Z == _visibleLevel)
+            .Where(item => item.Position.Z + surfaceOffset == _visibleLevel)
             .Select(item => item.Part.Kind)
             .ToArray();
         if (visibleParts.Contains(WorldObjectPartKind.TreeTrunk))
@@ -1370,19 +1477,28 @@ public partial class WorldView : Node2D
             var color = designation.Kind switch
             {
                 WorkDesignationKind.GatherFood => new Color(0.55f, 0.9f, 0.28f, 0.72f),
+                WorkDesignationKind.GatherReeds => new Color(0.72f, 0.86f, 0.32f, 0.78f),
                 WorkDesignationKind.GatherBrushwood => new Color(0.72f, 0.46f, 0.22f, 0.78f),
                 WorkDesignationKind.UprootBerryBush => new Color(0.92f, 0.3f, 0.2f, 0.82f),
                 WorkDesignationKind.FellTree => new Color(0.95f, 0.72f, 0.18f, 0.86f),
                 WorkDesignationKind.GatherStone => new Color(0.62f, 0.7f, 0.76f, 0.8f),
                 WorkDesignationKind.QuarryBoulder => new Color(0.75f, 0.82f, 0.88f, 0.9f),
                 WorkDesignationKind.MineRock => new Color(0.9f, 0.62f, 0.2f, 0.92f),
+                WorkDesignationKind.CarveRampDown => new Color(0.3f, 0.66f, 0.95f, 0.94f),
+                WorkDesignationKind.CarveRampUp => new Color(0.96f, 0.74f, 0.3f, 0.94f),
+                WorkDesignationKind.Scout => new Color(0.38f, 0.78f, 0.94f, 0.68f),
+                WorkDesignationKind.HuntAnimal => new Color(0.96f, 0.32f, 0.18f, 0.88f),
                 _ => Colors.Magenta,
             };
+            if (designation.IsSuspended)
+            {
+                color = color.Lerp(new Color(0.34f, 0.36f, 0.38f, 0.42f), 0.72f);
+            }
             DrawRect(
                 CellRect(designation.Target.X, designation.Target.Y).Grow(-4f),
                 color,
                 filled: false,
-                width: 0.7f);
+                width: designation.IsSuspended ? 0.5f : 0.7f);
         }
     }
 
@@ -1391,12 +1507,17 @@ public partial class WorldView : Node2D
         var color = _workPreviewKind switch
         {
             WorkDesignationKind.GatherFood => new Color(0.65f, 1f, 0.3f, 0.9f),
+            WorkDesignationKind.GatherReeds => new Color(0.78f, 0.96f, 0.36f, 0.92f),
             WorkDesignationKind.GatherBrushwood => new Color(0.9f, 0.58f, 0.25f, 0.9f),
             WorkDesignationKind.UprootBerryBush => new Color(1f, 0.32f, 0.2f, 0.92f),
             WorkDesignationKind.FellTree => new Color(1f, 0.78f, 0.18f, 0.95f),
             WorkDesignationKind.GatherStone => new Color(0.7f, 0.8f, 0.88f, 0.92f),
             WorkDesignationKind.QuarryBoulder => new Color(0.84f, 0.9f, 0.96f, 0.96f),
             WorkDesignationKind.MineRock => new Color(1f, 0.7f, 0.24f, 0.96f),
+            WorkDesignationKind.CarveRampDown => new Color(0.34f, 0.76f, 1f, 0.98f),
+            WorkDesignationKind.CarveRampUp => new Color(1f, 0.82f, 0.34f, 0.98f),
+            WorkDesignationKind.Scout => new Color(0.42f, 0.86f, 1f, 0.88f),
+            WorkDesignationKind.HuntAnimal => new Color(1f, 0.36f, 0.2f, 0.96f),
             _ => new Color(0.95f, 0.28f, 0.24f, 0.9f),
         };
         foreach (var cell in _workPreview.Where(cell => cell.Z == _visibleLevel))
@@ -1418,7 +1539,7 @@ public partial class WorldView : Node2D
                 var center = GetVisualActorPosition(actors[index]) + offsets[actors[index].Id];
                 var healthRatio = (float)actors[index].Health / _engine.Definitions.MaximumHealth;
                 var healthColor = new Color("b5443e").Lerp(new Color("a8d14b"), healthRatio);
-                if (actors[index].Id == _selectedActorId)
+                if (_selectedActorIds.Contains(actors[index].Id))
                 {
                     DrawCircle(center, 6.5f, new Color("f5dc72"));
                 }
@@ -1433,6 +1554,74 @@ public partial class WorldView : Node2D
                 DrawActorIntent(actors[index], center);
             }
         }
+    }
+
+    private void DrawGoblinBuds()
+    {
+        foreach (var bud in _snapshot.GoblinBuds.Where(bud =>
+                     bud.Position.Z == _visibleLevel &&
+                     _snapshot.GetVisibility(bud.Position, _engine.Map.Width) != CellVisibility.Unknown))
+        {
+            var center = CellCenter(bud.Position);
+            var progress = 1f - (float)bud.RemainingCareTicks / bud.TotalCareTicks;
+            DrawCircle(center + new Vector2(0, 2), 5.5f, new Color(0.15f, 0.23f, 0.12f, 0.9f));
+            DrawCircle(center, 4.2f, new Color("91c95a"));
+            DrawCircle(center + new Vector2(-2.5f, -3.5f), 1.5f, new Color("bfdc72"));
+            DrawCircle(center + new Vector2(2.2f, -3f), 1.2f, new Color("bfdc72"));
+            DrawArc(
+                center,
+                7f,
+                -Mathf.Pi / 2,
+                -Mathf.Pi / 2 + Mathf.Tau * progress,
+                20,
+                new Color("e4ef9a"),
+                1.8f);
+        }
+    }
+
+    private void DrawAnimals()
+    {
+        foreach (var animal in _snapshot.Animals.Where(animal =>
+                     animal.Position.Z == _visibleLevel &&
+                     _snapshot.GetVisibility(animal.Position, _engine.Map.Width) ==
+                     CellVisibility.Visible))
+        {
+            var center = GetVisualAnimalPosition(animal);
+            if (animal.Kind == AnimalKind.MarshHare)
+            {
+                DrawEllipse(center + new Vector2(0, 1), new Vector2(4.6f, 3.2f),
+                    new Color("b9aa86"));
+                DrawLine(center + new Vector2(-1.5f, -2), center + new Vector2(-2.2f, -6),
+                    new Color("d5c9a8"), 1.8f);
+                DrawLine(center + new Vector2(0.5f, -2), center + new Vector2(1.2f, -6),
+                    new Color("d5c9a8"), 1.8f);
+                DrawCircle(center + new Vector2(2.6f, -0.4f), 0.65f, new Color("241d18"));
+            }
+            else
+            {
+                DrawEllipse(center, new Vector2(6.2f, 4.2f), new Color("665044"));
+                DrawCircle(center + new Vector2(5, 1), 2.3f, new Color("7b5d4c"));
+                DrawLine(center + new Vector2(6.4f, 1.8f), center + new Vector2(8, 0.5f),
+                    new Color("e5d3a4"), 1.4f);
+                if (animal.Activity == AnimalActivity.Threatening)
+                {
+                    DrawArc(center, 8f, 0, Mathf.Tau, 20, new Color("e15b45"), 1.8f);
+                }
+            }
+        }
+    }
+
+    private void DrawEllipse(Vector2 center, Vector2 radius, Color color)
+    {
+        var points = new Vector2[20];
+        for (var index = 0; index < points.Length; index++)
+        {
+            var angle = Mathf.Tau * index / points.Length;
+            points[index] = center + new Vector2(
+                Mathf.Cos(angle) * radius.X,
+                Mathf.Sin(angle) * radius.Y);
+        }
+        DrawColoredPolygon(points, color);
     }
 
     private void DrawHumanCohorts()
@@ -1592,6 +1781,8 @@ public partial class WorldView : Node2D
                 ActorJobKind.Haul => new Color(0.96f, 0.62f, 0.25f, 0.72f),
                 ActorJobKind.SupplyConstruction => new Color(0.98f, 0.68f, 0.25f, 0.82f),
                 ActorJobKind.BuildConstruction => new Color(0.38f, 0.82f, 0.92f, 0.82f),
+                ActorJobKind.SupplyCrafting => new Color(0.78f, 0.58f, 0.34f, 0.82f),
+                ActorJobKind.Craft => new Color(0.72f, 0.82f, 0.42f, 0.82f),
                 ActorJobKind.Rest => new Color(0.48f, 0.72f, 0.96f, 0.72f),
                 ActorJobKind.Collapsed => new Color(0.34f, 0.42f, 0.64f, 0.78f),
                 ActorJobKind.Eat => new Color(0.96f, 0.38f, 0.48f, 0.76f),
@@ -1641,6 +1832,27 @@ public partial class WorldView : Node2D
         }
     }
 
+    private void DrawCraftingOrders()
+    {
+        foreach (var order in _snapshot.CraftingOrders.Where(order =>
+                     order.Workshop.Z == _visibleLevel))
+        {
+            var required = order.Materials.Sum(material => material.RequiredQuantity);
+            var delivered = order.Materials.Sum(material => material.DeliveredQuantity);
+            var materialProgress = required == 0 ? 1f : (float)delivered / required;
+            var workProgress = order.TotalWorkTicks == 0
+                ? 1f
+                : 1f - ((float)order.RemainingWorkTicks / order.TotalWorkTicks);
+            var rect = CellRect(order.Workshop.X, order.Workshop.Y).Grow(-3f);
+            var position = rect.Position + new Vector2(1f, 2f);
+            var width = rect.Size.X - 2f;
+            DrawRect(new Rect2(position, new Vector2(width, 2f)), new Color(0.06f, 0.07f, 0.06f, 0.88f));
+            DrawRect(new Rect2(position, new Vector2(width * materialProgress, 2f)), new Color("d59b62"));
+            DrawRect(new Rect2(position + new Vector2(0f, 3f), new Vector2(width, 2f)), new Color(0.06f, 0.07f, 0.06f, 0.88f));
+            DrawRect(new Rect2(position + new Vector2(0f, 3f), new Vector2(width * workProgress, 2f)), new Color("a8cc68"));
+        }
+    }
+
     private void DrawFog()
     {
         for (var y = 0; y < _engine.Map.Height; y++)
@@ -1666,7 +1878,7 @@ public partial class WorldView : Node2D
 
     private void DrawOrderedDestination()
     {
-        var selected = _snapshot.Actors.FirstOrDefault(actor => actor.Id == _selectedActorId);
+        var selected = _snapshot.Actors.FirstOrDefault(actor => _selectedActorIds.Contains(actor.Id));
         if (selected.Id == EntityId.None ||
             selected.Job.Kind != ActorJobKind.Move ||
             selected.Job.Target.Z != _visibleLevel)
@@ -1696,9 +1908,15 @@ public partial class WorldView : Node2D
             ActorJobKind.FellTree => UiIcon.FellTree,
             ActorJobKind.QuarryBoulder => UiIcon.Work,
             ActorJobKind.MineRock => UiIcon.Work,
+            ActorJobKind.CarveRamp => UiIcon.Work,
+            ActorJobKind.TendBud => UiIcon.GatherFood,
+            ActorJobKind.HuntAnimal => UiIcon.Expedition,
             ActorJobKind.Haul => UiIcon.FoodStorage,
+            ActorJobKind.ClearConstructionSite => UiIcon.GatherBrushwood,
             ActorJobKind.SupplyConstruction => UiIcon.GatherBrushwood,
             ActorJobKind.BuildConstruction => UiIcon.Build,
+            ActorJobKind.SupplyCrafting => UiIcon.GatherBrushwood,
+            ActorJobKind.Craft => UiIcon.Build,
             ActorJobKind.Rest => UiIcon.FieldCamp,
             ActorJobKind.Collapsed => UiIcon.FieldCamp,
             ActorJobKind.Eat => UiIcon.Hunger,
@@ -1737,6 +1955,23 @@ public partial class WorldView : Node2D
         }
     }
 
+    private void SynchronizeAnimalPositions()
+    {
+        var livingIds = _snapshot.Animals.Select(animal => animal.Id).ToHashSet();
+        foreach (var id in _visualAnimalPositions.Keys.Where(id => !livingIds.Contains(id)).ToArray())
+        {
+            _visualAnimalPositions.Remove(id);
+            _targetAnimalPositions.Remove(id);
+        }
+
+        foreach (var animal in _snapshot.Animals)
+        {
+            var target = CellCenter(animal.Position);
+            _targetAnimalPositions[animal.Id] = target;
+            _visualAnimalPositions.TryAdd(animal.Id, target);
+        }
+    }
+
     private Dictionary<EntityId, Vector2> CreateActorOffsets()
     {
         var result = new Dictionary<EntityId, Vector2>();
@@ -1757,6 +1992,9 @@ public partial class WorldView : Node2D
 
     private Vector2 GetVisualActorPosition(ActorSnapshot actor) =>
         _visualActorPositions.GetValueOrDefault(actor.Id, CellCenter(actor.Position));
+
+    private Vector2 GetVisualAnimalPosition(AnimalSnapshot animal) =>
+        _visualAnimalPositions.GetValueOrDefault(animal.Id, CellCenter(animal.Position));
 
     private static Rect2 CellRect(int x, int y) => new(
         x * TileSize,

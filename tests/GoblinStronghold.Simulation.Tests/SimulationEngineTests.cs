@@ -11,7 +11,7 @@ public sealed class SimulationEngineTests
     private static readonly SimulationTick FinalTick = new(480);
 
     [Fact]
-    public void DefaultActiveMapUsesTheExpandedSixtyFourCellRegion()
+    public void DefaultActiveMapUsesTheExpandedNinetySixCellRegion()
     {
         var engine = SimulationEngine.Create(
             new WorldSeed(0x4C41524745UL),
@@ -19,8 +19,8 @@ public sealed class SimulationEngineTests
             initialGoblinCount: 1,
             initialFoodStock: 0);
 
-        Assert.Equal(64, engine.Map.Width);
-        Assert.Equal(64, engine.Map.Height);
+        Assert.Equal(SwampMapGenerator.DefaultDimension, engine.Map.Width);
+        Assert.Equal(SwampMapGenerator.DefaultDimension, engine.Map.Height);
         Assert.True(engine.Map.LevelCount >= 4);
     }
 
@@ -193,6 +193,35 @@ public sealed class SimulationEngineTests
         Assert.True(builder.Experience.Building > 0);
         Assert.True(builder.Experience.Hauling > 0);
         Assert.True(builder.KnownSkills.HasFlag(GoblinSkill.Building));
+    }
+
+    [Fact]
+    public void FoodStorageMayBePlannedOnOpenCaveFloorAtItsActualLevel()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x4341564553544FUL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 5);
+        var caveFloor =
+            (from level in Enumerable.Range(1, engine.Map.CaveLevelCount)
+             from y in Enumerable.Range(0, engine.Map.Height)
+             from x in Enumerable.Range(0, engine.Map.Width)
+             let position = new GridPosition(x, y, -level)
+             where engine.World.IsTerrainTraversable(position)
+             select position).First();
+
+        engine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            new SimulationTick(1),
+            sequence: 1,
+            caveFloor));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.FoodStorage, site.Kind);
+        Assert.Equal(caveFloor, site.Anchor);
+        Assert.Equal(caveFloor, site.End);
     }
 
 
@@ -825,10 +854,24 @@ public sealed class SimulationEngineTests
             initialFoodStock: 0,
             initialWoodStock: 2,
             scatterInitialBrushwood: false);
+        var initialSnapshot = engine.CreateSnapshot();
+        var occupied = initialSnapshot.ItemStacks
+            .Where(stack => stack.Location.Kind == ItemLocationKind.Ground)
+            .Select(stack => stack.Location.Position)
+            .Concat(initialSnapshot.StorageZones.Select(zone => zone.Position))
+            .ToHashSet();
+        var position = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.IsSurfaceTraversable)
+            .Where(candidate => !occupied.Contains(candidate))
+            .OrderBy(candidate => Math.Abs(candidate.X - engine.Map.GoblinSpawn.X) +
+                Math.Abs(candidate.Y - engine.Map.GoblinSpawn.Y))
+            .First();
         engine.QueueCommand(SimulationCommand.BuildFoodStorage(
             new SimulationTick(1),
             sequence: 1,
-            engine.Map.GoblinSpawn));
+            position));
         engine.AdvanceTicks(1);
         var siteId = Assert.Single(engine.CreateSnapshot().ConstructionSites).Id;
 
@@ -921,11 +964,24 @@ public sealed class SimulationEngineTests
             scatterInitialBrushwood: true);
         var woodStackCount = engine.CreateSnapshot().ItemStacks.Count(stack =>
             stack.Resource == ResourceKind.Wood);
+        var occupied = engine.CreateSnapshot().ItemStacks
+            .Where(stack => stack.Location.Kind == ItemLocationKind.Ground)
+            .Select(stack => stack.Location.Position)
+            .Concat(engine.CreateSnapshot().StorageZones.Select(zone => zone.Position))
+            .ToHashSet();
+        var position = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.IsSurfaceTraversable)
+            .Where(candidate => !occupied.Contains(candidate))
+            .OrderBy(candidate => Math.Abs(candidate.X - engine.Map.GoblinSpawn.X) +
+                Math.Abs(candidate.Y - engine.Map.GoblinSpawn.Y))
+            .First();
         var searchesBefore = engine.Navigation.GetMetrics().Searches;
         engine.QueueCommand(SimulationCommand.BuildFoodStorage(
             new SimulationTick(1),
             sequence: 1,
-            engine.Map.GoblinSpawn));
+            position));
 
         engine.AdvanceTicks(1);
 
@@ -946,6 +1002,79 @@ public sealed class SimulationEngineTests
             .Order()
             .ToArray();
         Assert.Equal(expectedStackIds, indexedStackIds);
+    }
+
+    [Fact]
+    public void ConstructionBlueprintClearsLooseStackBeforeBuilding()
+    {
+        var definitions = SimulationDefinitions.Foundation;
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x434C454152UL),
+            definitions,
+            initialGoblinCount: 1,
+            initialFoodStock: 20,
+            initialWoodStock: 8);
+        var snapshot = engine.CreateSnapshot();
+        var occupiedByStack = snapshot.ItemStacks
+            .Where(stack => stack.Location.Kind == ItemLocationKind.Ground)
+            .Select(stack => stack.Location.Position)
+            .ToHashSet();
+        var storagePositions = snapshot.StorageZones.Select(zone => zone.Position).ToHashSet();
+        var workshop = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.CanBuildPrimitiveWorkshop)
+            .Where(position => !occupiedByStack.Contains(position) &&
+                !storagePositions.Contains(position) &&
+                engine.Navigation.HasSurfacePath(engine.Map.GoblinSpawn, position))
+            .OrderBy(position => Math.Abs(position.X - engine.Map.GoblinSpawn.X) +
+                Math.Abs(position.Y - engine.Map.GoblinSpawn.Y))
+            .First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var blockingStack = save["itemStacks"]!.AsArray()
+            .First(item => item!["resource"]!.GetValue<int>() == (int)ResourceKind.Food)!
+            .AsObject();
+        var blockingStackId = new EntityId(blockingStack["id"]!.GetValue<ulong>());
+        blockingStack["quantity"] = 1;
+        blockingStack["locationKind"] = (int)ItemLocationKind.Ground;
+        blockingStack["x"] = workshop.X;
+        blockingStack["y"] = workshop.Y;
+        blockingStack["z"] = workshop.Z;
+        blockingStack["ownerId"] = EntityId.None.Value;
+        engine = SimulationEngine.Load(save.ToJsonString(), definitions);
+        engine.QueueCommand(SimulationCommand.BuildPrimitiveWorkshop(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            workshop));
+
+        for (var tick = 0; tick < 500 &&
+             engine.CreateSnapshot().Actors.Single().Job.Kind !=
+                 ActorJobKind.ClearConstructionSite; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var clearing = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(ActorJobKind.ClearConstructionSite, clearing.Job.Kind);
+        var constructionSite = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(
+            ConstructionReadinessState.AwaitingSiteClearance,
+            engine.InspectConstructionReadiness(constructionSite.Id).State);
+        var restored = SimulationEngine.Load(engine.Save(), definitions);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+
+        for (var tick = 0; tick < 5_000 &&
+             !engine.World.HasPrimitiveWorkshop(workshop); tick++)
+        {
+            engine.AdvanceTicks(1);
+            restored.AdvanceTicks(1);
+        }
+
+        Assert.True(engine.World.HasPrimitiveWorkshop(workshop));
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        var movedStack = engine.CreateSnapshot().ItemStacks
+            .Single(stack => stack.Id == blockingStackId);
+        Assert.NotEqual(ItemLocation.OnGround(workshop), movedStack.Location);
     }
 
     [Fact]

@@ -84,14 +84,20 @@ public partial class MinimapView : Control
                     continue;
                 }
 
-                var terrain = _engine.Map.GetCell(position).Terrain;
-                var color = terrain switch
+                var cell = _engine.Map.GetCell(position);
+                var color = cell.Terrain switch
                 {
                     TerrainKind.SolidGround => new Color("668b4d"),
                     TerrainKind.Mud => new Color("4f5838"),
                     TerrainKind.ShallowWater => new Color("4b8890"),
                     TerrainKind.DeepWater => new Color("28536d"),
                     _ => Colors.Magenta,
+                };
+                color = cell.SurfaceLevel switch
+                {
+                    > 0 => color.Lightened(Math.Min(0.28f, cell.SurfaceLevel * 0.13f)),
+                    < 0 => color.Darkened(0.22f),
+                    _ => color,
                 };
                 if (visibility == CellVisibility.Explored)
                 {

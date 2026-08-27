@@ -29,6 +29,7 @@ public enum WorldObjectKind : byte
     StoneWall = 14,
     StoneDoorFrame = 15,
     WallTorch = 16,
+    PrimitiveWorkshop = 17,
 }
 
 public enum WorldObjectOwner : byte
@@ -72,6 +73,7 @@ public enum WorldObjectPartKind : byte
     AutomaticallyOpenedDoorLeaf = 13,
     Boulder = 14,
     WallTorch = 15,
+    PrimitiveWorkshop = 16,
 }
 
 public readonly record struct WorldObjectPartSnapshot(

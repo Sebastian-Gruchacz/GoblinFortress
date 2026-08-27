@@ -68,6 +68,7 @@ internal static class ItemIcons
         ResourceKind.Coal => ItemIcon.Stone,
         ResourceKind.Ore => ItemIcon.Stone,
         ResourceKind.Bone => ItemIcon.Bone,
+        ResourceKind.Hide => ItemIcon.RagClothes,
         _ => ItemIcon.Unknown,
     };
 
@@ -75,6 +76,7 @@ internal static class ItemIcons
     {
         ResourceKind.Coal => new Color("5f6468"),
         ResourceKind.Ore => new Color("d9783d"),
+        ResourceKind.Hide => new Color("b88759"),
         _ => Colors.White,
     };
 }

@@ -8,6 +8,66 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class MoveCommandTests
 {
     [Fact]
+    public void OrderedGoblinClimbsGeneratedTerrainRampToMaterialHillSurface()
+    {
+        var seed = new WorldSeed(0x48494C4C434C494DUL);
+        var map = SwampMapGenerator.Generate(seed, 96, 96);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 20);
+        var transition = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(column => map.GetColumnCell(column).RampDirection != TerrainRampDirection.None)
+            .Select(column =>
+            {
+                var direction = map.GetColumnCell(column).RampDirection;
+                var uphillColumn = direction switch
+                {
+                    TerrainRampDirection.North => column with { Y = column.Y - 1 },
+                    TerrainRampDirection.East => column with { X = column.X + 1 },
+                    TerrainRampDirection.South => column with { Y = column.Y + 1 },
+                    TerrainRampDirection.West => column with { X = column.X - 1 },
+                    _ => column,
+                };
+                return (
+                    Lower: map.GetTerrainSurfacePosition(column),
+                    Upper: map.GetTerrainSurfacePosition(uphillColumn));
+            })
+            .First(item => item.Upper.Z > item.Lower.Z &&
+                engine.World.IsTerrainTraversable(item.Lower) &&
+                engine.World.IsTerrainTraversable(item.Upper));
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["actors"]![0]!["x"] = transition.Lower.X;
+        save["actors"]![0]!["y"] = transition.Lower.Y;
+        save["actors"]![0]!["z"] = transition.Lower.Z;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+
+        engine.QueueCommand(SimulationCommand.Move(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            actor.Id,
+            transition.Upper));
+        engine.AdvanceTicks(1);
+
+        actor = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(ActorJobKind.Move, actor.Job.Kind);
+        Assert.Equal(transition.Upper, actor.Job.Target);
+        Assert.Equal(1, actor.Job.RemainingRouteSteps);
+
+        engine.AdvanceTicks(SimulationDefinitions.Foundation.ActorMovementIntervalTicks - 1);
+
+        actor = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(transition.Upper, actor.Position);
+        Assert.Equal(ActorJobKind.None, actor.Job.Kind);
+        Assert.Equal(CellVisibility.Visible, engine.Visibility.Get(transition.Upper));
+    }
+
+    [Fact]
     public void OrderedGoblinTravelsCellByCellAndCompletesAtDestination()
     {
         var engine = CreateEngine();
@@ -37,6 +97,107 @@ public sealed class MoveCommandTests
         Assert.Equal(ActorJobKind.None, completed.Job.Kind);
         Assert.Contains(events, item => item.Kind == SimulationEventKind.MoveOrdered);
         Assert.Contains(events, item => item.Kind == SimulationEventKind.MoveCompleted);
+    }
+
+    [Fact]
+    public void TraversedEdgeBecomesPersistedPersonalKnowledge()
+    {
+        var engine = CreateEngine();
+        var actor = engine.CreateSnapshot().Actors.Single();
+        var destination = engine.World.FindSurfacePath(actor.Position, engine.Map.HumanVillage)![0];
+        engine.QueueCommand(SimulationCommand.Move(
+            new SimulationTick(1),
+            sequence: 1,
+            actor.Id,
+            destination));
+
+        engine.AdvanceTicks(SimulationDefinitions.Foundation.ActorMovementIntervalTicks);
+
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var belief = Assert.Single(save["actors"]![0]!["navigationBeliefs"]!.AsArray())!;
+        Assert.Equal((int)NavigationBeliefStatus.Passable, belief["status"]!.GetValue<int>());
+        Assert.Equal(actor.Id.Value, belief["sourceActorId"]!.GetValue<ulong>());
+        Assert.True(belief["isDirectObservation"]!.GetValue<bool>());
+
+        var restored = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void OrderedMoveAvoidsAnEdgeKnownBlockedOnlyByThatGoblin()
+    {
+        var engine = CreateEngine();
+        var square = FindTraversableSquare(engine.World);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var actor = save["actors"]![0]!.AsObject();
+        actor["x"] = square.Start.X;
+        actor["y"] = square.Start.Y;
+        actor["z"] = square.Start.Z;
+        actor["navigationBeliefs"] = new JsonArray(new JsonObject
+        {
+            ["firstX"] = square.Start.X,
+            ["firstY"] = square.Start.Y,
+            ["firstZ"] = square.Start.Z,
+            ["secondX"] = square.Destination.X,
+            ["secondY"] = square.Destination.Y,
+            ["secondZ"] = square.Destination.Z,
+            ["status"] = (int)NavigationBeliefStatus.Blocked,
+            ["observedAt"] = 0,
+            ["receivedAt"] = 0,
+            ["sourceActorId"] = actor["id"]!.GetValue<ulong>(),
+            ["confidence"] = 100,
+            ["isDirectObservation"] = true,
+        });
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var goblin = engine.CreateSnapshot().Actors.Single();
+        engine.QueueCommand(SimulationCommand.Move(
+            new SimulationTick(1), sequence: 1, goblin.Id, square.Destination));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Contains(engine.DrainEvents(), simulationEvent =>
+            simulationEvent.Kind == SimulationEventKind.MoveOrdered &&
+            simulationEvent.Amount >= 3);
+        Assert.Equal(square.Start, engine.CreateSnapshot().Actors.Single().Position);
+    }
+
+    [Fact]
+    public void OrderedMoveUsesTribalReportWhenGoblinHasNoPersonalObservation()
+    {
+        var engine = CreateEngine();
+        var square = FindTraversableSquare(engine.World);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var actor = save["actors"]![0]!.AsObject();
+        actor["x"] = square.Start.X;
+        actor["y"] = square.Start.Y;
+        actor["z"] = square.Start.Z;
+        save["tribeNavigationBeliefs"] = new JsonArray(new JsonObject
+        {
+            ["firstX"] = square.Start.X,
+            ["firstY"] = square.Start.Y,
+            ["firstZ"] = square.Start.Z,
+            ["secondX"] = square.Destination.X,
+            ["secondY"] = square.Destination.Y,
+            ["secondZ"] = square.Destination.Z,
+            ["status"] = (int)NavigationBeliefStatus.Blocked,
+            ["observedAt"] = 0,
+            ["receivedAt"] = 0,
+            ["sourceActorId"] = 999UL,
+            ["confidence"] = 80,
+            ["isDirectObservation"] = false,
+        });
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var goblin = engine.CreateSnapshot().Actors.Single();
+        engine.QueueCommand(SimulationCommand.Move(
+            new SimulationTick(1), sequence: 1, goblin.Id, square.Destination));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Contains(engine.DrainEvents(), simulationEvent =>
+            simulationEvent.Kind == SimulationEventKind.MoveOrdered &&
+            simulationEvent.Amount >= 3);
+        Assert.Empty(JsonNode.Parse(engine.Save())!["actors"]![0]!["navigationBeliefs"]!
+            .AsArray());
     }
 
     [Fact]
@@ -198,7 +359,56 @@ public sealed class MoveCommandTests
     }
 
     [Fact]
-    public void MiningAreaKeepsBlockedRockQueuedUntilTunnelReachesIt()
+    public void StrandedCargoIsDroppedSoTheOnlyMinerCanTakeQueuedMiningWork()
+    {
+        var engine = CreateEngine();
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        var landing = engine.Map.VerticalPassages
+            .Where(passage => passage.Kind == VerticalPassageKind.CaveMouth)
+            .Select(passage => passage.Lower)
+            .First(position => engine.Navigation.FindPath(actor.Position, position) is not null);
+        var route = engine.Navigation.FindPath(actor.Position, landing)!;
+        engine.QueueCommand(SimulationCommand.Move(
+            new SimulationTick(1), sequence: 1, actor.Id, landing));
+        engine.AdvanceTicks((route.Count + 2) *
+            SimulationDefinitions.Foundation.ActorMovementIntervalTicks);
+        var rock =
+            (from y in Enumerable.Range(0, engine.Map.Height)
+             from x in Enumerable.Range(0, engine.Map.Width)
+             let position = new GridPosition(x, y, landing.Z)
+             where engine.World.CanExcavateRock(position) &&
+                   engine.Visibility.Get(position).IsDiscovered()
+             orderby Math.Abs(position.X - landing.X) + Math.Abs(position.Y - landing.Y)
+             select position).First();
+        var cargo = engine.CreateSnapshot().ItemStacks.First(stack =>
+            stack.Resource == ResourceKind.Food &&
+            stack.Location.Kind == ItemLocationKind.Ground);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), sequence: 2, landing, ResourceKind.Wood, capacity: 64));
+        engine.QueueCommand(SimulationCommand.PickUp(
+            engine.CurrentTick.Next(), sequence: 3, actor.Id, cargo.Id, quantity: 1));
+        engine.QueueCommand(SimulationCommand.DesignateRockMining(
+            engine.CurrentTick.Next(), sequence: 4, rock, rock));
+
+        engine.AdvanceTicks(1);
+
+        actor = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(EntityId.None, actor.CarriedStackId);
+        var dropEvent = Assert.Single(engine.DrainEvents(), item =>
+            item.Kind == SimulationEventKind.ItemDropped && item.Subject == actor.Id);
+        Assert.Contains(engine.CreateSnapshot().ItemStacks, stack =>
+            stack.Id == dropEvent.Target &&
+            stack.Location == ItemLocation.OnGround(actor.Position));
+
+        engine.AdvanceTicks(1);
+
+        actor = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(ActorJobKind.MineRock, actor.Job.Kind);
+        Assert.NotEqual(EntityId.None, actor.Job.SourceStackId);
+    }
+
+    [Fact]
+    public void MiningAreaKeepsUnknownCellsQueuedUntilTunnelReachesThem()
     {
         var engine = CreateEngine();
         var actor = engine.CreateSnapshot().Actors.Single();
@@ -231,7 +441,7 @@ public sealed class MoveCommandTests
                  first.Z)
              where engine.World.IsSolidCaveRock(second) &&
                    !engine.World.CanExcavateRock(second) &&
-                   engine.Visibility.Get(second).IsDiscovered()
+                   engine.Visibility.Get(second) == CellVisibility.Unknown
              orderby Math.Abs(first.X - landing.X) + Math.Abs(first.Y - landing.Y)
              select (First: first, Second: second)).First();
         engine.QueueCommand(SimulationCommand.DesignateRockMining(
@@ -451,6 +661,30 @@ public sealed class MoveCommandTests
         }
 
         throw new InvalidOperationException("The generated swamp has no impassable cell.");
+    }
+
+    private static (GridPosition Start, GridPosition Destination) FindTraversableSquare(
+        WorldMapState world)
+    {
+        for (var y = 0; y < world.Baseline.Height - 1; y++)
+        {
+            for (var x = 0; x < world.Baseline.Width - 1; x++)
+            {
+                var upperLeft = new GridPosition(x, y);
+                var upperRight = new GridPosition(x + 1, y);
+                var lowerLeft = new GridPosition(x, y + 1);
+                var lowerRight = new GridPosition(x + 1, y + 1);
+                if (world.CanTraverseTerrainEdge(upperLeft, upperRight, canOpenDoors: true) &&
+                    world.CanTraverseTerrainEdge(upperLeft, lowerLeft, canOpenDoors: true) &&
+                    world.CanTraverseTerrainEdge(lowerLeft, lowerRight, canOpenDoors: true) &&
+                    world.CanTraverseTerrainEdge(lowerRight, upperRight, canOpenDoors: true))
+                {
+                    return (upperLeft, upperRight);
+                }
+            }
+        }
+
+        throw new InvalidOperationException("Generated map has no traversable square.");
     }
 
     private static SimulationEngine CreateEngine()

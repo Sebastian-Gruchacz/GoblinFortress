@@ -6,6 +6,31 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class SwampMapGeneratorTests
 {
     [Fact]
+    public void CurrentDefaultMapHasProminentFoothillsNearGoblinRegion()
+    {
+        Assert.Equal(96, SwampMapGenerator.DefaultDimension);
+
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x474F424C494EUL),
+            SwampMapGenerator.DefaultDimension,
+            SwampMapGenerator.DefaultDimension);
+        var elevated = Positions(map)
+            .Where(position => map.GetCell(position).SurfaceLevel > 0)
+            .ToArray();
+        var nearestToGoblinCamp = elevated.Min(position =>
+            Math.Abs(position.X - map.GoblinSpawn.X) +
+            Math.Abs(position.Y - map.GoblinSpawn.Y));
+
+        Assert.True(
+            elevated.Length >= map.CellCount / 20,
+            $"Only {elevated.Length} of {map.CellCount} cells are elevated.");
+        Assert.Contains(elevated, position => map.GetCell(position).SurfaceLevel == 2);
+        Assert.True(
+            nearestToGoblinCamp <= map.Width / 4,
+            $"Nearest elevated cell is {nearestToGoblinCamp} steps from goblin spawn.");
+    }
+
+    [Fact]
     public void SameSeedProducesSameMap()
     {
         var first = SwampMapGenerator.Generate(new WorldSeed(123), width: 64, height: 48);
@@ -199,6 +224,8 @@ public sealed class SwampMapGeneratorTests
         var ramp = positions.First(position =>
             map.GetCell(position).RampDirection != TerrainRampDirection.None);
         var rampUphill = UphillNeighbor(ramp, map.GetCell(ramp).RampDirection);
+        var materialRamp = map.GetTerrainSurfacePosition(ramp);
+        var materialRampUphill = map.GetTerrainSurfacePosition(rampUphill);
         var cliff = (
                 from position in positions
                 from neighbor in map.GetCardinalNeighbors(position)
@@ -216,10 +243,155 @@ public sealed class SwampMapGeneratorTests
         Assert.Contains((sbyte)2, levels);
         Assert.True(map.CanTraverseSurfaceEdge(ramp, rampUphill));
         Assert.True(map.CanTraverseSurfaceEdge(rampUphill, ramp));
+        Assert.Equal(1, materialRampUphill.Z - materialRamp.Z);
+        Assert.True(map.CanTraverseTerrainSurfaceEdge(materialRamp, materialRampUphill));
+        Assert.True(map.CanTraverseTerrainSurfaceEdge(materialRampUphill, materialRamp));
+        Assert.Contains(materialRampUphill, map.GetTerrainNeighbors(materialRamp));
+        Assert.Equal(
+            new[] { materialRampUphill },
+            map.FindTerrainPath(materialRamp, materialRampUphill));
         Assert.False(map.CanTraverseSurfaceEdge(cliff.position, cliff.neighbor));
+        Assert.False(map.CanTraverseTerrainSurfaceEdge(
+            map.GetTerrainSurfacePosition(cliff.position),
+            map.GetTerrainSurfacePosition(cliff.neighbor)));
         Assert.True(map.HasTraversablePath(map.GoblinSpawn, map.HumanVillage));
+        var materialRoute = map.FindTerrainPath(
+            map.GetTerrainSurfacePosition(map.GoblinSpawn),
+            map.GetTerrainSurfacePosition(map.HumanVillage));
+        Assert.NotNull(materialRoute);
+        Assert.All(materialRoute!, position => Assert.True(map.IsTerrainTraversable(position)));
         Assert.Equal(0, map.GetCell(map.GoblinSpawn).SurfaceLevel);
         Assert.Equal(0, map.GetCell(map.HumanVillage).SurfaceLevel);
+    }
+
+    [Fact]
+    public void CurrentHillsExposeDistinctSurfaceAndRockVolumeCoordinates()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x48494C4C564F4CUL), 96, 96);
+        var column = Positions(map)
+            .Where(position => map.GetCell(position) is
+                { Terrain: TerrainKind.SolidGround, SurfaceLevel: > 0 })
+            .OrderByDescending(position => map.GetCell(position).SurfaceLevel)
+            .First();
+        var surface = map.GetTerrainSurfacePosition(column);
+        var lowerRock = column;
+
+        Assert.True(surface.Z > 0);
+        Assert.True(map.IsTerrainSurfacePosition(surface));
+        Assert.False(map.IsHillRockPosition(surface));
+        Assert.True(map.IsHillRockPosition(lowerRock));
+        Assert.Equal(CaveCellKind.SolidRock, map.GetHillRockCell(lowerRock).Kind);
+        Assert.All(Enumerable.Range(0, surface.Z), z =>
+        {
+            var rock = column with { Z = z };
+            Assert.True(map.IsHillRockPosition(rock));
+            Assert.Equal(MineralDepositKind.None, map.GetHillRockCell(rock).Deposit);
+        });
+        var regenerated = SwampMapGenerator.Generate(map.Seed, map.Width, map.Height);
+        Assert.Equal(map.GetHillRockCell(lowerRock), regenerated.GetHillRockCell(lowerRock));
+
+        var historical = SwampMapGenerator.Generate(
+            map.Seed,
+            map.Width,
+            map.Height,
+            generatorVersion: 8);
+        Assert.Equal(0, historical.MaterializedPositiveLevelCount);
+        Assert.False(historical.IsHillRockPosition(lowerRock));
+    }
+
+    [Fact]
+    public void InitialGeometryUsesOneContractAboveAndBelowZero()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x554E4946494544UL), 96, 96);
+        var column = Positions(map)
+            .Where(position => map.GetCell(position) is
+                { Terrain: TerrainKind.SolidGround, SurfaceLevel: > 0 })
+            .OrderByDescending(position => map.GetCell(position).SurfaceLevel)
+            .First();
+        var summit = map.GetTerrainSurfacePosition(column);
+
+        Assert.True(map.TryGetInitialGeometry(column, out var hillRock));
+        Assert.True(hillRock.IsSolid);
+        Assert.NotNull(hillRock.SolidMaterial);
+
+        Assert.True(map.TryGetInitialGeometry(summit, out var summitFloor));
+        Assert.False(summitFloor.IsSolid);
+        Assert.True(summitFloor.IsSupported);
+        Assert.Equal(TerrainKind.SolidGround, summitFloor.Cover);
+
+        var unsupportedAir = summit with { Z = summit.Z - 1 };
+        var lowerColumn = Positions(map)
+            .First(position =>
+                map.GetCell(position).SurfaceLevel < unsupportedAir.Z);
+        unsupportedAir = lowerColumn with { Z = unsupportedAir.Z };
+        Assert.True(map.TryGetInitialGeometry(unsupportedAir, out var air));
+        Assert.False(air.IsSolid);
+        Assert.False(air.IsSupported);
+
+        var caveFloor = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, -1)))
+            .First(position => map.GetCaveCell(position).Kind == CaveCellKind.Floor);
+        Assert.True(map.TryGetInitialGeometry(caveFloor, out var underground));
+        Assert.False(underground.IsSolid);
+        Assert.True(underground.IsSupported);
+
+        Assert.False(map.TryGetInitialGeometry(
+            summit with { Z = map.MaximumTerrainLevel + 1 },
+            out _));
+    }
+
+    [Fact]
+    public void InitialGeometryBakesReliefAndWaterBeforeUnderlyingCaves()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x42414B454F524445UL), 96, 96);
+        var depression = Positions(map)
+            .First(position => map.GetCell(position) is
+                { Terrain: not TerrainKind.DeepWater, SurfaceLevel: < 0 });
+        var depressionFloor = map.GetTerrainSurfacePosition(depression);
+
+        Assert.True(map.IsCavePosition(depressionFloor));
+        Assert.True(map.TryGetInitialGeometry(depressionFloor, out var bakedDepression));
+        Assert.False(bakedDepression.IsSolid);
+        Assert.True(bakedDepression.IsSupported);
+        Assert.Equal(map.GetCell(depression).Terrain, bakedDepression.Cover);
+
+        var deepColumn = Positions(map)
+            .Where(position => map.GetCell(position).Terrain == TerrainKind.DeepWater)
+            .OrderBy(position => map.GetCell(position).FloorLevel)
+            .First();
+        var deepTerrain = map.GetCell(deepColumn);
+        Assert.True(map.TryGetInitialGeometry(deepColumn, out var waterSurface));
+        Assert.Equal(CellFluidKind.Water, waterSurface.Fluid);
+        Assert.Equal(deepTerrain.WaterDepthLevels, waterSurface.FluidDepthLevels);
+
+        if (deepTerrain.WaterDepthLevels > 1)
+        {
+            var submerged = deepColumn with { Z = deepTerrain.SurfaceLevel - 1 };
+            Assert.True(map.TryGetInitialGeometry(submerged, out var lowerWater));
+            Assert.Equal(CellFluidKind.Water, lowerWater.Fluid);
+            Assert.True(lowerWater.IsSupported);
+            Assert.Equal(1, lowerWater.FluidDepthLevels);
+        }
+    }
+
+    [Fact]
+    public void InitialSkyExposurePassesOnlyThroughRealVerticalOpenings()
+    {
+        var map = SwampMapGenerator.Generate(new WorldSeed(0x534B594C49474854UL), 96, 96);
+        var caveMouth = map.VerticalPassages.Single(passage =>
+            passage.Kind == VerticalPassageKind.CaveMouth);
+
+        Assert.True(map.IsInitiallyOpenToSky(caveMouth.Upper));
+        Assert.True(map.IsInitiallyOpenToSky(caveMouth.Lower));
+
+        var coveredCaveFloor = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, -1)))
+            .First(position =>
+                map.GetCaveCell(position).IsOpen && position != caveMouth.Lower &&
+                !map.VerticalPassages.Any(passage => passage.Lower == position));
+        Assert.False(map.IsInitiallyOpenToSky(coveredCaveFloor));
     }
 
     [Fact]
@@ -239,6 +411,7 @@ public sealed class SwampMapGeneratorTests
         Assert.Contains(map.VerticalPassages, passage =>
             passage.Kind == VerticalPassageKind.NaturalRamp);
         Assert.Equal(0, map.CaveEntrances.Single().Z);
+        Assert.True(map.IsTerrainSurfacePosition(map.CaveEntrances.Single()));
         Assert.NotNull(path);
         Assert.Contains(path, position => position.Z == -1);
         Assert.Contains(path, position => position.Z == -2);
@@ -278,6 +451,31 @@ public sealed class SwampMapGeneratorTests
         Assert.Contains(caveCells, cell => cell.Deposit == MineralDepositKind.IronOre);
         Assert.All(caveCells.Where(cell => cell.Deposit != MineralDepositKind.None), cell =>
             Assert.Equal(CaveCellKind.SolidRock, cell.Kind));
+
+        var offsets = new[]
+        {
+            new GridPosition(0, -1),
+            new GridPosition(1, 0),
+            new GridPosition(0, 1),
+            new GridPosition(-1, 0),
+        };
+        var exposedDeposits = Enumerable.Range(1, map.CaveLevelCount)
+            .SelectMany(level => Enumerable.Range(0, map.Height)
+                .SelectMany(y => Enumerable.Range(0, map.Width)
+                    .Select(x => new GridPosition(x, y, -level))))
+            .Where(position => map.GetCaveCell(position).Kind == CaveCellKind.SolidRock)
+            .Where(position => offsets.Any(offset =>
+            {
+                var neighbor = new GridPosition(
+                    position.X + offset.X,
+                    position.Y + offset.Y,
+                    position.Z);
+                return map.IsCavePosition(neighbor) && map.GetCaveCell(neighbor).IsOpen;
+            }))
+            .Select(position => map.GetCaveCell(position).Deposit)
+            .ToHashSet();
+        Assert.Contains(MineralDepositKind.Coal, exposedDeposits);
+        Assert.Contains(MineralDepositKind.IronOre, exposedDeposits);
 
         var historical = SwampMapGenerator.Generate(
             new WorldSeed(0x5645494E53UL),

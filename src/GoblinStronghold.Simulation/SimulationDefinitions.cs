@@ -27,7 +27,8 @@ public sealed record FoodNutritionSettings(
     int Berries,
     int Mushrooms,
     int EdibleRoots,
-    int Fish)
+    int Fish,
+    int RawMeat)
 {
     public int GetSatiety(Resources.FoodKind kind) => kind switch
     {
@@ -36,6 +37,7 @@ public sealed record FoodNutritionSettings(
         Resources.FoodKind.Mushrooms => Mushrooms,
         Resources.FoodKind.EdibleRoots => EdibleRoots,
         Resources.FoodKind.Fish => Fish,
+        Resources.FoodKind.RawMeat => RawMeat,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown food kind."),
     };
 }
@@ -64,6 +66,38 @@ public sealed record ActorPlanningSettings(
     int OrdinaryJobCommitment,
     int OrderedJobCommitment,
     int InterruptHysteresis);
+
+public sealed record GoblinReproductionSettings(
+    int FoodCost,
+    int MinimumMoisture,
+    int TendWorkTicks,
+    int JuvenileSeasonCount,
+    int ParentHealthCost,
+    int ParentHungerCost,
+    int ParentThirstCost,
+    int ParentFatigueCost);
+
+public sealed record GoblinRangedCombatSettings(
+    int HandAmmoCapacity,
+    int SlingAmmoCapacity,
+    int ThrownStoneRange,
+    int SlingRange,
+    int ThrownStoneDamage,
+    int SlingDamage,
+    int DamageVariance);
+
+public sealed record GoblinPrimitiveEquipmentSettings(
+    int BoneKnifeDamageBonus,
+    int FightingStickDamageBonus,
+    int StoneClubDamageBonus);
+
+public sealed record GoblinAgingSettings(
+    int HealthyYears,
+    int DeclineMinimumSeasons,
+    int DeclineMaximumSeasons,
+    int TerminalHealthPermille,
+    int InitialMinimumAgeYears,
+    int InitialMaximumAgeYearsExclusive);
 
 public sealed class SimulationDefinitions
 {
@@ -334,7 +368,8 @@ public sealed class SimulationDefinitions
             Berries: berriesNutrition,
             Mushrooms: mushroomsNutrition,
             EdibleRoots: edibleRootsNutrition,
-            Fish: fishNutrition);
+            Fish: fishNutrition,
+            RawMeat: fishNutrition);
         HealthRecovery = new(
             NaturalIntervalTicks: naturalHealthRecoveryIntervalTicks,
             SleepingBonusIntervalTicks: sleepingHealthRecoveryBonusIntervalTicks,
@@ -344,6 +379,34 @@ public sealed class SimulationDefinitions
             GoblinNightRadius: goblinNightVisionRadius ?? Math.Max(2, visionRadius - 1),
             GoblinStructureRadius: goblinStructureVisionRadius);
         ActorPlanning = actorPlanning;
+        Reproduction = new(
+            FoodCost: 4,
+            MinimumMoisture: 55,
+            TendWorkTicks: 120,
+            JuvenileSeasonCount: 1,
+            ParentHealthCost: 1_500,
+            ParentHungerCost: 3_000,
+            ParentThirstCost: 1_000,
+            ParentFatigueCost: 3_000);
+        RangedCombat = new(
+            HandAmmoCapacity: 3,
+            SlingAmmoCapacity: 8,
+            ThrownStoneRange: 2,
+            SlingRange: 5,
+            ThrownStoneDamage: 160,
+            SlingDamage: 280,
+            DamageVariance: 90);
+        PrimitiveEquipment = new(
+            BoneKnifeDamageBonus: 30,
+            FightingStickDamageBonus: 80,
+            StoneClubDamageBonus: 140);
+        Aging = new(
+            HealthyYears: 5,
+            DeclineMinimumSeasons: 1,
+            DeclineMaximumSeasons: 2,
+            TerminalHealthPermille: 150,
+            InitialMinimumAgeYears: 1,
+            InitialMaximumAgeYearsExclusive: 5);
     }
 
     public string Id { get; }
@@ -361,6 +424,14 @@ public sealed class SimulationDefinitions
     public VisionSettings Vision { get; }
 
     public ActorPlanningSettings ActorPlanning { get; }
+
+    public GoblinReproductionSettings Reproduction { get; }
+
+    public GoblinRangedCombatSettings RangedCombat { get; }
+
+    public GoblinPrimitiveEquipmentSettings PrimitiveEquipment { get; }
+
+    public GoblinAgingSettings Aging { get; }
 
     public int MaximumHunger { get; }
 

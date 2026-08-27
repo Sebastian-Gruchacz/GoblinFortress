@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-menu-background-v1.png" id="6_menu_background"]
 [ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-icon-v1.png" id="7_menu_goblin"]
 [ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-title-v1.png" id="8_menu_title"]
+[ext_resource type="AudioStream" path="res://Assets/Audio/the-hollow-council-title-demo.mp3" id="9_title_music"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_main_menu"]
 bg_color = Color(0.025, 0.055, 0.047, 0.46)
@@ -74,6 +75,11 @@ corner_radius_bottom_left = 8
 [node name="Main" type="Node" unique_id=636844132]
 script = ExtResource("1_main")
 
+[node name="TitleMusic" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("9_title_music")
+volume_db = -8.0
+autoplay = true
+
 [node name="WorldView" type="Node2D" parent="." unique_id=425175923]
 script = ExtResource("2_world")
 
@@ -96,39 +102,49 @@ position = Vector2(640, 640)
 
 [node name="Interface" type="CanvasLayer" parent="." unique_id=547562144]
 
-[node name="TopBar" type="PanelContainer" parent="Interface" unique_id=1751452914]
+[node name="StatusBar" type="PanelContainer" parent="Interface" unique_id=1751452914]
 anchors_preset = 10
 anchor_right = 1.0
 offset_left = 16.0
-offset_top = 16.0
-offset_right = -216.0
-offset_bottom = 72.0
+offset_top = 72.0
+offset_right = -16.0
+offset_bottom = 116.0
 grow_horizontal = 2
 
-[node name="Controls" type="HBoxContainer" parent="Interface/TopBar" unique_id=1709334484]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="Title" type="Label" parent="Interface/TopBar/Controls" unique_id=1123238938]
-layout_mode = 2
-text = "GOBLIN STRONGHOLD  •  LIVING SWAMP PROBE"
-
-[node name="Status" type="Label" parent="Interface/TopBar/Controls" unique_id=704111137]
-custom_maximum_size = Vector2(800, -1)
+[node name="Status" type="Label" parent="Interface/StatusBar" unique_id=704111137]
 layout_mode = 2
 theme_override_font_sizes/font_size = 12
 text = "Tick 0"
 autowrap_mode = 2
-max_lines_visible = 3
+max_lines_visible = 2
+
+[node name="Title" type="Label" parent="Interface" unique_id=1123238938]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -360.0
+offset_top = -42.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.72, 0.78, 0.68, 0.52)
+theme_override_font_sizes/font_size = 13
+text = "GOBLIN STRONGHOLD  •  v0.1-dev"
+horizontal_alignment = 2
+vertical_alignment = 1
 
 [node name="Calendar" type="PanelContainer" parent="Interface" unique_id=891939435]
 anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
 offset_left = -270.0
-offset_top = 80.0
+offset_top = 12.0
 offset_right = 270.0
-offset_bottom = 134.0
+offset_bottom = 66.0
 grow_horizontal = 2
 
 [node name="Controls" type="HBoxContainer" parent="Interface/Calendar" unique_id=1790690875]
@@ -160,9 +176,9 @@ anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -200.0
-offset_top = 16.0
+offset_top = 122.0
 offset_right = -16.0
-offset_bottom = 324.0
+offset_bottom = 430.0
 grow_horizontal = 0
 theme_override_constants/separation = 6
 
@@ -266,9 +282,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -130.0
+offset_left = -158.0
 offset_top = -72.0
-offset_right = 130.0
+offset_right = 158.0
 offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -277,6 +293,10 @@ grow_vertical = 0
 layout_mode = 2
 theme_override_constants/separation = 8
 alignment = 1
+
+[node name="Management" type="Button" parent="Interface/ActionBar/Controls"]
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
 
 [node name="Build" type="Button" parent="Interface/ActionBar/Controls" unique_id=108997841]
 custom_minimum_size = Vector2(48, 48)
@@ -450,6 +470,26 @@ text = "Wyjście"
 
 [node name="BuildMenu" type="PopupPanel" parent="." unique_id=1640149946]
 size = Vector2i(164, 164)
+
+[node name="ManagementMenu" type="PopupPanel" parent="."]
+size = Vector2i(84, 84)
+
+[node name="Margin" type="MarginContainer" parent="ManagementMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 80.0
+offset_bottom = 80.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Grid" type="GridContainer" parent="ManagementMenu/Margin"]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 2
 
 [node name="Margin" type="MarginContainer" parent="BuildMenu" unique_id=1205575898]
 anchors_preset = 15
@@ -665,7 +705,33 @@ offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Text" type="Label" parent="StatisticsWindow/Margin" unique_id=369480313]
+[node name="Content" type="VBoxContainer" parent="StatisticsWindow/Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="Population" type="HBoxContainer" parent="StatisticsWindow/Margin/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Decrease" type="Button" parent="StatisticsWindow/Margin/Content/Population"]
+layout_mode = 2
+tooltip_text = "Zmniejsz docelową liczebność plemienia"
+text = "−"
+
+[node name="Target" type="Label" parent="StatisticsWindow/Margin/Content/Population"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Docelowa liczebność: 0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Increase" type="Button" parent="StatisticsWindow/Margin/Content/Population"]
+layout_mode = 2
+tooltip_text = "Zaplanuj powiększenie plemienia o jednego goblina"
+text = "+"
+
+[node name="Text" type="Label" parent="StatisticsWindow/Margin/Content" unique_id=369480313]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3

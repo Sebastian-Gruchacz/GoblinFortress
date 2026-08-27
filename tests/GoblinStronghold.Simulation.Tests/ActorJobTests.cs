@@ -90,6 +90,11 @@ public sealed class ActorJobTests
             new GridPosition(0, 0),
             new GridPosition(map.Width - 1, map.Height - 1),
             ResourceKind.Food));
+        engine.QueueCommand(SimulationCommand.DesignateScouting(
+            new SimulationTick(1),
+            sequence: 2,
+            new GridPosition(0, 0),
+            new GridPosition(map.Width - 1, map.Height - 1)));
         return engine;
     }
 }

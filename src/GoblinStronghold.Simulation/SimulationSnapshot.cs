@@ -21,7 +21,79 @@ public enum ActorJobKind : byte
     FellTree = 12,
     QuarryBoulder = 13,
     MineRock = 14,
+    TendBud = 15,
+    HuntAnimal = 16,
+    SupplyCrafting = 17,
+    Craft = 18,
+    ClearConstructionSite = 19,
+    CarveRamp = 20,
 }
+
+public readonly record struct GoblinBudSnapshot(
+    EntityId Id,
+    EntityId ParentId,
+    GridPosition Position,
+    int RemainingCareTicks,
+    int TotalCareTicks);
+
+public enum GoblinReproductionReadinessKind : byte
+{
+    AtTarget = 0,
+    Ready = 1,
+    InsufficientFood = 2,
+    NoMoistSpace = 3,
+    NoEligibleParent = 4,
+    BudWaitingForCare = 5,
+    BudBeingTended = 6,
+}
+
+public readonly record struct GoblinReproductionReadinessSnapshot(
+    GoblinReproductionReadinessKind Kind,
+    int RequiredFood,
+    int AvailableFood,
+    int SuitableMoistSites,
+    int EligibleParents,
+    int UntendedBuds);
+
+public readonly record struct TribeNeedsSnapshot(
+    int FoodUnits,
+    int ExpectedDailyFoodUnits,
+    int ShelterCapacity,
+    int StorageCapacity,
+    int StoredUnits,
+    int KnownLooseUnits,
+    int SuitableMoistSites,
+    int HealthyWorkers,
+    int WorkDemand,
+    int HumanHostility,
+    GoblinReproductionReadinessSnapshot Reproduction);
+
+public enum AnimalKind : byte
+{
+    MarshHare = 1,
+    SwampBoar = 2,
+}
+
+public enum AnimalActivity : byte
+{
+    Roaming = 0,
+    Foraging = 1,
+    Resting = 2,
+    Fleeing = 3,
+    Threatening = 4,
+}
+
+public readonly record struct AnimalSnapshot(
+    ulong Id,
+    AnimalKind Kind,
+    GridPosition Position,
+    AnimalActivity Activity,
+    int Health,
+    int MaximumHealth,
+    int Hunger,
+    int Fatigue,
+    int MaximumFatigue,
+    long AgeTicks);
 
 public enum ActorJobStage : byte
 {
@@ -30,6 +102,7 @@ public enum ActorJobStage : byte
     Delivering = 2,
     ProvisioningFood = 3,
     ProvisioningWater = 4,
+    ProvisioningAmmo = 5,
 }
 
 public enum ActorJobPhase : byte
@@ -61,13 +134,17 @@ public enum ActorPlanIntentKind : byte
     RefillWater = 4,
     Rest = 5,
     ResumeSuspendedJob = 6,
+    NextPublicWork = 7,
 }
 
 public readonly record struct ActorPlanEntrySnapshot(
     ActorPlanIntentKind Kind,
     ActorJobKind JobKind,
     int Priority,
-    GridPosition Target);
+    GridPosition Target)
+{
+    public EntityId WorkOrderId { get; init; }
+}
 
 [Flags]
 public enum GoblinSkill : ushort
@@ -124,6 +201,11 @@ public enum PersonalEquipment : ushort
     BoneKnife = 1 << 2,
     WoodenAxe = 1 << 3,
     PrimitivePickaxe = 1 << 4,
+    PrimitiveSling = 1 << 5,
+    FightingStick = 1 << 6,
+    StoneClub = 1 << 7,
+    HideClothes = 1 << 8,
+    ReedClothes = 1 << 9,
 }
 
 public sealed class PersonalFoodContentsSnapshot : IReadOnlyList<FoodKind>,
@@ -181,6 +263,12 @@ public readonly record struct ActorSnapshot(
     FoodKind PersonalFoodKind,
     PersonalFoodContentsSnapshot PersonalFoodKinds,
     int PersonalWater,
+    int PersonalStoneAmmo,
+    int AgeDays,
+    bool IsJuvenile,
+    bool IsElderly,
+    int EffectiveMaximumHealth,
+    double SenescenceProgress,
     EntityId CarriedStackId,
     ActorJobSnapshot Job,
     IReadOnlyList<ActorPlanEntrySnapshot> Plan);
@@ -321,12 +409,17 @@ public sealed class SimulationSnapshot
         WorldSeed worldSeed,
         SimulationTick tick,
         int foodStock,
+        int populationTarget,
         ActorSnapshot[] actors,
+        GoblinBudSnapshot[] goblinBuds,
+        TribeNeedsSnapshot tribeNeeds,
+        AnimalSnapshot[] animals,
         ItemStackSnapshot[] itemStacks,
         StorageZoneSnapshot[] storageZones,
         ResourcePrioritySnapshot[] resourcePriorities,
         ResourceInventorySnapshot[] resourceInventory,
         ConstructionSiteSnapshot[] constructionSites,
+        CraftingOrderSnapshot[] craftingOrders,
         WorkDesignationSnapshot[] workDesignations,
         PlantPatchSnapshot[] plantPatches,
         WorldObjectSnapshot[] worldObjects,
@@ -336,6 +429,7 @@ public sealed class SimulationSnapshot
         EntityId[] raidPartyIds,
         CellVisibility[] visibility,
         int visibilityLayerCellCount,
+        int visibilityNegativeLevelCount,
         ulong worldVersion,
         int mapGeneratorVersion,
         string mapFingerprint,
@@ -344,12 +438,17 @@ public sealed class SimulationSnapshot
         WorldSeed = worldSeed;
         Tick = tick;
         FoodStock = foodStock;
+        PopulationTarget = populationTarget;
         Actors = new ReadOnlyCollection<ActorSnapshot>(actors);
+        GoblinBuds = new ReadOnlyCollection<GoblinBudSnapshot>(goblinBuds);
+        TribeNeeds = tribeNeeds;
+        Animals = new ReadOnlyCollection<AnimalSnapshot>(animals);
         ItemStacks = new ReadOnlyCollection<ItemStackSnapshot>(itemStacks);
         StorageZones = new ReadOnlyCollection<StorageZoneSnapshot>(storageZones);
         ResourcePriorities = new ReadOnlyCollection<ResourcePrioritySnapshot>(resourcePriorities);
         ResourceInventory = new ReadOnlyCollection<ResourceInventorySnapshot>(resourceInventory);
         ConstructionSites = new ReadOnlyCollection<ConstructionSiteSnapshot>(constructionSites);
+        CraftingOrders = new ReadOnlyCollection<CraftingOrderSnapshot>(craftingOrders);
         WorkDesignations = new ReadOnlyCollection<WorkDesignationSnapshot>(workDesignations);
         PlantPatches = new ReadOnlyCollection<PlantPatchSnapshot>(plantPatches);
         WorldObjects = new ReadOnlyCollection<WorldObjectSnapshot>(worldObjects);
@@ -359,6 +458,7 @@ public sealed class SimulationSnapshot
         RaidPartyIds = new ReadOnlyCollection<EntityId>(raidPartyIds);
         Visibility = new ReadOnlyCollection<CellVisibility>(visibility);
         VisibilityLayerCellCount = visibilityLayerCellCount;
+        VisibilityNegativeLevelCount = visibilityNegativeLevelCount;
         WorldVersion = worldVersion;
         MapGeneratorVersion = mapGeneratorVersion;
         MapFingerprint = mapFingerprint;
@@ -371,7 +471,15 @@ public sealed class SimulationSnapshot
 
     public int FoodStock { get; }
 
+    public int PopulationTarget { get; }
+
     public IReadOnlyList<ActorSnapshot> Actors { get; }
+
+    public IReadOnlyList<GoblinBudSnapshot> GoblinBuds { get; }
+
+    public TribeNeedsSnapshot TribeNeeds { get; }
+
+    public IReadOnlyList<AnimalSnapshot> Animals { get; }
 
     public IReadOnlyList<ItemStackSnapshot> ItemStacks { get; }
 
@@ -382,6 +490,8 @@ public sealed class SimulationSnapshot
     public IReadOnlyList<ResourceInventorySnapshot> ResourceInventory { get; }
 
     public IReadOnlyList<ConstructionSiteSnapshot> ConstructionSites { get; }
+
+    public IReadOnlyList<CraftingOrderSnapshot> CraftingOrders { get; }
 
     public IReadOnlyList<WorkDesignationSnapshot> WorkDesignations { get; }
 
@@ -401,9 +511,12 @@ public sealed class SimulationSnapshot
 
     public int VisibilityLayerCellCount { get; }
 
+    public int VisibilityNegativeLevelCount { get; }
+
     public CellVisibility GetVisibility(GridPosition position, int mapWidth) =>
         Visibility[checked(
-            (Math.Max(0, -position.Z) * VisibilityLayerCellCount) +
+            ((position.Z <= 0 ? -position.Z : VisibilityNegativeLevelCount + position.Z) *
+             VisibilityLayerCellCount) +
             (position.Y * mapWidth) + position.X)];
 
     public ulong WorldVersion { get; }

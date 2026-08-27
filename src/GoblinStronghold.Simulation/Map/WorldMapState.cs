@@ -9,6 +9,7 @@ public enum PlantKind : byte
     MushroomCluster = 2,
     EdibleRoots = 3,
     FishShoal = 4,
+    ReedBed = 5,
 }
 
 public enum WorldChangeKind : byte
@@ -22,6 +23,7 @@ public enum WorldChangeKind : byte
     DoorToggled = 7,
     BoulderQuarried = 8,
     RockExcavated = 9,
+    RampExcavated = 10,
 }
 
 public readonly record struct PlantPatchSnapshot(
@@ -43,6 +45,7 @@ public sealed class WorldMapState
     private readonly SortedDictionary<WorldObjectId, WorldObjectSnapshot> _worldObjects;
     private readonly Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> _occupancy;
     private readonly HashSet<GridPosition> _excavatedCaveCells;
+    private readonly HashSet<VerticalPassage> _excavatedVerticalPassages;
 
     private WorldMapState(
         GeneratedMap baseline,
@@ -50,7 +53,8 @@ public sealed class WorldMapState
         SortedDictionary<int, PlantPatchState> plantPatches,
         SortedDictionary<WorldObjectId, WorldObjectSnapshot> worldObjects,
         Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> occupancy,
-        IEnumerable<GridPosition>? excavatedCaveCells = null)
+        IEnumerable<GridPosition>? excavatedCaveCells = null,
+        IEnumerable<VerticalPassage>? excavatedVerticalPassages = null)
     {
         Baseline = baseline;
         Version = version;
@@ -58,6 +62,7 @@ public sealed class WorldMapState
         _worldObjects = worldObjects;
         _occupancy = occupancy;
         _excavatedCaveCells = excavatedCaveCells?.ToHashSet() ?? [];
+        _excavatedVerticalPassages = excavatedVerticalPassages?.ToHashSet() ?? [];
     }
 
     public GeneratedMap Baseline { get; }
@@ -71,6 +76,20 @@ public sealed class WorldMapState
     public int WorldObjectCount => _worldObjects.Count;
 
     public IReadOnlyCollection<GridPosition> ExcavatedCaveCells => _excavatedCaveCells;
+
+    public IReadOnlyCollection<VerticalPassage> ExcavatedVerticalPassages =>
+        _excavatedVerticalPassages;
+
+    public IReadOnlyList<VerticalPassage> CreateVerticalPassageSnapshot() =>
+        Baseline.VerticalPassages
+            .Concat(_excavatedVerticalPassages)
+            .OrderBy(passage => passage.Upper.Z)
+            .ThenBy(passage => passage.Upper.Y)
+            .ThenBy(passage => passage.Upper.X)
+            .ThenBy(passage => passage.Lower.Z)
+            .ThenBy(passage => passage.Lower.Y)
+            .ThenBy(passage => passage.Lower.X)
+            .ToArray();
 
     internal static WorldMapState CreateInitial(GeneratedMap baseline)
     {
@@ -126,7 +145,8 @@ public sealed class WorldMapState
         ulong version,
         IEnumerable<PlantPatchSnapshot> plantPatches,
         IEnumerable<WorldObjectSnapshot> worldObjects,
-        IEnumerable<GridPosition>? excavatedCaveCells = null)
+        IEnumerable<GridPosition>? excavatedCaveCells = null,
+        IEnumerable<VerticalPassage>? excavatedVerticalPassages = null)
     {
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(plantPatches);
@@ -163,6 +183,36 @@ public sealed class WorldMapState
             throw new InvalidDataException("The save contains invalid excavated cave cells.");
         }
 
+        var passages = excavatedVerticalPassages?.ToArray() ?? [];
+        var allPassages = baseline.VerticalPassages.Concat(passages).ToArray();
+        if (passages.Any(passage =>
+                passage.Kind != VerticalPassageKind.ExcavatedRamp ||
+                passage.Upper.X != passage.Lower.X ||
+                passage.Upper.Y != passage.Lower.Y ||
+                passage.Upper.Z != passage.Lower.Z + 1 ||
+                passage.Upper.Z > 0 ||
+                !baseline.IsCavePosition(passage.Lower) ||
+                !(baseline.IsTerrainSurfacePosition(passage.Upper) ||
+                  baseline.IsCavePosition(passage.Upper)) ||
+                !(baseline.GetCaveCell(passage.Lower).IsOpen ||
+                  excavated.Contains(passage.Lower)) ||
+                (!baseline.IsTerrainSurfacePosition(passage.Upper) &&
+                 !(baseline.GetCaveCell(passage.Upper).IsOpen ||
+                   excavated.Contains(passage.Upper)))))
+        {
+            throw new InvalidDataException("The save contains an invalid excavated ramp shape.");
+        }
+        if (passages.Distinct().Count() != passages.Length)
+        {
+            throw new InvalidDataException("The save contains duplicate excavated ramps.");
+        }
+        if (allPassages.SelectMany(passage => new[] { passage.Upper, passage.Lower })
+            .GroupBy(position => position)
+            .Any(group => group.Count() > 1))
+        {
+            throw new InvalidDataException("The save contains overlapping vertical passages.");
+        }
+
         var (restoredObjects, occupancy) = ValidateAndIndexObjects(baseline, worldObjects);
         return new WorldMapState(
             baseline,
@@ -170,7 +220,8 @@ public sealed class WorldMapState
             restored,
             restoredObjects,
             occupancy,
-            excavated);
+            excavated,
+            passages);
     }
 
     public PlantPatchSnapshot? GetPlantPatch(GridPosition position)
@@ -208,6 +259,12 @@ public sealed class WorldMapState
         return new ReadOnlyCollection<WorldObjectSnapshot>(
             ids.Select(id => _worldObjects[id]).ToArray());
     }
+
+    public bool HasPrimitiveWorkshop(GridPosition position) =>
+        _worldObjects.Values.Any(worldObject =>
+            worldObject.Kind == WorldObjectKind.PrimitiveWorkshop &&
+            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            worldObject.Anchor == position);
 
     internal WorldObjectSnapshot? GetFellableWood(GridPosition anchor) =>
         _worldObjects.Values.FirstOrDefault(worldObject =>
@@ -260,30 +317,39 @@ public sealed class WorldMapState
         return solidIsTraversable && fixtureIsReachable;
     }
 
-    public bool IsTerrainReachable(GridPosition position) => position.Z switch
-    {
-        0 => IsSurfaceReachable(position),
-        < 0 => Baseline.IsCavePosition(position) &&
-            (Baseline.GetCaveCell(position).IsOpen || _excavatedCaveCells.Contains(position)) &&
-            IsSpatiallyReachable(position),
-        _ => false,
-    };
+    public bool IsTerrainReachable(GridPosition position) =>
+        Baseline.IsTerrainSurfacePosition(position)
+            ? IsMaterialSurfaceReachable(position)
+            : position.Z < 0 && IsSubterraneanReachable(position);
 
-    public bool IsTerrainTraversable(GridPosition position) => position.Z switch
+    public bool IsTerrainTraversable(GridPosition position) =>
+        IsTerrainReachable(position) && !HasClosedDoorLeaf(position);
+
+    private bool IsMaterialSurfaceReachable(GridPosition position)
     {
-        0 => IsSurfaceTraversable(position),
-        < 0 => IsTerrainReachable(position) && !HasClosedDoorLeaf(position),
-        _ => false,
-    };
+        if (!Baseline.TryGetInitialGeometry(position, out var geometry))
+        {
+            return false;
+        }
+
+        var hasWalkway = TryGetOccupancyClaim(
+            position,
+            SpatialOccupancyChannel.Surface,
+            out var surfaceClaim) &&
+            surfaceClaim.PartKind == WorldObjectPartKind.Walkway;
+        return (geometry.IsOccupiable || hasWalkway) && IsSpatiallyReachable(position);
+    }
 
     private bool IsSpatiallyReachable(GridPosition position)
     {
-        var solidIsReachable = !_occupancy.TryGetValue(
-                new SpatialOccupancyKey(position, SpatialOccupancyChannel.Solid),
+        var solidIsReachable = !TryGetOccupancyClaim(
+                position,
+                SpatialOccupancyChannel.Solid,
                 out var solidClaim) ||
             solidClaim.PartKind == WorldObjectPartKind.Door;
-        var fixtureIsReachable = !_occupancy.TryGetValue(
-                new SpatialOccupancyKey(position, SpatialOccupancyChannel.Fixture),
+        var fixtureIsReachable = !TryGetOccupancyClaim(
+                position,
+                SpatialOccupancyChannel.Fixture,
                 out var fixtureClaim) ||
             fixtureClaim.PartKind is WorldObjectPartKind.OpenDoorLeaf or
                 WorldObjectPartKind.ClosedDoorLeaf or
@@ -292,10 +358,51 @@ public sealed class WorldMapState
     }
 
     private bool HasClosedDoorLeaf(GridPosition position) =>
-        _occupancy.TryGetValue(
-            new SpatialOccupancyKey(position, SpatialOccupancyChannel.Fixture),
+        TryGetOccupancyClaim(
+            position,
+            SpatialOccupancyChannel.Fixture,
             out var fixtureClaim) &&
-        fixtureClaim.PartKind == WorldObjectPartKind.ClosedDoorLeaf;
+            fixtureClaim.PartKind == WorldObjectPartKind.ClosedDoorLeaf;
+
+    private bool TryGetOccupancyClaim(
+        GridPosition position,
+        SpatialOccupancyChannel channel,
+        out SpatialOccupancyClaim claim)
+    {
+        if (_occupancy.TryGetValue(new SpatialOccupancyKey(position, channel), out claim))
+        {
+            return true;
+        }
+
+        return position.Z > 0 && Baseline.IsTerrainSurfacePosition(position) &&
+            _occupancy.TryGetValue(
+                new SpatialOccupancyKey(position with { Z = 0 }, channel),
+                out claim);
+    }
+
+    public bool TryGetFluid(
+        GridPosition position,
+        out CellFluidKind fluid,
+        out int depthLevels)
+    {
+        if (Baseline.TryGetInitialGeometry(position, out var geometry) &&
+            geometry.Fluid != CellFluidKind.None && geometry.FluidDepthLevels > 0)
+        {
+            fluid = geometry.Fluid;
+            depthLevels = geometry.FluidDepthLevels;
+            return true;
+        }
+
+        fluid = CellFluidKind.None;
+        depthLevels = 0;
+        return false;
+    }
+
+    private bool IsSubterraneanReachable(GridPosition position) =>
+        Baseline.IsCavePosition(position) &&
+        !TryGetFluid(position, out _, out _) &&
+        (Baseline.GetCaveCell(position).IsOpen || _excavatedCaveCells.Contains(position)) &&
+        IsSpatiallyReachable(position);
 
     public IEnumerable<GridPosition> GetTerrainNeighbors(
         GridPosition position,
@@ -309,18 +416,39 @@ public sealed class WorldMapState
             yield break;
         }
 
-        foreach (var neighbor in GetCardinalWorldNeighbors(position))
+        var isMaterialSurface = Baseline.IsTerrainSurfacePosition(position);
+        foreach (var adjacent in GetCardinalWorldNeighbors(position))
         {
-            if (!canTraverse(neighbor) ||
-                position.Z == 0 && !Baseline.CanTraverseSurfaceEdge(position, neighbor))
+            if (!isMaterialSurface)
             {
+                if (canTraverse(adjacent))
+                {
+                    yield return adjacent;
+                }
                 continue;
             }
 
-            yield return neighbor;
+            var surfaceNeighbor = Baseline.GetTerrainSurfacePosition(adjacent);
+            if (canTraverse(surfaceNeighbor) &&
+                Baseline.CanTraverseTerrainSurfaceEdge(position, surfaceNeighbor))
+            {
+                yield return surfaceNeighbor;
+            }
         }
 
         foreach (var passage in Baseline.VerticalPassages)
+        {
+            var neighbor = passage.Upper == position
+                ? passage.Lower
+                : passage.Lower == position
+                    ? passage.Upper
+                    : (GridPosition?)null;
+            if (neighbor.HasValue && canTraverse(neighbor.Value))
+            {
+                yield return neighbor.Value;
+            }
+        }
+        foreach (var passage in _excavatedVerticalPassages)
         {
             var neighbor = passage.Upper == position
                 ? passage.Lower
@@ -343,7 +471,8 @@ public sealed class WorldMapState
     public IReadOnlyList<GridPosition>? FindTerrainPath(
         GridPosition start,
         GridPosition destination,
-        bool canOpenDoors = false)
+        bool canOpenDoors = false,
+        Func<GridPosition, GridPosition, bool>? canUseEdge = null)
     {
         Func<GridPosition, bool> canTraverse = canOpenDoors
             ? IsTerrainReachable
@@ -373,7 +502,8 @@ public sealed class WorldMapState
 
             foreach (var neighbor in GetTerrainNeighbors(current, canOpenDoors))
             {
-                if (visited.Add(neighbor))
+                if ((canUseEdge is null || canUseEdge(current, neighbor)) &&
+                    visited.Add(neighbor))
                 {
                     predecessors[neighbor] = current;
                     queue.Enqueue(neighbor);
@@ -886,20 +1016,8 @@ public sealed class WorldMapState
     {
         var footprint = GetFieldCampFootprint(anchor);
         return footprint.All(position =>
-            position.Z == 0 &&
-            Baseline.IsWithin(position) &&
-            Baseline.GetCell(position).IsTraversable &&
-            !_occupancy.Keys.Any(key =>
-                key.Position.X == position.X && key.Position.Y == position.Y)) &&
-            Enumerable.Range(Math.Max(0, anchor.Y - 4),
-                    Math.Min(Baseline.Height - 1, anchor.Y + 4) - Math.Max(0, anchor.Y - 4) + 1)
-                .SelectMany(y => Enumerable.Range(Math.Max(0, anchor.X - 4),
-                        Math.Min(Baseline.Width - 1, anchor.X + 4) - Math.Max(0, anchor.X - 4) + 1)
-                    .Select(x => new GridPosition(x, y)))
-                .Any(position =>
-                    Distance(position, anchor) <= 4 &&
-                    Baseline.GetCell(position).Terrain == TerrainKind.ShallowWater &&
-                    FindSurfacePath(anchor, position) is not null);
+            IsTerrainTraversable(position) &&
+            !_occupancy.Keys.Any(key => key.Position == position));
     }
 
     internal WorldChangeEvent BuildGoblinFieldCamp(GridPosition anchor, SimulationTick tick)
@@ -915,10 +1033,16 @@ public sealed class WorldMapState
         var parts = new List<WorldObjectPartSnapshot>();
         foreach (var position in GetFieldCampFootprint(anchor))
         {
-            var relative = new GridPosition(position.X - anchor.X, position.Y - anchor.Y);
+            var relative = new GridPosition(
+                position.X - anchor.X,
+                position.Y - anchor.Y,
+                position.Z - anchor.Z);
             parts.Add(new(relative, SpatialOccupancyChannel.Surface, WorldObjectPartKind.Floor));
-            parts.Add(new(relative with { Z = 1 }, SpatialOccupancyChannel.Overhead, WorldObjectPartKind.Roof));
-            _plantPatches.Remove(GetIndex(Baseline, position));
+            if (anchor.Z == 0)
+            {
+                parts.Add(new(relative with { Z = 1 }, SpatialOccupancyChannel.Overhead, WorldObjectPartKind.Roof));
+                _plantPatches.Remove(GetIndex(Baseline, position));
+            }
         }
 
         var worldObject = new WorldObjectSnapshot(
@@ -936,6 +1060,40 @@ public sealed class WorldMapState
                 new SpatialOccupancyClaim(id, part.Kind));
         }
         return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 4);
+    }
+
+    public bool CanBuildPrimitiveWorkshop(GridPosition anchor) =>
+        IsTerrainTraversable(anchor) &&
+        !_occupancy.Keys.Any(key => key.Position == anchor);
+
+    internal WorldChangeEvent BuildPrimitiveWorkshop(
+        GridPosition anchor,
+        SimulationTick tick)
+    {
+        if (!CanBuildPrimitiveWorkshop(anchor))
+        {
+            throw new InvalidOperationException("The primitive workshop placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.PrimitiveWorkshop,
+            WorldObjectOwner.GoblinTribe,
+            anchor,
+            CardinalOrientation.North,
+            [new(default, SpatialOccupancyChannel.Fixture, WorldObjectPartKind.PrimitiveWorkshop)]);
+        _worldObjects.Add(id, worldObject);
+        _occupancy.Add(
+            new SpatialOccupancyKey(anchor, SpatialOccupancyChannel.Fixture),
+            new SpatialOccupancyClaim(id, WorldObjectPartKind.PrimitiveWorkshop));
+        if (anchor.Z == 0)
+        {
+            _plantPatches.Remove(GetIndex(Baseline, anchor));
+        }
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 1);
     }
 
     private static IReadOnlyList<GridPosition> GetFieldCampFootprint(GridPosition anchor) =>
@@ -1323,7 +1481,16 @@ public sealed class WorldMapState
     public bool IsSolidCaveRock(GridPosition position) =>
         Baseline.IsCavePosition(position) &&
         Baseline.GetCaveCell(position).Kind == CaveCellKind.SolidRock &&
+        Baseline.TryGetInitialGeometry(position, out var geometry) &&
+        geometry.IsSolid &&
         !_excavatedCaveCells.Contains(position);
+
+    public bool IsSolidHillRock(GridPosition position) =>
+        Baseline.IsHillRockPosition(position) &&
+        !_excavatedCaveCells.Contains(position);
+
+    public bool IsSolidRock(GridPosition position) =>
+        IsSolidCaveRock(position) || IsSolidHillRock(position);
 
     public bool CanExcavateRock(GridPosition position) =>
         IsSolidCaveRock(position) &&
@@ -1352,6 +1519,71 @@ public sealed class WorldMapState
         return true;
     }
 
+    public bool CanCarveRampDown(GridPosition upper)
+    {
+        var lower = upper with { Z = upper.Z - 1 };
+        return IsTerrainTraversable(upper) &&
+            Baseline.IsCavePosition(lower) &&
+            IsSolidCaveRock(lower) &&
+            !HasVerticalPassageAt(upper) &&
+            !HasVerticalPassageAt(lower) &&
+            GetWorldObjectsAt(upper).Count == 0;
+    }
+
+    public bool CanCarveRampUp(GridPosition lower)
+    {
+        var upper = lower with { Z = lower.Z + 1 };
+        var upperCanBeOpened = upper.Z == 0
+            ? IsTerrainTraversable(upper)
+            : IsSolidCaveRock(upper);
+        return lower.Z < 0 &&
+            IsTerrainTraversable(lower) &&
+            upperCanBeOpened &&
+            !HasVerticalPassageAt(lower) &&
+            !HasVerticalPassageAt(upper) &&
+            GetWorldObjectsAt(lower).Count == 0 &&
+            (upper.Z < 0 || GetWorldObjectsAt(upper).Count == 0);
+    }
+
+    internal bool TryCarveVerticalRamp(
+        GridPosition origin,
+        bool carveDown,
+        SimulationTick tick,
+        out RockKind rock,
+        out WorldChangeEvent change)
+    {
+        if (carveDown ? !CanCarveRampDown(origin) : !CanCarveRampUp(origin))
+        {
+            rock = default;
+            change = default;
+            return false;
+        }
+
+        var upper = carveDown ? origin : origin with { Z = origin.Z + 1 };
+        var lower = carveDown ? origin with { Z = origin.Z - 1 } : origin;
+        var excavated = carveDown ? lower : upper;
+        if (excavated.Z < 0)
+        {
+            rock = Baseline.GetCaveCell(excavated).Rock;
+            _excavatedCaveCells.Add(excavated);
+        }
+        else
+        {
+            rock = Baseline.GetCaveCell(lower).Rock;
+        }
+
+        _excavatedVerticalPassages.Add(new VerticalPassage(
+            upper,
+            lower,
+            VerticalPassageKind.ExcavatedRamp));
+        change = CreateChange(tick, WorldChangeKind.RampExcavated, origin, carveDown ? -1 : 1);
+        return true;
+    }
+
+    private bool HasVerticalPassageAt(GridPosition position) =>
+        Baseline.VerticalPassages.Concat(_excavatedVerticalPassages)
+            .Any(passage => passage.Upper == position || passage.Lower == position);
+
     internal IReadOnlyList<WorldChangeEvent> GrowPlants(
         SimulationTick tick,
         int growthPerPatch,
@@ -1368,6 +1600,7 @@ public sealed class WorldMapState
                 PlantKind.MushroomCluster => season is SeasonKind.Spring or SeasonKind.Autumn,
                 PlantKind.EdibleRoots => season is not SeasonKind.Winter,
                 PlantKind.FishShoal => true,
+                PlantKind.ReedBed => season is not SeasonKind.Winter,
                 _ => false,
             };
             if (!canGrow)
@@ -1375,7 +1608,8 @@ public sealed class WorldMapState
                 continue;
             }
 
-            var growthMultiplier = patch.Kind is PlantKind.MushroomCluster or PlantKind.FishShoal
+            var growthMultiplier = patch.Kind is PlantKind.MushroomCluster or PlantKind.FishShoal or
+                PlantKind.ReedBed
                 ? 2
                 : 1;
             var grown = Math.Min(
@@ -1421,8 +1655,12 @@ public sealed class WorldMapState
     {
         if (cell.Terrain == TerrainKind.ShallowWater)
         {
-            return waterBodySize >= 12 && RollOccurrence(baseline, subject, sampleKey: 4) < 32
-                ? PlantKind.FishShoal
+            if (waterBodySize >= 12 && RollOccurrence(baseline, subject, sampleKey: 4) < 32)
+            {
+                return PlantKind.FishShoal;
+            }
+            return RollOccurrence(baseline, subject, sampleKey: 5) < 20
+                ? PlantKind.ReedBed
                 : null;
         }
 
@@ -1462,12 +1700,13 @@ public sealed class WorldMapState
         PlantKind.MushroomCluster => Math.Max(10, 6 + (cell.Moisture / 4)),
         PlantKind.EdibleRoots => Math.Max(10, 6 + (cell.Fertility / 4)),
         PlantKind.FishShoal => Math.Clamp(12 + (waterBodySize / 3), 16, 40),
+        PlantKind.ReedBed => Math.Max(12, 8 + (cell.Moisture / 3)),
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
     private static bool IsValidHabitat(MapCell cell, PlantKind kind) => kind switch
     {
-        PlantKind.FishShoal => cell.Terrain == TerrainKind.ShallowWater,
+        PlantKind.FishShoal or PlantKind.ReedBed => cell.Terrain == TerrainKind.ShallowWater,
         PlantKind.BerryBush or PlantKind.MushroomCluster or PlantKind.EdibleRoots =>
             cell.IsTraversable && cell.Terrain != TerrainKind.ShallowWater,
         _ => false,
@@ -1530,7 +1769,8 @@ public sealed class WorldMapState
         Version = checked(Version + 1);
         if (kind is WorldChangeKind.StructureBuilt or WorldChangeKind.TreeFelled or
             WorldChangeKind.StumpHarvested or WorldChangeKind.DoorToggled or
-            WorldChangeKind.BoulderQuarried or WorldChangeKind.RockExcavated)
+            WorldChangeKind.BoulderQuarried or WorldChangeKind.RockExcavated or
+            WorldChangeKind.RampExcavated)
         {
             TopologyVersion = checked(TopologyVersion + 1);
         }
@@ -1567,7 +1807,9 @@ public sealed class WorldMapState
                     WorldObjectKind.WoodenDoorFrame or
                     WorldObjectKind.StoneDoorFrame or
                     WorldObjectKind.WoodenDoorLeaf or
-                    WorldObjectKind.WallTorch)) ||
+                    WorldObjectKind.WallTorch or
+                    WorldObjectKind.PrimitiveWorkshop or
+                    WorldObjectKind.GoblinFieldCamp)) ||
                 worldObject.Parts.Count == 0 ||
                 !restored.TryAdd(worldObject.Id, worldObject))
             {

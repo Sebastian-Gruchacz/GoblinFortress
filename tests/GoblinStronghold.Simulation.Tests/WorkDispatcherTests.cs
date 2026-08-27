@@ -13,7 +13,6 @@ public sealed class WorkDispatcherTests
         var engine = CreateEngine(goblinCount: 4);
 
         engine.AdvanceTicks(1);
-
         Assert.DoesNotContain(
             engine.CreateSnapshot().Actors,
             actor => actor.Job.Kind == ActorJobKind.Forage);
@@ -101,7 +100,7 @@ public sealed class WorkDispatcherTests
     {
         var engine = CreateEngine(goblinCount: 1);
         var target = engine.World.CreatePlantSnapshot()
-            .First(plant => plant.Biomass > 0 &&
+            .First(plant => plant.Biomass > 0 && plant.Kind != PlantKind.ReedBed &&
                 engine.Visibility.Get(plant.Position) == CellVisibility.Unknown);
         var save = JsonNode.Parse(engine.Save())!.AsObject();
         var visibilityIndex = (target.Position.Y * engine.Map.Width) + target.Position.X;
@@ -119,6 +118,36 @@ public sealed class WorkDispatcherTests
         Assert.Contains(engine.CreateSnapshot().WorkDesignations, designation =>
             designation.Kind == WorkDesignationKind.GatherFood &&
             designation.Target == target.Position);
+    }
+
+    [Fact]
+    public void ReedBedsRequireAndAcceptDedicatedGatherReedsDesignation()
+    {
+        var engine = CreateEngine(goblinCount: 1);
+        var target = engine.World.CreatePlantSnapshot()
+            .First(plant => plant.Kind == PlantKind.ReedBed && plant.Biomass > 0);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var visibilityIndex = (target.Position.Y * engine.Map.Width) + target.Position.X;
+        save["visibility"]!.AsArray()[visibilityIndex] = (int)CellVisibility.Explored;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            target.Position,
+            target.Position,
+            ResourceKind.Food));
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            engine.CurrentTick.Next(),
+            sequence: 2,
+            target.Position,
+            target.Position,
+            ResourceKind.Reeds));
+        engine.AdvanceTicks(1);
+
+        var designation = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(WorkDesignationKind.GatherReeds, designation.Kind);
+        Assert.Equal(target.Position, designation.Target);
     }
 
     [Fact]
@@ -752,6 +781,10 @@ public sealed class WorkDispatcherTests
         Assert.Equal(2, destinations.Length);
         engine.QueueCommand(SimulationCommand.CreateStorageZone(
             new SimulationTick(1), sequence: 1, sourcePosition, ResourceKind.Wood, capacity: 5));
+        engine.QueueCommand(SimulationCommand.DesignateScouting(
+            new SimulationTick(1), sequence: 2,
+            new GridPosition(0, 0),
+            new GridPosition(engine.Map.Width - 1, engine.Map.Height - 1)));
         engine.AdvanceTicks(80);
         var source = Assert.Single(engine.CreateSnapshot().StorageZones);
         Assert.Equal(5, source.StoredQuantity);
@@ -920,6 +953,121 @@ public sealed class WorkDispatcherTests
         engine.AdvanceTicks(1);
 
         Assert.Empty(engine.CreateSnapshot().WorkDesignations);
+    }
+
+    [Fact]
+    public void PlannerPriorityPersistsAndClearingOrderKeepsOtherWork()
+    {
+        var engine = CreateEngine(goblinCount: 1, initialWood: 4);
+        var spawn = engine.Map.GoblinSpawn;
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            new SimulationTick(1), sequence: 1, spawn, spawn, ResourceKind.Food));
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            new SimulationTick(1), sequence: 2, spawn, spawn, ResourceKind.Wood));
+        engine.AdvanceTicks(1);
+        Assert.Contains(engine.CreateSnapshot().WorkDesignations,
+            designation => designation.Kind == WorkDesignationKind.GatherFood);
+        Assert.Contains(engine.CreateSnapshot().WorkDesignations,
+            designation => designation.Kind == WorkDesignationKind.GatherBrushwood);
+        var foodOrderId = engine.CreateSnapshot().WorkDesignations
+            .First(designation => designation.Kind == WorkDesignationKind.GatherFood)
+            .OrderId;
+
+        engine.QueueCommand(SimulationCommand.ConfigureWorkPriority(
+            new SimulationTick(2), sequence: 3,
+            foodOrderId, StoragePriority.Urgent));
+        engine.AdvanceTicks(1);
+
+        Assert.All(engine.CreateSnapshot().WorkDesignations.Where(designation =>
+                designation.Kind == WorkDesignationKind.GatherFood),
+            designation => Assert.Equal(StoragePriority.Urgent, designation.Priority));
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.All(restored.CreateSnapshot().WorkDesignations.Where(designation =>
+                designation.Kind == WorkDesignationKind.GatherFood),
+            designation => Assert.Equal(StoragePriority.Urgent, designation.Priority));
+
+        restored.QueueCommand(SimulationCommand.ClearWorkDesignationOrder(
+            restored.CurrentTick.Next(), sequence: 4, foodOrderId));
+        restored.AdvanceTicks(1);
+
+        Assert.DoesNotContain(restored.CreateSnapshot().WorkDesignations,
+            designation => designation.Kind == WorkDesignationKind.GatherFood);
+        Assert.Contains(restored.CreateSnapshot().WorkDesignations,
+            designation => designation.Kind == WorkDesignationKind.GatherBrushwood);
+    }
+
+    [Fact]
+    public void ReplacingWorkAreaIsAtomicAndKeepsOrderIdentity()
+    {
+        var engine = CreateEngine(goblinCount: 1);
+        var spawn = engine.Map.GoblinSpawn;
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            new SimulationTick(1), sequence: 1, spawn, spawn, ResourceKind.Food));
+        engine.AdvanceTicks(1);
+        var original = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        var snapshot = engine.CreateSnapshot();
+        var foodPositions = snapshot.PlantPatches
+            .Where(plant => plant.Biomass > 0)
+            .Select(plant => plant.Position)
+            .ToHashSet();
+        var emptyVisibleCell =
+            (from y in Enumerable.Range(0, engine.Map.Height)
+             from x in Enumerable.Range(0, engine.Map.Width)
+             let position = new GridPosition(x, y)
+             where snapshot.GetVisibility(position, engine.Map.Width) != CellVisibility.Unknown &&
+                   !foodPositions.Contains(position)
+             select position).First();
+
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+                new SimulationTick(2), sequence: 2,
+                emptyVisibleCell, emptyVisibleCell, ResourceKind.Food)
+            .ReplacingWorkOrder(original.OrderId, StoragePriority.Urgent));
+        engine.AdvanceTicks(1);
+
+        var afterRejectedReplacement = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(original, afterRejectedReplacement);
+
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+                new SimulationTick(3), sequence: 3, spawn, spawn, ResourceKind.Food)
+            .ReplacingWorkOrder(original.OrderId, StoragePriority.Urgent));
+        engine.AdvanceTicks(1);
+
+        var replaced = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(original.OrderId, replaced.OrderId);
+        Assert.NotEqual(original.Id, replaced.Id);
+        Assert.Equal(StoragePriority.Urgent, replaced.Priority);
+    }
+
+    [Fact]
+    public void SuspendedPlannerOrderStopsWorkAndResumesWithSameTargets()
+    {
+        var engine = CreateEngine(goblinCount: 1);
+        var spawn = engine.Map.GoblinSpawn;
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            new SimulationTick(1), sequence: 1, spawn, spawn, ResourceKind.Food));
+        engine.AdvanceTicks(1);
+        var original = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(ActorJobKind.Forage, Assert.Single(engine.CreateSnapshot().Actors).Job.Kind);
+
+        engine.QueueCommand(SimulationCommand.ConfigureWorkSuspension(
+            new SimulationTick(2), sequence: 2, original.OrderId, isSuspended: true));
+        engine.AdvanceTicks(1);
+
+        var suspended = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.True(suspended.IsSuspended);
+        Assert.Equal(ActorJobKind.None, Assert.Single(engine.CreateSnapshot().Actors).Job.Kind);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.True(Assert.Single(restored.CreateSnapshot().WorkDesignations).IsSuspended);
+
+        restored.QueueCommand(SimulationCommand.ConfigureWorkSuspension(
+            restored.CurrentTick.Next(), sequence: 3, original.OrderId, isSuspended: false));
+        restored.AdvanceTicks(1);
+
+        var resumed = Assert.Single(restored.CreateSnapshot().WorkDesignations);
+        Assert.False(resumed.IsSuspended);
+        Assert.Equal(original.Id, resumed.Id);
+        Assert.Equal(ActorJobKind.Forage, Assert.Single(restored.CreateSnapshot().Actors).Job.Kind);
     }
 
     private static SimulationEngine CreateEngine(

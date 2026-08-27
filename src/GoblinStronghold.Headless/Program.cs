@@ -10,7 +10,10 @@ if (args.Contains("--benchmark-day", StringComparer.OrdinalIgnoreCase))
 
 const long finalTick = 720;
 var definitions = SimulationDefinitions.Foundation;
-var map = SwampMapGenerator.Generate(new WorldSeed(0x474F424C494EUL), width: 64, height: 64);
+var map = SwampMapGenerator.Generate(
+    new WorldSeed(0x474F424C494EUL),
+    SwampMapGenerator.DefaultDimension,
+    SwampMapGenerator.DefaultDimension);
 
 var accelerated = CreateScenario(definitions, map);
 var acceleratedRunner = new SimulationRunner(accelerated);
@@ -24,10 +27,25 @@ acceleratedRunner.RunUntil(
 var midpointHash = accelerated.ComputeStateHash();
 var save = accelerated.Save();
 accelerated = SimulationEngine.Load(save, definitions);
+var reloadedHash = accelerated.ComputeStateHash();
 
-if (!StringComparer.Ordinal.Equals(midpointHash, accelerated.ComputeStateHash()))
+if (!StringComparer.Ordinal.Equals(midpointHash, reloadedHash))
 {
-    Console.Error.WriteLine("Save/load changed authoritative state at the midpoint.");
+    var reloadedSave = accelerated.Save();
+    var sharedLength = Math.Min(save.Length, reloadedSave.Length);
+    var differenceAt = Enumerable.Range(0, sharedLength)
+        .FirstOrDefault(index => save[index] != reloadedSave[index], -1);
+    if (differenceAt < 0 && save.Length != reloadedSave.Length)
+    {
+        differenceAt = sharedLength;
+    }
+    var contextStart = Math.Max(0, differenceAt - 80);
+    var contextLength = Math.Min(240, Math.Max(save.Length, reloadedSave.Length) - contextStart);
+    Console.Error.WriteLine(
+        $"Save/load changed authoritative state at the midpoint: {midpointHash} != {reloadedHash}.");
+    Console.Error.WriteLine($"First serialized difference at {differenceAt}.");
+    Console.Error.WriteLine($"Before: {save.Substring(contextStart, Math.Min(contextLength, save.Length - contextStart))}");
+    Console.Error.WriteLine($"After:  {reloadedSave.Substring(contextStart, Math.Min(contextLength, reloadedSave.Length - contextStart))}");
     return 1;
 }
 

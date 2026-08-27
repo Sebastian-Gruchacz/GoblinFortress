@@ -8,5 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\GoblinStronghold.Simulation\GoblinStronghold.Simulation.csproj" />
+    <EmbeddedResource Include="Content\title-splashes.pl.txt"
+                      LogicalName="GoblinStronghold.GodotClient.Content.title-splashes.pl.txt"
+                      WithCulture="false" />
   </ItemGroup>
 </Project>

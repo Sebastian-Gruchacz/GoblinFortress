@@ -9,6 +9,55 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class WorldMapStateTests
 {
     [Fact]
+    public void DeepRiverVolumeOverridesLegacyCaveRockAfterSaveLoad()
+    {
+        var seed = new WorldSeed(456);
+        var map = SwampMapGenerator.Generate(seed, 64, 64, generatorVersion: 10);
+        var water = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, -1)))
+            .First(position =>
+                map.TryGetInitialGeometry(position, out var geometry) &&
+                geometry.Fluid == CellFluidKind.Water);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+
+        Assert.True(engine.World.TryGetFluid(water, out var fluid, out var depthLevels));
+        Assert.Equal(CellFluidKind.Water, fluid);
+        Assert.True(depthLevels > 0);
+        Assert.False(engine.World.IsSolidCaveRock(water));
+        Assert.False(engine.World.CanExcavateRock(water));
+        Assert.False(engine.World.IsTerrainReachable(water));
+        Assert.False(engine.World.IsTerrainTraversable(water));
+
+        Assert.Equal(CaveCellKind.SolidRock, map.GetCaveCell(water).Kind);
+        var oldSave = JsonNode.Parse(engine.Save())!.AsObject();
+        oldSave["excavatedCaveCells"]!.AsArray().Add(new JsonObject
+        {
+            ["x"] = water.X,
+            ["y"] = water.Y,
+            ["z"] = water.Z,
+        });
+        var restored = SimulationEngine.Load(
+            oldSave.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        Assert.True(restored.World.TryGetFluid(water, out fluid, out depthLevels));
+        Assert.Equal(CellFluidKind.Water, fluid);
+        Assert.True(depthLevels > 0);
+        Assert.Contains(water, restored.World.ExcavatedCaveCells);
+        Assert.False(restored.World.IsSolidCaveRock(water));
+        Assert.False(restored.World.IsTerrainTraversable(water));
+        var roundTripped = SimulationEngine.Load(
+            restored.Save(),
+            SimulationDefinitions.Foundation);
+        Assert.Equal(restored.ComputeStateHash(), roundTripped.ComputeStateHash());
+    }
+
+    [Fact]
     public void InitialEcologyContainsDistinctDeterministicFoodSources()
     {
         var seed = new WorldSeed(0x474F424C494EUL);
@@ -31,6 +80,7 @@ public sealed class WorldMapStateTests
         Assert.Contains(firstSources, source => source.Kind == PlantKind.MushroomCluster);
         Assert.Contains(firstSources, source => source.Kind == PlantKind.EdibleRoots);
         Assert.Contains(firstSources, source => source.Kind == PlantKind.FishShoal);
+        Assert.Contains(firstSources, source => source.Kind == PlantKind.ReedBed);
     }
 
     [Fact]

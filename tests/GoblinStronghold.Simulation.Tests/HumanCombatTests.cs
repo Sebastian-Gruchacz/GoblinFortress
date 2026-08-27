@@ -33,13 +33,51 @@ public sealed class HumanCombatTests
 
         var snapshot = engine.CreateSnapshot();
         var events = engine.DrainEvents();
-        Assert.True(snapshot.HumanVillage.GoblinAttackOrdered,
-            $"Raid phase: {snapshot.RaidPhase}; rally: {snapshot.RaidRallyPoint}; storages: {string.Join("; ", snapshot.StorageZones.Select(zone => $"{zone.Id}@{zone.Position} {zone.StoredQuantity}/{zone.DesiredQuantity}"))}; ground: {string.Join("; ", snapshot.ItemStacks.Select(stack => $"{stack.Id}:{stack.Resource}={stack.Quantity}@{stack.Location.Kind}/{stack.Location.Position}"))}; actors: {string.Join("; ", snapshot.Actors.Select(actor => $"{actor.Id}@{actor.Position} f{actor.PersonalFood} w{actor.PersonalWater} h{actor.Hunger} t{actor.Thirst} z{actor.Fatigue} {actor.Job.Kind}/{actor.Job.Stage}->{actor.Job.Target}"))}");
-        Assert.Equal(GoblinRaidPhase.Marching, snapshot.RaidPhase);
+        Assert.False(snapshot.HumanVillage.GoblinAttackOrdered);
+        Assert.Equal(GoblinRaidPhase.None, snapshot.RaidPhase);
         Assert.Equal(100, snapshot.HumanVillage.Hostility);
+        Assert.Equal(0, snapshot.HumanVillage.GuardHitPoints);
         var departure = Assert.Single(events,
             item => item.Kind == SimulationEventKind.RaidDeparted);
         Assert.Equal(SimulationDefinitions.FieldCampCapacity, departure.Amount);
+        Assert.Contains(events, item => item.Kind == SimulationEventKind.RaidVictory);
+    }
+
+    [Fact]
+    public void RaidVictoryClearsActiveLifecycleAndKeepsSurvivingPartySelection()
+    {
+        var engine = CreateEncounterEngine(orderRaid: true);
+        var preparing = engine.CreateSnapshot();
+        Assert.Equal(GoblinRaidPhase.Preparing, preparing.RaidPhase);
+        var party = preparing.RaidPartyIds.ToArray();
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["raidPhase"] = (int)GoblinRaidPhase.Marching;
+        save["humanVillage"]!["goblinAttackOrdered"] = true;
+        save["humanVillage"]!["hostility"] = 100;
+        save["humanVillage"]!["lastIntruderSeenTick"] = save["currentTick"]!.GetValue<long>();
+        var guard = save["humanVillage"]!["cohorts"]!.AsArray()
+            .Select(node => node!.AsObject())
+            .Single(model => model["role"]!.GetValue<int>() == (int)HumanCohortRole.Guards);
+        var guardPopulation = guard["population"]!.GetValue<int>();
+        guard["population"] = 0;
+        save["humanVillage"]!["guardHitPoints"] = 0;
+        save["humanVillage"]!["population"] =
+            save["humanVillage"]!["population"]!.GetValue<int>() - guardPopulation;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(1);
+
+        var completed = engine.CreateSnapshot();
+        Assert.Equal(GoblinRaidPhase.None, completed.RaidPhase);
+        Assert.Equal(default, completed.RaidRallyPoint);
+        Assert.False(completed.HumanVillage.GoblinAttackOrdered);
+        Assert.Equal(party, completed.RaidPartyIds);
+        var victory = Assert.Single(engine.DrainEvents(), item =>
+            item.Kind == SimulationEventKind.RaidVictory);
+        Assert.Equal(party.Length, victory.Amount);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
 
     [Fact]
@@ -75,6 +113,52 @@ public sealed class HumanCombatTests
             SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation));
 
         Assert.Contains("guard health", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SlingExtendsGoblinAttackRangeAndConsumesPersonalStone()
+    {
+        var seed = new WorldSeed(0x511A6UL);
+        var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+        var guard = engine.CreateSnapshot().HumanVillage.Cohorts.Single(cohort =>
+            cohort.Role == HumanCohortRole.Guards);
+        var firingPosition = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.IsSurfaceTraversable)
+            .Where(position => Math.Abs(position.X - guard.Position.X) +
+                Math.Abs(position.Y - guard.Position.Y) is >= 3 and <= 5)
+            .OrderBy(position => Math.Abs(position.X - guard.Position.X) +
+                Math.Abs(position.Y - guard.Position.Y))
+            .First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var actor = save["actors"]!.AsArray()[0]!.AsObject();
+        actor["x"] = firingPosition.X;
+        actor["y"] = firingPosition.Y;
+        actor["z"] = firingPosition.Z;
+        actor["equipment"] = actor["equipment"]!.GetValue<int>() |
+            (int)PersonalEquipment.PrimitiveSling;
+        actor["personalStoneAmmo"] = 1;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var guardHealth = engine.CreateSnapshot().HumanVillage.GuardHitPoints;
+
+        for (var index = 0; index < 200 &&
+             engine.CreateSnapshot().Actors[0].PersonalStoneAmmo > 0; index++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.Equal(0, snapshot.Actors[0].PersonalStoneAmmo);
+        Assert.True(snapshot.HumanVillage.GuardHitPoints < guardHealth);
+        Assert.Contains(engine.DrainEvents(), simulationEvent =>
+            simulationEvent.Kind == SimulationEventKind.GoblinHitHumanGuard);
     }
 
     private static void AdvanceUntilAlerted(SimulationEngine engine, int maximumTicks)

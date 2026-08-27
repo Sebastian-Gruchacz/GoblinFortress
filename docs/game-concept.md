@@ -125,6 +125,10 @@ The design supports three related paths:
 
 **Working rule:** A descendant may receive incomplete skill familiarity from a goblin parent or goblin corpse. Inheritance never creates knowledge the source did not possess, is lossier for advanced skills and may leave fragments below the threshold required to operate a facility.
 
+The first reproduction slice retains one parental skill and one parental trait, ten percent of the parent's practical experience and softened work preferences. A newborn remains a juvenile for one complete season as defined by the active climate profile. During that time it satisfies personal needs but is excluded from public work, raids and combat.
+
+Goblin adulthood is short. The baseline body remains healthy for roughly five climate years, after which senescence lowers its recoverable maximum health over a deterministic one or two seasons until only about fifteen percent of ordinary capacity remains. This is heavy organ failure rather than an automatic death timer: exceptional protection, care or future noble privileges may prolong life, but an elder becomes extremely vulnerable to hunger, dehydration, illness and injury. Founding adults receive deterministic ages between one and four years so ageing can occur during a campaign without making every tribe expire together.
+
 This leakage lets the tribe retain traces of progress after a disaster without making carriers immortal through reproduction. The exact amount and whether several weak fragments can be recombined are deferred balance questions.
 
 ### Genetic diversity and biological advancement
@@ -255,6 +259,18 @@ Primitive resources include:
 - shallow and deep water;
 - basic storage bundles and primitive tools.
 
+The first crafting chain begins with hunting. A carcass yields separate physical stacks of
+meat, hide and bone rather than one abstract hunting reward. A primitive workshop consumes
+delivered inputs through queued recipes; the starter sling uses one hide and one bone. Goblins
+can pocket a small number of stored stones for hand throwing, while a sling increases ammunition
+capacity, range and damage. The same workshop also makes bone knives, fighting sticks, stone clubs,
+hide clothes and reed clothes. Recipes are queued from a completed workshop's own window rather
+than from the construction palette. Reeds grow as harvestable beds in shallow wetlands; hungry
+goblins ignore them unless the player has issued the dedicated gather-reeds designation.
+Automatic personal resupply draws only from stockpiles and only for
+sling users or a party actively preparing for an expedition, so ordinary stone logistics are not
+silently drained by every idle worker.
+
 Resources exist in locations, inventories, containers and stockpiles rather than only as global counters. Gathering, transport, spoilage and access therefore matter.
 
 A storage slot is a shared physical primitive used by stockpiles, furniture, barrels, workshops, carts and personal inventories. Its policy defines slot count, stack size, whether unlike item types may share space, accepted or excluded identities and physical containment capabilities. An unrestricted filter accepts every compatible item by default; specialist stockpiles narrow that filter. Compatibility remains separate from preference: loose solid goods may fit an open shelf, while a liquid requires a sealed vessel even when neither object applies a resource-name filter. Workshops consume from and produce into the same slots rather than owning a second hidden inventory model.
@@ -281,7 +297,7 @@ A newly constructed specialist stockpile starts as an active request for its acc
 
 This full system is a later milestone. The survival foundation establishes physical ownership, reachability, capacity and deterministic reservations without committing the UI to the initial single-cell storage prototype.
 
-A primitive field camp is the first concrete staging buffer. It is a physical 2×2 shelter built near reachable shallow water, provides a place to rest and requests a food reserve sized for at least a small expedition. Haulers may act on the remembered location of player-owned or previously discovered stock after it leaves current sight; the presentation must still distinguish remembered quantities from live observations. Camp demand competes with other storage demand through the same reservations rather than conjuring expedition supplies.
+A primitive field camp is the first concrete staging buffer. It is a physical 2×2 shelter that may be built on any reachable valid footprint and does not require adjacent water; its occupants use ordinary water-fetching behavior. It provides a place to rest and requests a food reserve sized for at least a small expedition. Haulers may act on the remembered location of player-owned or previously discovered stock after it leaves current sight; the presentation must still distinguish remembered quantities from live observations. Camp demand competes with other storage demand through the same reservations rather than conjuring expedition supplies.
 
 Area tools for gathering and later cutting, mining or clearing are selectors. Confirming an area resolves it into stable object targets; the rectangle itself is discarded. Empty cells are not jobs, newly appearing objects are not implicitly added, and target sets of different kinds may overlap. Persistent overlays use thin category-specific outlines around the selected bushes, trees, loose items, rocks or deposits rather than painting every tile in the original rectangle.
 
@@ -519,6 +535,18 @@ The first implementation uses correct deterministic local pathfinding behind a p
 
 Digging, construction and changing water can invalidate connectivity. Advanced pathfinding is introduced only after profiling shows which workload dominates.
 
+Agents do not receive the authoritative topology as perfect knowledge. The simulation keeps three distinct layers:
+
+- the true world state used to resolve movement, collision, falling, fire and fluids;
+- each actor's recent local observations and remembered route failures;
+- delayed shared knowledge held by the tribe, settlement or traveling group.
+
+An actor analyzes nearby visible or otherwise perceptible cells exactly enough to take its next steps safely. Long-distance planning uses a coarser believed region graph whose edges carry the last observation tick, source and confidence. A route may therefore still claim that an old gate is open, a bridge exists or a corridor is dry. On reaching a contradiction, the actor stops before a directly perceived hazard, records the blocked transition and performs a bounded local replan. It may detour, wait, abandon the job or return for another assignment according to urgency, risk tolerance and available supplies. It does not walk knowingly into visible lava merely because an old strategic edge said `passable`.
+
+Knowledge does not become communal at the instant of observation. A report enters shared tribal knowledge only through an implemented communication opportunity: returning to the settlement or camp, meeting a connected group, speaking to an appropriate dispatcher, or later using signals, messengers or learned communication infrastructure. Reports are deterministic simulation events with travel and processing time, not wall-clock cache invalidations. Several reports may conflict; newer direct observation normally wins, while uncertain hearsay may coexist until verified. Deliberate lies, misunderstanding and language barriers are later social extensions, not required for the first stale-map implementation.
+
+This separation is also a performance boundary. Distant movement first follows cached approximate routes between stable regions, entrances, bridges, stockpiles and settlements. Only the actor's local perception bubble requests detailed cell paths. A changed door, collapse or new lava channel updates authoritative topology immediately but invalidates beliefs only for observers and later report recipients; it does not force every actor to rescan the map. Player-visible feasibility must consequently distinguish `known reachable`, `believed reachable`, `route uncertain` and `locally blocked` instead of presenting omniscient yes/no answers.
+
 ## Roadmap relationship
 
 The implementation sequence is:
@@ -535,7 +563,26 @@ The knowledge loop remains the game's central validation target. The survival fo
 
 ### Is the game 2D or 3D?
 
-The world has three-dimensional topology expressed as discrete levels; presentation is top-down 2D. Full 3D art is not required.
+The world has three-dimensional topology expressed as discrete levels; presentation is top-down 2D. Full 3D art is not required. There is no privileged `surface` layer in the simulation. Mountains, caves, buildings and excavations are arrangements of the same cells at different Z coordinates, and the apparent ground is merely the highest locally exposed support that can currently be seen or occupied. A mountain is solid material extending through levels at or above zero; digging into its side, tunnelling beneath it and carving a ramp are ordinary topology changes.
+
+Each layer uses one physical contract:
+
+- a cell volume may contain solid material, open space or an amount of fluid;
+- an occupiable cell is supported by the upper face of solid material below or by an explicit horizontal slab;
+- that same horizontal slab is the roof when observed from below and the floor when observed from above;
+- soil, grass, mud, paving and puddles are thin floor or cover states rather than special world layers;
+- ramps and gentle slopes are shaped support surfaces and traversable links between adjacent Z levels; cliffs expose solid faces and are not traversable without an appropriate ability;
+- an unsupported actor or loose object is subject to gravity regardless of whether it is above or below level zero.
+
+Sunlight and rain enter from above and continue down a column until geometry or material properties block them. Being outdoors is therefore a derived exposure query, not a property attached to level zero. Water and lava use the same gravity-driven flow rules everywhere, with material-specific properties such as viscosity, temperature and damage. Shallow water lies over a traversable floor or sloping bed; deep water occupies open volume created above a lower bed, including fully excavated cells rather than merely changing a terrain label.
+
+Underground rivers, perched reservoirs and lava channels use those same fluid volumes. Their danger comes from geometry and pressure: removing the final separating wall may suddenly connect a tunnel to a much larger body, while a route over the obstacle or cautious excavation from a higher level can remain safe. A solid wall conceals the fluid itself but may transmit limited local evidence. Water raises moisture and can produce dark stone, dripping, seepage and eventually a puddle on the dry side; lava conducts heat and can make the wall warm, hot or visibly cracked and glowing. These are derived physical clues rather than automatic revelation of hidden cells. Their strength depends on material permeability, wall thickness, fluid head, temperature and elapsed time; a goblin's mining knowledge affects interpretation and warnings, not whether seepage or heat exists.
+
+Fluid transfer through intact material is much slower than flow through open cells. Seepage may create dampness or a small accumulating puddle without opening a traversable connection, whereas breaching or collapsing the wall creates an ordinary high-rate flow edge. Water and lava can cool, heat, erode, contaminate or transform neighboring materials later, but those reactions must consume bounded dirty regions rather than rescan every underground cell each tick.
+
+Flooded caves are valid generated spaces and potentially valuable engineering projects, not invalid maps. The player may abandon them, approach from above, dig a bypass or create a new tunnel system. Reclamation must move water somewhere physical: a gravity drain to a lower outlet or sump, a diversion channel, a sealed bulkhead or floodgate, absorbent fill and backfilling, and eventually mechanical or learned pumps. Water does not disappear merely because a room is designated for draining. Pump capacity, destination capacity, renewed inflow and accidental connection to a river determine whether the cave can remain dry. The same tools can deliberately flood defenses, extinguish fire or redirect hazards, while lava demands heat-resistant variants rather than acting as differently colored water.
+
+The top-down renderer may composite lower layers through cells that have no floor or other opaque obstruction. Those lower layers can be slightly dimmed, misted or scaled for depth legibility, but this is presentation only: selection, visibility, light, falling and movement continue to use authoritative world coordinates.
 
 ### Is the game real-time or tick-based?
 
@@ -570,7 +617,7 @@ These questions are real but do not block the survival foundation:
 3. **Fragment recombination:** Several descendants may hold partial familiarity. Whether they can collectively reconstruct a capability requires a clear, non-exploitable rule.
 4. **Personality transfer:** Technical knowledge, temperament, morality and loyalty may have different fidelity. The initial transfer system should store their provenance even if only skills affect play.
 5. **Coarse-detail reconciliation:** Remote casualties, inventories and scheduled travel must not be rerolled when actors become visible.
-6. **Water and verticality:** Dynamic water across height levels could dominate pathfinding and performance. The first swamp uses limited water behavior until the core simulation is measurable.
+6. **Fluids and verticality:** Water and lava must eventually use one level-independent flow model. Dynamic fluid volume, pressure, seepage and heat conduction across many Z levels could dominate topology updates and pathfinding, so the first swamp may approximate stable bodies while preserving a representation that can later flow without redefining `surface` tiles. Updates must be event- or dirty-region-driven, and hidden-fluid warnings must reveal symptoms rather than exact unseen geometry.
 7. **Agriculture versus woodworking:** Both are desirable first targets. The conflict milestone should let the player choose between two valuable experts, but only one complete production chain is required for its minimum acceptance test.
 8. **Knowledge visibility:** Reports must be useful without exposing exact hidden statistics. Uncertainty, staleness and misidentification require UI experiments.
 9. **Social class:** A learned elite can emerge from carrier scarcity, but hard-coded castes are deferred until ordinary status and teaching create observable pressure.

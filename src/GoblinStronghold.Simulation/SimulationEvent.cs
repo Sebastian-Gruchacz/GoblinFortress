@@ -34,6 +34,22 @@ public enum SimulationEventKind
     ResourcePriorityConfigured = 30,
     ConstructionPriorityConfigured = 31,
     StorageMineralFilterConfigured = 32,
+    WorkPriorityConfigured = 33,
+    WorkSuspensionConfigured = 34,
+    ItemDropped = 35,
+    RaidVictory = 36,
+    RaidDefeated = 37,
+    PopulationTargetConfigured = 38,
+    GoblinBudCreated = 39,
+    GoblinBorn = 40,
+    AnimalHitGoblin = 41,
+    AnimalBorn = 42,
+    AnimalDied = 43,
+    AnimalHunted = 44,
+    CraftingOrdered = 45,
+    CraftingMaterialDelivered = 46,
+    CraftingCompleted = 47,
+    ActorCollectedStoneAmmo = 48,
 }
 
 public readonly record struct SimulationEvent(

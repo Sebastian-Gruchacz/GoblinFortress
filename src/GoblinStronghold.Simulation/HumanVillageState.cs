@@ -200,6 +200,11 @@ internal sealed class HumanVillageState
         LastIntruderSeenTick = Math.Max(0, LastIntruderSeenTick);
     }
 
+    public void EndGoblinAttack()
+    {
+        GoblinAttackOrdered = false;
+    }
+
     public HumanVillageSnapshot CreateSnapshot() => new(
         Anchor, Population, FoodStock, WoodStock, GoodsStock, WaterStock, PlannedFieldCount,
         StorehouseCount, FoodCapacity, GoblinAttackOrdered, Hostility, LastIntruderSeenTick,

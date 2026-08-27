@@ -2,7 +2,8 @@ namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 11;
+    public const int DefaultDimension = 96;
     public const int MinimumDimension = 16;
     public const int MaximumDimension = 2_048;
 
@@ -37,7 +38,7 @@ public static class SwampMapGenerator
         }
         if (generatorVersion >= 5)
         {
-            ApplyTerrainRelief(cells, seed, width, height);
+            ApplyTerrainRelief(cells, seed, width, height, generatorVersion);
         }
 
         var goblinSpawn = generatorVersion >= 4
@@ -428,7 +429,8 @@ public static class SwampMapGenerator
         MapCell[] cells,
         WorldSeed seed,
         int width,
-        int height)
+        int height,
+        int generatorVersion)
     {
         for (var y = 0; y < height; y++)
         {
@@ -460,15 +462,27 @@ public static class SwampMapGenerator
                 var riverDistance = Math.Abs(normalizedY - riverCenterY) * height;
                 var valleySuppression = Math.Clamp(riverDistance / (Math.Min(width, height) * 0.18d), 0d, 1d);
                 var uplandInfluence = Math.Clamp((normalizedX + (1d - normalizedY) - 0.72d) / 0.9d, 0d, 1d);
+                var foothillInfluence = generatorVersion >= 11
+                    ? RadialInfluence(
+                        normalizedX,
+                        normalizedY,
+                        centerX: 0.22d,
+                        centerY: 0.6d,
+                        radiusX: 0.16d,
+                        radiusY: 0.18d)
+                    : 0d;
                 var reliefScore = (broadRelief * 0.5d) + (ridgeNoise * 0.2d) +
-                    (uplandInfluence * 0.42d) - ((1d - valleySuppression) * 0.38d);
-                var level = reliefScore switch
-                {
-                    >= 0.83d => (sbyte)2,
-                    >= 0.59d => (sbyte)1,
-                    <= 0.19d when riverDistance > 5d => (sbyte)-1,
-                    _ => (sbyte)0,
-                };
+                    (uplandInfluence * 0.42d) + (foothillInfluence * 0.72d) -
+                    ((1d - valleySuppression) * 0.38d);
+                var highThreshold = generatorVersion >= 11 ? 0.79d : 0.83d;
+                var raisedThreshold = generatorVersion >= 11 ? 0.55d : 0.59d;
+                var level = reliefScore >= highThreshold
+                    ? (sbyte)2
+                    : reliefScore >= raisedThreshold
+                        ? (sbyte)1
+                        : reliefScore <= 0.19d && riverDistance > 5d
+                            ? (sbyte)-1
+                            : (sbyte)0;
                 cells[index] = cell with
                 {
                     FloorLevel = level,
@@ -477,6 +491,20 @@ public static class SwampMapGenerator
                 };
             }
         }
+    }
+
+    private static double RadialInfluence(
+        double x,
+        double y,
+        double centerX,
+        double centerY,
+        double radiusX,
+        double radiusY)
+    {
+        var offsetX = (x - centerX) / radiusX;
+        var offsetY = (y - centerY) / radiusY;
+        var distance = Math.Sqrt((offsetX * offsetX) + (offsetY * offsetY));
+        return Smooth(Math.Clamp(1d - distance, 0d, 1d));
     }
 
     private static void AssignTerrainRamps(
@@ -590,7 +618,8 @@ public static class SwampMapGenerator
             width,
             height,
             goblinSpawn,
-            humanVillage);
+            humanVillage,
+            generatorVersion);
         var horizontalSign = DeterministicRandom.NextInt(
             seed,
             RandomDomain.MapGeneration,
@@ -610,26 +639,50 @@ public static class SwampMapGenerator
         var spanX = Math.Max(3, Math.Min(8, width / 6));
         var spanY = Math.Max(3, Math.Min(7, height / 7));
         var firstRoom = entrance with { Z = -1 };
-        var secondRoom = ClampCavePosition(
+        var secondRoom = FindAvailableCavePosition(
+            surfaceCells,
+            ClampCavePosition(
             firstRoom with
             {
                 X = firstRoom.X + (spanX * horizontalSign),
                 Y = firstRoom.Y + (2 * verticalSign),
             },
             width,
-            height);
-        var descent = ClampCavePosition(
+            height),
+            width,
+            height,
+            generatorVersion);
+        var descent = FindAvailableCavePosition(
+            surfaceCells,
+            ClampCavePosition(
             secondRoom with
             {
                 X = secondRoom.X + (spanX * horizontalSign),
                 Y = secondRoom.Y + (spanY * verticalSign),
             },
             width,
-            height);
+            height),
+            width,
+            height,
+            generatorVersion);
         CarveCaveChamber(caveCells, width, height, firstRoom, radiusX: 2, radiusY: 2);
-        CarveCaveCorridor(caveCells, width, height, firstRoom, secondRoom);
+        CarveCaveCorridor(
+            caveCells,
+            surfaceCells,
+            width,
+            height,
+            firstRoom,
+            secondRoom,
+            generatorVersion);
         CarveCaveChamber(caveCells, width, height, secondRoom, radiusX: 3, radiusY: 2);
-        CarveCaveCorridor(caveCells, width, height, secondRoom, descent);
+        CarveCaveCorridor(
+            caveCells,
+            surfaceCells,
+            width,
+            height,
+            secondRoom,
+            descent,
+            generatorVersion);
         CarveCaveChamber(caveCells, width, height, descent, radiusX: 2, radiusY: 3);
 
         var deepStart = descent with { Z = -2 };
@@ -650,9 +703,23 @@ public static class SwampMapGenerator
             width,
             height);
         CarveCaveChamber(caveCells, width, height, deepStart, radiusX: 2, radiusY: 2);
-        CarveCaveCorridor(caveCells, width, height, deepStart, deepMiddle);
+        CarveCaveCorridor(
+            caveCells,
+            surfaceCells,
+            width,
+            height,
+            deepStart,
+            deepMiddle,
+            generatorVersion);
         CarveCaveChamber(caveCells, width, height, deepMiddle, radiusX: 3, radiusY: 2);
-        CarveCaveCorridor(caveCells, width, height, deepMiddle, deepEnd);
+        CarveCaveCorridor(
+            caveCells,
+            surfaceCells,
+            width,
+            height,
+            deepMiddle,
+            deepEnd,
+            generatorVersion);
         CarveCaveChamber(caveCells, width, height, deepEnd, radiusX: 3, radiusY: 3);
 
         SetCaveKind(caveCells, width, height, firstRoom, CaveCellKind.Ramp);
@@ -661,6 +728,21 @@ public static class SwampMapGenerator
         if (generatorVersion >= 8)
         {
             AssignMineralDeposits(caveCells, seed, width, height);
+            if (generatorVersion >= 10)
+            {
+                EnsureExposedMineralDeposit(
+                    caveCells,
+                    seed,
+                    width,
+                    height,
+                    MineralDepositKind.Coal);
+                EnsureExposedMineralDeposit(
+                    caveCells,
+                    seed,
+                    width,
+                    height,
+                    MineralDepositKind.IronOre);
+            }
         }
         return new CaveGenerationResult(
             caveCells,
@@ -715,13 +797,57 @@ public static class SwampMapGenerator
         }
     }
 
+    private static void EnsureExposedMineralDeposit(
+        CaveCell[] cells,
+        WorldSeed seed,
+        int width,
+        int height,
+        MineralDepositKind deposit)
+    {
+        var cellCount = checked(width * height);
+        var exposedRock = (
+                from level in Enumerable.Range(1, 2)
+                from y in Enumerable.Range(1, height - 2)
+                from x in Enumerable.Range(1, width - 2)
+                let position = new GridPosition(x, y, -level)
+                let index = ((level - 1) * cellCount) + (y * width) + x
+                where cells[index].Kind == CaveCellKind.SolidRock &&
+                    CardinalNeighbors(position, width, height).Any(neighbor =>
+                    {
+                        var neighborIndex = ((level - 1) * cellCount) +
+                            (neighbor.Y * width) + neighbor.X;
+                        return cells[neighborIndex].IsOpen;
+                    })
+                select (Position: position, Index: index))
+            .ToArray();
+        if (exposedRock.Any(candidate => cells[candidate.Index].Deposit == deposit))
+        {
+            return;
+        }
+
+        var selected = exposedRock
+            .Where(candidate => cells[candidate.Index].Deposit == MineralDepositKind.None)
+            .OrderBy(candidate => DeterministicRandom.Sample(
+                seed,
+                RandomDomain.MapGeneration,
+                new EntityId(checked((ulong)candidate.Index + 1)),
+                SimulationTick.Zero,
+                sampleKey: checked(29_300UL + (ulong)deposit)))
+            .FirstOrDefault();
+        if (selected != default)
+        {
+            cells[selected.Index] = cells[selected.Index] with { Deposit = deposit };
+        }
+    }
+
     private static GridPosition FindCaveEntrance(
         MapCell[] surfaceCells,
         WorldSeed seed,
         int width,
         int height,
         GridPosition goblinSpawn,
-        GridPosition humanVillage)
+        GridPosition humanVillage,
+        int generatorVersion)
     {
         var margin = Math.Min(4, Math.Max(2, (Math.Min(width, height) - 1) / 4));
         var candidates = (
@@ -732,9 +858,14 @@ public static class SwampMapGenerator
                 where cell.IsTraversable &&
                     cell.Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
                     cell.RampDirection == TerrainRampDirection.None &&
+                    (generatorVersion < 10 || cell.SurfaceLevel == 0) &&
                     Distance(position, goblinSpawn) >= 4 &&
                     Distance(position, humanVillage) >= 4
-                orderby cell.SurfaceLevel descending,
+                orderby generatorVersion >= 10
+                        ? Math.Min(
+                            Distance(position, goblinSpawn),
+                            Distance(position, humanVillage))
+                        : cell.SurfaceLevel descending,
                     DeterministicRandom.Sample(
                         seed,
                         RandomDomain.MapGeneration,
@@ -754,6 +885,36 @@ public static class SwampMapGenerator
         X = Math.Clamp(position.X, 2, width - 3),
         Y = Math.Clamp(position.Y, 2, height - 3),
     };
+
+    private static GridPosition FindAvailableCavePosition(
+        MapCell[] surfaceCells,
+        GridPosition preferred,
+        int width,
+        int height,
+        int generatorVersion)
+    {
+        if (!IsCaveColumnBlocked(
+                surfaceCells,
+                preferred,
+                width,
+                generatorVersion))
+        {
+            return preferred;
+        }
+
+        return (
+                from y in Enumerable.Range(2, height - 4)
+                from x in Enumerable.Range(2, width - 4)
+                let position = new GridPosition(x, y, preferred.Z)
+                where !IsCaveColumnBlocked(
+                    surfaceCells,
+                    position,
+                    width,
+                    generatorVersion)
+                orderby Distance(position, preferred), y, x
+                select position)
+            .First();
+    }
 
     private static void CarveCaveChamber(
         CaveCell[] cells,
@@ -784,11 +945,32 @@ public static class SwampMapGenerator
 
     private static void CarveCaveCorridor(
         CaveCell[] cells,
+        MapCell[] surfaceCells,
         int width,
         int height,
         GridPosition start,
-        GridPosition end)
+        GridPosition end,
+        int generatorVersion)
     {
+        if (generatorVersion >= 10 && start.Z == -1 &&
+            DirectCaveCorridorCrossesBlockedColumn(
+                surfaceCells,
+                width,
+                start,
+                end,
+                generatorVersion))
+        {
+            CarveCaveCorridorAroundBlockedColumns(
+                cells,
+                surfaceCells,
+                width,
+                height,
+                start,
+                end,
+                generatorVersion);
+            return;
+        }
+
         var current = start;
         SetCaveKind(cells, width, height, current, CaveCellKind.Floor);
         while (current.X != end.X)
@@ -801,6 +983,101 @@ public static class SwampMapGenerator
             current = current with { Y = current.Y + Math.Sign(end.Y - current.Y) };
             SetCaveKind(cells, width, height, current, CaveCellKind.Floor);
         }
+    }
+
+    private static bool DirectCaveCorridorCrossesBlockedColumn(
+        MapCell[] surfaceCells,
+        int width,
+        GridPosition start,
+        GridPosition end,
+        int generatorVersion)
+    {
+        var current = start;
+        while (current.X != end.X)
+        {
+            current = current with { X = current.X + Math.Sign(end.X - current.X) };
+            if (IsCaveColumnBlocked(surfaceCells, current, width, generatorVersion))
+            {
+                return true;
+            }
+        }
+        while (current.Y != end.Y)
+        {
+            current = current with { Y = current.Y + Math.Sign(end.Y - current.Y) };
+            if (IsCaveColumnBlocked(surfaceCells, current, width, generatorVersion))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void CarveCaveCorridorAroundBlockedColumns(
+        CaveCell[] cells,
+        MapCell[] surfaceCells,
+        int width,
+        int height,
+        GridPosition start,
+        GridPosition end,
+        int generatorVersion)
+    {
+        var queue = new Queue<GridPosition>();
+        var predecessors = new Dictionary<GridPosition, GridPosition>();
+        var visited = new HashSet<GridPosition> { start };
+        queue.Enqueue(start);
+        while (queue.TryDequeue(out var current) && current != end)
+        {
+            foreach (var neighbor in CardinalNeighbors(current, width, height))
+            {
+                if (neighbor.X < 1 || neighbor.X >= width - 1 ||
+                    neighbor.Y < 1 || neighbor.Y >= height - 1 ||
+                    IsCaveColumnBlocked(
+                        surfaceCells,
+                        neighbor,
+                        width,
+                        generatorVersion) ||
+                    !visited.Add(neighbor))
+                {
+                    continue;
+                }
+
+                predecessors[neighbor] = current;
+                queue.Enqueue(neighbor);
+            }
+        }
+
+        if (!visited.Contains(end))
+        {
+            throw new InvalidOperationException("Unable to route the generated cave corridor.");
+        }
+
+        var route = new List<GridPosition> { end };
+        var step = end;
+        while (step != start)
+        {
+            step = predecessors[step];
+            route.Add(step);
+        }
+        foreach (var position in route)
+        {
+            SetCaveKind(cells, width, height, position, CaveCellKind.Floor);
+        }
+    }
+
+    private static bool IsCaveColumnBlocked(
+        MapCell[] surfaceCells,
+        GridPosition position,
+        int width,
+        int generatorVersion)
+    {
+        if (generatorVersion < 10 || position.Z != -1)
+        {
+            return false;
+        }
+
+        var surface = surfaceCells[(position.Y * width) + position.X];
+        return surface.Terrain == TerrainKind.DeepWater && surface.FloorLevel <= -2;
     }
 
     private static void SetCaveKind(

@@ -78,6 +78,23 @@ public sealed class NavigationPathService
         return route;
     }
 
+    public IReadOnlyList<GridPosition>? FindPath(
+        GridPosition start,
+        GridPosition destination,
+        Func<GridPosition, GridPosition, bool> canUseEdge,
+        bool canOpenDoors = true)
+    {
+        ArgumentNullException.ThrowIfNull(canUseEdge);
+        EnsureCurrentTopology();
+        _requests = checked(_requests + 1);
+        _searches = checked(_searches + 1);
+        return _world.FindTerrainPath(
+            start,
+            destination,
+            canOpenDoors,
+            canUseEdge);
+    }
+
     public bool HasPath(GridPosition start, GridPosition destination) =>
         FindPath(start, destination) is not null;
 

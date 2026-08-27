@@ -41,6 +41,16 @@ public sealed class GeneratedMap
 
     public int MaximumTerrainLevel => _cells.Max(cell => cell.SurfaceLevel);
 
+    public int MinimumWorldLevel => Math.Min(MinimumTerrainLevel, DeepestCaveLevel);
+
+    public int MaximumWorldLevel => MaximumTerrainLevel;
+
+    public int MaterializedPositiveLevelCount => GeneratorVersion >= 9
+        ? Math.Max(0, MaximumTerrainLevel)
+        : 0;
+
+    public int MaterializedNegativeLevelCount => Math.Max(0, -MinimumWorldLevel);
+
     public int LevelCount => MaximumTerrainLevel - MinimumTerrainLevel + 1;
 
     public int CaveLevelCount => _caveCells.Length == 0 ? 0 : _caveCells.Length / CellCount;
@@ -69,7 +79,154 @@ public sealed class GeneratedMap
         position.X >= 0 && position.X < Width &&
         position.Y >= 0 && position.Y < Height;
 
+    public bool IsColumnWithin(GridPosition position) =>
+        position.X >= 0 && position.X < Width &&
+        position.Y >= 0 && position.Y < Height;
+
+    public bool TryGetInitialGeometry(
+        GridPosition position,
+        out InitialCellGeometry geometry)
+    {
+        geometry = default;
+        if (!IsColumnWithin(position) ||
+            position.Z < MinimumWorldLevel || position.Z > MaximumWorldLevel)
+        {
+            return false;
+        }
+
+        var terrain = GetColumnCell(position);
+        if (IsTerrainSurfacePosition(position))
+        {
+            geometry = CreateTerrainGeometry(terrain);
+            return true;
+        }
+
+        if (terrain.Terrain == TerrainKind.DeepWater &&
+            position.Z > terrain.FloorLevel && position.Z < terrain.SurfaceLevel)
+        {
+            geometry = new InitialCellGeometry(
+                CellVolumeKind.Open,
+                Support: position.Z == terrain.FloorLevel + 1
+                    ? CellSupportKind.NaturalFlat
+                    : CellSupportKind.None,
+                Fluid: CellFluidKind.Water,
+                FluidDepthLevels: position.Z - terrain.FloorLevel);
+            return true;
+        }
+
+        if (IsHillRockPosition(position))
+        {
+            geometry = new InitialCellGeometry(
+                CellVolumeKind.Solid,
+                GetHillRockCell(position).Rock);
+            return true;
+        }
+
+        if (IsCavePosition(position))
+        {
+            var cave = GetCaveCell(position);
+            geometry = cave.Kind switch
+            {
+                CaveCellKind.SolidRock => new InitialCellGeometry(
+                    CellVolumeKind.Solid,
+                    cave.Rock),
+                CaveCellKind.Ramp => new InitialCellGeometry(
+                    CellVolumeKind.Open,
+                    Support: CellSupportKind.NaturalRamp),
+                _ => new InitialCellGeometry(
+                    CellVolumeKind.Open,
+                    Support: CellSupportKind.NaturalFlat),
+            };
+            return true;
+        }
+
+        geometry = new InitialCellGeometry(CellVolumeKind.Open);
+        return true;
+    }
+
+    public bool IsInitiallyOpenToSky(GridPosition position)
+    {
+        if (!TryGetInitialGeometry(position, out var target) || target.IsSolid)
+        {
+            return false;
+        }
+
+        for (var z = position.Z + 1; z <= MaximumWorldLevel; z++)
+        {
+            var above = position with { Z = z };
+            if (!TryGetInitialGeometry(above, out var geometry))
+            {
+                continue;
+            }
+            if (geometry.IsSolid ||
+                geometry.IsSupported && !HasInitialVerticalOpening(above, above with { Z = z - 1 }))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public bool HasInitialVerticalOpening(GridPosition upper, GridPosition lower) =>
+        upper.X == lower.X && upper.Y == lower.Y && upper.Z - lower.Z == 1 &&
+        _verticalPassages.Any(passage => passage.Upper == upper && passage.Lower == lower);
+
     public MapCell GetCell(GridPosition position) => _cells[GetIndex(position)];
+
+    public MapCell GetColumnCell(GridPosition position)
+    {
+        if (!IsColumnWithin(position))
+        {
+            throw new ArgumentOutOfRangeException(nameof(position));
+        }
+
+        return _cells[checked((position.Y * Width) + position.X)];
+    }
+
+    public GridPosition GetTerrainSurfacePosition(GridPosition column)
+    {
+        var cell = GetColumnCell(column);
+        return column with { Z = GeneratorVersion >= 9 ? cell.SurfaceLevel : 0 };
+    }
+
+    public bool IsTerrainSurfacePosition(GridPosition position) =>
+        IsColumnWithin(position) &&
+        position.Z == (GeneratorVersion >= 9 ? GetColumnCell(position).SurfaceLevel : 0);
+
+    public bool IsHillRockPosition(GridPosition position)
+    {
+        if (GeneratorVersion < 9 || !IsColumnWithin(position))
+        {
+            return false;
+        }
+
+        var cell = GetColumnCell(position);
+        return cell.Terrain == TerrainKind.SolidGround &&
+            position.Z >= 0 && position.Z < cell.SurfaceLevel;
+    }
+
+    public CaveCell GetHillRockCell(GridPosition position)
+    {
+        if (!IsHillRockPosition(position))
+        {
+            throw new ArgumentOutOfRangeException(nameof(position));
+        }
+
+        var sample = Seed.Value ^
+            ((ulong)(uint)position.X * 0x9E3779B185EBCA87UL) ^
+            ((ulong)(uint)position.Y * 0xC2B2AE3D27D4EB4FUL) ^
+            ((ulong)(uint)position.Z * 0x165667B19E3779F9UL);
+        var rock = (sample & 0x07UL) < 3UL ? RockKind.Granite : RockKind.Sandstone;
+        return new CaveCell(rock, CaveCellKind.SolidRock, MineralDepositKind.None);
+    }
+
+    public bool IsRockPosition(GridPosition position) =>
+        IsCavePosition(position) || IsHillRockPosition(position);
+
+    public CaveCell GetRockCell(GridPosition position) => position.Z < 0
+        ? GetCaveCell(position)
+        : GetHillRockCell(position);
 
     public CaveCell GetCaveCell(GridPosition position)
     {
@@ -86,12 +243,20 @@ public sealed class GeneratedMap
         position.Y >= 0 && position.Y < Height &&
         position.Z < 0 && position.Z >= -CaveLevelCount;
 
-    public bool IsTerrainTraversable(GridPosition position) => position.Z switch
+    public bool IsTerrainTraversable(GridPosition position)
     {
-        0 => IsWithin(position) && GetCell(position).IsTraversable,
-        < 0 => IsCavePosition(position) && GetCaveCell(position).IsOpen,
-        _ => false,
-    };
+        if (GeneratorVersion < 10)
+        {
+            return position.Z switch
+            {
+                0 => IsWithin(position) && GetCell(position).IsTraversable,
+                < 0 => IsCavePosition(position) && GetCaveCell(position).IsOpen,
+                _ => false,
+            };
+        }
+
+        return TryGetInitialGeometry(position, out var geometry) && geometry.IsOccupiable;
+    }
 
     public IEnumerable<GridPosition> GetCardinalNeighbors(GridPosition position)
     {
@@ -191,6 +356,37 @@ public sealed class GeneratedMap
         return false;
     }
 
+    public bool CanTraverseTerrainSurfaceEdge(GridPosition from, GridPosition to)
+    {
+        if (GeneratorVersion < 10)
+        {
+            return CanTraverseSurfaceEdge(from, to);
+        }
+        if (!IsTerrainSurfacePosition(from) || !IsTerrainSurfacePosition(to) ||
+            Math.Abs(from.X - to.X) + Math.Abs(from.Y - to.Y) != 1)
+        {
+            return false;
+        }
+
+        var fromCell = GetColumnCell(from);
+        var toCell = GetColumnCell(to);
+        var difference = to.Z - from.Z;
+        if (difference == 0)
+        {
+            return true;
+        }
+        if (difference == 1)
+        {
+            return fromCell.RampDirection == DirectionFrom(from, to);
+        }
+        if (difference == -1)
+        {
+            return toCell.RampDirection == DirectionFrom(to, from);
+        }
+
+        return false;
+    }
+
     public IEnumerable<GridPosition> GetTerrainNeighbors(GridPosition position)
     {
         if (!IsTerrainTraversable(position))
@@ -198,18 +394,33 @@ public sealed class GeneratedMap
             yield break;
         }
 
-        foreach (var neighbor in GetCardinalWorldNeighbors(position))
+        var isMaterialSurface = GeneratorVersion >= 10 &&
+            IsTerrainSurfacePosition(position);
+        foreach (var adjacentColumn in GetCardinalWorldNeighbors(position))
         {
-            if (!IsTerrainTraversable(neighbor))
+            if (!isMaterialSurface)
             {
-                continue;
-            }
-            if (position.Z == 0 && !CanTraverseSurfaceEdge(position, neighbor))
-            {
+                if (IsTerrainTraversable(adjacentColumn) &&
+                    (GeneratorVersion >= 10 || position.Z != 0 ||
+                     CanTraverseSurfaceEdge(position, adjacentColumn)))
+                {
+                    yield return adjacentColumn;
+                }
                 continue;
             }
 
-            yield return neighbor;
+            var surfaceNeighbor = GetTerrainSurfacePosition(adjacentColumn);
+            if (IsTerrainTraversable(surfaceNeighbor) &&
+                CanTraverseTerrainSurfaceEdge(position, surfaceNeighbor))
+            {
+                yield return surfaceNeighbor;
+            }
+
+            if (adjacentColumn != surfaceNeighbor &&
+                IsTerrainTraversable(adjacentColumn))
+            {
+                yield return adjacentColumn;
+            }
         }
 
         foreach (var passage in _verticalPassages)
@@ -317,6 +528,29 @@ public sealed class GeneratedMap
                 hash.AppendData(passageBuffer);
             }
         }
+        if (GeneratorVersion >= 9)
+        {
+            Span<byte> hillRockBuffer = stackalloc byte[1];
+            for (var y = 0; y < Height; y++)
+            {
+                for (var x = 0; x < Width; x++)
+                {
+                    var cell = GetColumnCell(new GridPosition(x, y));
+                    for (var z = 0; z < cell.SurfaceLevel; z++)
+                    {
+                        var position = new GridPosition(x, y, z);
+                        if (!IsHillRockPosition(position))
+                        {
+                            continue;
+                        }
+
+                        AppendPosition(hash, position);
+                        hillRockBuffer[0] = (byte)GetHillRockCell(position).Rock;
+                        hash.AppendData(hillRockBuffer);
+                    }
+                }
+            }
+        }
 
         return Convert.ToHexString(hash.GetHashAndReset());
     }
@@ -360,4 +594,26 @@ public sealed class GeneratedMap
             (-1, 0) => TerrainRampDirection.West,
             _ => TerrainRampDirection.None,
         };
+
+    private static InitialCellGeometry CreateTerrainGeometry(MapCell terrain)
+    {
+        var support = terrain.HasFloorAtSurface
+            ? terrain.RampDirection == TerrainRampDirection.None
+                ? CellSupportKind.NaturalFlat
+                : CellSupportKind.NaturalRamp
+            : terrain.Terrain == TerrainKind.DeepWater &&
+                terrain.SurfaceLevel == terrain.FloorLevel + 1
+                    ? CellSupportKind.NaturalFlat
+                    : CellSupportKind.None;
+        var fluid = terrain.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater
+            ? CellFluidKind.Water
+            : CellFluidKind.None;
+        return new InitialCellGeometry(
+            CellVolumeKind.Open,
+            Support: support,
+            Cover: terrain.Terrain,
+            Fluid: fluid,
+            FluidDepthLevels: terrain.WaterDepthLevels,
+            RampDirection: terrain.RampDirection);
+    }
 }

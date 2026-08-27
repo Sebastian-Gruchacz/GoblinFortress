@@ -29,7 +29,7 @@ public partial class WorldView3D : Node3D
     private StandardMaterial3D _selectedActorMaterial = null!;
     private Vector3 _cameraTarget;
     private ulong _renderedStructureSignature = ulong.MaxValue;
-    private EntityId _selectedActorId = EntityId.None;
+    private HashSet<EntityId> _selectedActorIds = [];
     private CameraAngle _cameraAngle = CameraAngle.TopDown;
     private int _cameraQuarterTurns;
 
@@ -84,9 +84,9 @@ public partial class WorldView3D : Node3D
         _camera.Current = active;
     }
 
-    public void SetSelectedActor(EntityId actorId)
+    public void SetSelectedActors(IEnumerable<EntityId> actorIds)
     {
-        _selectedActorId = actorId;
+        _selectedActorIds = actorIds.ToHashSet();
         UpdateActorMaterials();
     }
 
@@ -562,7 +562,7 @@ public partial class WorldView3D : Node3D
     {
         foreach (var (actorId, marker) in _actorMarkers)
         {
-            marker.MaterialOverride = actorId == _selectedActorId
+            marker.MaterialOverride = _selectedActorIds.Contains(actorId)
                 ? _selectedActorMaterial
                 : _actorMaterial;
         }

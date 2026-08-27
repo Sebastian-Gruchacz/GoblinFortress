@@ -23,6 +23,11 @@ public enum SimulationCommandKind
     ConfigureConstructionPriority = 16,
     ConfigureStorageMineralFilter = 17,
     ConfigureRaidMember = 18,
+    ConfigureWorkPriority = 19,
+    ClearWorkDesignationOrder = 20,
+    ConfigureWorkSuspension = 21,
+    ConfigurePopulationTarget = 22,
+    QueueCraftingOrder = 23,
 }
 
 public enum ConstructionKind : byte
@@ -38,6 +43,17 @@ public enum ConstructionKind : byte
     StoneWall = 9,
     StoneDoorFrame = 10,
     WallTorch = 11,
+    PrimitiveWorkshop = 12,
+}
+
+public enum CraftingRecipeKind : byte
+{
+    PrimitiveSling = 1,
+    BoneKnife = 2,
+    FightingStick = 3,
+    StoneClub = 4,
+    HideClothes = 5,
+    ReedClothes = 6,
 }
 
 public readonly record struct SimulationCommand(
@@ -359,6 +375,55 @@ public readonly record struct SimulationCommand(
             ResourceKind.Wood,
             Amount: 1);
 
+    public static SimulationCommand BuildPrimitiveWorkshop(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.PrimitiveWorkshop,
+            ResourceKind.Wood,
+            Amount: 4);
+
+    public static SimulationCommand QueuePrimitiveSling(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition workshop) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.QueueCraftingOrder,
+            EntityId.None,
+            EntityId.None,
+            workshop,
+            workshop,
+            default,
+            ResourceKind.Any,
+            Amount: (int)CraftingRecipeKind.PrimitiveSling);
+
+    public static SimulationCommand QueueCraftingRecipe(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition workshop,
+        CraftingRecipeKind recipe) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.QueueCraftingOrder,
+            EntityId.None,
+            EntityId.None,
+            workshop,
+            workshop,
+            ConstructionKind.PrimitiveWorkshop,
+            ResourceKind.Any,
+            Amount: (int)recipe);
+
     public static SimulationCommand ToggleWoodenDoor(
         SimulationTick executeAt,
         ulong sequence,
@@ -427,6 +492,23 @@ public readonly record struct SimulationCommand(
             ResourceKind.Any,
             Amount: (int)WorkDesignationKind.QuarryBoulder);
 
+    public static SimulationCommand DesignateAnimalHunting(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.HuntAnimal);
+
     public static SimulationCommand DesignateRockMining(
         SimulationTick executeAt,
         ulong sequence,
@@ -444,6 +526,69 @@ public readonly record struct SimulationCommand(
             ResourceKind.Any,
             Amount: (int)WorkDesignationKind.MineRock);
 
+    public static SimulationCommand DesignateRampDown(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.CarveRampDown);
+
+    public static SimulationCommand DesignateRampUp(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.CarveRampUp);
+
+    public static SimulationCommand DesignateScouting(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.Scout);
+
+    public SimulationCommand WithWorkPriority(StoragePriority priority) =>
+        this with { Amount = (Amount & 0xff) | (((int)priority + 1) << 8) };
+
+    public SimulationCommand ReplacingWorkOrder(
+        EntityId orderId,
+        StoragePriority priority,
+        bool isSuspended = false) =>
+        this with
+        {
+            Subject = orderId,
+            Amount = (Amount & 0xff) | (((int)priority + 1) << 8) |
+                (isSuspended ? 1 << 16 : 0),
+        };
+
     public static SimulationCommand ClearWorkDesignations(
         SimulationTick executeAt,
         ulong sequence,
@@ -460,6 +605,56 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: 0);
+
+    public static SimulationCommand ConfigureWorkPriority(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId orderId,
+        StoragePriority priority) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureWorkPriority,
+            EntityId.None,
+            orderId,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: (int)priority);
+
+    public static SimulationCommand ClearWorkDesignationOrder(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId orderId) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ClearWorkDesignationOrder,
+            EntityId.None,
+            orderId,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ConfigureWorkSuspension(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId orderId,
+        bool isSuspended) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureWorkSuspension,
+            EntityId.None,
+            orderId,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: isSuspended ? 1 : 0);
 
     public static SimulationCommand ConfigureStoragePull(
         SimulationTick executeAt,
@@ -611,6 +806,22 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: selected ? 1 : 0);
+
+    public static SimulationCommand ConfigurePopulationTarget(
+        SimulationTick executeAt,
+        ulong sequence,
+        int populationTarget) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigurePopulationTarget,
+            EntityId.None,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: populationTarget);
 }
 
 internal readonly record struct CommandKey(SimulationTick Tick, ulong Sequence) : IComparable<CommandKey>

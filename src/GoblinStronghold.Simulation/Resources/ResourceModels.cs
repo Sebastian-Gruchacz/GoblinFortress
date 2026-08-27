@@ -13,6 +13,7 @@ public enum ResourceKind : byte
     Vegetation = 6,
     Coal = 7,
     Ore = 8,
+    Hide = 9,
 }
 
 public enum FoodKind : byte
@@ -23,6 +24,7 @@ public enum FoodKind : byte
     Mushrooms = 3,
     EdibleRoots = 4,
     Fish = 5,
+    RawMeat = 6,
 }
 
 public enum ResourceVariant : byte

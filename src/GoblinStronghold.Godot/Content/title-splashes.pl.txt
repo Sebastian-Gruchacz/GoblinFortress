@@ -1,0 +1,105 @@
+# Jeden napis na wiersz. Puste wiersze i wiersze zaczynające się od # są pomijane.
+# Napis jest losowany raz przy otwarciu gry.
+
+# Goblińskie prawdy
+Plemię pamięta to, co zdoła pożreć.
+Każdy problem wygląda lepiej z bezpiecznej strony palisady.
+Nie ma rzeczy zgubionych. Są tylko rzeczy jeszcze nieznalezione przez goblina.
+Dzisiejszy pąk, jutrzejszy kierownik zmiany.
+Najpierw bagno. Potem świat.
+Gdy życie daje ci grzyby, sprawdź, czy nie gryzą.
+Wiedza wchodzi najlepiej z odrobiną soli.
+Cywilizacja zaczęła się od ostrego kamienia i bardzo złego pomysłu.
+To nie bałagan. To kultura materialna plemienia.
+Każda wielka twierdza zaczynała jako przeciekająca chata.
+Jeśli plan się udał, goblin twierdzi, że był jego.
+Jeśli plan się nie udał, goblin twierdzi, że był ludzki.
+Robota sama się nie zrobi. Goblin też nie, ale można próbować.
+Palisada nie ocenia. Palisada zatrzymuje strzały.
+Najcenniejszy skarb ma zwykle nogi i coś wie.
+
+# Żartobliwe
+Teraz z większą liczbą grzybów!
+Prawdopodobnie jadalne!
+Żaden goblin nie ucierpiał podczas wczytywania tego napisu.
+Instrukcja obsługi została zjedzona.
+Optymalizacja jest wtedy, gdy wszyscy biegną w tę samą złą stronę.
+Nie karm goblinów po północy. Chyba że są głodne.
+Praca zespołowa: ktoś kopie, ktoś patrzy, ktoś przypisuje sobie zasługi.
+Kliknij rozsądnie. Gobliny patrzą.
+Zawiera śladowe ilości rozsądku.
+Sto procent organicznego chaosu.
+Bagno premium. Błoto bez mikropłatności.
+Teraz także w kolorze podejrzanie zielonym.
+Zbudowane z drewna, kamienia i konsekwencji.
+Nie jest błędem, jeśli plemię zrobi z tego tradycję.
+Goblin Stronghold: bo krasnoludy miały już swoją kolej.
+Strategia czasu rzeczywistego. Gobliny czasu względnego.
+Zarządzaj mądrze. Albo przynajmniej widowiskowo.
+Naciśnij „Nowa gra”, zanim zrobi to ktoś mniej odpowiedzialny.
+Każdy goblin jest wyjątkowy. Niektóre wyjątkowo przeszkadzają.
+Magazyn jest pełny. Podłoga jest większym magazynem.
+Plan był doskonały aż do pojawienia się uczestników.
+W razie pożaru wskaż innego goblina.
+Wersja bez elfiego filtra upiększającego.
+Przegrywanie też generuje historię.
+
+# Groźne
+Bagno zna twoje kroki.
+Ludzie śpią. Plemię rośnie.
+Nie wszystkie światła w lesie chcą być odnalezione.
+Mur zatrzyma wroga. Głód nie potrzebuje bramy.
+To, co czai się pod ziemią, słyszy kilofy.
+Każda pochodnia tworzy nowe cienie.
+Wieś na horyzoncie jeszcze nie zna twojego imienia.
+Zanim nadejdzie zima, policz zapasy. Potem policz gobliny.
+Głęboka woda nie oddaje nieostrożnych.
+Nocą nawet własne tunele mają obce końce.
+Nie pytaj, skąd płynie woda. Jeszcze nie.
+Gdy umiera ostatni mistrz, narzędzia milkną.
+Twierdza pamięta każdy niewykonany rozkaz.
+Pod cienką skałą czasem czeka całe jezioro.
+Najazd kończy się dopiero, gdy coś wróci.
+Las zauważył, że ubywa drzew.
+Twoje plemię nie jest jedynym głodnym stworzeniem na mapie.
+Nie wszystko, co znaleziono w jaskini, powinno ujrzeć słońce.
+
+# Tajemnicze
+Pod korzeniami ktoś zostawił drzwi.
+Najstarszy goblin pamięta miejsce, którego nie ma na mapie.
+W trzecim tunelu echo odpowiada za wcześnie.
+Grzyby świecą tylko wtedy, gdy nikt nie patrzy.
+Mapa kończy się wcześniej niż bagno.
+Pewnej nocy wszystkie pąki śniły ten sam sen.
+Kamień pod twierdzą jest cieplejszy niż powinien.
+Nie każda ruina została zbudowana przez ludzi.
+Mgła ukrywa także rzeczy, które stoją tuż obok.
+Ktoś policzył gobliny. Wynik był o jeden za duży.
+Na dnie studni nie ma wody. Jest światło.
+Stare tunele prowadzą w dół, nawet gdy idziesz pod górę.
+Plemię odziedziczyło wspomnienie, którego nikt nie przeżył.
+W lesie stoi palisada zwrócona do środka.
+Ostatnia strona kroniki została zapisana jutro.
+W nocy rzeka płynie w przeciwną stronę.
+Niektóre ślady zaczynają się pośrodku błota.
+Podczas ciszy słychać pracę obcych kilofów.
+
+# O grze i gatunku
+Symulator kolonii, generator katastrof.
+Historie powstają pomiędzy rozkazem a jego wykonaniem.
+Nie sterujesz goblinami. Przekonujesz rzeczywistość.
+Każdy surowiec ma wagę. Każda decyzja ma pogrzeb.
+Systemy są spokojne. Dopóki się nie spotkają.
+Jedna mapa, tysiąc złych pomysłów.
+Zbuduj twierdzę. Obserwuj konsekwencje.
+Najlepsze opowieści nie mieszczą się w drzewku technologii.
+W tej grze wiedza ma nogi, potrzeby i punkty życia.
+Symulacja nie ma litości, ale prowadzi dokładne notatki.
+Nie ma jednej właściwej twierdzy. Są tylko te, które jeszcze stoją.
+Przetrwanie jest planem. Katastrofa — emergentną mechaniką.
+Twoja historia jest zapisana w błocie.
+Kolonia żyje. Arkusz kalkulacyjny płacze.
+Zapisz grę. Kronikarz wygląda na zdenerwowanego.
+Pauza: najpotężniejsza technologia plemienia.
+Poziom trudności: goblin.
+Małe istoty. Wielkie systemy. Bardzo kruche plany.

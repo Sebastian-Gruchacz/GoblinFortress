@@ -34,7 +34,8 @@ public sealed class WorldVisibilityState
         ArgumentNullException.ThrowIfNull(map);
         return new WorldVisibilityState(
             map,
-            new CellVisibility[checked(map.CellCount * (map.CaveLevelCount + 1))]);
+            new CellVisibility[checked(map.CellCount *
+                (map.MaterializedNegativeLevelCount + map.MaterializedPositiveLevelCount + 1))]);
     }
 
     internal static WorldVisibilityState Restore(
@@ -44,16 +45,27 @@ public sealed class WorldVisibilityState
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(visibility);
         var cells = visibility.ToArray();
-        var expectedLength = checked(map.CellCount * (map.CaveLevelCount + 1));
+        var legacyLength = checked(map.CellCount * (map.CaveLevelCount + 1));
+        var previousExpectedLength = checked(map.CellCount *
+            (map.CaveLevelCount + map.MaterializedPositiveLevelCount + 1));
+        var expectedLength = checked(map.CellCount *
+            (map.MaterializedNegativeLevelCount + map.MaterializedPositiveLevelCount + 1));
         if (cells.Any(state => !Enum.IsDefined(state)) ||
-            cells.Length != map.CellCount && cells.Length != expectedLength)
+            cells.Length != map.CellCount && cells.Length != legacyLength &&
+            cells.Length != previousExpectedLength &&
+            cells.Length != expectedLength)
         {
             throw new InvalidDataException("The save contains invalid fog-of-war state.");
         }
 
-        if (cells.Length == map.CellCount && expectedLength != map.CellCount)
+        if (cells.Length != expectedLength)
         {
-            Array.Resize(ref cells, expectedLength);
+            cells = ExpandLayers(
+                cells,
+                map.CellCount,
+                Math.Min(map.CaveLevelCount, (cells.Length / map.CellCount) - 1),
+                map.MaterializedNegativeLevelCount,
+                map.MaterializedPositiveLevelCount);
         }
 
         return new WorldVisibilityState(map, cells);
@@ -107,7 +119,8 @@ public sealed class WorldVisibilityState
                     var distanceSquared = checked(
                         ((x - observer.X) * (x - observer.X)) +
                         ((y - observer.Y) * (y - observer.Y)));
-                    if (distanceSquared <= radiusSquared && IsVisibilityPosition(position))
+                    if (distanceSquared <= radiusSquared && IsVisibilityPosition(position) &&
+                        !Map.IsHillRockPosition(position))
                     {
                         _cells[GetIndex(position)] = CellVisibility.Visible;
                     }
@@ -117,8 +130,40 @@ public sealed class WorldVisibilityState
     }
 
     private bool IsVisibilityPosition(GridPosition position) =>
-        Map.IsWithin(position) || Map.IsCavePosition(position);
+        Map.IsWithin(position) || Map.IsCavePosition(position) ||
+        Map.IsHillRockPosition(position) ||
+        Map.IsTerrainSurfacePosition(position);
 
     private int GetIndex(GridPosition position) => checked(
-        ((-position.Z) * Map.CellCount) + (position.Y * Map.Width) + position.X);
+        ((position.Z <= 0 ? -position.Z : Map.MaterializedNegativeLevelCount + position.Z) * Map.CellCount) +
+        (position.Y * Map.Width) + position.X);
+
+    private static CellVisibility[] ExpandLayers(
+        CellVisibility[] source,
+        int cellCount,
+        int sourceNegativeLevelCount,
+        int targetNegativeLevelCount,
+        int positiveLevelCount)
+    {
+        var result = new CellVisibility[checked(
+            cellCount * (targetNegativeLevelCount + positiveLevelCount + 1))];
+        var nonPositiveLength = checked(
+            cellCount * (Math.Min(sourceNegativeLevelCount, targetNegativeLevelCount) + 1));
+        Array.Copy(source, result, Math.Min(nonPositiveLength, source.Length));
+
+        var sourceLayerCount = source.Length / cellCount;
+        var sourcePositiveLevelCount = Math.Max(0, sourceLayerCount - sourceNegativeLevelCount - 1);
+        var copiedPositiveLevelCount = Math.Min(sourcePositiveLevelCount, positiveLevelCount);
+        if (copiedPositiveLevelCount > 0)
+        {
+            Array.Copy(
+                source,
+                checked(cellCount * (sourceNegativeLevelCount + 1)),
+                result,
+                checked(cellCount * (targetNegativeLevelCount + 1)),
+                checked(cellCount * copiedPositiveLevelCount));
+        }
+
+        return result;
+    }
 }

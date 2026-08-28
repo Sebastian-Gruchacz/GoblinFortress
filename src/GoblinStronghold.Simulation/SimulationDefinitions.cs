@@ -166,6 +166,7 @@ public sealed class SimulationDefinitions
             InterruptHysteresis: 5));
 
     public const int FieldCampCapacity = 5;
+    public const int GoblinHutCapacity = 9;
 
     public SimulationDefinitions(
         string id,

@@ -189,6 +189,115 @@ public sealed class FieldCampTests
     }
 
     [Fact]
+    public void RaidCanUseExplicitFieldCampAsRallyPoint()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x43414D50UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 20,
+            initialWoodStock: 20);
+        var firstCamp = FindCampPosition(engine);
+        engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
+            new SimulationTick(1), sequence: 1, firstCamp));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        var selectedCamp = FindCampPosition(engine);
+        Assert.NotEqual(firstCamp, selectedCamp);
+        engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
+            engine.CurrentTick.Next(), sequence: 2, selectedCamp));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        engine.QueueCommand(SimulationCommand.AttackHumanVillage(
+            engine.CurrentTick.Next(), sequence: 3, selectedCamp));
+        engine.AdvanceTicks(1);
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.Equal(GoblinRaidPhase.Preparing, snapshot.RaidPhase);
+        Assert.Equal(selectedCamp, snapshot.RaidRallyPoint);
+    }
+
+    [Fact]
+    public void PreparedRaidCanWaitForManualLaunchAndKeepsPlanAcrossSaveLoad()
+    {
+        var engine = CreateEngine();
+        var campPosition = FindCampPosition(engine);
+        engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
+            new SimulationTick(1), sequence: 1, campPosition));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        var target = engine.Map.HumanVillage;
+        var directives = SimulationEngine.DefaultRaidDirectives &
+            ~RaidDirective.AutoLaunchWhenReady;
+        var executeAt = engine.CurrentTick.Next();
+        engine.QueueCommand(SimulationCommand.ConfigureRaidTarget(
+            executeAt, sequence: 2, target, radius: 4));
+        engine.QueueCommand(SimulationCommand.ConfigureRaidDirectives(
+            executeAt, sequence: 3, directives));
+        engine.QueueCommand(SimulationCommand.AttackHumanVillage(
+            executeAt, sequence: 4, campPosition));
+        engine.AdvanceTicks(1);
+
+        for (var tick = 0; tick < 2_000 &&
+             engine.CreateSnapshot().RaidPhase != GoblinRaidPhase.Ready; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var ready = engine.CreateSnapshot();
+        Assert.Equal(GoblinRaidPhase.Ready, ready.RaidPhase);
+        Assert.False(ready.HumanVillage.GoblinAttackOrdered);
+        Assert.Equal(target, ready.RaidPlan.Target);
+        Assert.Equal(4, ready.RaidPlan.TargetRadius);
+        Assert.False(ready.RaidPlan.Has(RaidDirective.AutoLaunchWhenReady));
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+
+        restored.QueueCommand(SimulationCommand.LaunchRaid(
+            restored.CurrentTick.Next(), sequence: 5));
+        restored.AdvanceTicks(1);
+        Assert.Equal(GoblinRaidPhase.Marching, restored.CreateSnapshot().RaidPhase);
+        Assert.True(restored.CreateSnapshot().HumanVillage.GoblinAttackOrdered);
+    }
+
+    [Fact]
+    public void ConstructedGoblinHutAddsNineShelterPlaces()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x485554UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 20,
+            initialWoodStock: 20);
+        var position = Enumerable.Range(0, engine.Map.Height - 2)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width - 2)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.CanBuildGoblinHut)
+            .OrderBy(cell => Math.Abs(cell.X - engine.Map.GoblinSpawn.X) +
+                Math.Abs(cell.Y - engine.Map.GoblinSpawn.Y))
+            .First();
+        var before = engine.CreateSnapshot().TribeNeeds.ShelterCapacity;
+        var populationTargetBefore = engine.CreateSnapshot().PopulationTarget;
+
+        engine.QueueCommand(SimulationCommand.BuildGoblinHut(
+            new SimulationTick(1), sequence: 1, position));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine, maximumTicks: 12_000);
+
+        var snapshot = engine.CreateSnapshot();
+        var hut = Assert.Single(snapshot.WorldObjects, item =>
+            item.Kind == WorldObjectKind.GoblinHut && item.Anchor == position);
+        Assert.Equal(9, hut.Parts.Count(part => part.Kind == WorldObjectPartKind.Floor));
+        Assert.Equal(before + 9, snapshot.TribeNeeds.ShelterCapacity);
+        Assert.Equal(
+            populationTargetBefore + SimulationDefinitions.GoblinHutCapacity,
+            snapshot.PopulationTarget);
+    }
+
+    [Fact]
     public void RaidMemberCanPackDifferentFoodKindFromCamp()
     {
         var engine = CreateEngine();

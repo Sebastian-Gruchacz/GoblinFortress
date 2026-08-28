@@ -9,6 +9,7 @@ namespace GoblinStronghold.GodotClient;
 public partial class Main : Node
 {
     private const int MaximumSimulationTicksPerFrame = 8;
+    private const double MaximumSimulationMillisecondsPerFrame = 8d;
     private const double PresentationRefreshIntervalSeconds = 1d / 5d;
     private const double MinimumAutosaveIntervalSeconds = 10d * 60d;
     private SimulationEngine _engine = null!;
@@ -63,8 +64,15 @@ public partial class Main : Node
     private Label _raidSummary = null!;
     private VBoxContainer _raidRows = null!;
     private Button _raidStartButton = null!;
+    private OptionButton _raidEngagement = null!;
+    private readonly Dictionary<RaidDirective, CheckButton> _raidDirectiveChecks = [];
     private readonly HashSet<EntityId> _raidDraftIds = [];
     private bool _updatingRaidSelection;
+    private GridPosition? _raidDraftRallyPoint;
+    private bool _isRaidTargetMode;
+    private int _raidTargetRadius = SimulationEngine.DefaultRaidTargetRadius;
+    private PopupMenu _worldContextMenu = null!;
+    private GridPosition? _contextCampAnchor;
     private Window _plannerWindow = null!;
     private VBoxContainer _plannerRows = null!;
     private Label _plannerSummary = null!;
@@ -85,7 +93,10 @@ public partial class Main : Node
     private WorkMode _workMode;
     private bool _isDraggingWorkArea;
     private GridPosition _workAreaStart;
-    private bool _isMoveMode;
+    private UnitOrderMode _unitOrderMode;
+    private PopupMenu _unitOrderMenu = null!;
+    private int _unitOrderRadius = SimulationEngine.DefaultRaidTargetRadius;
+    private readonly List<GridPosition> _patrolDraftPoints = [];
     private bool _isPanningCamera;
     private float _rightDragDistance;
     private Window _storageDetails = null!;
@@ -146,6 +157,7 @@ public partial class Main : Node
         WoodenDoor,
         WallTorch,
         PrimitiveWorkshop,
+        GoblinHut,
     }
 
     private enum WorkMode
@@ -165,6 +177,33 @@ public partial class Main : Node
         Scout,
         CleanBlood,
         Clear,
+    }
+
+    private enum UnitOrderMode
+    {
+        None,
+        Move,
+        AttackArea,
+        HuntArea,
+        Patrol,
+    }
+
+    private enum UnitOrderAction
+    {
+        Move = 1,
+        AttackArea = 2,
+        HuntArea = 3,
+        Patrol = 4,
+    }
+
+    private enum WorldContextAction
+    {
+        EditRaid = 1,
+        ToggleRaidPreparation = 2,
+        SelectRaidTarget = 3,
+        LaunchRaid = 4,
+        SelectCampOccupants = 5,
+        OpenCampStorage = 6,
     }
 
     public override void _Ready()
@@ -245,6 +284,9 @@ public partial class Main : Node
             "Pomost\nKoszt: 1 drewno za segment", () => SelectBuildMode((long)BuildMode.Walkway));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
             "Obozowisko wypadowe\nKoszt: 6 drewna", () => SelectBuildMode((long)BuildMode.FieldCamp));
+        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
+            "Chata goblinów\nKoszt: 8 drewna • zwiększa pojemność plemienia",
+            () => SelectBuildMode((long)BuildMode.GoblinHut));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenWall,
             "Drewniana ściana\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodenWall));
         CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
@@ -444,20 +486,21 @@ public partial class Main : Node
         GetToolbarButton("Management").Icon = _commandingHandIcon;
         ConfigureActionButton("Build", UiIcon.Build, "Budowanie");
         ConfigureActionButton("Work", UiIcon.Work, "Zlecenia pracy");
-        ConfigureActionButton("Move", UiIcon.Expedition, "Rozkaż wybranemu goblinowi lub grupie przejść we wskazane miejsce");
-        ConfigureActionButton("Raid", UiIcon.Expedition, "Przygotuj najazd • bieżąca grupa będzie proponowanym składem oddziału");
+        ConfigureActionButton("Move", UiIcon.Expedition, "Rozkazy wybranych goblinów • M/A/H/P");
         var statisticsButton = GetToolbarButton("Statistics");
         statisticsButton.FocusMode = Control.FocusModeEnum.None;
         statisticsButton.TooltipText = "Zestawienia i statystyki";
         GetToolbarButton("Management").Pressed += ShowManagementMenu;
         GetToolbarButton("Build").Pressed += ShowBuildMenu;
         GetToolbarButton("Work").Pressed += ShowWorkMenu;
-        GetToolbarButton("Move").Pressed += SelectMoveMode;
-        GetToolbarButton("Raid").Pressed += ShowRaidWindow;
+        GetToolbarButton("Move").Pressed += ShowUnitOrderMenu;
+        GetToolbarButton("Raid").Hide();
         statisticsButton.Pressed += ShowStatisticsMenu;
         CreatePlannerWindow();
         CreateRaidWindow();
         CreateWorkshopWindow();
+        CreateWorldContextMenu();
+        CreateUnitOrderMenu();
         UpdateSpeedButtons();
         ShowMainMenu();
     }
@@ -477,9 +520,13 @@ public partial class Main : Node
 
         _autosaveElapsedRealSeconds += delta;
         _presentationRefreshElapsed += delta;
-        _accumulator += delta * _speed;
+        var maximumBacklogSeconds = SecondsPerTick * MaximumSimulationTicksPerFrame;
+        _accumulator = Math.Min(
+            _accumulator + delta * _speed,
+            maximumBacklogSeconds);
         var changed = false;
         var ticksAdvanced = 0;
+        var simulationStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         while (_accumulator >= SecondsPerTick &&
                ticksAdvanced < MaximumSimulationTicksPerFrame)
         {
@@ -487,6 +534,11 @@ public partial class Main : Node
             _accumulator -= SecondsPerTick;
             ticksAdvanced++;
             changed = true;
+            if (System.Diagnostics.Stopwatch.GetElapsedTime(simulationStartedAt).TotalMilliseconds >=
+                MaximumSimulationMillisecondsPerFrame)
+            {
+                break;
+            }
         }
 
         if (changed && _presentationRefreshElapsed >= PresentationRefreshIntervalSeconds)
@@ -569,6 +621,30 @@ public partial class Main : Node
                 Toggle3DCameraAngle();
                 GetViewport().SetInputAsHandled();
                 break;
+            case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.F1:
+                ShowSelectedGoblinDetails();
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && !key.CtrlPressed &&
+                key.Keycode == Key.M:
+                SelectUnitOrderMode(UnitOrderMode.Move);
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && !key.CtrlPressed &&
+                key.Keycode == Key.A:
+                SelectUnitOrderMode(UnitOrderMode.AttackArea);
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && !key.CtrlPressed &&
+                key.Keycode == Key.H:
+                SelectUnitOrderMode(UnitOrderMode.HuntArea);
+                GetViewport().SetInputAsHandled();
+                break;
+            case InputEventKey key when key.Pressed && !key.Echo && !key.CtrlPressed &&
+                key.Keycode == Key.P:
+                SelectUnitOrderMode(UnitOrderMode.Patrol);
+                GetViewport().SetInputAsHandled();
+                break;
             case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.Q &&
                 _use3DView:
                 Rotate3DCamera(-1);
@@ -597,7 +673,9 @@ public partial class Main : Node
                 GetViewport().SetInputAsHandled();
                 break;
             case InputEventKey key when key.Pressed && key.Keycode == Key.Escape:
-                if (_buildMode != BuildMode.None || _workMode != WorkMode.None || _isMoveMode)
+                if (_buildMode != BuildMode.None || _workMode != WorkMode.None ||
+                    _unitOrderMode != UnitOrderMode.None ||
+                    _isRaidTargetMode)
                 {
                     CancelActiveTool();
                 }
@@ -608,10 +686,32 @@ public partial class Main : Node
                 GetViewport().SetInputAsHandled();
                 break;
             case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.WheelUp }:
-                ChangeCameraZoom(1.15f);
+                if (_isRaidTargetMode)
+                {
+                    ChangeRaidTargetRadius(1);
+                }
+                else if (_unitOrderMode is UnitOrderMode.AttackArea or UnitOrderMode.HuntArea)
+                {
+                    ChangeUnitOrderRadius(1);
+                }
+                else
+                {
+                    ChangeCameraZoom(1.15f);
+                }
                 break;
             case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.WheelDown }:
-                ChangeCameraZoom(1f / 1.15f);
+                if (_isRaidTargetMode)
+                {
+                    ChangeRaidTargetRadius(-1);
+                }
+                else if (_unitOrderMode is UnitOrderMode.AttackArea or UnitOrderMode.HuntArea)
+                {
+                    ChangeUnitOrderRadius(-1);
+                }
+                else
+                {
+                    ChangeCameraZoom(1f / 1.15f);
+                }
                 break;
             case InputEventMouseMotion mouse when _isPanningCamera:
                 if (_use3DView)
@@ -632,8 +732,19 @@ public partial class Main : Node
             case InputEventMouseMotion mouse when _workMode != WorkMode.None:
                 UpdateWorkPreview(mouse.Position);
                 break;
+            case InputEventMouseMotion mouse when _isRaidTargetMode:
+                UpdateRaidTargetPreview(mouse.Position);
+                break;
+            case InputEventMouseMotion mouse when _unitOrderMode is UnitOrderMode.AttackArea or
+                UnitOrderMode.HuntArea:
+                UpdateUnitOrderPreview(mouse.Position);
+                break;
             case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mouse:
-                if (_buildMode != BuildMode.None)
+                if (_isRaidTargetMode)
+                {
+                    FinishRaidTargetSelection(mouse.Position);
+                }
+                else if (_buildMode != BuildMode.None)
                 {
                     BeginConstruction(mouse.Position);
                 }
@@ -641,9 +752,9 @@ public partial class Main : Node
                 {
                     BeginWorkArea(mouse.Position);
                 }
-                else if (_isMoveMode)
+                else if (_unitOrderMode != UnitOrderMode.None)
                 {
-                    IssueMoveOrder(mouse.Position);
+                    IssueUnitOrder(mouse);
                 }
                 else if (_selectedActorIds.Count > 0 && TryIssuePassageMove(mouse.Position))
                 {
@@ -651,7 +762,7 @@ public partial class Main : Node
                 }
                 else
                 {
-                    InspectWorld(mouse.Position, mouse.CtrlPressed || mouse.ShiftPressed);
+                    InspectWorld(mouse.Position, mouse.ShiftPressed, mouse.CtrlPressed);
                 }
                 break;
             case InputEventMouseButton { Pressed: false, ButtonIndex: MouseButton.Left } mouse
@@ -663,7 +774,9 @@ public partial class Main : Node
                 FinishWorkArea(mouse.Position);
                 break;
             case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right }:
-                if (_buildMode != BuildMode.None || _workMode != WorkMode.None || _isMoveMode)
+                if (_buildMode != BuildMode.None || _workMode != WorkMode.None ||
+                    _unitOrderMode != UnitOrderMode.None ||
+                    _isRaidTargetMode)
                 {
                     CancelActiveTool();
                 }
@@ -674,10 +787,13 @@ public partial class Main : Node
                 }
                 GetViewport().SetInputAsHandled();
                 break;
-            case InputEventMouseButton { Pressed: false, ButtonIndex: MouseButton.Right }:
+            case InputEventMouseButton { Pressed: false, ButtonIndex: MouseButton.Right } mouse:
                 if (_isPanningCamera && _rightDragDistance < 4f)
                 {
-                    ClearSelection();
+                    if (!TryShowWorldContextMenu(mouse.Position))
+                    {
+                        ClearSelection();
+                    }
                 }
                 _isPanningCamera = false;
                 GetViewport().SetInputAsHandled();
@@ -903,7 +1019,10 @@ public partial class Main : Node
         _goblinRosterWindow.Hide();
         _statisticsWindow.Hide();
         _raidWindow.Hide();
+        _worldContextMenu.Hide();
         _raidDraftIds.Clear();
+        _raidDraftRallyPoint = null;
+        _contextCampAnchor = null;
         _storedResourcesSignature = string.Empty;
         _looseResourcesSignature = string.Empty;
         _goblinRosterSignature = string.Empty;
@@ -974,18 +1093,55 @@ public partial class Main : Node
         ShowToolbarMenu(_workMenu, "Work");
     }
 
-    private void SelectMoveMode()
+    private void CreateUnitOrderMenu()
+    {
+        _unitOrderMenu = new PopupMenu { MinSize = new Vector2I(210, 0) };
+        _unitOrderMenu.AddItem("Marsz", (int)UnitOrderAction.Move, (Key)Key.M);
+        _unitOrderMenu.AddItem("Atakuj obszar", (int)UnitOrderAction.AttackArea, (Key)Key.A);
+        _unitOrderMenu.AddItem("Poluj w obszarze", (int)UnitOrderAction.HuntArea, (Key)Key.H);
+        _unitOrderMenu.AddItem("Patrol", (int)UnitOrderAction.Patrol, (Key)Key.P);
+        _unitOrderMenu.IdPressed += action => SelectUnitOrderMode(
+            (UnitOrderMode)(int)action);
+        AddChild(_unitOrderMenu);
+    }
+
+    private void ShowUnitOrderMenu()
+    {
+        var speedButton = GetToolbarButton("Speed8");
+        var rect = speedButton.GetGlobalRect();
+        _unitOrderMenu.Position = new Vector2I(
+            Mathf.RoundToInt(rect.Position.X),
+            Mathf.RoundToInt(rect.End.Y + 4));
+        _unitOrderMenu.Popup();
+    }
+
+    private void SelectUnitOrderMode(UnitOrderMode mode)
     {
         if (_selectedActorIds.Count == 0)
         {
-            _inspector.Text = "Najpierw wybierz goblina albo grupę goblinów. Ctrl/Shift+LPM rozszerza zaznaczenie.";
+            _inspector.Text = "Najpierw wybierz goblina albo grupę goblinów. Shift+LPM rozszerza zaznaczenie.";
             return;
         }
 
         CancelBuildMode(clearInspector: false);
         CancelWorkMode(clearInspector: false);
-        _isMoveMode = true;
-        _inspector.Text = "Ruch: wskaż odkryte, dostępne pole na dowolnym poziomie • Page Up / Page Down zmienia warstwę • Esc anuluje";
+        _isRaidTargetMode = false;
+        _worldView.SetRaidTargetPreview(null, 0);
+        _unitOrderMode = mode;
+        _patrolDraftPoints.Clear();
+        if (mode is UnitOrderMode.AttackArea or UnitOrderMode.HuntArea)
+        {
+            _unitOrderRadius = SimulationEngine.DefaultRaidTargetRadius;
+            UpdateUnitOrderPreview(GetViewport().GetMousePosition());
+        }
+        _inspector.Text = mode switch
+        {
+            UnitOrderMode.Move => "Marsz (M): wskaż odkryte, dostępne pole.",
+            UnitOrderMode.AttackArea => "Atak (A): wskaż centrum poszukiwania wrogów • kółko zmienia promień.",
+            UnitOrderMode.HuntArea => "Polowanie (H): wskaż centrum łowiska • kółko zmienia promień.",
+            UnitOrderMode.Patrol => "Patrol (P): wskaż cel; Ctrl+LPM dodaje kolejne punkty, zwykłe LPM kończy trasę.",
+            _ => string.Empty,
+        };
     }
 
     private void IssueMoveOrder(Vector2 screenPosition)
@@ -1033,7 +1189,7 @@ public partial class Main : Node
             _inspector.Text = "Żaden zaznaczony goblin nie może dotrzeć do wskazanego przejścia.";
             return;
         }
-        _isMoveMode = false;
+        _unitOrderMode = UnitOrderMode.None;
         _inspector.Text = ordered == 1
             ? $"Wydano rozkaz marszu do {clickedDestination}" +
               (usedPassage ? " przez przejście między poziomami." : ".")
@@ -1041,6 +1197,111 @@ public partial class Main : Node
               (usedPassage ? " z użyciem przejścia między poziomami." : ".");
         _inspector.Text +=
             (_speed == 0 ? " Zostanie wykonany po wznowieniu czasu." : string.Empty);
+    }
+
+    private void IssueUnitOrder(InputEventMouseButton mouse)
+    {
+        switch (_unitOrderMode)
+        {
+            case UnitOrderMode.Move:
+                IssueMoveOrder(mouse.Position);
+                break;
+            case UnitOrderMode.AttackArea:
+            case UnitOrderMode.HuntArea:
+                IssueAreaUnitOrder(mouse.Position);
+                break;
+            case UnitOrderMode.Patrol:
+                AddPatrolPoint(mouse.Position, mouse.CtrlPressed);
+                break;
+        }
+    }
+
+    private void IssueAreaUnitOrder(Vector2 screenPosition)
+    {
+        var center = ScreenToVisibleCell(screenPosition);
+        var snapshot = _engine.CreateSnapshot();
+        if (!snapshot.GetVisibility(center, _engine.Map.Width).IsDiscovered())
+        {
+            _inspector.Text = "Obszar rozkazu musi leżeć na rozpoznanym terenie.";
+            return;
+        }
+
+        var executeAt = _engine.CurrentTick.Next();
+        var ordered = 0;
+        foreach (var actor in snapshot.Actors
+                     .Where(actor => _selectedActorIds.Contains(actor.Id) && actor.Health > 0)
+                     .OrderBy(actor => actor.Id))
+        {
+            _engine.QueueCommand(_unitOrderMode == UnitOrderMode.AttackArea
+                ? SimulationCommand.OrderAttackArea(
+                    executeAt, _commandSequence++, actor.Id, center, _unitOrderRadius)
+                : SimulationCommand.OrderHuntArea(
+                    executeAt, _commandSequence++, actor.Id, center, _unitOrderRadius));
+            ordered++;
+        }
+
+        var name = _unitOrderMode == UnitOrderMode.AttackArea ? "atak" : "polowanie";
+        _unitOrderMode = UnitOrderMode.None;
+        _worldView.SetRaidTargetPreview(null, 0);
+        _inspector.Text = $"Wydano {ordered} goblinom rozkaz: {name} w promieniu " +
+            $"{_unitOrderRadius} od {center}.";
+    }
+
+    private void AddPatrolPoint(Vector2 screenPosition, bool keepAdding)
+    {
+        var point = ScreenToVisibleCell(screenPosition);
+        var snapshot = _engine.CreateSnapshot();
+        if (!snapshot.GetVisibility(point, _engine.Map.Width).IsDiscovered() ||
+            !_engine.World.IsTerrainReachable(point))
+        {
+            _inspector.Text = "Punkt patrolu musi być odkryty i dostępny.";
+            return;
+        }
+        if (_patrolDraftPoints.Count == 0 || _patrolDraftPoints[^1] != point)
+        {
+            _patrolDraftPoints.Add(point);
+        }
+        if (keepAdding)
+        {
+            _inspector.Text = $"Patrol: dodano punkt {_patrolDraftPoints.Count}. " +
+                "Ctrl+LPM dodaje następny; zwykłe LPM kończy trasę.";
+            return;
+        }
+
+        var executeAt = _engine.CurrentTick.Next();
+        var ordered = 0;
+        foreach (var actor in snapshot.Actors
+                     .Where(actor => _selectedActorIds.Contains(actor.Id) && actor.Health > 0)
+                     .OrderBy(actor => actor.Id))
+        {
+            for (var index = 0; index < _patrolDraftPoints.Count; index++)
+            {
+                _engine.QueueCommand(SimulationCommand.OrderPatrol(
+                    executeAt,
+                    _commandSequence++,
+                    actor.Id,
+                    _patrolDraftPoints[index],
+                    append: index > 0));
+            }
+            ordered++;
+        }
+        _unitOrderMode = UnitOrderMode.None;
+        _inspector.Text = $"Wydano {ordered} goblinom patrol przez " +
+            $"{_patrolDraftPoints.Count + 1} punktów (łącznie z pozycją startową).";
+        _patrolDraftPoints.Clear();
+    }
+
+    private void UpdateUnitOrderPreview(Vector2 screenPosition) =>
+        _worldView.SetRaidTargetPreview(ScreenToVisibleCell(screenPosition), _unitOrderRadius);
+
+    private void ChangeUnitOrderRadius(int delta)
+    {
+        _unitOrderRadius = Math.Clamp(
+            _unitOrderRadius + delta,
+            SimulationEngine.MinimumRaidTargetRadius,
+            SimulationEngine.MaximumRaidTargetRadius);
+        UpdateUnitOrderPreview(GetViewport().GetMousePosition());
+        _inspector.Text = $"Promień obszaru rozkazu: {_unitOrderRadius}.";
     }
 
     private bool TryIssuePassageMove(Vector2 screenPosition)
@@ -1321,7 +1582,8 @@ public partial class Main : Node
         }
 
         CancelWorkMode(clearInspector: false);
-        _isMoveMode = false;
+        _unitOrderMode = UnitOrderMode.None;
+        _worldView.SetRaidTargetPreview(null, 0);
         _buildMode = mode;
         _isDraggingLinearBuild = false;
         _worldView.SetConstructionPreview([]);
@@ -1332,6 +1594,8 @@ public partial class Main : Node
             BuildMode.StoneStorage => "Budowa składu kamienia: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
             BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • Esc anuluje",
             BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu",
+            BuildMode.GoblinHut => $"Chata 3×3: wskaż lewy górny narożnik • koszt 8 drewna • " +
+                $"daje {SimulationDefinitions.GoblinHutCapacity} miejsc i podnosi cel populacji",
             BuildMode.WoodenWall => "Budowa drewnianej ściany: przeciągnij LPM od początku do końca • 2 drewna/segment • blokuje przejście",
             BuildMode.StoneWall => "Budowa kamiennego muru: przeciągnij LPM od początku do końca • 2 jednostki kamienia/segment • wymaga kilofa",
             BuildMode.WoodenDoorFrame => "Budowa drewnianej ościeżnicy: wskaż pole LPM • koszt 1 drewna • może zastąpić gotową ścianę",
@@ -1347,7 +1611,8 @@ public partial class Main : Node
     {
         var mode = (WorkMode)id;
         CancelBuildMode(clearInspector: false);
-        _isMoveMode = false;
+        _unitOrderMode = UnitOrderMode.None;
+        _worldView.SetRaidTargetPreview(null, 0);
         _workMode = mode;
         _isDraggingWorkArea = false;
         _worldView.SetWorkPreview(default, []);
@@ -1460,6 +1725,17 @@ public partial class Main : Node
             return;
         }
 
+        if (_buildMode == BuildMode.GoblinHut)
+        {
+            _engine.QueueCommand(SimulationCommand.BuildGoblinHut(
+                _engine.CurrentTick.Next(),
+                _commandSequence++,
+                cell));
+            _inspector.Text = "Zlecono budowę chaty goblinów. Materiały mogą zostać dostarczone później.";
+            CancelBuildMode(clearInspector: false);
+            return;
+        }
+
         _linearBuildStart = cell;
         _isDraggingLinearBuild = true;
         UpdateBuildPreview(screenPosition);
@@ -1522,6 +1798,7 @@ public partial class Main : Node
                 when _isDraggingLinearBuild =>
                 SimulationCommand.GetLinearCells(_linearBuildStart, cell),
             BuildMode.FieldCamp => GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
+            BuildMode.GoblinHut => GetAreaCells(cell, cell with { X = cell.X + 2, Y = cell.Y + 2 }),
             _ => new[] { cell },
         };
         _worldView.SetConstructionPreview(cells);
@@ -1762,14 +2039,66 @@ public partial class Main : Node
     private void CancelActiveTool()
     {
         var hadActiveTool = _buildMode != BuildMode.None || _workMode != WorkMode.None ||
-            _isMoveMode;
+            _unitOrderMode != UnitOrderMode.None || _isRaidTargetMode;
         CancelBuildMode(clearInspector: false);
         CancelWorkMode(clearInspector: false);
-        _isMoveMode = false;
+        _unitOrderMode = UnitOrderMode.None;
+        _patrolDraftPoints.Clear();
+        _isRaidTargetMode = false;
+        _worldView.SetRaidTargetPreview(null, 0);
         if (hadActiveTool)
         {
             _inspector.Text = "Aktywne narzędzie anulowane.";
         }
+    }
+
+    private void BeginRaidTargetSelection(SimulationSnapshot snapshot)
+    {
+        CancelActiveTool();
+        _isRaidTargetMode = true;
+        _raidTargetRadius = snapshot.RaidPlan.TargetRadius;
+        _visibleLevel = snapshot.RaidPlan.Target.Z;
+        _worldView.SetVisibleLevel(_visibleLevel);
+        _worldView.SetRaidTargetPreview(snapshot.RaidPlan.Target, _raidTargetRadius);
+        _inspector.Text = $"Wskaż centrum najazdu • promień {_raidTargetRadius} • " +
+            "kółko myszy zmienia promień (3–10).";
+    }
+
+    private void UpdateRaidTargetPreview(Vector2 screenPosition)
+    {
+        var cell = ScreenToVisibleCell(screenPosition);
+        _worldView.SetRaidTargetPreview(cell, _raidTargetRadius);
+    }
+
+    private void ChangeRaidTargetRadius(int delta)
+    {
+        _raidTargetRadius = Math.Clamp(
+            _raidTargetRadius + delta,
+            SimulationEngine.MinimumRaidTargetRadius,
+            SimulationEngine.MaximumRaidTargetRadius);
+        _worldView.SetRaidTargetPreview(ScreenToVisibleCell(GetViewport().GetMousePosition()),
+            _raidTargetRadius);
+        _inspector.Text = $"Promień obszaru najazdu: {_raidTargetRadius}.";
+    }
+
+    private void FinishRaidTargetSelection(Vector2 screenPosition)
+    {
+        var target = ScreenToVisibleCell(screenPosition);
+        var snapshot = _engine.CreateSnapshot();
+        if (!snapshot.GetVisibility(target, _engine.Map.Width).IsDiscovered())
+        {
+            _inspector.Text = "Cel najazdu musi leżeć na wcześniej rozpoznanym terenie.";
+            return;
+        }
+
+        _engine.QueueCommand(SimulationCommand.ConfigureRaidTarget(
+            _engine.CurrentTick.Next(),
+            _commandSequence++,
+            target,
+            _raidTargetRadius));
+        _isRaidTargetMode = false;
+        _worldView.SetRaidTargetPreview(null, 0);
+        _inspector.Text = $"Cel najazdu: {target}, promień {_raidTargetRadius}.";
     }
 
     private static WorkDesignationKind ToDesignationKind(WorkMode mode) => mode switch
@@ -2051,7 +2380,10 @@ public partial class Main : Node
         }
     }
 
-    private void InspectWorld(Vector2 screenPosition, bool extendActorSelection)
+    private void InspectWorld(
+        Vector2 screenPosition,
+        bool extendActorSelection,
+        bool showActorDetails)
     {
         var cell = ScreenToCell(screenPosition);
         if (!_engine.Map.IsWithin(cell))
@@ -2078,7 +2410,7 @@ public partial class Main : Node
                     item.Footprint.Contains(levelPosition));
                 if (actor.Id != EntityId.None)
                 {
-                    SelectOrToggleActor(actor.Id, extendActorSelection);
+                    SelectOrToggleActor(actor.Id, extendActorSelection, showActorDetails);
                     _inspector.Text = DescribeActorSelection(actor, levelPosition);
                     return;
                 }
@@ -2180,7 +2512,7 @@ public partial class Main : Node
         var clickedActor = actors.OrderBy(actor => actor.Id).FirstOrDefault();
         if (clickedActor.Id != EntityId.None)
         {
-            SelectOrToggleActor(clickedActor.Id, extendActorSelection);
+            SelectOrToggleActor(clickedActor.Id, extendActorSelection, showActorDetails);
         }
         else
         {
@@ -2206,6 +2538,9 @@ public partial class Main : Node
                 ? string.Empty
                 : $" • {DescribeFoodSource(plant.Value.Kind)} {plant.Value.Biomass}/{plant.Value.Capacity}") +
             (objects.Count == 0 ? string.Empty : $" • {string.Join(", ", objects.Select(item => item.Kind))}") +
+            (objects.Any(item => item.Kind == WorldObjectKind.GoblinFieldCamp)
+                ? " • PPM: menu obozu"
+                : string.Empty) +
             (humanCohorts.Length == 0
                 ? string.Empty
                 : $" • ludzie: {string.Join(", ", humanCohorts.Select(DescribeCohort))}") +
@@ -2535,6 +2870,7 @@ public partial class Main : Node
         ConstructionKind.StoneStorage => "składu kamienia",
         ConstructionKind.WoodenWalkway => "pomostu",
         ConstructionKind.GoblinFieldCamp => "obozu wypadowego",
+        ConstructionKind.GoblinHut => "chaty goblinów",
         ConstructionKind.WoodenWall => "drewnianej ściany",
         ConstructionKind.StoneWall => "kamiennego muru",
         ConstructionKind.WoodenDoorFrame => "drewnianej ościeżnicy",
@@ -2907,6 +3243,8 @@ public partial class Main : Node
         var needs = snapshot.TribeNeeds;
         var metrics = _engine.GetMetrics();
         var navigation = metrics.Navigation;
+        var stages = metrics.LastTickBreakdown;
+        var jobs = _engine.GetLastActorJobUpdateProfile();
         var cacheHitRate = navigation.Requests == 0
             ? 0
             : navigation.CacheHits * 100d / navigation.Requests;
@@ -2939,6 +3277,14 @@ public partial class Main : Node
             $"Ticki: {metrics.TicksExecuted:N0}\n" +
             $"Ostatni tick: {metrics.LastTickDuration.TotalMilliseconds:N3} ms\n" +
             $"Średni tick: {averageTickMilliseconds:N3} ms\n" +
+            $"Etapy: świat {stages.World.TotalMilliseconds:N2} • prace " +
+            $"{stages.ActorJobs.TotalMilliseconds:N2} • zwierzęta " +
+            $"{stages.Animals.TotalMilliseconds:N2} • ludzie " +
+            $"{stages.HumanVillage.TotalMilliseconds:N2} • widoczność " +
+            $"{stages.Visibility.TotalMilliseconds:N2} ms\n" +
+            $"Prace: planowanie {jobs.IdlePlanning.TotalMilliseconds:N2} • aktywne " +
+            $"{jobs.ActiveJobs.TotalMilliseconds:N2} • potrzeby " +
+            $"{jobs.NeedInterrupts.TotalMilliseconds:N2} ms\n" +
             $"Aktywne stacki: {metrics.ItemStacks:N0}\n" +
             $"Obiekty świata: {metrics.WorldObjects:N0}\n" +
             $"Ścieżki: {navigation.Searches:N0}/{navigation.Requests:N0} wyszukań " +
@@ -2977,21 +3323,24 @@ public partial class Main : Node
         return $"{name} • {activity} • zdrowie {animal.Health}";
     }
 
-    private void SelectActor(EntityId actorId)
+    private void SelectActor(EntityId actorId, bool showDetails = false)
     {
         _selectedActorIds.Clear();
         if (actorId != EntityId.None)
         {
             _selectedActorIds.Add(actorId);
         }
-        ApplyActorSelection(actorId);
+        ApplyActorSelection(actorId, showDetails);
     }
 
-    private void SelectOrToggleActor(EntityId actorId, bool extendSelection)
+    private void SelectOrToggleActor(
+        EntityId actorId,
+        bool extendSelection,
+        bool showDetails = false)
     {
         if (!extendSelection)
         {
-            SelectActor(actorId);
+            SelectActor(actorId, showDetails);
             return;
         }
 
@@ -3002,15 +3351,15 @@ public partial class Main : Node
         var primary = _selectedActorIds.Contains(actorId)
             ? actorId
             : _selectedActorIds.OrderBy(id => id).FirstOrDefault();
-        ApplyActorSelection(primary);
+        ApplyActorSelection(primary, showDetails);
     }
 
-    private void ApplyActorSelection(EntityId actorId)
+    private void ApplyActorSelection(EntityId actorId, bool showDetails = false)
     {
         _selectedActorId = actorId;
         _worldView.SetSelectedActors(_selectedActorIds);
         _worldView3D.SetSelectedActors(_selectedActorIds);
-        if (actorId == EntityId.None)
+        if (actorId == EntityId.None || !showDetails)
         {
             _goblinDetails.Hide();
             return;
@@ -3022,13 +3371,23 @@ public partial class Main : Node
         _goblinDetails.Show();
     }
 
+    private void ShowSelectedGoblinDetails()
+    {
+        if (_selectedActorId == EntityId.None)
+        {
+            _inspector.Text = "Najpierw wybierz goblina; F1 otwiera dane głównej zaznaczonej postaci.";
+            return;
+        }
+        ApplyActorSelection(_selectedActorId, showDetails: true);
+    }
+
     private string DescribeActorSelection(ActorSnapshot actor, GridPosition position) =>
         !_selectedActorIds.Contains(actor.Id)
             ? $"{actor.Name} usunięty z bieżącej grupy • pozostało {_selectedActorIds.Count}"
             : _selectedActorIds.Count <= 1
             ? $"{actor.Name} • {position} • {DescribeJob(actor.Job)}"
             : $"Wybrano grupę {_selectedActorIds.Count} goblinów • główny: {actor.Name} • " +
-              "Ruch wyda rozkaz całej grupie; Najazd użyje jej jako składu oddziału.";
+              "rozkazy M/A/H/P obejmą całą grupę.";
 
     private void PositionGoblinDetailsWindow()
     {
@@ -3423,6 +3782,7 @@ public partial class Main : Node
             .AppendLine($"Znane cechy: {DescribeTraits(actor.KnownTraits)}")
             .AppendLine($"Służba logistyczna: " +
                 (logisticsDuty.Length == 0 ? "brak przydziału" : string.Join(", ", logisticsDuty)))
+            .AppendLine($"Rozkaz nadrzędny: {DescribeTacticalOrder(actor.TacticalOrder)}")
             .AppendLine();
         text.AppendLine("Plan działań:");
         if (actor.Plan.Count == 0)
@@ -3447,6 +3807,19 @@ public partial class Main : Node
         _goblinDetails.Title = actor.Name;
         _goblinDetailsText.Text = text.ToString();
     }
+
+    private static string DescribeTacticalOrder(ActorTacticalOrderSnapshot order) =>
+        order.Kind switch
+        {
+            ActorTacticalOrderKind.Patrol =>
+                $"patrol przez {order.PatrolPoints.Count} punktów " +
+                $"(następny {order.PatrolPointIndex + 1})",
+            ActorTacticalOrderKind.AttackArea =>
+                $"atakuj wrogów wokół {order.Center}, promień {order.Radius}",
+            ActorTacticalOrderKind.HuntArea =>
+                $"poluj wokół {order.Center}, promień {order.Radius}",
+            _ => "brak",
+        };
 
     private static string DescribePlanEntry(ActorPlanEntrySnapshot entry)
     {
@@ -4403,12 +4776,215 @@ public partial class Main : Node
         _ => "praca",
     };
 
+    private void CreateWorldContextMenu()
+    {
+        _worldContextMenu = new PopupMenu
+        {
+            Name = "WorldContextMenu",
+            MinSize = new Vector2I(245, 0),
+        };
+        _worldContextMenu.IdPressed += HandleWorldContextAction;
+        AddChild(_worldContextMenu);
+    }
+
+    private bool TryShowWorldContextMenu(Vector2 screenPosition)
+    {
+        if (!_hasActiveSession || _mainMenu.Visible)
+        {
+            return false;
+        }
+
+        var clicked = ScreenToVisibleCell(screenPosition);
+        var snapshot = _engine.CreateSnapshot();
+        var camp = snapshot.WorldObjects.FirstOrDefault(worldObject =>
+            worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            IsCampContextHit(worldObject, clicked));
+        if (camp is null ||
+            !snapshot.GetVisibility(camp.Anchor, _engine.Map.Width).IsDiscovered())
+        {
+            return false;
+        }
+
+        _contextCampAnchor = camp.Anchor;
+        var floorCells = camp.GetAbsoluteParts()
+            .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
+            .Select(part => part.Position)
+            .ToHashSet();
+        var occupants = snapshot.Actors
+            .Where(actor => actor.Health > 0 && floorCells.Contains(actor.Position))
+            .OrderBy(actor => actor.Id)
+            .ToArray();
+        var storage = snapshot.StorageZones.FirstOrDefault(zone =>
+            zone.Position == camp.Anchor && zone.AcceptedResource == ResourceKind.Food);
+
+        _worldContextMenu.Clear();
+        _worldContextMenu.AddItem($"Obóz wypadowy • z={camp.Anchor.Z}");
+        _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
+        _worldContextMenu.AddItem(
+            storage.Id == EntityId.None
+                ? $"Prowiant: brak składu • obsada {occupants.Length}/{SimulationDefinitions.FieldCampCapacity}"
+                : $"Prowiant {storage.StoredQuantity}/{storage.Capacity} • obsada " +
+                  $"{occupants.Length}/{SimulationDefinitions.FieldCampCapacity}");
+        _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
+        _worldContextMenu.AddSeparator();
+        _worldContextMenu.AddItem("Edytuj najazd…", (int)WorldContextAction.EditRaid);
+        _worldContextMenu.SetItemDisabled(
+            _worldContextMenu.GetItemIndex((int)WorldContextAction.EditRaid),
+            snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready or
+                GoblinRaidPhase.Marching);
+        _worldContextMenu.AddItem(
+            snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready
+                ? "Wstrzymaj przygotowania"
+                : "Przygotuj najazd",
+            (int)WorldContextAction.ToggleRaidPreparation);
+        _worldContextMenu.SetItemDisabled(
+            _worldContextMenu.GetItemIndex((int)WorldContextAction.ToggleRaidPreparation),
+            snapshot.RaidPhase == GoblinRaidPhase.Marching);
+        _worldContextMenu.AddItem(
+            $"Wybierz cel… (promień {snapshot.RaidPlan.TargetRadius})",
+            (int)WorldContextAction.SelectRaidTarget);
+        _worldContextMenu.SetItemDisabled(
+            _worldContextMenu.GetItemIndex((int)WorldContextAction.SelectRaidTarget),
+            snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready or
+                GoblinRaidPhase.Marching);
+        if (snapshot.RaidPhase == GoblinRaidPhase.Ready)
+        {
+            _worldContextMenu.AddItem("ATAK!", (int)WorldContextAction.LaunchRaid);
+        }
+        _worldContextMenu.AddSeparator();
+        _worldContextMenu.AddItem(
+            occupants.Length == 0
+                ? "Brak goblinów w obozie"
+                : $"Zaznacz gobliny w obozie ({occupants.Length})",
+            (int)WorldContextAction.SelectCampOccupants);
+        _worldContextMenu.SetItemDisabled(
+            _worldContextMenu.GetItemIndex((int)WorldContextAction.SelectCampOccupants),
+            occupants.Length == 0);
+        _worldContextMenu.AddItem(
+            "Otwórz skład prowiantu",
+            (int)WorldContextAction.OpenCampStorage);
+        _worldContextMenu.SetItemDisabled(
+            _worldContextMenu.GetItemIndex((int)WorldContextAction.OpenCampStorage),
+            storage.Id == EntityId.None);
+        _worldContextMenu.Position = new Vector2I(
+            Mathf.RoundToInt(screenPosition.X),
+            Mathf.RoundToInt(screenPosition.Y));
+        _worldContextMenu.Popup();
+        return true;
+    }
+
+    private static bool IsCampContextHit(WorldObjectSnapshot camp, GridPosition clicked)
+    {
+        if (camp.Anchor.Z != clicked.Z)
+        {
+            return false;
+        }
+
+        var footprint = camp.GetAbsoluteParts()
+            .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
+            .Select(part => part.Position)
+            .ToArray();
+        return footprint.Length > 0 &&
+            clicked.X >= footprint.Min(position => position.X) - 1 &&
+            clicked.X <= footprint.Max(position => position.X) + 1 &&
+            clicked.Y >= footprint.Min(position => position.Y) - 1 &&
+            clicked.Y <= footprint.Max(position => position.Y) + 1;
+    }
+
+    private void HandleWorldContextAction(long actionId)
+    {
+        var campAnchor = _contextCampAnchor;
+        _contextCampAnchor = null;
+        if (campAnchor is null)
+        {
+            return;
+        }
+
+        var snapshot = _engine.CreateSnapshot();
+        var camp = snapshot.WorldObjects.FirstOrDefault(worldObject =>
+            worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            worldObject.Anchor == campAnchor.Value);
+        if (camp is null)
+        {
+            return;
+        }
+
+        switch ((WorldContextAction)actionId)
+        {
+            case WorldContextAction.EditRaid:
+                ShowRaidWindow(camp.Anchor);
+                break;
+            case WorldContextAction.ToggleRaidPreparation:
+                var executeAt = _engine.CurrentTick.Next();
+                var suspendPreparation = snapshot.RaidPhase is GoblinRaidPhase.Preparing or
+                    GoblinRaidPhase.Ready;
+                _engine.QueueCommand(suspendPreparation
+                    ? SimulationCommand.SuspendRaidPreparation(executeAt, _commandSequence++)
+                    : SimulationCommand.AttackHumanVillage(
+                        executeAt,
+                        _commandSequence++,
+                        camp.Anchor));
+                _inspector.Text = suspendPreparation
+                    ? "Zlecono wstrzymanie przygotowań do najazdu."
+                    : $"Zlecono przygotowanie najazdu w obozie {camp.Anchor}.";
+                if (_speed == 0)
+                {
+                    _inspector.Text += " Rozkaz zostanie wykonany po wznowieniu czasu.";
+                }
+                break;
+            case WorldContextAction.SelectRaidTarget:
+                BeginRaidTargetSelection(snapshot);
+                break;
+            case WorldContextAction.LaunchRaid:
+                _engine.QueueCommand(SimulationCommand.LaunchRaid(
+                    _engine.CurrentTick.Next(),
+                    _commandSequence++));
+                _inspector.Text = "Wydano rozkaz ATAK!" +
+                    (_speed == 0 ? " Najazd ruszy po wznowieniu czasu." : string.Empty);
+                break;
+            case WorldContextAction.SelectCampOccupants:
+                SelectCampOccupants(snapshot, camp);
+                break;
+            case WorldContextAction.OpenCampStorage:
+                var storage = snapshot.StorageZones.FirstOrDefault(zone =>
+                    zone.Position == camp.Anchor && zone.AcceptedResource == ResourceKind.Food);
+                if (storage.Id != EntityId.None)
+                {
+                    ShowStorageDetails(storage);
+                }
+                break;
+        }
+    }
+
+    private void SelectCampOccupants(
+        SimulationSnapshot snapshot,
+        WorldObjectSnapshot camp)
+    {
+        var floorCells = camp.GetAbsoluteParts()
+            .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
+            .Select(part => part.Position)
+            .ToHashSet();
+        var occupants = snapshot.Actors
+            .Where(actor => actor.Health > 0 && floorCells.Contains(actor.Position))
+            .OrderBy(actor => actor.Id)
+            .Select(actor => actor.Id)
+            .ToArray();
+        _selectedActorIds.Clear();
+        _selectedActorIds.UnionWith(occupants);
+        ApplyActorSelection(occupants.FirstOrDefault());
+        _inspector.Text = occupants.Length == 0
+            ? $"Obóz {camp.Anchor} jest pusty."
+            : $"Zaznaczono {occupants.Length} goblinów przebywających w obozie {camp.Anchor}.";
+    }
+
     private void CreateRaidWindow()
     {
         _raidWindow = new Window
         {
             Title = "Oddział wyprawy",
-            Size = new Vector2I(500, 560),
+            Size = new Vector2I(620, 720),
             MinSize = new Vector2I(420, 420),
             Unresizable = false,
             Visible = false,
@@ -4438,6 +5014,26 @@ public partial class Main : Node
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         };
         content.AddChild(_raidSummary);
+
+        _raidEngagement = new OptionButton();
+        _raidEngagement.AddItem("Atakuj tylko strażników", 0);
+        _raidEngagement.AddItem("Atakuj wszystkich, którzy nie uciekają", 1);
+        content.AddChild(_raidEngagement);
+
+        var directiveGrid = new GridContainer { Columns = 2 };
+        directiveGrid.AddThemeConstantOverride("h_separation", 12);
+        content.AddChild(directiveGrid);
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.LootEquipment, "Zabierz sprzęt");
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.LootSupplies, "Zabierz zapasy");
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.LootFood, "Zabierz żywność");
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.ConsumeCorpses, "Pożryj zwłoki");
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.BudCorpses, "Zapączkuj zwłoki");
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.BurnBuildings, "Spal budynki");
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.DemolishBuildings, "Wyburz budynki");
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.ContinueWhileTargetsVisible,
+            "Kontynuuj, gdy widać cele");
+        AddRaidDirectiveCheck(directiveGrid, RaidDirective.AutoLaunchWhenReady,
+            "Atakuj automatycznie po przygotowaniu");
         var scroll = new ScrollContainer
         {
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
@@ -4460,14 +5056,32 @@ public partial class Main : Node
         var cancel = new Button { Text = "Zamknij" };
         cancel.Pressed += _raidWindow.Hide;
         buttons.AddChild(cancel);
-        _raidStartButton = new Button { Text = "Rozpocznij przygotowania" };
+        _raidStartButton = new Button { Text = "Zapisz plan" };
         _raidStartButton.Pressed += StartSelectedRaid;
         buttons.AddChild(_raidStartButton);
     }
 
-    private void ShowRaidWindow()
+    private void AddRaidDirectiveCheck(
+        Control parent,
+        RaidDirective directive,
+        string text)
+    {
+        var check = new CheckButton { Text = text };
+        _raidDirectiveChecks.Add(directive, check);
+        parent.AddChild(check);
+    }
+
+    private void ShowRaidWindow() => ShowRaidWindow(null);
+
+    private void ShowRaidWindow(GridPosition? rallyPoint)
     {
         var snapshot = _engine.CreateSnapshot();
+        _raidDraftRallyPoint = rallyPoint;
+        _raidEngagement.Select(snapshot.RaidPlan.Has(RaidDirective.AttackNonFleeing) ? 1 : 0);
+        foreach (var (directive, check) in _raidDirectiveChecks)
+        {
+            check.ButtonPressed = snapshot.RaidPlan.Has(directive);
+        }
         _raidDraftIds.Clear();
         if (snapshot.RaidPartyIds.Count > 0)
         {
@@ -4479,6 +5093,23 @@ public partial class Main : Node
                 .Where(id => snapshot.Actors.Any(actor => actor.Id == id && actor.Health > 0))
                 .OrderBy(id => id)
                 .Take(SimulationDefinitions.FieldCampCapacity));
+        }
+        else if (rallyPoint is not null)
+        {
+            var campFloor = snapshot.WorldObjects
+                .Where(worldObject =>
+                    worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+                    worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+                    worldObject.Anchor == rallyPoint.Value)
+                .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+                .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
+                .Select(part => part.Position)
+                .ToHashSet();
+            _raidDraftIds.UnionWith(snapshot.Actors
+                .Where(actor => actor.Health > 0 && campFloor.Contains(actor.Position))
+                .OrderBy(actor => actor.Id)
+                .Take(SimulationDefinitions.FieldCampCapacity)
+                .Select(actor => actor.Id));
         }
         else
         {
@@ -4493,8 +5124,14 @@ public partial class Main : Node
         {
             child.QueueFree();
         }
-        var selectionLocked = snapshot.RaidPhase != GoblinRaidPhase.None ||
+        var selectionLocked = snapshot.RaidPhase is not (GoblinRaidPhase.None or
+                GoblinRaidPhase.Suspended) ||
             snapshot.HumanVillage.GoblinAttackOrdered;
+        _raidEngagement.Disabled = selectionLocked;
+        foreach (var check in _raidDirectiveChecks.Values)
+        {
+            check.Disabled = selectionLocked;
+        }
         foreach (var actor in snapshot.Actors.OrderBy(actor => actor.Id))
         {
             var check = new CheckButton
@@ -4546,20 +5183,27 @@ public partial class Main : Node
     {
         var hasCamp = snapshot.WorldObjects.Any(item =>
             item.Kind == WorldObjectKind.GoblinFieldCamp &&
-            item.Owner == WorldObjectOwner.GoblinTribe);
+            item.Owner == WorldObjectOwner.GoblinTribe &&
+            (_raidDraftRallyPoint is null || item.Anchor == _raidDraftRallyPoint.Value));
         var phase = snapshot.RaidPhase switch
         {
             GoblinRaidPhase.Preparing => $"Przygotowanie w punkcie {snapshot.RaidRallyPoint}.",
-            GoblinRaidPhase.Marching => "Oddział maszeruje na wieś.",
+            GoblinRaidPhase.Ready => "Oddział gotowy — czeka na rozkaz ATAK!.",
+            GoblinRaidPhase.Suspended => "Przygotowania wstrzymane; plan można edytować.",
+            GoblinRaidPhase.Marching => $"Oddział maszeruje do {snapshot.RaidPlan.Target}.",
+            _ when _raidDraftRallyPoint is not null =>
+                $"Punkt zbiórki: obóz {_raidDraftRallyPoint.Value}. Wybierz od 1 do 5 goblinów.",
             _ => "Wybierz od 1 do 5 goblinów. Wyruszą po zebraniu się w obozie i uzupełnieniu zapasów.",
         };
         var blockers = snapshot.RaidPhase == GoblinRaidPhase.Preparing
             ? DescribeRaidBlockers(snapshot)
             : string.Empty;
         _raidSummary.Text = $"{phase}\nWybrano: {_raidDraftIds.Count}/{SimulationDefinitions.FieldCampCapacity}." +
+            "\nPrzygotowanie: automatyczne, zależne od celu i doktryny najazdu." +
             (hasCamp ? string.Empty : "\nBrak ukończonego obozowiska z drogą do wsi.") +
             blockers;
-        _raidStartButton.Disabled = snapshot.RaidPhase != GoblinRaidPhase.None ||
+        _raidStartButton.Disabled = snapshot.RaidPhase is not (GoblinRaidPhase.None or
+                GoblinRaidPhase.Suspended) ||
             snapshot.HumanVillage.GoblinAttackOrdered || !hasCamp || _raidDraftIds.Count == 0;
     }
 
@@ -4571,6 +5215,10 @@ public partial class Main : Node
             .OrderBy(actor => actor.Id)
             .Select(actor =>
             {
+                var preparation = RaidPreparationPolicy.ResolveAutomatic(
+                    snapshot.RaidPlan.Directives,
+                    _engine.Definitions,
+                    actor.Equipment);
                 var reasons = new List<string>();
                 if (actor.Position != snapshot.RaidRallyPoint)
                 {
@@ -4580,11 +5228,11 @@ public partial class Main : Node
                 {
                     reasons.Add("odkłada ładunek");
                 }
-                if (actor.PersonalFood < _engine.Definitions.PersonalFoodCapacity)
+                if (actor.PersonalFood < preparation.FoodTarget)
                 {
                     reasons.Add("uzupełnia wałówkę");
                 }
-                if (actor.PersonalWater < _engine.Definitions.PersonalWaterCapacity)
+                if (actor.PersonalWater < preparation.WaterTarget)
                 {
                     reasons.Add("napełnia bukłak");
                 }
@@ -4616,7 +5264,8 @@ public partial class Main : Node
     private void StartSelectedRaid()
     {
         var snapshot = _engine.CreateSnapshot();
-        if (_raidDraftIds.Count == 0 || snapshot.RaidPhase != GoblinRaidPhase.None ||
+        if (_raidDraftIds.Count == 0 || snapshot.RaidPhase is not (GoblinRaidPhase.None or
+                GoblinRaidPhase.Suspended) ||
             snapshot.HumanVillage.GoblinAttackOrdered)
         {
             return;
@@ -4631,11 +5280,23 @@ public partial class Main : Node
                 actor.Id,
                 _raidDraftIds.Contains(actor.Id)));
         }
-        _engine.QueueCommand(SimulationCommand.AttackHumanVillage(executeAt, _commandSequence++));
+        var directives = _raidEngagement.Selected == 1
+            ? RaidDirective.AttackNonFleeing
+            : RaidDirective.AttackGuards;
+        foreach (var (directive, check) in _raidDirectiveChecks)
+        {
+            if (check.ButtonPressed)
+            {
+                directives |= directive;
+            }
+        }
+        _engine.QueueCommand(SimulationCommand.ConfigureRaidDirectives(
+            executeAt,
+            _commandSequence++,
+            directives));
         _raidWindow.Hide();
-        _inspector.Text = $"Wyznaczono {_raidDraftIds.Count} goblinów do najazdu. " +
-            "Najpierw zbiorą się i uzupełnią zapasy w najbliższym obozowisku." +
-            (_speed == 0 ? " Polecenie ruszy po wznowieniu czasu." : string.Empty);
+        _inspector.Text = $"Zapisano plan najazdu dla {_raidDraftIds.Count} goblinów. " +
+            "Przygotowania uruchomisz z menu obozu.";
     }
 
     private void SetSpeed(int speed)
@@ -4731,7 +5392,7 @@ public partial class Main : Node
             _ => $" Zaznaczenie grupy {selectedActors.Length} goblinów zachowane; poziomy: " +
                  string.Join(", ", selectedActors.Select(actor => actor.Position.Z).Distinct().Order()) + ".",
         };
-        _inspector.Text = (_isMoveMode
+        _inspector.Text = (_unitOrderMode == UnitOrderMode.Move
             ? $"Widoczna warstwa z={next}. Wskaż odkryty cel marszu lub przejście między poziomami."
             : $"Widoczna warstwa mapy: z={next}. Page Up / Page Down zmienia poziom.") +
             selection;
@@ -4837,6 +5498,7 @@ public partial class Main : Node
             .Sum(stack => stack.Quantity);
         _status.Text = $"Tick {snapshot.Tick.Value:N0}  •  z={_visibleLevel}  •  plemię {snapshot.Actors.Count}" +
             $" + {snapshot.GoblinBuds.Count} pąk. / cel {snapshot.PopulationTarget}" +
+            $" / miejsca {snapshot.TribeNeeds.ShelterCapacity}" +
             $"  •  żywność {snapshot.FoodStock}" +
             $" (skł. {storedFood}, racje {personalFood}/{personalWater})" +
             $"  •  drewno {wood}" +
@@ -4887,6 +5549,14 @@ public partial class Main : Node
         if (snapshot.RaidPhase == GoblinRaidPhase.Preparing)
         {
             _status.Text += $"  •  najazd: przygotowanie w {snapshot.RaidRallyPoint}";
+        }
+        else if (snapshot.RaidPhase == GoblinRaidPhase.Ready)
+        {
+            _status.Text += "  •  najazd: GOTOWY";
+        }
+        else if (snapshot.RaidPhase == GoblinRaidPhase.Suspended)
+        {
+            _status.Text += "  •  najazd: przygotowania wstrzymane";
         }
         else if (snapshot.RaidPhase == GoblinRaidPhase.Marching)
         {

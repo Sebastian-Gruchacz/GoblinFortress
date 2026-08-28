@@ -1,0 +1,81 @@
+using GoblinStronghold.Simulation.Map;
+
+namespace GoblinStronghold.Simulation;
+
+[Flags]
+public enum RaidDirective : ushort
+{
+    None = 0,
+    AttackGuards = 1 << 0,
+    AttackNonFleeing = 1 << 1,
+    LootEquipment = 1 << 2,
+    LootSupplies = 1 << 3,
+    LootFood = 1 << 4,
+    ConsumeCorpses = 1 << 5,
+    BudCorpses = 1 << 6,
+    BurnBuildings = 1 << 7,
+    DemolishBuildings = 1 << 8,
+    ContinueWhileTargetsVisible = 1 << 9,
+    AutoLaunchWhenReady = 1 << 10,
+}
+
+public readonly record struct RaidPlanSnapshot(
+    GridPosition RallyPoint,
+    GridPosition Target,
+    int TargetRadius,
+    RaidDirective Directives)
+{
+    public bool Has(RaidDirective directive) => Directives.HasFlag(directive);
+}
+
+public enum RaidPreparationMode : byte
+{
+    Automatic = 0,
+}
+
+public readonly record struct RaidPreparationProfile(
+    RaidPreparationMode Mode,
+    int FoodTarget,
+    int WaterTarget,
+    int StoneAmmoTarget,
+    PersonalEquipment PreferredEquipment,
+    bool KeepCargoHandsFree);
+
+public static class RaidPreparationPolicy
+{
+    public static RaidPreparationProfile ResolveAutomatic(
+        RaidDirective directives,
+        SimulationDefinitions definitions,
+        PersonalEquipment equipment)
+    {
+        ArgumentNullException.ThrowIfNull(definitions);
+        var expectsExtendedOperation = directives.HasFlag(RaidDirective.LootEquipment) ||
+            directives.HasFlag(RaidDirective.LootSupplies) ||
+            directives.HasFlag(RaidDirective.LootFood) ||
+            directives.HasFlag(RaidDirective.ConsumeCorpses) ||
+            directives.HasFlag(RaidDirective.BudCorpses) ||
+            directives.HasFlag(RaidDirective.BurnBuildings) ||
+            directives.HasFlag(RaidDirective.DemolishBuildings) ||
+            directives.HasFlag(RaidDirective.ContinueWhileTargetsVisible);
+        var expectsBroadCombat = directives.HasFlag(RaidDirective.AttackNonFleeing) ||
+            directives.HasFlag(RaidDirective.ContinueWhileTargetsVisible);
+        var ammoCapacity = equipment.HasFlag(PersonalEquipment.PrimitiveSling)
+            ? definitions.RangedCombat.SlingAmmoCapacity
+            : definitions.RangedCombat.HandAmmoCapacity;
+        var preferredEquipment = directives.HasFlag(RaidDirective.DemolishBuildings)
+            ? PersonalEquipment.PrimitivePickaxe
+            : PersonalEquipment.None;
+
+        return new RaidPreparationProfile(
+            RaidPreparationMode.Automatic,
+            expectsExtendedOperation
+                ? definitions.PersonalFoodCapacity
+                : Math.Min(definitions.PersonalFoodCapacity, 1),
+            definitions.PersonalWaterCapacity,
+            expectsBroadCombat ? ammoCapacity : Math.Min(ammoCapacity, 1),
+            preferredEquipment,
+            KeepCargoHandsFree: directives.HasFlag(RaidDirective.LootEquipment) ||
+                directives.HasFlag(RaidDirective.LootSupplies) ||
+                directives.HasFlag(RaidDirective.LootFood));
+    }
+}

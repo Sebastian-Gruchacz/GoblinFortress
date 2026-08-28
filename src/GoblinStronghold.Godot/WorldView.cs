@@ -22,6 +22,8 @@ public partial class WorldView : Node2D
     private IReadOnlyList<GridPosition> _constructionPreview = [];
     private WorkDesignationKind _workPreviewKind;
     private IReadOnlyList<GridPosition> _workPreview = [];
+    private GridPosition? _raidTargetPreview;
+    private int _raidTargetRadius;
     private Texture2D _iconAtlas = null!;
     private Texture2D _itemIconAtlas = null!;
     private Texture2D _environmentAtlas = null!;
@@ -36,9 +38,10 @@ public partial class WorldView : Node2D
     private int _visibleLevel;
     private double _waterAnimationElapsed;
     private double _waterAnimationRedrawElapsed;
-    private WallEnclosureAnalysis? _wallEnclosure;
-    private HashSet<GridPosition> _wallEnclosureBarriers = [];
-    private HashSet<GridPosition> _wallEnclosureSolids = [];
+    private ulong _snapshotTopologyVersion;
+    private readonly Dictionary<int, (ulong TopologyVersion, HashSet<GridPosition> Solids)>
+        _cachedCaveSolids = [];
+    private readonly Dictionary<int, StructureRenderCache> _structureRenderCaches = [];
 
     public int VisibleLevel => _visibleLevel;
 
@@ -67,9 +70,9 @@ public partial class WorldView : Node2D
         _targetActorPositions.Clear();
         _visualAnimalPositions.Clear();
         _targetAnimalPositions.Clear();
-        _wallEnclosure = null;
-        _wallEnclosureBarriers.Clear();
-        _wallEnclosureSolids.Clear();
+        _snapshotTopologyVersion = 0;
+        _cachedCaveSolids.Clear();
+        _structureRenderCaches.Clear();
         _engine = engine;
         Refresh(engine.CreatePresentationSnapshot());
     }
@@ -77,6 +80,7 @@ public partial class WorldView : Node2D
     public void Refresh(SimulationSnapshot snapshot)
     {
         _snapshot = snapshot;
+        _snapshotTopologyVersion = _engine.World.TopologyVersion;
         SynchronizeActorPositions();
         SynchronizeAnimalPositions();
         QueueRedraw();
@@ -115,6 +119,13 @@ public partial class WorldView : Node2D
         QueueRedraw();
     }
 
+    public void SetRaidTargetPreview(GridPosition? center, int radius)
+    {
+        _raidTargetPreview = center;
+        _raidTargetRadius = radius;
+        QueueRedraw();
+    }
+
     public GridPosition WorldToCell(Vector2 position) => new(
         Mathf.FloorToInt(position.X / TileSize),
         Mathf.FloorToInt(position.Y / TileSize));
@@ -123,15 +134,23 @@ public partial class WorldView : Node2D
 
     public override void _Process(double delta)
     {
-        _waterAnimationElapsed = (_waterAnimationElapsed + delta) % WaterAnimationCycleSeconds;
-        _waterAnimationRedrawElapsed += delta;
-        if (_visibleLevel <= 0 && _waterAnimationRedrawElapsed >= WaterAnimationRedrawSeconds)
+        if (_engine is null)
         {
-            _waterAnimationRedrawElapsed %= WaterAnimationRedrawSeconds;
-            QueueRedraw();
+            return;
         }
 
-        if (_engine is null || _simulationSpeed == 0 ||
+        _waterAnimationElapsed = (_waterAnimationElapsed + delta) % WaterAnimationCycleSeconds;
+        _waterAnimationRedrawElapsed += delta;
+        if (_waterAnimationRedrawElapsed >= WaterAnimationRedrawSeconds)
+        {
+            _waterAnimationRedrawElapsed %= WaterAnimationRedrawSeconds;
+            if (HasVisibleAnimatedWater())
+            {
+                QueueRedraw();
+            }
+        }
+
+        if (_simulationSpeed == 0 ||
             (_visualActorPositions.Count == 0 && _visualAnimalPositions.Count == 0))
         {
             return;
@@ -208,6 +227,25 @@ public partial class WorldView : Node2D
         DrawWorkPreview();
         DrawOrderedDestination();
         DrawConstructionPreview();
+        DrawRaidTargetPreview();
+    }
+
+    private void DrawRaidTargetPreview()
+    {
+        if (_raidTargetPreview is not { } center || center.Z != _visibleLevel)
+        {
+            return;
+        }
+
+        var worldCenter = CellCenter(center);
+        var radius = (_raidTargetRadius + 0.5f) * TileSize;
+        DrawCircle(worldCenter, radius, new Color(0.85f, 0.12f, 0.08f, 0.12f));
+        DrawArc(worldCenter, radius, 0f, Mathf.Tau, 64,
+            new Color(1f, 0.25f, 0.12f, 0.95f), 2.5f, true);
+        DrawLine(worldCenter - new Vector2(8f, 0f), worldCenter + new Vector2(8f, 0f),
+            new Color(1f, 0.75f, 0.25f), 2f);
+        DrawLine(worldCenter - new Vector2(0f, 8f), worldCenter + new Vector2(0f, 8f),
+            new Color(1f, 0.75f, 0.25f), 2f);
     }
 
     private void DrawTerrain()
@@ -873,16 +911,9 @@ public partial class WorldView : Node2D
 
     private void DrawStructures()
     {
-        var walkwayCells = _snapshot.WorldObjects
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenWalkway)
-            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
-            .Where(item =>
-                item.Position.Z == _visibleLevel &&
-                item.Part.Kind == WorldObjectPartKind.Walkway)
-            .Select(item => item.Position)
-            .ToHashSet();
-        DrawWalkways(walkwayCells);
-        DrawPrimitiveBarriers();
+        var structureCache = GetStructureRenderCache();
+        DrawWalkways(structureCache.WalkwayCells);
+        DrawPrimitiveBarriers(structureCache);
 
         foreach (var worldObject in _snapshot.WorldObjects)
         {
@@ -996,81 +1027,16 @@ public partial class WorldView : Node2D
         }
     }
 
-    private void DrawPrimitiveBarriers()
+    private void DrawPrimitiveBarriers(StructureRenderCache cache)
     {
-        var woodenWalls = _snapshot.WorldObjects
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenWall &&
-                worldObject.Anchor.Z == _visibleLevel)
-            .Select(worldObject => worldObject.Anchor)
-            .ToHashSet();
-        var stoneWalls = _snapshot.WorldObjects
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.StoneWall &&
-                worldObject.Anchor.Z == _visibleLevel)
-            .Select(worldObject => worldObject.Anchor)
-            .ToHashSet();
-        var doorFrames = _snapshot.WorldObjects
-            .Where(worldObject => worldObject.Kind is (WorldObjectKind.WoodenDoorFrame or
-                    WorldObjectKind.StoneDoorFrame) &&
-                worldObject.Anchor.Z == _visibleLevel)
-            .ToDictionary(worldObject => worldObject.Anchor);
-        var doorLeaves = _snapshot.WorldObjects
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorLeaf &&
-                worldObject.Anchor.Z == _visibleLevel)
-            .ToDictionary(
-                worldObject => worldObject.Anchor,
-                worldObject => worldObject.Parts.Single().Kind is
-                    WorldObjectPartKind.OpenDoorLeaf or
-                    WorldObjectPartKind.AutomaticallyOpenedDoorLeaf);
-        var wallTorches = _snapshot.WorldObjects
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.WallTorch &&
-                worldObject.Anchor.Z == _visibleLevel)
-            .ToArray();
-        var connectedCells = woodenWalls.Concat(stoneWalls).Concat(doorFrames.Keys).ToHashSet();
-        if (connectedCells.Count == 0 && doorLeaves.Count == 0 && wallTorches.Length == 0)
+        if (cache.ConnectedCells.Count == 0 && cache.DoorLeaves.Count == 0 &&
+            cache.WallTorches.Length == 0)
         {
             return;
         }
-
-        var structuralSolids = _snapshot.WorldObjects
-            .Where(worldObject => worldObject.Kind is not (
-                WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall or
-                WorldObjectKind.WoodenDoorFrame or WorldObjectKind.StoneDoorFrame or
-                WorldObjectKind.WoodenDoorLeaf))
-            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
-            .Where(item => item.Position.Z == _visibleLevel &&
-                item.Part.Kind == WorldObjectPartKind.Wall)
-            .Select(item => item.Position)
-            .ToHashSet();
-        if (_visibleLevel < 0)
+        foreach (var position in cache.WoodenWalls)
         {
-            for (var y = 0; y < _engine.Map.Height; y++)
-            {
-                for (var x = 0; x < _engine.Map.Width; x++)
-                {
-                    var position = new GridPosition(x, y, _visibleLevel);
-                    if (_engine.World.IsSolidCaveRock(position))
-                    {
-                        structuralSolids.Add(position);
-                    }
-                }
-            }
-        }
-        if (_wallEnclosure is null ||
-            !_wallEnclosureBarriers.SetEquals(connectedCells) ||
-            !_wallEnclosureSolids.SetEquals(structuralSolids))
-        {
-            _wallEnclosure = WallEnclosureAnalysis.Analyze(
-                _engine.Map.Width,
-                _engine.Map.Height,
-                connectedCells,
-                structuralSolids,
-                _visibleLevel);
-            _wallEnclosureBarriers = connectedCells;
-            _wallEnclosureSolids = structuralSolids;
-        }
-        foreach (var position in woodenWalls)
-        {
-            var mask = GetCardinalConnectionMask(position, connectedCells);
+            var mask = GetCardinalConnectionMask(position, cache.ConnectedCells);
             DrawTextureRectRegion(
                 _structureWallAtlas,
                 CellRect(position.X, position.Y).Grow(-0.5f),
@@ -1080,12 +1046,12 @@ public partial class WorldView : Node2D
                     mask));
             DrawInteriorWallFaces(
                 position,
-                _wallEnclosure.GetWallSides(position).VisibleFaces);
+                cache.Enclosure!.GetWallSides(position).VisibleFaces);
         }
 
-        foreach (var position in stoneWalls)
+        foreach (var position in cache.StoneWalls)
         {
-            var mask = GetCardinalConnectionMask(position, connectedCells);
+            var mask = GetCardinalConnectionMask(position, cache.ConnectedCells);
             DrawTextureRectRegion(
                 _structureWallAtlas,
                 CellRect(position.X, position.Y).Grow(-0.5f),
@@ -1096,23 +1062,23 @@ public partial class WorldView : Node2D
                 new Color(0.62f, 0.7f, 0.76f));
             DrawInteriorWallFaces(
                 position,
-                _wallEnclosure.GetWallSides(position).VisibleFaces,
+                cache.Enclosure!.GetWallSides(position).VisibleFaces,
                 stone: true);
         }
 
-        foreach (var (position, frame) in doorFrames)
+        foreach (var (position, frame) in cache.DoorFrames)
         {
             DrawDoorFrame(
                 position,
                 frame.Orientation,
                 stone: frame.Kind == WorldObjectKind.StoneDoorFrame);
-            if (doorLeaves.TryGetValue(position, out var isOpen))
+            if (cache.DoorLeaves.TryGetValue(position, out var isOpen))
             {
                 DrawDoorLeaf(position, frame.Orientation, isOpen);
             }
         }
 
-        foreach (var torch in wallTorches)
+        foreach (var torch in cache.WallTorches)
         {
             DrawWallTorch(torch.Anchor, torch.Orientation);
         }
@@ -2263,6 +2229,152 @@ public partial class WorldView : Node2D
             _engine.Map.Height);
         return (minimumX, minimumY, maximumX, maximumY);
     }
+
+    private bool HasVisibleAnimatedWater()
+    {
+        var bounds = GetVisibleCellBounds(padding: 0);
+        for (var y = bounds.MinimumY; y < bounds.MaximumY; y++)
+        {
+            for (var x = bounds.MinimumX; x < bounds.MaximumX; x++)
+            {
+                var position = new GridPosition(x, y, _visibleLevel);
+                if (_visibleLevel < 0)
+                {
+                    if (_engine.World.TryGetFluid(position, out var fluid, out _) &&
+                        fluid == CellFluidKind.Water)
+                    {
+                        return true;
+                    }
+                    continue;
+                }
+
+                var cell = _engine.Map.GetColumnCell(position);
+                if (cell.SurfaceLevel == _visibleLevel &&
+                    cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private IReadOnlySet<GridPosition> GetCachedCaveSolids()
+    {
+        var topologyVersion = _snapshotTopologyVersion;
+        if (_cachedCaveSolids.TryGetValue(_visibleLevel, out var cached) &&
+            cached.TopologyVersion == topologyVersion)
+        {
+            return cached.Solids;
+        }
+
+        var solids = new HashSet<GridPosition>();
+        for (var y = 0; y < _engine.Map.Height; y++)
+        {
+            for (var x = 0; x < _engine.Map.Width; x++)
+            {
+                var position = new GridPosition(x, y, _visibleLevel);
+                if (_engine.World.IsSolidCaveRock(position))
+                {
+                    solids.Add(position);
+                }
+            }
+        }
+
+        _cachedCaveSolids[_visibleLevel] = (topologyVersion, solids);
+        return solids;
+    }
+
+    private StructureRenderCache GetStructureRenderCache()
+    {
+        if (_structureRenderCaches.TryGetValue(_visibleLevel, out var cached) &&
+            cached.TopologyVersion == _snapshotTopologyVersion)
+        {
+            return cached;
+        }
+
+        var woodenWalls = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenWall &&
+                worldObject.Anchor.Z == _visibleLevel)
+            .Select(worldObject => worldObject.Anchor)
+            .ToHashSet();
+        var stoneWalls = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.StoneWall &&
+                worldObject.Anchor.Z == _visibleLevel)
+            .Select(worldObject => worldObject.Anchor)
+            .ToHashSet();
+        var doorFrames = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind is (WorldObjectKind.WoodenDoorFrame or
+                    WorldObjectKind.StoneDoorFrame) &&
+                worldObject.Anchor.Z == _visibleLevel)
+            .ToDictionary(worldObject => worldObject.Anchor);
+        var doorLeaves = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorLeaf &&
+                worldObject.Anchor.Z == _visibleLevel)
+            .ToDictionary(
+                worldObject => worldObject.Anchor,
+                worldObject => worldObject.Parts.Single().Kind is
+                    WorldObjectPartKind.OpenDoorLeaf or
+                    WorldObjectPartKind.AutomaticallyOpenedDoorLeaf);
+        var wallTorches = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WallTorch &&
+                worldObject.Anchor.Z == _visibleLevel)
+            .ToArray();
+        var walkwayCells = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenWalkway)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(item => item.Position.Z == _visibleLevel &&
+                item.Part.Kind == WorldObjectPartKind.Walkway)
+            .Select(item => item.Position)
+            .ToHashSet();
+        var connectedCells = woodenWalls.Concat(stoneWalls).Concat(doorFrames.Keys).ToHashSet();
+        var structuralSolids = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind is not (
+                WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall or
+                WorldObjectKind.WoodenDoorFrame or WorldObjectKind.StoneDoorFrame or
+                WorldObjectKind.WoodenDoorLeaf))
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(item => item.Position.Z == _visibleLevel &&
+                item.Part.Kind == WorldObjectPartKind.Wall)
+            .Select(item => item.Position)
+            .ToHashSet();
+        if (_visibleLevel < 0)
+        {
+            structuralSolids.UnionWith(GetCachedCaveSolids());
+        }
+
+        var enclosure = connectedCells.Count == 0
+            ? null
+            : WallEnclosureAnalysis.Analyze(
+                _engine.Map.Width,
+                _engine.Map.Height,
+                connectedCells,
+                structuralSolids,
+                _visibleLevel);
+        cached = new StructureRenderCache(
+            _snapshotTopologyVersion,
+            walkwayCells,
+            woodenWalls,
+            stoneWalls,
+            doorFrames,
+            doorLeaves,
+            wallTorches,
+            connectedCells,
+            enclosure);
+        _structureRenderCaches[_visibleLevel] = cached;
+        return cached;
+    }
+
+    private sealed record StructureRenderCache(
+        ulong TopologyVersion,
+        HashSet<GridPosition> WalkwayCells,
+        HashSet<GridPosition> WoodenWalls,
+        HashSet<GridPosition> StoneWalls,
+        Dictionary<GridPosition, WorldObjectSnapshot> DoorFrames,
+        Dictionary<GridPosition, bool> DoorLeaves,
+        WorldObjectSnapshot[] WallTorches,
+        HashSet<GridPosition> ConnectedCells,
+        WallEnclosureAnalysis? Enclosure);
 
     private static Rect2 CellRect(int x, int y) => new(
         x * TileSize,

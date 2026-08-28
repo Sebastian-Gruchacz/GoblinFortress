@@ -32,7 +32,7 @@ internal sealed class SimulationSaveLoadPlan(
 
 internal static class SimulationSaveMigrationManager
 {
-    public const int CurrentVersion = 42;
+    public const int CurrentVersion = 45;
 
     private static readonly ISimulationSaveMigration[] Migrations =
     [
@@ -48,6 +48,9 @@ internal static class SimulationSaveMigrationManager
         new SimulationSaveMigration39To40(),
         new SimulationSaveMigration40To41(),
         new SimulationSaveMigration41To42(),
+        new SimulationSaveMigration42To43(),
+        new SimulationSaveMigration43To44(),
+        new SimulationSaveMigration44To45(),
     ];
 
     public static SimulationSaveLoadPlan Prepare(
@@ -81,6 +84,67 @@ internal static class SimulationSaveMigrationManager
         }
 
         return new SimulationSaveLoadPlan(save, applied);
+    }
+}
+
+internal sealed class SimulationSaveMigration44To45 : ISimulationSaveMigration
+{
+    public int SourceVersion => 44;
+
+    public int TargetVersion => 45;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+        var generatedHuts = GeneratedSettlementStructureGenerator.Generate(world.Baseline)
+            .Where(worldObject =>
+                worldObject.Kind == WorldObjectKind.GoblinHut &&
+                worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .Select(worldObject => worldObject.Anchor)
+            .ToHashSet();
+        var constructedHutCount = world.EnumerateWorldObjects().Count(worldObject =>
+            worldObject.Kind == WorldObjectKind.GoblinHut &&
+            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            !generatedHuts.Contains(worldObject.Anchor));
+        save.PopulationTarget = Math.Min(
+            1_000,
+            checked(save.PopulationTarget +
+                (constructedHutCount * SimulationDefinitions.GoblinHutCapacity)));
+    }
+}
+
+internal sealed class SimulationSaveMigration43To44 : ISimulationSaveMigration
+{
+    public int SourceVersion => 43;
+
+    public int TargetVersion => 44;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration42To43 : ISimulationSaveMigration
+{
+    public int SourceVersion => 42;
+
+    public int TargetVersion => 43;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        save.RaidTargetRadius = 0;
+        save.RaidDirectives = SimulationEngine.DefaultRaidDirectives;
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
     }
 }
 

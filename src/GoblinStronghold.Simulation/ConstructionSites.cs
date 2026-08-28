@@ -140,8 +140,15 @@ internal sealed class ConstructionSiteState(
             Anchor with { Y = Anchor.Y + 1 },
             Anchor with { X = Anchor.X + 1, Y = Anchor.Y + 1 },
         ],
+        ConstructionKind.GoblinHut => CreateSquareFootprint(Anchor, 3),
         _ => [Anchor],
     };
+
+    private static IReadOnlyList<GridPosition> CreateSquareFootprint(GridPosition anchor, int size) =>
+        Enumerable.Range(0, size)
+            .SelectMany(y => Enumerable.Range(0, size)
+                .Select(x => new GridPosition(anchor.X + x, anchor.Y + y, anchor.Z)))
+            .ToArray();
 
     public ConstructionSiteSnapshot ToSnapshot() => new(
         Id,
@@ -178,6 +185,7 @@ internal static class ConstructionBlueprintCatalog
                 ConstructionKind.StoneStorage => 2,
             ConstructionKind.WoodenWalkway => segmentCount,
             ConstructionKind.GoblinFieldCamp => 6,
+            ConstructionKind.GoblinHut => 8,
             ConstructionKind.WoodenWall => checked(segmentCount * 2),
             ConstructionKind.StoneWall => checked(segmentCount * 2),
             ConstructionKind.WoodenDoorFrame => 1,
@@ -193,6 +201,7 @@ internal static class ConstructionBlueprintCatalog
                 ConstructionKind.StoneStorage => 40,
             ConstructionKind.WoodenWalkway => checked(segmentCount * 25),
             ConstructionKind.GoblinFieldCamp => 120,
+            ConstructionKind.GoblinHut => 180,
             ConstructionKind.WoodenWall => checked(segmentCount * 45),
             ConstructionKind.StoneWall => checked(segmentCount * 60),
             ConstructionKind.WoodenDoorFrame => 30,

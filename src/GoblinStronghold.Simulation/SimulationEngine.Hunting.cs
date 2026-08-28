@@ -39,9 +39,19 @@ public sealed partial class SimulationEngine
 
     private void UpdateHuntAnimalJob(ActorState actor)
     {
-        if (!_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
-            designation.Kind != WorkDesignationKind.HuntAnimal || designation.IsSuspended ||
-            !_animals.TryGetValue(designation.TargetEntityId.Value, out var animal))
+        var isTacticalHunt = actor.SourceStackId == EntityId.None &&
+            actor.TacticalOrderKind == ActorTacticalOrderKind.HuntArea;
+        var hasDesignation = _workDesignations.TryGetValue(
+            actor.SourceStackId, out var designation);
+        var animalId = isTacticalHunt
+            ? actor.TacticalTargetEntityId
+            : hasDesignation
+                ? designation.TargetEntityId
+                : EntityId.None;
+        if ((!isTacticalHunt &&
+             (!hasDesignation || designation.Kind != WorkDesignationKind.HuntAnimal ||
+              designation.IsSuspended)) ||
+            !_animals.TryGetValue(animalId.Value, out var animal))
         {
             actor.ClearJob();
             return;
@@ -140,10 +150,17 @@ public sealed partial class SimulationEngine
             animal.Position,
             ResourceKind.Bone,
             animal.Kind == AnimalKind.MarshHare ? 1 : 4);
-        _workDesignations.Remove(designation.Id);
+        if (hasDesignation)
+        {
+            _workDesignations.Remove(designation.Id);
+        }
+        actor.TacticalTargetEntityId = EntityId.None;
         GainForagingExperience(actor, animal.Kind == AnimalKind.MarshHare ? 12 : 30);
         Publish(SimulationEventKind.AnimalHunted, actor.Id, EntityId.None, meat);
-        Publish(SimulationEventKind.WorkDesignationRemoved, EntityId.None, designation.Id, 0);
+        if (hasDesignation)
+        {
+            Publish(SimulationEventKind.WorkDesignationRemoved, EntityId.None, designation.Id, 0);
+        }
         actor.ClearJob();
     }
 
@@ -200,11 +217,16 @@ public sealed partial class SimulationEngine
 
     private void ValidateLoadedHuntAnimalJob(ActorState actor)
     {
+        var validTacticalHunt = actor.SourceStackId == EntityId.None &&
+            actor.TacticalOrderKind == ActorTacticalOrderKind.HuntArea &&
+            _animals.ContainsKey(actor.TacticalTargetEntityId.Value);
+        var validPublicHunt = _workDesignations.TryGetValue(
+                actor.SourceStackId, out var designation) &&
+            designation.Kind == WorkDesignationKind.HuntAnimal &&
+            _animals.ContainsKey(designation.TargetEntityId.Value);
         if (actor.JobStage != ActorJobStage.None || actor.CarriedStackId != EntityId.None ||
             actor.DestinationZoneId != EntityId.None || actor.ReservedQuantity != 0 ||
-            !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
-            designation.Kind != WorkDesignationKind.HuntAnimal ||
-            !_animals.ContainsKey(designation.TargetEntityId.Value))
+            (!validTacticalHunt && !validPublicHunt))
         {
             throw new InvalidDataException("The save contains an invalid animal-hunting job.");
         }

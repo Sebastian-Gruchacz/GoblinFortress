@@ -11,6 +11,15 @@ namespace GoblinStronghold.Simulation;
 public sealed partial class SimulationEngine
 {
     private const int SaveFormatVersion = SimulationSaveMigrationManager.CurrentVersion;
+    public const int MinimumRaidTargetRadius = 3;
+    public const int MaximumRaidTargetRadius = 10;
+    public const int DefaultRaidTargetRadius = 6;
+    public const RaidDirective DefaultRaidDirectives =
+        RaidDirective.AttackGuards |
+        RaidDirective.LootEquipment |
+        RaidDirective.LootSupplies |
+        RaidDirective.LootFood |
+        RaidDirective.AutoLaunchWhenReady;
 
     private static readonly JsonSerializerOptions SaveOptions = new()
     {
@@ -36,6 +45,9 @@ public sealed partial class SimulationEngine
     private GoblinRaidPhase _raidPhase;
     private GridPosition _raidRallyPoint;
     private readonly SortedSet<EntityId> _raidPartyIds = [];
+    private GridPosition _raidTarget;
+    private int _raidTargetRadius = DefaultRaidTargetRadius;
+    private RaidDirective _raidDirectives = DefaultRaidDirectives;
     private int _populationTarget;
     private ulong _nextAnimalId = 1;
     private ulong _nextEntityId = 1;
@@ -62,6 +74,7 @@ public sealed partial class SimulationEngine
         Navigation = new NavigationPathService(World);
         Visibility = WorldVisibilityState.Create(map);
         _humanVillage = HumanVillageState.CreateInitial(World, definitions);
+        _raidTarget = map.HumanVillage;
         foreach (var resource in Enum.GetValues<ResourceKind>().Where(IsStorableResource))
         {
             _resourcePriorities.Add(resource, StoragePriority.Normal);
@@ -280,6 +293,15 @@ public sealed partial class SimulationEngine
             _nextAnimalId = save.NextAnimalId == 0 ? 1 : save.NextAnimalId,
             _raidPhase = save.RaidPhase,
             _raidRallyPoint = new GridPosition(save.RaidRallyX, save.RaidRallyY, save.RaidRallyZ),
+            _raidTarget = save.RaidTargetRadius == 0
+                ? map.HumanVillage
+                : new GridPosition(save.RaidTargetX, save.RaidTargetY, save.RaidTargetZ),
+            _raidTargetRadius = save.RaidTargetRadius == 0
+                ? DefaultRaidTargetRadius
+                : save.RaidTargetRadius,
+            _raidDirectives = save.RaidDirectives == RaidDirective.None
+                ? DefaultRaidDirectives
+                : save.RaidDirectives,
         };
         foreach (var actorId in save.RaidPartyIds)
         {
@@ -438,7 +460,15 @@ public sealed partial class SimulationEngine
                     actor,
                     futurePublicWork.TryGetValue(actor.Id, out var futureWork)
                         ? futureWork
-                        : null)))
+                        : null))
+            {
+                TacticalOrder = new ActorTacticalOrderSnapshot(
+                    actor.TacticalOrderKind,
+                    actor.TacticalCenter,
+                    actor.TacticalRadius,
+                    actor.PatrolPoints.ToArray(),
+                    actor.PatrolPointIndex),
+            })
             .ToArray();
         var itemStacks = _itemStacks.Values
             .Select(stack => new ItemStackSnapshot(
@@ -511,6 +541,9 @@ public sealed partial class SimulationEngine
             _raidPhase,
             _raidRallyPoint,
             _raidPartyIds.ToArray(),
+            _raidTarget,
+            _raidTargetRadius,
+            _raidDirectives,
             visibility,
             Map.CellCount,
             Map.MaterializedNegativeLevelCount,
@@ -858,6 +891,11 @@ public sealed partial class SimulationEngine
             RaidRallyY = _raidRallyPoint.Y,
             RaidRallyZ = _raidRallyPoint.Z,
             RaidPartyIds = _raidPartyIds.Select(id => id.Value).ToList(),
+            RaidTargetX = _raidTarget.X,
+            RaidTargetY = _raidTarget.Y,
+            RaidTargetZ = _raidTarget.Z,
+            RaidTargetRadius = _raidTargetRadius,
+            RaidDirectives = _raidDirectives,
             PlantPatches = World.CreatePlantSnapshot().Select(patch => new PlantPatchSaveModel
             {
                 X = patch.Position.X,
@@ -1012,6 +1050,9 @@ public sealed partial class SimulationEngine
         Append(canonical, World.Version);
         Append(canonical, (int)_raidPhase);
         Append(canonical, _raidRallyPoint);
+        Append(canonical, _raidTarget);
+        Append(canonical, _raidTargetRadius);
+        Append(canonical, (int)_raidDirectives);
         Append(canonical, _raidPartyIds.Count);
         foreach (var actorId in _raidPartyIds)
         {
@@ -1202,6 +1243,16 @@ public sealed partial class SimulationEngine
             }
             Append(canonical, (int)actor.SuspendedJobKind);
             Append(canonical, actor.SuspendedJobTarget);
+            Append(canonical, (int)actor.TacticalOrderKind);
+            Append(canonical, actor.TacticalCenter);
+            Append(canonical, actor.TacticalRadius);
+            Append(canonical, actor.PatrolPointIndex);
+            Append(canonical, actor.TacticalTargetEntityId.Value);
+            Append(canonical, actor.PatrolPoints.Count);
+            foreach (var point in actor.PatrolPoints)
+            {
+                Append(canonical, point);
+            }
         }
 
         Append(canonical, _itemStacks.Count);
@@ -1355,6 +1406,31 @@ public sealed partial class SimulationEngine
             var personalFoodKinds = actorModel.PersonalFoodKinds is null
                 ? Enumerable.Repeat(actorModel.PersonalFoodKind, actorModel.PersonalFood).ToArray()
                 : actorModel.PersonalFoodKinds.ToArray();
+            var tacticalCenter = new GridPosition(
+                actorModel.TacticalCenterX,
+                actorModel.TacticalCenterY,
+                actorModel.TacticalCenterZ);
+            var hasValidTacticalOrder = actorModel.TacticalOrderKind switch
+            {
+                ActorTacticalOrderKind.None => actorModel.TacticalRadius == 0 &&
+                    tacticalCenter == default && actorModel.PatrolPoints.Count == 0 &&
+                    actorModel.TacticalTargetEntityId == 0,
+                ActorTacticalOrderKind.Patrol => actorModel.TacticalRadius == 0 &&
+                    tacticalCenter == default && actorModel.PatrolPoints.Count >= 2 &&
+                    actorModel.TacticalTargetEntityId == 0,
+                ActorTacticalOrderKind.AttackArea =>
+                    actorModel.TacticalRadius is >= MinimumRaidTargetRadius and
+                        <= MaximumRaidTargetRadius &&
+                    IsAddressableMapPosition(tacticalCenter) &&
+                    actorModel.PatrolPoints.Count == 0 &&
+                    actorModel.TacticalTargetEntityId == 0,
+                ActorTacticalOrderKind.HuntArea =>
+                    actorModel.TacticalRadius is >= MinimumRaidTargetRadius and
+                        <= MaximumRaidTargetRadius &&
+                    IsAddressableMapPosition(tacticalCenter) &&
+                    actorModel.PatrolPoints.Count == 0,
+                _ => false,
+            };
             if (id == EntityId.None ||
                 string.IsNullOrWhiteSpace(actorModel.Name) ||
                 !HasOnlyKnownFlags(actorModel.KnownSkills, GoblinSkill.Building) ||
@@ -1388,6 +1464,11 @@ public sealed partial class SimulationEngine
                   actorModel.BirthTick > CurrentTick.Value ||
                   actorModel.AgeOffsetTicks is > 0)) ||
                 !Enum.IsDefined(actorModel.SuspendedJobKind) ||
+                !hasValidTacticalOrder ||
+                actorModel.PatrolPointIndex < 0 ||
+                actorModel.PatrolPointIndex >= Math.Max(1, actorModel.PatrolPoints.Count) ||
+                actorModel.PatrolPoints.Any(point => !World.IsTerrainReachable(
+                    new GridPosition(point.X, point.Y, point.Z))) ||
                 (actorModel.SuspendedJobKind == ActorJobKind.None &&
                  (actorModel.SuspendedTargetX != 0 || actorModel.SuspendedTargetY != 0 ||
                   actorModel.SuspendedTargetZ != 0)) ||
@@ -1439,11 +1520,21 @@ public sealed partial class SimulationEngine
                     actorModel.SuspendedTargetX,
                     actorModel.SuspendedTargetY,
                     actorModel.SuspendedTargetZ),
+                TacticalOrderKind = actorModel.TacticalOrderKind,
+                TacticalCenter = new GridPosition(
+                    actorModel.TacticalCenterX,
+                    actorModel.TacticalCenterY,
+                    actorModel.TacticalCenterZ),
+                TacticalRadius = actorModel.TacticalRadius,
+                PatrolPointIndex = actorModel.PatrolPointIndex,
+                TacticalTargetEntityId = new EntityId(actorModel.TacticalTargetEntityId),
             };
             actor.PersonalFoodKinds.AddRange(personalFoodKinds);
 
             actor.RemainingRoute.AddRange(actorModel.RemainingRoute.Select(routePosition =>
                 new GridPosition(routePosition.X, routePosition.Y, routePosition.Z)));
+            actor.PatrolPoints.AddRange(actorModel.PatrolPoints.Select(point =>
+                new GridPosition(point.X, point.Y, point.Z)));
             RestoreNavigationBeliefs(actor.NavigationKnowledge, actorModel.NavigationBeliefs);
             RestorePendingNavigationReports(actor, actorModel.PendingNavigationReports);
             ValidateLoadedJob(actor);
@@ -2051,9 +2142,10 @@ public sealed partial class SimulationEngine
         var observers = _actors.Values
             .Select(actor => (actor.Position, goblinRadius))
             .ToList();
+        var verticalPassages = World.CreateVerticalPassageSnapshot();
         foreach (var actor in _actors.Values)
         {
-            foreach (var passage in World.CreateVerticalPassageSnapshot())
+            foreach (var passage in verticalPassages)
             {
                 if (passage.Upper == actor.Position)
                 {
@@ -2141,8 +2233,17 @@ public sealed partial class SimulationEngine
             TryExecuteConfigureConstructionPriority(command),
         SimulationCommandKind.ConfigureStorageMineralFilter =>
             TryExecuteConfigureStorageMineralFilter(command),
-        SimulationCommandKind.AttackHumanVillage => TryExecuteAttackHumanVillage(),
+        SimulationCommandKind.AttackHumanVillage => TryExecuteAttackHumanVillage(command),
         SimulationCommandKind.ConfigureRaidMember => TryExecuteConfigureRaidMember(command),
+        SimulationCommandKind.SuspendRaidPreparation => TryExecuteSuspendRaidPreparation(),
+        SimulationCommandKind.LaunchRaid => TryExecuteLaunchRaid(),
+        SimulationCommandKind.ConfigureRaidTarget => TryExecuteConfigureRaidTarget(command),
+        SimulationCommandKind.ConfigureRaidDirectives => TryExecuteConfigureRaidDirectives(command),
+        SimulationCommandKind.OrderPatrol => TryExecuteOrderPatrol(command),
+        SimulationCommandKind.OrderAttackArea => TryExecuteAreaOrder(
+            command, ActorTacticalOrderKind.AttackArea),
+        SimulationCommandKind.OrderHuntArea => TryExecuteAreaOrder(
+            command, ActorTacticalOrderKind.HuntArea),
         SimulationCommandKind.ToggleWoodenDoor => TryExecuteToggleWoodenDoor(command),
         SimulationCommandKind.ConfigurePopulationTarget =>
             TryExecuteConfigurePopulationTarget(command),
@@ -2200,9 +2301,10 @@ public sealed partial class SimulationEngine
             stack.Location.Position == position) &&
         !_storageZones.Values.Any(zone => zone.Position == position);
 
-    private bool TryExecuteAttackHumanVillage()
+    private bool TryExecuteAttackHumanVillage(SimulationCommand command)
     {
-        if (_humanVillage.GoblinAttackOrdered || _raidPhase != GoblinRaidPhase.None)
+        if (_humanVillage.GoblinAttackOrdered ||
+            _raidPhase is not (GoblinRaidPhase.None or GoblinRaidPhase.Suspended))
         {
             return false;
         }
@@ -2229,11 +2331,12 @@ public sealed partial class SimulationEngine
                 item.Kind == WorldObjectKind.GoblinFieldCamp &&
                 item.Owner == WorldObjectOwner.GoblinTribe)
             .Select(item => item.Anchor)
+            .Where(position => command.Position == default || position == command.Position)
             .Where(World.IsTerrainTraversable)
             .Select(position => new
             {
                 Position = position,
-                Route = FindTribePath(position, Map.HumanVillage),
+                Route = FindTribePath(position, _raidTarget),
             })
             .Where(item => item.Route is not null)
             .OrderBy(item => item.Route!.Count)
@@ -2259,9 +2362,90 @@ public sealed partial class SimulationEngine
         return true;
     }
 
+    private bool TryExecuteSuspendRaidPreparation()
+    {
+        if (_raidPhase is not (GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready))
+        {
+            return false;
+        }
+
+        _raidPhase = GoblinRaidPhase.Suspended;
+        foreach (var actor in GetRaidParty())
+        {
+            if (actor.CarriedStackId == EntityId.None)
+            {
+                actor.ClearJob();
+            }
+        }
+        return true;
+    }
+
+    private bool TryExecuteLaunchRaid()
+    {
+        if (_raidPhase != GoblinRaidPhase.Ready)
+        {
+            return false;
+        }
+
+        var raidParty = GetRaidParty();
+        if (raidParty.Count == 0)
+        {
+            return false;
+        }
+
+        var routes = raidParty
+            .Select(actor => (Actor: actor, Route: FindActorPath(actor, _raidTarget)))
+            .ToArray();
+        if (routes.Any(item => item.Route is not { Count: > 0 }))
+        {
+            return false;
+        }
+
+        _raidPhase = GoblinRaidPhase.Marching;
+        _humanVillage.OrderGoblinAttack();
+        foreach (var (actor, route) in routes)
+        {
+            actor.ClearJob();
+            actor.JobKind = ActorJobKind.Move;
+            actor.JobPhase = ActorJobPhase.Traveling;
+            actor.JobTarget = _raidTarget;
+            actor.RemainingRoute.AddRange(route!);
+            Publish(SimulationEventKind.MoveOrdered, actor.Id, EntityId.None, route!.Count);
+        }
+        Publish(SimulationEventKind.RaidDeparted, EntityId.None, EntityId.None, raidParty.Count);
+        return true;
+    }
+
+    private bool TryExecuteConfigureRaidTarget(SimulationCommand command)
+    {
+        if (_raidPhase is not (GoblinRaidPhase.None or GoblinRaidPhase.Suspended) ||
+            !IsAddressableMapPosition(command.Position) ||
+            command.Amount is < MinimumRaidTargetRadius or > MaximumRaidTargetRadius)
+        {
+            return false;
+        }
+
+        _raidTarget = command.Position;
+        _raidTargetRadius = command.Amount;
+        return true;
+    }
+
+    private bool TryExecuteConfigureRaidDirectives(SimulationCommand command)
+    {
+        var directives = (RaidDirective)command.Amount;
+        if (_raidPhase is not (GoblinRaidPhase.None or GoblinRaidPhase.Suspended) ||
+            !AreValidRaidDirectives(directives))
+        {
+            return false;
+        }
+
+        _raidDirectives = directives;
+        return true;
+    }
+
     private bool TryExecuteConfigureRaidMember(SimulationCommand command)
     {
-        if (_raidPhase != GoblinRaidPhase.None ||
+        if (_raidPhase is not (GoblinRaidPhase.None or GoblinRaidPhase.Suspended) ||
             !_actors.TryGetValue(command.Subject, out var actor) ||
             actor.Health <= 0 ||
             IsJuvenile(actor))
@@ -2290,6 +2474,9 @@ public sealed partial class SimulationEngine
     private void ValidateLoadedRaidState()
     {
         if (!Enum.IsDefined(_raidPhase) ||
+            !IsAddressableMapPosition(_raidTarget) ||
+            _raidTargetRadius is < MinimumRaidTargetRadius or > MaximumRaidTargetRadius ||
+            !AreValidRaidDirectives(_raidDirectives) ||
             (_raidPhase == GoblinRaidPhase.None &&
              (_raidRallyPoint != default || _humanVillage.GoblinAttackOrdered)) ||
             (_raidPhase != GoblinRaidPhase.None &&
@@ -2298,10 +2485,29 @@ public sealed partial class SimulationEngine
                   item.Kind == WorldObjectKind.GoblinFieldCamp &&
                   item.Owner == WorldObjectOwner.GoblinTribe))) ||
             (_raidPhase == GoblinRaidPhase.Marching && !_humanVillage.GoblinAttackOrdered) ||
-            (_raidPhase == GoblinRaidPhase.Preparing && _humanVillage.GoblinAttackOrdered))
+            (_raidPhase != GoblinRaidPhase.Marching && _humanVillage.GoblinAttackOrdered))
         {
             throw new InvalidDataException("The save contains invalid goblin raid state.");
         }
+    }
+
+    private static bool AreValidRaidDirectives(RaidDirective directives)
+    {
+        const RaidDirective all = RaidDirective.AttackGuards |
+            RaidDirective.AttackNonFleeing |
+            RaidDirective.LootEquipment |
+            RaidDirective.LootSupplies |
+            RaidDirective.LootFood |
+            RaidDirective.ConsumeCorpses |
+            RaidDirective.BudCorpses |
+            RaidDirective.BurnBuildings |
+            RaidDirective.DemolishBuildings |
+            RaidDirective.ContinueWhileTargetsVisible |
+            RaidDirective.AutoLaunchWhenReady;
+        var engagement = directives &
+            (RaidDirective.AttackGuards | RaidDirective.AttackNonFleeing);
+        return (directives & ~all) == 0 &&
+            engagement is RaidDirective.AttackGuards or RaidDirective.AttackNonFleeing;
     }
 
     private void RestoreLegacyRaidPartyIfNeeded()
@@ -2860,6 +3066,10 @@ public sealed partial class SimulationEngine
             anchor with { Y = anchor.Y + 1 },
             anchor with { X = anchor.X + 1, Y = anchor.Y + 1 },
         ],
+        ConstructionKind.GoblinHut => Enumerable.Range(0, 3)
+            .SelectMany(y => Enumerable.Range(0, 3)
+                .Select(x => new GridPosition(anchor.X + x, anchor.Y + y, anchor.Z)))
+            .ToArray(),
         _ => [anchor],
     };
 
@@ -2883,6 +3093,7 @@ public sealed partial class SimulationEngine
                     : World.IsTerrainTraversable(anchor),
             ConstructionKind.WoodenWalkway => World.CanBuildWalkway(footprint),
             ConstructionKind.GoblinFieldCamp => World.CanBuildGoblinFieldCamp(anchor),
+            ConstructionKind.GoblinHut => World.CanBuildGoblinHut(anchor),
             ConstructionKind.WoodenWall => World.CanBuildWoodenWalls(footprint),
             ConstructionKind.StoneWall => World.CanBuildStoneWalls(footprint),
             ConstructionKind.WoodenDoorFrame => World.CanBuildWoodenDoorFrame(anchor),
@@ -2918,7 +3129,7 @@ public sealed partial class SimulationEngine
         }
 
         if (site.Kind is ConstructionKind.WoodenWall or ConstructionKind.StoneWall or
-                ConstructionKind.PrimitiveWorkshop &&
+                ConstructionKind.PrimitiveWorkshop or ConstructionKind.GoblinHut &&
             _actors.Values.Any(actor => site.GetFootprint().Contains(actor.Position)))
         {
             return false;
@@ -2970,6 +3181,23 @@ public sealed partial class SimulationEngine
                     campProvisionCapacity,
                     campProvisionTarget).Id;
                 experience = 25;
+                break;
+            case ConstructionKind.GoblinHut:
+                _undeliveredWorldChanges.Add(World.BuildGoblinHut(site.Anchor, CurrentTick));
+                var shelterCapacity = CreateTribeNeedsSnapshot().ShelterCapacity;
+                if (_populationTarget < shelterCapacity)
+                {
+                    _populationTarget = Math.Min(
+                        shelterCapacity,
+                        checked(_populationTarget + SimulationDefinitions.GoblinHutCapacity));
+                    Publish(
+                        SimulationEventKind.PopulationTargetConfigured,
+                        EntityId.None,
+                        EntityId.None,
+                        _populationTarget);
+                }
+                completedTarget = EntityId.None;
+                experience = 35;
                 break;
             case ConstructionKind.WoodenWall:
                 var wallCells = site.GetFootprint();
@@ -3045,6 +3273,8 @@ public sealed partial class SimulationEngine
         }
 
         actor.ClearJob();
+        actor.ClearTacticalOrder();
+        actor.ClearSuspendedJob();
         Publish(SimulationEventKind.MoveOrdered, actor.Id, EntityId.None, route.Count);
         if (route.Count == 0)
         {
@@ -3056,6 +3286,59 @@ public sealed partial class SimulationEngine
         actor.JobPhase = ActorJobPhase.Traveling;
         actor.JobTarget = command.Position;
         actor.RemainingRoute.AddRange(route);
+        return true;
+    }
+
+    private bool TryExecuteOrderPatrol(SimulationCommand command)
+    {
+        if (!_actors.TryGetValue(command.Subject, out var actor) ||
+            !World.IsTerrainReachable(command.Position))
+        {
+            return false;
+        }
+
+        if (command.Amount == 0)
+        {
+            actor.ClearTacticalOrder();
+            actor.TacticalOrderKind = ActorTacticalOrderKind.Patrol;
+            actor.PatrolPoints.Add(actor.Position);
+            if (command.Position != actor.Position)
+            {
+                actor.PatrolPoints.Add(command.Position);
+            }
+            actor.PatrolPointIndex = actor.PatrolPoints.Count > 1 ? 1 : 0;
+        }
+        else if (actor.TacticalOrderKind == ActorTacticalOrderKind.Patrol &&
+                 actor.PatrolPoints.Count < 16 && actor.PatrolPoints[^1] != command.Position)
+        {
+            actor.PatrolPoints.Add(command.Position);
+        }
+        else
+        {
+            return false;
+        }
+
+        actor.ClearJob();
+        actor.ClearSuspendedJob();
+        return true;
+    }
+
+    private bool TryExecuteAreaOrder(
+        SimulationCommand command,
+        ActorTacticalOrderKind kind)
+    {
+        if (!_actors.TryGetValue(command.Subject, out var actor) ||
+            command.Amount is < MinimumRaidTargetRadius or > MaximumRaidTargetRadius)
+        {
+            return false;
+        }
+
+        actor.ClearTacticalOrder();
+        actor.TacticalOrderKind = kind;
+        actor.TacticalCenter = command.Position;
+        actor.TacticalRadius = command.Amount;
+        actor.ClearJob();
+        actor.ClearSuspendedJob();
         return true;
     }
 
@@ -3545,6 +3828,18 @@ public sealed partial class SimulationEngine
                     throw new ArgumentException("Field-camp construction is invalid.", nameof(command));
                 }
 
+                if (command.Construction == ConstructionKind.GoblinHut &&
+                    (command.Amount != 8 ||
+                     command.EndPosition.Z != command.Position.Z ||
+                     command.EndPosition != command.Position with
+                     {
+                         X = command.Position.X + 2,
+                         Y = command.Position.Y + 2,
+                     }))
+                {
+                    throw new ArgumentException("Goblin-hut construction is invalid.", nameof(command));
+                }
+
                 if (command.Construction == ConstructionKind.WoodenWall &&
                     (command.Position.Z != command.EndPosition.Z ||
                      command.Amount != 2))
@@ -3733,7 +4028,14 @@ public sealed partial class SimulationEngine
                 break;
             case SimulationCommandKind.AttackHumanVillage:
                 if (command.Subject != EntityId.None || command.Target != EntityId.None ||
-                    command.Amount != 0)
+                    command.Position != command.EndPosition ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount != 0 ||
+                    (command.Position != default &&
+                     !World.CreateWorldObjectSnapshot().Any(item =>
+                         item.Kind == WorldObjectKind.GoblinFieldCamp &&
+                         item.Owner == WorldObjectOwner.GoblinTribe &&
+                         item.Anchor == command.Position)))
                 {
                     throw new ArgumentException("Human-village attack command is invalid.", nameof(command));
                 }
@@ -3745,6 +4047,58 @@ public sealed partial class SimulationEngine
                     command.Resource != ResourceKind.Any || command.Amount is not (0 or 1))
                 {
                     throw new ArgumentException("Raid-member command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.SuspendRaidPreparation:
+            case SimulationCommandKind.LaunchRaid:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount != 0)
+                {
+                    throw new ArgumentException("Raid-control command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.ConfigureRaidTarget:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    command.Position != command.EndPosition ||
+                    !IsAddressableMapPosition(command.Position) ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount is < MinimumRaidTargetRadius or > MaximumRaidTargetRadius)
+                {
+                    throw new ArgumentException("Raid-target command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.ConfigureRaidDirectives:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    !AreValidRaidDirectives((RaidDirective)command.Amount))
+                {
+                    throw new ArgumentException("Raid-directive command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.OrderPatrol:
+                ValidateActor(command.Subject, command);
+                if (command.Target != EntityId.None ||
+                    command.Position != command.EndPosition ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount is not (0 or 1) ||
+                    !World.IsTerrainReachable(command.Position))
+                {
+                    throw new ArgumentException("Patrol command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.OrderAttackArea:
+            case SimulationCommandKind.OrderHuntArea:
+                ValidateActor(command.Subject, command);
+                if (command.Target != EntityId.None ||
+                    command.Position != command.EndPosition ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount is < MinimumRaidTargetRadius or > MaximumRaidTargetRadius ||
+                    !IsAddressableMapPosition(command.Position))
+                {
+                    throw new ArgumentException("Tactical-area command is invalid.", nameof(command));
                 }
                 break;
             case SimulationCommandKind.ToggleWoodenDoor:
@@ -4699,6 +5053,19 @@ public sealed partial class SimulationEngine
         SuspendedTargetX = actor.SuspendedJobTarget.X,
         SuspendedTargetY = actor.SuspendedJobTarget.Y,
         SuspendedTargetZ = actor.SuspendedJobTarget.Z,
+        TacticalOrderKind = actor.TacticalOrderKind,
+        TacticalCenterX = actor.TacticalCenter.X,
+        TacticalCenterY = actor.TacticalCenter.Y,
+        TacticalCenterZ = actor.TacticalCenter.Z,
+        TacticalRadius = actor.TacticalRadius,
+        PatrolPointIndex = actor.PatrolPointIndex,
+        TacticalTargetEntityId = actor.TacticalTargetEntityId.Value,
+        PatrolPoints = actor.PatrolPoints.Select(point => new GridPositionSaveModel
+        {
+            X = point.X,
+            Y = point.Y,
+            Z = point.Z,
+        }).ToList(),
         RemainingRoute = actor.RemainingRoute.Select(position => new GridPositionSaveModel
         {
             X = position.X,
@@ -4935,6 +5302,18 @@ public sealed partial class SimulationEngine
 
         public GridPosition SuspendedJobTarget { get; set; }
 
+        public ActorTacticalOrderKind TacticalOrderKind { get; set; }
+
+        public GridPosition TacticalCenter { get; set; }
+
+        public int TacticalRadius { get; set; }
+
+        public List<GridPosition> PatrolPoints { get; } = [];
+
+        public int PatrolPointIndex { get; set; }
+
+        public EntityId TacticalTargetEntityId { get; set; }
+
         public void SuspendCurrentJob()
         {
             if (JobKind is ActorJobKind.Move or ActorJobKind.Explore or ActorJobKind.Forage or
@@ -4966,6 +5345,16 @@ public sealed partial class SimulationEngine
             DestinationZoneId = EntityId.None;
             ReservedQuantity = 0;
             RemainingRoute.Clear();
+        }
+
+        public void ClearTacticalOrder()
+        {
+            TacticalOrderKind = ActorTacticalOrderKind.None;
+            TacticalCenter = default;
+            TacticalRadius = 0;
+            PatrolPoints.Clear();
+            PatrolPointIndex = 0;
+            TacticalTargetEntityId = EntityId.None;
         }
     }
 

@@ -28,6 +28,13 @@ public enum SimulationCommandKind
     ConfigureWorkSuspension = 21,
     ConfigurePopulationTarget = 22,
     QueueCraftingOrder = 23,
+    SuspendRaidPreparation = 24,
+    LaunchRaid = 25,
+    ConfigureRaidTarget = 26,
+    ConfigureRaidDirectives = 27,
+    OrderPatrol = 28,
+    OrderAttackArea = 29,
+    OrderHuntArea = 30,
 }
 
 public enum ConstructionKind : byte
@@ -44,6 +51,7 @@ public enum ConstructionKind : byte
     StoneDoorFrame = 10,
     WallTorch = 11,
     PrimitiveWorkshop = 12,
+    GoblinHut = 13,
 }
 
 public enum CraftingRecipeKind : byte
@@ -264,6 +272,22 @@ public readonly record struct SimulationCommand(
             ConstructionKind.GoblinFieldCamp,
             ResourceKind.Wood,
             Amount: 6);
+
+    public static SimulationCommand BuildGoblinHut(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position with { X = position.X + 2, Y = position.Y + 2 },
+            ConstructionKind.GoblinHut,
+            ResourceKind.Wood,
+            Amount: 8);
 
     public static SimulationCommand BuildWoodenWall(
         SimulationTick executeAt,
@@ -794,11 +818,31 @@ public readonly record struct SimulationCommand(
 
     public static SimulationCommand AttackHumanVillage(
         SimulationTick executeAt,
-        ulong sequence) =>
+        ulong sequence) => AttackHumanVillage(executeAt, sequence, default);
+
+    public static SimulationCommand AttackHumanVillage(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition rallyPoint) =>
         new(
             executeAt,
             sequence,
             SimulationCommandKind.AttackHumanVillage,
+            EntityId.None,
+            EntityId.None,
+            rallyPoint,
+            rallyPoint,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand SuspendRaidPreparation(
+        SimulationTick executeAt,
+        ulong sequence) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.SuspendRaidPreparation,
             EntityId.None,
             EntityId.None,
             default,
@@ -806,6 +850,54 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: 0);
+
+    public static SimulationCommand LaunchRaid(
+        SimulationTick executeAt,
+        ulong sequence) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.LaunchRaid,
+            EntityId.None,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ConfigureRaidTarget(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition target,
+        int radius) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureRaidTarget,
+            EntityId.None,
+            EntityId.None,
+            target,
+            target,
+            default,
+            ResourceKind.Any,
+            Amount: radius);
+
+    public static SimulationCommand ConfigureRaidDirectives(
+        SimulationTick executeAt,
+        ulong sequence,
+        RaidDirective directives) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureRaidDirectives,
+            EntityId.None,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: (int)directives);
 
     public static SimulationCommand ConfigureRaidMember(
         SimulationTick executeAt,
@@ -839,6 +931,60 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: populationTarget);
+
+    public static SimulationCommand OrderPatrol(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor,
+        GridPosition point,
+        bool append) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.OrderPatrol,
+            actor,
+            EntityId.None,
+            point,
+            point,
+            default,
+            ResourceKind.Any,
+            Amount: append ? 1 : 0);
+
+    public static SimulationCommand OrderAttackArea(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor,
+        GridPosition center,
+        int radius) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.OrderAttackArea,
+            actor,
+            EntityId.None,
+            center,
+            center,
+            default,
+            ResourceKind.Any,
+            Amount: radius);
+
+    public static SimulationCommand OrderHuntArea(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor,
+        GridPosition center,
+        int radius) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.OrderHuntArea,
+            actor,
+            EntityId.None,
+            center,
+            center,
+            default,
+            ResourceKind.Any,
+            Amount: radius);
 }
 
 internal readonly record struct CommandKey(SimulationTick Tick, ulong Sequence) : IComparable<CommandKey>

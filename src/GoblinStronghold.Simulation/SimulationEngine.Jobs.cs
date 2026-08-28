@@ -121,6 +121,10 @@ public sealed partial class SimulationEngine
                 {
                     // Young goblins eat, drink, sleep and observe for one local season.
                 }
+                else if (TryPlanTacticalOrder(actor))
+                {
+                    // A persistent personal order resumes after food, water and rest interruptions.
+                }
                 else if (!shouldPlanBackgroundWork)
                 {
                     // Expensive public planning is staggered between actors instead of repeated every tick.
@@ -262,7 +266,7 @@ public sealed partial class SimulationEngine
         _lastActorJobStageStopwatchTicks[4] = activeJobTicks;
         stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         FinalizeMatureGoblinBuds();
-        TryLaunchPreparedRaid();
+        TryMarkRaidReady();
         if (CurrentTick.Value % Definitions.ActorPlanning.BackgroundPlanningIntervalTicks == 0)
         {
             RemoveExhaustedWorkDesignations();
@@ -286,15 +290,19 @@ public sealed partial class SimulationEngine
         }
         var isAtRally = actor.Position == _raidRallyPoint;
         var isInRallyArea = Distance(actor.Position, _raidRallyPoint) <= 4;
-        var foodTarget = Definitions.PersonalFoodCapacity;
-        var waterTarget = Definitions.PersonalWaterCapacity;
+        var preparation = RaidPreparationPolicy.ResolveAutomatic(
+            _raidDirectives,
+            Definitions,
+            actor.Equipment);
+        var foodTarget = preparation.FoodTarget;
+        var waterTarget = preparation.WaterTarget;
         if (!isInRallyArea && actor.Hunger >= Definitions.FoodSeekThreshold &&
             TryPlanEatJob(actor, sourceReservations))
         {
             return true;
         }
         if (!isInRallyArea && actor.PersonalFood < foodTarget &&
-            TryPlanFoodResupply(actor, sourceReservations))
+            TryPlanFoodResupply(actor, sourceReservations, desiredQuantity: foodTarget))
         {
             return true;
         }
@@ -305,15 +313,19 @@ public sealed partial class SimulationEngine
             return true;
         }
         if (actor.PersonalFood < foodTarget &&
-            TryPlanFoodResupply(actor, sourceReservations, isInRallyArea ? _raidRallyPoint : null))
+            TryPlanFoodResupply(
+                actor,
+                sourceReservations,
+                isInRallyArea ? _raidRallyPoint : null,
+                foodTarget))
         {
             return true;
         }
-        if (actor.PersonalWater < waterTarget && TryPlanWaterResupply(actor))
+        if (actor.PersonalWater < waterTarget && TryPlanWaterResupply(actor, waterTarget))
         {
             return true;
         }
-        if (TryPlanStoneAmmoResupply(actor, sourceReservations))
+        if (TryPlanStoneAmmoResupply(actor, sourceReservations, preparation.StoneAmmoTarget))
         {
             return true;
         }
@@ -353,39 +365,34 @@ public sealed partial class SimulationEngine
         return true;
     }
 
-    private void TryLaunchPreparedRaid()
+    private void TryMarkRaidReady()
     {
         var raidParty = GetRaidParty();
         if (_raidPhase != GoblinRaidPhase.Preparing || raidParty.Count == 0 ||
             raidParty.Any(actor =>
-                actor.Position != _raidRallyPoint ||
+            {
+                var preparation = RaidPreparationPolicy.ResolveAutomatic(
+                    _raidDirectives,
+                    Definitions,
+                    actor.Equipment);
+                return actor.Position != _raidRallyPoint ||
                 actor.JobKind != ActorJobKind.None ||
                 actor.CarriedStackId != EntityId.None ||
-                actor.PersonalFood < Definitions.PersonalFoodCapacity ||
-                actor.PersonalWater < Definitions.PersonalWaterCapacity ||
+                actor.PersonalFood < preparation.FoodTarget ||
+                actor.PersonalWater < preparation.WaterTarget ||
                 actor.Hunger >= Definitions.FoodSeekThreshold ||
                 actor.Thirst >= Definitions.DrinkThreshold ||
-                actor.Fatigue >= Definitions.RestThreshold))
+                actor.Fatigue >= Definitions.RestThreshold;
+            }))
         {
             return;
         }
 
-        _raidPhase = GoblinRaidPhase.Marching;
-        _humanVillage.OrderGoblinAttack();
-        foreach (var actor in raidParty)
+        _raidPhase = GoblinRaidPhase.Ready;
+        if (_raidDirectives.HasFlag(RaidDirective.AutoLaunchWhenReady))
         {
-            var route = FindActorPath(actor, Map.HumanVillage);
-            if (route is not { Count: > 0 })
-            {
-                continue;
-            }
-            actor.JobKind = ActorJobKind.Move;
-            actor.JobPhase = ActorJobPhase.Traveling;
-            actor.JobTarget = Map.HumanVillage;
-            actor.RemainingRoute.AddRange(route);
-            Publish(SimulationEventKind.MoveOrdered, actor.Id, EntityId.None, route.Count);
+            TryExecuteLaunchRaid();
         }
-        Publish(SimulationEventKind.RaidDeparted, EntityId.None, EntityId.None, raidParty.Count);
     }
 
     private List<ActorState> GetRaidParty() => _raidPartyIds
@@ -1350,9 +1357,11 @@ public sealed partial class SimulationEngine
     private bool TryPlanFoodResupply(
         ActorState actor,
         Dictionary<EntityId, int> itemReservations,
-        GridPosition? requiredPosition = null)
+        GridPosition? requiredPosition = null,
+        int? desiredQuantity = null)
     {
-        if (actor.PersonalFood >= Definitions.PersonalFoodCapacity)
+        var target = desiredQuantity ?? Definitions.PersonalFoodCapacity;
+        if (actor.PersonalFood >= target)
         {
             return false;
         }
@@ -1388,9 +1397,10 @@ public sealed partial class SimulationEngine
         return true;
     }
 
-    private bool TryPlanWaterResupply(ActorState actor)
+    private bool TryPlanWaterResupply(ActorState actor, int? desiredQuantity = null)
     {
-        if (actor.PersonalWater >= Definitions.PersonalWaterCapacity)
+        var target = desiredQuantity ?? Definitions.PersonalWaterCapacity;
+        if (actor.PersonalWater >= target)
         {
             return false;
         }
@@ -1411,7 +1421,8 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanStoneAmmoResupply(
         ActorState actor,
-        Dictionary<EntityId, int> itemReservations)
+        Dictionary<EntityId, int> itemReservations,
+        int? desiredQuantity = null)
     {
         var isPreparingForRaid = _raidPhase == GoblinRaidPhase.Preparing &&
             _raidPartyIds.Contains(actor.Id);
@@ -1421,7 +1432,8 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var missing = GetStoneAmmoCapacity(actor.Equipment) - actor.PersonalStoneAmmo;
+        var target = desiredQuantity ?? GetStoneAmmoCapacity(actor.Equipment);
+        var missing = target - actor.PersonalStoneAmmo;
         if (missing <= 0)
         {
             return false;
@@ -3051,7 +3063,8 @@ public sealed partial class SimulationEngine
         var footprint = site.GetFootprint();
         var accessPositions = site.Kind is ConstructionKind.WoodenWall or
             ConstructionKind.StoneWall or ConstructionKind.WoodenDoor or
-            ConstructionKind.WallTorch or ConstructionKind.PrimitiveWorkshop
+            ConstructionKind.WallTorch or ConstructionKind.PrimitiveWorkshop or
+            ConstructionKind.GoblinHut
             ? footprint.SelectMany(World.GetCardinalWorldNeighbors)
             : footprint.SelectMany(position =>
                 World.GetCardinalWorldNeighbors(position).Append(position));

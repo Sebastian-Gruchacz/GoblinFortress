@@ -18,11 +18,15 @@ public static class CellVisibilityExtensions
 public sealed class WorldVisibilityState
 {
     private readonly CellVisibility[] _cells;
+    private readonly List<int> _visibleIndices;
 
     private WorldVisibilityState(GeneratedMap map, CellVisibility[] cells)
     {
         Map = map;
         _cells = cells;
+        _visibleIndices = Enumerable.Range(0, cells.Length)
+            .Where(index => cells[index] == CellVisibility.Visible)
+            .ToList();
     }
 
     public GeneratedMap Map { get; }
@@ -100,13 +104,11 @@ public sealed class WorldVisibilityState
             throw new ArgumentOutOfRangeException(nameof(observers));
         }
 
-        for (var index = 0; index < _cells.Length; index++)
+        foreach (var index in _visibleIndices)
         {
-            if (_cells[index] == CellVisibility.Visible)
-            {
-                _cells[index] = CellVisibility.Explored;
-            }
+            _cells[index] = CellVisibility.Explored;
         }
+        _visibleIndices.Clear();
 
         foreach (var (observer, radius) in observerArray)
         {
@@ -122,7 +124,12 @@ public sealed class WorldVisibilityState
                     if (distanceSquared <= radiusSquared && IsVisibilityPosition(position) &&
                         !Map.IsHillRockPosition(position))
                     {
-                        _cells[GetIndex(position)] = CellVisibility.Visible;
+                        var index = GetIndex(position);
+                        if (_cells[index] != CellVisibility.Visible)
+                        {
+                            _cells[index] = CellVisibility.Visible;
+                            _visibleIndices.Add(index);
+                        }
                     }
                 }
             }

@@ -23,7 +23,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
         var migrated = JsonNode.Parse(restored.Save())!.AsObject();
 
-        Assert.Equal(42, migrated["formatVersion"]!.GetValue<int>());
+        Assert.Equal(45, migrated["formatVersion"]!.GetValue<int>());
         Assert.Contains(migrated["resourcePriorities"]!.AsArray(), priority =>
             priority!["resource"]!.GetValue<int>() == (int)ResourceKind.Hide &&
             priority["priority"]!.GetValue<int>() == (int)StoragePriority.Normal);
@@ -56,7 +56,7 @@ public sealed class SaveMigrationTests
         Assert.NotEqual(blockedPosition, restoredActor.Position);
         Assert.True(restored.World.IsTerrainTraversable(restoredActor.Position));
         Assert.Equal(ActorJobKind.None, restoredActor.Job.Kind);
-        Assert.Equal(42, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(45, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
 
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
-        Assert.Equal(42, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(45, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class SaveMigrationTests
             animal.Kind == AnimalKind.MarshHare);
 
         Assert.Equal(restoredHare.MaximumFatigue, restoredHare.Fatigue);
-        Assert.Equal(42, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(45, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -111,16 +111,48 @@ public sealed class SaveMigrationTests
     }
 
     [Fact]
+    public void VersionFortyFourRaisesPopulationTargetForPreviouslyConstructedHut()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x4855544D494752UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 20,
+            initialWoodStock: 20);
+        var position = Enumerable.Range(0, engine.Map.Height - 2)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width - 2)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.CanBuildGoblinHut)
+            .OrderBy(cell => Math.Abs(cell.X - engine.Map.GoblinSpawn.X) +
+                Math.Abs(cell.Y - engine.Map.GoblinSpawn.Y))
+            .First();
+        engine.QueueCommand(SimulationCommand.BuildGoblinHut(
+            new SimulationTick(1), sequence: 1, position));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine, maximumTicks: 12_000);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["formatVersion"] = 44;
+        save["populationTarget"] = 1;
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Equal(10, restored.CreateSnapshot().PopulationTarget);
+        Assert.Equal(45, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
     public void SaveFromNewerFormatIsRejectedClearly()
     {
         var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
-        save["formatVersion"] = 43;
+        save["formatVersion"] = 46;
 
         var exception = Assert.Throws<InvalidDataException>(() => SimulationEngine.Load(
             save.ToJsonString(),
             SimulationDefinitions.Foundation));
 
-        Assert.Contains("newer than supported version 42", exception.Message);
+        Assert.Contains("newer than supported version 45", exception.Message);
     }
 
     private static SimulationEngine CreateEngine() => SimulationEngine.Create(

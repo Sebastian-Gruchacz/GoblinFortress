@@ -274,7 +274,10 @@ public readonly record struct ActorSnapshot(
     double SenescenceProgress,
     EntityId CarriedStackId,
     ActorJobSnapshot Job,
-    IReadOnlyList<ActorPlanEntrySnapshot> Plan);
+    IReadOnlyList<ActorPlanEntrySnapshot> Plan)
+{
+    public ActorTacticalOrderSnapshot TacticalOrder { get; init; }
+}
 
 public enum HumanCohortRole : byte
 {
@@ -404,6 +407,8 @@ public enum GoblinRaidPhase : byte
     None = 0,
     Preparing = 1,
     Marching = 2,
+    Suspended = 3,
+    Ready = 4,
 }
 
 public sealed class SimulationSnapshot
@@ -431,6 +436,9 @@ public sealed class SimulationSnapshot
         GoblinRaidPhase raidPhase,
         GridPosition raidRallyPoint,
         EntityId[] raidPartyIds,
+        GridPosition raidTarget,
+        int raidTargetRadius,
+        RaidDirective raidDirectives,
         CellVisibility[] visibility,
         int visibilityLayerCellCount,
         int visibilityNegativeLevelCount,
@@ -461,6 +469,11 @@ public sealed class SimulationSnapshot
         RaidPhase = raidPhase;
         RaidRallyPoint = raidRallyPoint;
         RaidPartyIds = new ReadOnlyCollection<EntityId>(raidPartyIds);
+        RaidPlan = new RaidPlanSnapshot(
+            raidRallyPoint,
+            raidTarget,
+            raidTargetRadius,
+            raidDirectives);
         Visibility = new ReadOnlyCollection<CellVisibility>(visibility);
         VisibilityLayerCellCount = visibilityLayerCellCount;
         VisibilityNegativeLevelCount = visibilityNegativeLevelCount;
@@ -513,6 +526,8 @@ public sealed class SimulationSnapshot
     public GridPosition RaidRallyPoint { get; }
 
     public IReadOnlyList<EntityId> RaidPartyIds { get; }
+
+    public RaidPlanSnapshot RaidPlan { get; }
 
     public IReadOnlyList<CellVisibility> Visibility { get; }
 

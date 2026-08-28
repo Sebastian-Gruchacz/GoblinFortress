@@ -44,6 +44,16 @@ internal sealed class SimulationSaveModel
 
     public List<ulong> RaidPartyIds { get; set; } = [];
 
+    public int RaidTargetX { get; set; }
+
+    public int RaidTargetY { get; set; }
+
+    public int RaidTargetZ { get; set; }
+
+    public int RaidTargetRadius { get; set; }
+
+    public RaidDirective RaidDirectives { get; set; }
+
     public List<PlantPatchSaveModel> PlantPatches { get; set; } = [];
 
     public List<WorldObjectSaveModel> WorldObjects { get; set; } = [];
@@ -345,6 +355,22 @@ internal sealed class ActorSaveModel
     public int SuspendedTargetY { get; set; }
 
     public int SuspendedTargetZ { get; set; }
+
+    public ActorTacticalOrderKind TacticalOrderKind { get; set; }
+
+    public int TacticalCenterX { get; set; }
+
+    public int TacticalCenterY { get; set; }
+
+    public int TacticalCenterZ { get; set; }
+
+    public int TacticalRadius { get; set; }
+
+    public int PatrolPointIndex { get; set; }
+
+    public List<GridPositionSaveModel> PatrolPoints { get; set; } = [];
+
+    public ulong TacticalTargetEntityId { get; set; }
 
     public List<NavigationBeliefSaveModel> NavigationBeliefs { get; set; } = [];
 

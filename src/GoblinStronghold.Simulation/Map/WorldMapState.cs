@@ -1063,6 +1063,57 @@ public sealed class WorldMapState
         return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 4);
     }
 
+    public bool CanBuildGoblinHut(GridPosition anchor)
+    {
+        var footprint = GetSquareFootprint(anchor, 3);
+        return footprint.All(position =>
+            IsTerrainTraversable(position) &&
+            !_occupancy.Keys.Any(key => key.Position == position));
+    }
+
+    internal WorldChangeEvent BuildGoblinHut(GridPosition anchor, SimulationTick tick)
+    {
+        if (!CanBuildGoblinHut(anchor))
+        {
+            throw new InvalidOperationException("The goblin hut placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var parts = new List<WorldObjectPartSnapshot>();
+        foreach (var position in GetSquareFootprint(anchor, 3))
+        {
+            var relative = new GridPosition(
+                position.X - anchor.X,
+                position.Y - anchor.Y,
+                0);
+            parts.Add(new(relative, SpatialOccupancyChannel.Surface, WorldObjectPartKind.Floor));
+            if (anchor.Z == 0)
+            {
+                parts.Add(new(relative with { Z = 1 }, SpatialOccupancyChannel.Overhead,
+                    WorldObjectPartKind.Roof));
+                _plantPatches.Remove(GetIndex(Baseline, position));
+            }
+        }
+
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.GoblinHut,
+            WorldObjectOwner.GoblinTribe,
+            anchor,
+            CardinalOrientation.North,
+            parts);
+        _worldObjects.Add(id, worldObject);
+        foreach (var (position, part) in worldObject.GetAbsoluteParts())
+        {
+            _occupancy.Add(
+                new SpatialOccupancyKey(position, part.Channel),
+                new SpatialOccupancyClaim(id, part.Kind));
+        }
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 9);
+    }
+
     public bool CanBuildPrimitiveWorkshop(GridPosition anchor) =>
         IsTerrainTraversable(anchor) &&
         !_occupancy.Keys.Any(key => key.Position == anchor);
@@ -1104,6 +1155,12 @@ public sealed class WorldMapState
             anchor with { Y = anchor.Y + 1 },
             new GridPosition(anchor.X + 1, anchor.Y + 1, anchor.Z),
         ];
+
+    private static IReadOnlyList<GridPosition> GetSquareFootprint(GridPosition anchor, int size) =>
+        Enumerable.Range(0, size)
+            .SelectMany(y => Enumerable.Range(0, size)
+                .Select(x => new GridPosition(anchor.X + x, anchor.Y + y, anchor.Z)))
+            .ToArray();
 
     internal bool TryBuildHumanStorehouse(
         GridPosition settlementCenter,

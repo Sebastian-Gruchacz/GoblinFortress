@@ -1552,7 +1552,7 @@ public partial class Main : Node
 
     private void BeginWorkArea(Vector2 screenPosition)
     {
-        var cell = ScreenToVisibleCell(screenPosition);
+        var cell = ClampToCurrentMapLevel(ScreenToVisibleCell(screenPosition));
         if (!IsBuildableLayerCell(cell))
         {
             return;
@@ -1565,7 +1565,7 @@ public partial class Main : Node
 
     private void UpdateWorkPreview(Vector2 screenPosition)
     {
-        var cell = ScreenToVisibleCell(screenPosition);
+        var cell = ClampToCurrentMapLevel(ScreenToVisibleCell(screenPosition));
         if (!IsBuildableLayerCell(cell))
         {
             _worldView.SetWorkPreview(default, []);
@@ -1616,7 +1616,7 @@ public partial class Main : Node
 
     private void FinishWorkArea(Vector2 screenPosition)
     {
-        var end = ScreenToVisibleCell(screenPosition);
+        var end = ClampToCurrentMapLevel(ScreenToVisibleCell(screenPosition));
         _isDraggingWorkArea = false;
         if (!IsBuildableLayerCell(end) || !IsValidWorkAreaSelection(_workAreaStart, end))
         {
@@ -4771,6 +4771,11 @@ public partial class Main : Node
         _engine.Map.IsColumnWithin(position) &&
         position.Z >= _engine.Map.MinimumWorldLevel &&
         position.Z <= _engine.Map.MaximumWorldLevel;
+
+    private GridPosition ClampToCurrentMapLevel(GridPosition position) => new(
+        Math.Clamp(position.X, 0, _engine.Map.Width - 1),
+        Math.Clamp(position.Y, 0, _engine.Map.Height - 1),
+        _visibleLevel);
 
     private bool IsValidWorkAreaSelection(GridPosition first, GridPosition second) =>
         first.Z == second.Z &&

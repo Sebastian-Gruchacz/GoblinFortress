@@ -252,6 +252,10 @@ public partial class WorldView : Node2D
                                 _terrainTransitionAtlas, sprite, cell.RampDirection)
                             : TerrainSprites.GetRegion(_terrainAtlas, sprite));
                     DrawTerrainRelief(x, y, cell, drawSlopeOverlay: !useGeneratedTransition);
+                    if (cell.RampDirection != TerrainRampDirection.None)
+                    {
+                        DrawTerrainRampSteps(CellRect(x, y), cell.RampDirection);
+                    }
                     DrawCaveMouth(x, y, caveMouths);
                     continue;
                 }
@@ -262,8 +266,43 @@ public partial class WorldView : Node2D
                     continue;
                 }
 
-                DrawRect(CellRect(x, y), new Color("101719"));
+                DrawLowerTerrainSurface(x, y, cell, livingTrees);
             }
+        }
+    }
+
+    private void DrawLowerTerrainSurface(
+        int x,
+        int y,
+        MapCell cell,
+        HashSet<GridPosition> livingTrees)
+    {
+        var rect = CellRect(x, y);
+        if (cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater)
+        {
+            DrawWaterTile(x, y, cell.Terrain);
+        }
+        else
+        {
+            var sprite = ResolveTerrainSprite(x, y, cell.Terrain, livingTrees);
+            var useGeneratedTransition = cell.RampDirection != TerrainRampDirection.None &&
+                TerrainTransitionSprites.Supports(sprite);
+            DrawTextureRectRegion(
+                useGeneratedTransition ? _terrainTransitionAtlas : _terrainAtlas,
+                rect,
+                useGeneratedTransition
+                    ? TerrainTransitionSprites.GetRegion(
+                        _terrainTransitionAtlas, sprite, cell.RampDirection)
+                    : TerrainSprites.GetRegion(_terrainAtlas, sprite));
+            DrawTerrainRelief(x, y, cell, drawSlopeOverlay: !useGeneratedTransition);
+        }
+
+        var levelDifference = _visibleLevel - cell.SurfaceLevel;
+        var darkness = Math.Min(0.84f, 0.68f + ((levelDifference - 1) * 0.08f));
+        DrawRect(rect, new Color(0.008f, 0.014f, 0.016f, darkness));
+        if (cell.RampDirection != TerrainRampDirection.None)
+        {
+            DrawTerrainRampSteps(rect, cell.RampDirection, 0.55f);
         }
     }
 
@@ -613,6 +652,49 @@ public partial class WorldView : Node2D
                 DrawLine(rect.Position + new Vector2(rect.Size.X * 0.38f, 0f),
                     rect.Position + new Vector2(rect.Size.X * 0.38f, rect.Size.Y), contour, 1f);
                 break;
+        }
+    }
+
+    private void DrawTerrainRampSteps(
+        Rect2 rect,
+        TerrainRampDirection uphill,
+        float opacity = 1f)
+    {
+        var downhillOffset = uphill switch
+        {
+            TerrainRampDirection.North => new Vector2(0f, 1f),
+            TerrainRampDirection.East => new Vector2(-1f, 0f),
+            TerrainRampDirection.South => new Vector2(0f, -1f),
+            TerrainRampDirection.West => new Vector2(1f, 0f),
+            _ => Vector2.Zero,
+        };
+        if (downhillOffset == Vector2.Zero)
+        {
+            return;
+        }
+
+        var highlight = new Color(0.78f, 0.76f, 0.57f, 0.16f * opacity);
+        var shadow = new Color(0.015f, 0.025f, 0.022f, 0.3f * opacity);
+        ReadOnlySpan<float> stepPositions = [0.24f, 0.5f, 0.76f];
+        foreach (var position in stepPositions)
+        {
+            Vector2 start;
+            Vector2 end;
+            if (uphill is TerrainRampDirection.North or TerrainRampDirection.South)
+            {
+                var y = rect.Position.Y + (rect.Size.Y * position);
+                start = new Vector2(rect.Position.X + 2f, y);
+                end = new Vector2(rect.End.X - 2f, y);
+            }
+            else
+            {
+                var x = rect.Position.X + (rect.Size.X * position);
+                start = new Vector2(x, rect.Position.Y + 2f);
+                end = new Vector2(x, rect.End.Y - 2f);
+            }
+
+            DrawLine(start + downhillOffset, end + downhillOffset, shadow, 1f);
+            DrawLine(start, end, highlight, 1f);
         }
     }
 
@@ -1964,7 +2046,7 @@ public partial class WorldView : Node2D
 
     private CellVisibility GetRenderedVisibility(GridPosition position)
     {
-        var visibility = _snapshot.GetVisibility(position, _engine.Map.Width);
+        var visibility = GetColumnVisibility(position);
         if (!_engine.Map.IsHillRockPosition(position))
         {
             return visibility;
@@ -1984,7 +2066,7 @@ public partial class WorldView : Node2D
                 continue;
             }
 
-            var neighborVisibility = _snapshot.GetVisibility(neighbor, _engine.Map.Width);
+            var neighborVisibility = GetColumnVisibility(neighbor);
             if (neighborVisibility > visibility)
             {
                 visibility = neighborVisibility;
@@ -1992,6 +2074,47 @@ public partial class WorldView : Node2D
         }
 
         return visibility;
+    }
+
+    private CellVisibility GetColumnVisibility(GridPosition position)
+    {
+        var visibility = TryGetSnapshotVisibility(position, out var directVisibility)
+            ? directVisibility
+            : CellVisibility.Unknown;
+        var surfaceLevel = _engine.Map.GetColumnCell(position).SurfaceLevel;
+        if (surfaceLevel != position.Z &&
+            TryGetSnapshotVisibility(
+                new GridPosition(position.X, position.Y, surfaceLevel),
+                out var surfaceVisibility) &&
+            surfaceVisibility > visibility)
+        {
+            visibility = surfaceVisibility;
+        }
+
+        return visibility;
+    }
+
+    private bool TryGetSnapshotVisibility(
+        GridPosition position,
+        out CellVisibility visibility)
+    {
+        visibility = CellVisibility.Unknown;
+        if (!_engine.Map.IsColumnWithin(position) ||
+            _snapshot.VisibilityLayerCellCount <= 0)
+        {
+            return false;
+        }
+
+        var layerCount = _snapshot.Visibility.Count / _snapshot.VisibilityLayerCellCount;
+        var positiveLevelCount = layerCount - _snapshot.VisibilityNegativeLevelCount - 1;
+        if (position.Z < -_snapshot.VisibilityNegativeLevelCount ||
+            position.Z > positiveLevelCount)
+        {
+            return false;
+        }
+
+        visibility = _snapshot.GetVisibility(position, _engine.Map.Width);
+        return true;
     }
 
     private void DrawOrderedDestination()

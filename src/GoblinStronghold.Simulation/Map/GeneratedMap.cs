@@ -9,6 +9,8 @@ public sealed class GeneratedMap
     private readonly CaveCell[] _caveCells;
     private readonly VerticalPassage[] _verticalPassages;
     private readonly string _fingerprint;
+    private readonly int _minimumTerrainLevel;
+    private readonly int _maximumTerrainLevel;
 
     internal GeneratedMap(
         int width,
@@ -28,6 +30,8 @@ public sealed class GeneratedMap
         _cells = cells;
         _caveCells = caveCells ?? [];
         _verticalPassages = verticalPassages ?? [];
+        _minimumTerrainLevel = _cells.Min(cell => Math.Min(cell.FloorLevel, cell.SurfaceLevel));
+        _maximumTerrainLevel = _cells.Max(cell => cell.SurfaceLevel);
         GoblinSpawn = goblinSpawn;
         HumanVillage = humanVillage;
         _fingerprint = ComputeFingerprintCore();
@@ -37,9 +41,9 @@ public sealed class GeneratedMap
 
     public int Height { get; }
 
-    public int MinimumTerrainLevel => _cells.Min(cell => Math.Min(cell.FloorLevel, cell.SurfaceLevel));
+    public int MinimumTerrainLevel => _minimumTerrainLevel;
 
-    public int MaximumTerrainLevel => _cells.Max(cell => cell.SurfaceLevel);
+    public int MaximumTerrainLevel => _maximumTerrainLevel;
 
     public int MinimumWorldLevel => Math.Min(MinimumTerrainLevel, DeepestCaveLevel);
 

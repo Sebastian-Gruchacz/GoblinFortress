@@ -305,6 +305,87 @@ public sealed class FieldCampTests
     }
 
     [Fact]
+    public void RaidPartyReservesAllCampBedsAndJuvenilesLeaveForStartArea()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x42454453UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 7,
+            initialFoodStock: 60,
+            initialWoodStock: 20);
+        var campPosition = FindCampPosition(engine);
+        engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
+            new SimulationTick(1), sequence: 1, campPosition));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        var currentTick = save["currentTick"]!.GetValue<long>();
+        var actors = save["actors"]!.AsArray()
+            .Select(node => node!.AsObject())
+            .OrderBy(node => node["id"]!.GetValue<ulong>())
+            .ToArray();
+        foreach (var actor in actors)
+        {
+            actor["x"] = campPosition.X;
+            actor["y"] = campPosition.Y;
+            actor["z"] = campPosition.Z;
+            actor["hunger"] = 0;
+            actor["thirst"] = 0;
+            actor["fatigue"] = 0;
+            ClearActorJob(actor);
+        }
+        foreach (var juvenile in actors.Skip(SimulationDefinitions.FieldCampCapacity))
+        {
+            juvenile["birthTick"] = currentTick;
+            juvenile["maturesAtTick"] = currentTick + 10_000;
+            juvenile["ageOffsetTicks"] = 0;
+        }
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        var snapshotActors = engine.CreateSnapshot().Actors.OrderBy(actor => actor.Id).ToArray();
+        var raiders = snapshotActors.Take(SimulationDefinitions.FieldCampCapacity).ToArray();
+        var juveniles = snapshotActors.Skip(SimulationDefinitions.FieldCampCapacity).ToArray();
+        var executeAt = engine.CurrentTick.Next();
+        var sequence = 2UL;
+        foreach (var raider in raiders)
+        {
+            engine.QueueCommand(SimulationCommand.ConfigureRaidMember(
+                executeAt, sequence++, raider.Id, selected: true));
+        }
+        engine.QueueCommand(SimulationCommand.AttackHumanVillage(
+            executeAt, sequence, campPosition));
+        engine.AdvanceTicks(1);
+
+        var campCells = engine.CreateSnapshot().WorldObjects
+            .Single(item => item.Kind == WorldObjectKind.GoblinFieldCamp &&
+                item.Anchor == campPosition)
+            .GetAbsoluteParts()
+            .Where(item => item.Part.Kind == WorldObjectPartKind.Floor)
+            .Select(item => item.Position)
+            .ToHashSet();
+        Assert.All(juveniles, juvenile => Assert.Equal(
+            ActorJobKind.Move,
+            engine.CreateSnapshot().Actors.Single(actor => actor.Id == juvenile.Id).Job.Kind));
+
+        for (var tick = 0; tick < 2_000 && engine.CreateSnapshot().Actors
+                 .Any(actor => juveniles.Any(juvenile => juvenile.Id == actor.Id) &&
+                     campCells.Contains(actor.Position)); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var evacuated = engine.CreateSnapshot();
+        Assert.True(evacuated.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready);
+        Assert.Equal(raiders.Select(actor => actor.Id), evacuated.RaidPartyIds);
+        Assert.DoesNotContain(evacuated.Actors, actor =>
+            juveniles.Any(juvenile => juvenile.Id == actor.Id) && campCells.Contains(actor.Position));
+        Assert.True(evacuated.Actors.Count(actor => campCells.Contains(actor.Position)) <=
+            SimulationDefinitions.FieldCampCapacity);
+    }
+
+    [Fact]
     public void PreparedRaidCanWaitForManualLaunchAndKeepsPlanAcrossSaveLoad()
     {
         var engine = CreateEngine();
@@ -479,4 +560,23 @@ public sealed class FieldCampTests
             .ThenBy(position => position.Y)
             .ThenBy(position => position.X)
             .First();
+
+    private static void ClearActorJob(JsonObject actor)
+    {
+        actor["jobKind"] = (int)ActorJobKind.None;
+        actor["jobPhase"] = (int)ActorJobPhase.None;
+        actor["jobStage"] = (int)ActorJobStage.None;
+        actor["jobTargetX"] = 0;
+        actor["jobTargetY"] = 0;
+        actor["jobTargetZ"] = 0;
+        actor["remainingWorkTicks"] = 0;
+        actor["sourceStackId"] = 0;
+        actor["destinationZoneId"] = 0;
+        actor["reservedQuantity"] = 0;
+        actor["remainingRoute"] = new JsonArray();
+        actor["suspendedJobKind"] = (int)ActorJobKind.None;
+        actor["suspendedTargetX"] = 0;
+        actor["suspendedTargetY"] = 0;
+        actor["suspendedTargetZ"] = 0;
+    }
 }

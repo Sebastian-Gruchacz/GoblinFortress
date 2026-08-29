@@ -31,13 +31,5 @@ internal static class UndergroundSprites
     }
 
     private static Texture2D LoadAtlas(string path, string description)
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(path));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load {description} atlas: {path}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(path, $"{description} atlas");
 }

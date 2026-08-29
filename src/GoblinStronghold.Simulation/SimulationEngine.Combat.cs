@@ -245,13 +245,15 @@ public sealed partial class SimulationEngine
         }
 
         _humanVillage.EndGoblinAttack();
+        var survivingRaiders = _raidPartyIds.Count;
         _raidPhase = GoblinRaidPhase.None;
         _raidRallyPoint = default;
+        _raidPartyIds.Clear();
         Publish(
             victory ? SimulationEventKind.RaidVictory : SimulationEventKind.RaidDefeated,
             EntityId.None,
             EntityId.None,
-            _raidPartyIds.Count);
+            survivingRaiders);
     }
 
     private static int Distance(GridPosition left, GridPosition right) =>

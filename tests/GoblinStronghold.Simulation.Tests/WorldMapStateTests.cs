@@ -38,7 +38,8 @@ public sealed class WorldMapStateTests
                     {
                         Z = cell.SurfaceLevel + 1,
                     };
-                    if (candidate.World.CanExcavateRock(position) &&
+                    if (candidate.Visibility.Get(position) != CellVisibility.Unknown &&
+                        candidate.World.CanExcavateRock(position) &&
                         candidate.World.CanTraverseTerrainEdge(position, destination))
                     {
                         engine = candidate;
@@ -55,6 +56,21 @@ public sealed class WorldMapStateTests
         var topologyVersion = rampEngine.World.TopologyVersion;
         Assert.Contains(ramp, rampEngine.QueryWorkDesignationTargets(
             WorkDesignationKind.MineRock, ramp, ramp));
+        rampEngine.ApplyCommandImmediately(SimulationCommand.DesignateRockMining(
+            rampEngine.CurrentTick,
+            sequence: 1,
+            ramp,
+            ramp));
+        rampEngine.AdvanceTicks(
+            SimulationDefinitions.Foundation.ActorPlanning.BackgroundPlanningIntervalTicks);
+
+        Assert.Contains(rampEngine.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.MineRock && designation.Target == ramp);
+        var designatedRampEngine = SimulationEngine.Load(
+            rampEngine.Save(),
+            SimulationDefinitions.Foundation);
+        Assert.Contains(designatedRampEngine.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.MineRock && designation.Target == ramp);
         Assert.True(rampEngine.World.TryExcavateRock(
             ramp,
             rampEngine.CurrentTick,
@@ -69,6 +85,10 @@ public sealed class WorldMapStateTests
         Assert.False(rampEngine.World.CanTraverseTerrainEdge(ramp, uphill));
         Assert.False(rampEngine.World.CanTraverseTerrainEdge(uphill, ramp));
         Assert.True(rampEngine.World.TopologyVersion > topologyVersion);
+        rampEngine.AdvanceTicks(
+            SimulationDefinitions.Foundation.ActorPlanning.BackgroundPlanningIntervalTicks);
+        Assert.DoesNotContain(rampEngine.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.MineRock && designation.Target == ramp);
 
         var restored = SimulationEngine.Load(
             rampEngine.Save(),
@@ -138,11 +158,13 @@ public sealed class WorldMapStateTests
         var bridgeEngine = engine ?? throw new InvalidOperationException(
             "The crossing has no owning simulation.");
         Assert.False(bridgeEngine.World.IsTerrainTraversable(bridge.Gap));
+        Assert.True(bridgeEngine.World.CanBuildWalkway(
+            [bridge.Left, bridge.Gap, bridge.Right]));
         bridgeEngine.QueueCommand(SimulationCommand.BuildWalkway(
             bridgeEngine.CurrentTick.Next(),
             bridgeEngine.NextAvailableCommandSequence,
-            bridge.Gap,
-            bridge.Gap));
+            bridge.Left,
+            bridge.Right));
         bridgeEngine.AdvanceTicks(1);
         SimulationTestSteps.AdvanceUntilConstructionCompletes(bridgeEngine);
 

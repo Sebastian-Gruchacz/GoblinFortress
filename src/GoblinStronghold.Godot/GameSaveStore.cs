@@ -24,7 +24,7 @@ internal sealed class GameSaveStore(string directoryPath)
         WriteAtomic(target, json);
     }
 
-    public IReadOnlyList<(string Path, string Json)> LoadNewestFirst()
+    public IReadOnlyList<(string Path, string Json)> LoadPreferredFirst()
     {
         if (!Directory.Exists(_directoryPath))
         {
@@ -33,7 +33,8 @@ internal sealed class GameSaveStore(string directoryPath)
 
         var candidates = EnumerateSavePaths()
             .Where(File.Exists)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .OrderBy(path => StringComparer.OrdinalIgnoreCase.Equals(path, QuickSavePath) ? 0 : 1)
+            .ThenByDescending(File.GetLastWriteTimeUtc)
             .ToArray();
         var saves = new List<(string Path, string Json)>();
         foreach (var candidate in candidates)
@@ -71,6 +72,7 @@ internal sealed class GameSaveStore(string directoryPath)
         {
             File.WriteAllText(temporaryPath, json, Utf8WithoutBom);
             File.Move(temporaryPath, path, overwrite: true);
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
         }
         finally
         {

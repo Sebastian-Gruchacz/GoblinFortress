@@ -20,8 +20,10 @@ public partial class WorldView : Node2D
     private int _simulationSpeed = 1;
     private double _secondsPerTick = 0.1;
     private IReadOnlyList<GridPosition> _constructionPreview = [];
+    private bool _constructionPreviewValid;
     private WorkDesignationKind _workPreviewKind;
     private IReadOnlyList<GridPosition> _workPreview = [];
+    private (GridPosition Start, GridPosition End)? _workAreaPreview;
     private GridPosition? _raidTargetPreview;
     private int _raidTargetRadius;
     private Texture2D _iconAtlas = null!;
@@ -110,9 +112,12 @@ public partial class WorldView : Node2D
         QueueRedraw();
     }
 
-    public void SetConstructionPreview(IReadOnlyList<GridPosition> cells)
+    public void SetConstructionPreview(
+        IReadOnlyList<GridPosition> cells,
+        bool isValid = false)
     {
         _constructionPreview = cells;
+        _constructionPreviewValid = isValid;
         QueueRedraw();
     }
 
@@ -120,6 +125,14 @@ public partial class WorldView : Node2D
     {
         _workPreviewKind = kind;
         _workPreview = cells;
+        QueueRedraw();
+    }
+
+    public void SetWorkAreaPreview(GridPosition? start, GridPosition? end)
+    {
+        _workAreaPreview = start is { } first && end is { } last
+            ? (first, last)
+            : null;
         QueueRedraw();
     }
 
@@ -229,6 +242,7 @@ public partial class WorldView : Node2D
         DrawNightLighting();
         DrawFog();
         DrawWorkDesignations();
+        DrawWorkAreaPreview();
         DrawWorkPreview();
         DrawOrderedDestination();
         DrawConstructionPreview();
@@ -1560,6 +1574,47 @@ public partial class WorldView : Node2D
             new Rect2(-size / 2f, size),
             EnvironmentSprites.GetRegion(_environmentAtlas, sprite.Value));
         DrawSetTransform(Vector2.Zero);
+        if (worldObject.Kind == WorldObjectKind.GoblinFieldCamp)
+        {
+            DrawFieldCampRaidStatus(worldObject, center, size);
+        }
+    }
+
+    private void DrawFieldCampRaidStatus(
+        WorldObjectSnapshot worldObject,
+        Vector2 center,
+        Vector2 size)
+    {
+        if (worldObject.Anchor != _snapshot.RaidRallyPoint ||
+            _snapshot.RaidPhase == GoblinRaidPhase.None)
+        {
+            return;
+        }
+
+        var color = _snapshot.RaidPhase switch
+        {
+            GoblinRaidPhase.Preparing => new Color("f0b84b"),
+            GoblinRaidPhase.Ready => new Color("75e36b"),
+            GoblinRaidPhase.Suspended => new Color("9b9a90"),
+            GoblinRaidPhase.Marching => new Color("e15b45"),
+            GoblinRaidPhase.Looting => new Color("d68ee8"),
+            GoblinRaidPhase.Returning => new Color("66b7e8"),
+            _ => new Color("f1f3e8"),
+        };
+        var radius = Math.Max(size.X, size.Y) * 0.56f;
+        DrawArc(center, radius, 0f, Mathf.Tau, 40, color, 2.5f, true);
+
+        var beacon = center + new Vector2(size.X * 0.42f, -size.Y * 0.42f);
+        DrawCircle(beacon, 5.5f, new Color(0.03f, 0.04f, 0.03f, 0.88f));
+        DrawCircle(beacon, 3.6f, color);
+        if (_snapshot.RaidPhase == GoblinRaidPhase.Ready)
+        {
+            DrawArc(center, radius + 3.5f, 0f, Mathf.Tau, 40, color, 1.5f, true);
+            DrawLine(beacon + new Vector2(-2.2f, 0f), beacon + new Vector2(-0.4f, 2f),
+                new Color("182117"), 1.4f, true);
+            DrawLine(beacon + new Vector2(-0.4f, 2f), beacon + new Vector2(2.5f, -2f),
+                new Color("182117"), 1.4f, true);
+        }
     }
 
     private void DrawHumanFields()
@@ -1601,12 +1656,7 @@ public partial class WorldView : Node2D
     {
         foreach (var cell in _constructionPreview.Where(cell => cell.Z == _visibleLevel))
         {
-            var valid = cell.Z == 0
-                ? _engine.Map.IsWithin(cell) &&
-                  _snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered()
-                : _engine.Map.IsCavePosition(cell) && _engine.World.IsTerrainTraversable(cell) &&
-                  _snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered();
-            var color = valid
+            var color = _constructionPreviewValid
                 ? new Color(0.95f, 0.75f, 0.28f, 0.7f)
                 : new Color(0.92f, 0.2f, 0.2f, 0.72f);
             DrawRect(CellRect(cell.X, cell.Y).Grow(-2f), color, filled: false, width: 2f);
@@ -1658,6 +1708,32 @@ public partial class WorldView : Node2D
                 style.Filled,
                 style.Width);
         }
+    }
+
+    private void DrawWorkAreaPreview()
+    {
+        if (_workAreaPreview is not { } area ||
+            area.Start.Z != _visibleLevel || area.End.Z != _visibleLevel)
+        {
+            return;
+        }
+
+        var minimumX = Math.Min(area.Start.X, area.End.X);
+        var maximumX = Math.Max(area.Start.X, area.End.X);
+        var minimumY = Math.Min(area.Start.Y, area.End.Y);
+        var maximumY = Math.Max(area.Start.Y, area.End.Y);
+        var rect = new Rect2(
+            minimumX * TileSize,
+            minimumY * TileSize,
+            (maximumX - minimumX + 1) * TileSize,
+            (maximumY - minimumY + 1) * TileSize).Grow(-1.5f);
+        var border = new Color(0.96f, 0.9f, 0.62f, 0.94f);
+
+        DrawRect(rect, border with { A = 0.055f });
+        DrawDashedLine(rect.Position, new Vector2(rect.End.X, rect.Position.Y), border, 1.5f, 5f);
+        DrawDashedLine(new Vector2(rect.End.X, rect.Position.Y), rect.End, border, 1.5f, 5f);
+        DrawDashedLine(rect.End, new Vector2(rect.Position.X, rect.End.Y), border, 1.5f, 5f);
+        DrawDashedLine(new Vector2(rect.Position.X, rect.End.Y), rect.Position, border, 1.5f, 5f);
     }
 
     private void DrawActors()

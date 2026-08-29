@@ -10,15 +10,7 @@ internal static class TerrainSlopeSprites
     private const string AtlasPath = "res://Assets/World/terrain-slope-overlays-v1.png";
 
     public static Texture2D LoadAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(AtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load terrain slope atlas: {AtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(AtlasPath, "terrain slope atlas");
 
     public static Rect2 GetRegion(Texture2D atlas, TerrainRampDirection direction)
     {

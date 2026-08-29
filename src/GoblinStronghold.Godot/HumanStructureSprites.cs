@@ -20,15 +20,7 @@ internal static class HumanStructureSprites
     private const string AtlasPath = "res://Assets/World/human-structures-atlas-v1.png";
 
     public static Texture2D LoadAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(AtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load human structure atlas: {AtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(AtlasPath, "human structure atlas");
 
     public static Rect2 GetRegion(HumanStructureSprite sprite)
     {

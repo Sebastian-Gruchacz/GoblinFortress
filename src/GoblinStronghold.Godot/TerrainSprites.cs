@@ -30,15 +30,7 @@ internal static class TerrainSprites
     private const string AtlasPath = "res://Assets/World/terrain-water-atlas-v1.png";
 
     public static Texture2D LoadAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(AtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load terrain atlas: {AtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(AtlasPath, "terrain atlas");
 
     public static Rect2 GetRegion(Texture2D atlas, TerrainSprite sprite)
     {

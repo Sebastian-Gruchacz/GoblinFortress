@@ -14,26 +14,10 @@ internal static class CaveSprites
     private const string WallAtlasPath = "res://Assets/Generated/cave-walls-v1.png";
 
     public static Texture2D LoadAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(FloorAtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load cave rock atlas: {FloorAtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(FloorAtlasPath, "cave rock atlas");
 
     public static Texture2D LoadWallAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(WallAtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load cave wall atlas: {WallAtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(WallAtlasPath, "cave wall atlas");
 
     public static Rect2 GetFloorRegion(Texture2D atlas, RockKind rock)
     {

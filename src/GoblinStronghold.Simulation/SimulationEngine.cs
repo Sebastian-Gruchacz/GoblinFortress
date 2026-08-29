@@ -2112,7 +2112,8 @@ public sealed partial class SimulationEngine
                     World.GetQuarriableBoulder(designation.Target) is not null,
                 WorkDesignationKind.MineRock =>
                     Visibility.Get(designation.Target) == CellVisibility.Unknown ||
-                    World.IsSolidRock(designation.Target),
+                    World.IsSolidRock(designation.Target) ||
+                    World.IsTerrainRampIntact(designation.Target),
                 WorkDesignationKind.CarveRampDown => World.CanCarveRampDown(designation.Target),
                 WorkDesignationKind.CarveRampUp => World.CanCarveRampUp(designation.Target),
                 WorkDesignationKind.Scout => designation.Target.Z == 0 &&

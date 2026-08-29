@@ -124,7 +124,7 @@ public sealed class HumanCombatTests
     }
 
     [Fact]
-    public void RaidVictoryClearsActiveLifecycleAndKeepsSurvivingPartySelection()
+    public void RaidVictoryClearsActiveLifecycleAndReleasesSurvivingPartySelection()
     {
         var engine = CreateEncounterEngine(orderRaid: true);
         var preparing = engine.CreateSnapshot();
@@ -251,7 +251,7 @@ public sealed class HumanCombatTests
         Assert.Equal(GoblinRaidPhase.None, completed.RaidPhase);
         Assert.Equal(default, completed.RaidRallyPoint);
         Assert.False(completed.HumanVillage.GoblinAttackOrdered);
-        Assert.Equal(party, completed.RaidPartyIds);
+        Assert.Empty(completed.RaidPartyIds);
         Assert.True(observedCarriedCorpse);
         Assert.True(observedPartialConsumption);
         Assert.True(observedCorpseBud);

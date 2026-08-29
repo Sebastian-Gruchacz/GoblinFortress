@@ -11,15 +11,7 @@ internal static class TerrainTransitionSprites
     private const string AtlasPath = "res://Assets/Generated/terrain-height-transitions-v1.png";
 
     public static Texture2D LoadAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(AtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load terrain transition atlas: {AtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(AtlasPath, "terrain transition atlas");
 
     public static bool Supports(TerrainSprite sprite) => sprite is
         TerrainSprite.Meadow or

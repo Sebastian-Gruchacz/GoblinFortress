@@ -36,15 +36,7 @@ internal static class UiIcons
     private const string Speed8IconPath = "res://Assets/UI/speed-8x-icon-v1.png";
 
     public static Texture2D LoadAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(AtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load UI icon atlas: {AtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(AtlasPath, "UI icon atlas");
 
     public static AtlasTexture CreateTexture(Texture2D atlas, UiIcon icon) => new()
     {
@@ -55,15 +47,9 @@ internal static class UiIcons
 
     public static AtlasTexture LoadSpeed8Texture()
     {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(Speed8IconPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load 8× speed icon: {Speed8IconPath}");
-        }
-
         return new AtlasTexture
         {
-            Atlas = ImageTexture.CreateFromImage(image),
+            Atlas = TextureResources.LoadRequired(Speed8IconPath, "8× speed icon"),
             Region = new Rect2(64, 410, 1152, 420),
             FilterClip = true,
         };

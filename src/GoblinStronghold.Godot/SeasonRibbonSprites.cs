@@ -9,15 +9,7 @@ internal static class SeasonRibbonSprites
     private const string RibbonPath = "res://Assets/UI/season-ribbon-v1.png";
 
     public static Texture2D LoadTexture()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(RibbonPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load season ribbon: {RibbonPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(RibbonPath, "season ribbon");
 
     public static Rect2 GetRegion(Texture2D texture, SeasonKind season)
     {

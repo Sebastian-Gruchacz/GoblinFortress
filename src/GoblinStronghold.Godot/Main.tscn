@@ -5,10 +5,10 @@
 [ext_resource type="Script" uid="uid://b48qk8at1y7er" path="res://MinimapView.cs" id="3_minimap"]
 [ext_resource type="Script" uid="uid://c1b4r0mtuevu7" path="res://SeasonCycleView.cs" id="4_seasons"]
 [ext_resource type="Script" uid="uid://hgf05hai8kbk" path="res://WorldView3D.cs" id="5_world_3d"]
-[ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-menu-background-v1.png" id="6_menu_background"]
-[ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-icon-v1.png" id="7_menu_goblin"]
-[ext_resource type="Texture2D" path="res://Assets/Branding/goblin-stronghold-title-v1.png" id="8_menu_title"]
-[ext_resource type="AudioStream" path="res://Assets/Audio/the-hollow-council-title-demo.mp3" id="9_title_music"]
+[ext_resource type="Texture2D" uid="uid://1vn87bjmjh6j" path="res://Assets/Branding/goblin-stronghold-menu-background-v1.png" id="6_menu_background"]
+[ext_resource type="Texture2D" uid="uid://3tvuy82cgyo2" path="res://Assets/Branding/goblin-stronghold-icon-v1.png" id="7_menu_goblin"]
+[ext_resource type="Texture2D" uid="uid://4lbmfrm2rlxt" path="res://Assets/Branding/goblin-stronghold-title-v1.png" id="8_menu_title"]
+[ext_resource type="AudioStream" uid="uid://bd62rn0ndx2hn" path="res://Assets/Audio/the-hollow-council-title-demo.mp3" id="9_title_music"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_main_menu"]
 bg_color = Color(0.025, 0.055, 0.047, 0.46)
@@ -36,18 +36,6 @@ corner_radius_top_right = 8
 corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_menu_button_hover"]
-bg_color = Color(0.08, 0.14, 0.105, 0.82)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.77, 0.84, 0.49, 0.75)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
-
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_menu_button_pressed"]
 bg_color = Color(0.14, 0.19, 0.09, 0.9)
 border_width_left = 2
@@ -55,6 +43,18 @@ border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
 border_color = Color(0.9, 0.71, 0.3, 0.8)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_menu_button_hover"]
+bg_color = Color(0.08, 0.14, 0.105, 0.82)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.77, 0.84, 0.49, 0.75)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_right = 8
@@ -75,7 +75,7 @@ corner_radius_bottom_left = 8
 [node name="Main" type="Node" unique_id=636844132]
 script = ExtResource("1_main")
 
-[node name="TitleMusic" type="AudioStreamPlayer" parent="."]
+[node name="TitleMusic" type="AudioStreamPlayer" parent="." unique_id=795161785]
 stream = ExtResource("9_title_music")
 volume_db = -8.0
 autoplay = true
@@ -130,10 +130,9 @@ offset_right = -16.0
 offset_bottom = -16.0
 grow_horizontal = 0
 grow_vertical = 0
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.72, 0.78, 0.68, 0.52)
 theme_override_font_sizes/font_size = 13
-text = "GOBLIN STRONGHOLD  •  v0.1-dev"
+text = "GOBLIN STRONGHOLD  •  v0.2-dev"
 horizontal_alignment = 2
 vertical_alignment = 1
 
@@ -294,7 +293,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 alignment = 1
 
-[node name="Management" type="Button" parent="Interface/ActionBar/Controls"]
+[node name="Management" type="Button" parent="Interface/ActionBar/Controls" unique_id=415863786]
 custom_minimum_size = Vector2(48, 48)
 layout_mode = 2
 
@@ -345,7 +344,7 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.018, 0.027, 0.024, 1)
 
-[node name="Background" type="TextureRect" parent="Interface/MainMenu"]
+[node name="Background" type="TextureRect" parent="Interface/MainMenu" unique_id=1328112428]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -356,7 +355,7 @@ texture = ExtResource("6_menu_background")
 expand_mode = 1
 stretch_mode = 6
 
-[node name="Shade" type="ColorRect" parent="Interface/MainMenu"]
+[node name="Shade" type="ColorRect" parent="Interface/MainMenu" unique_id=916882033]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -398,7 +397,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 alignment = 1
 
-[node name="Words" type="TextureRect" parent="Interface/MainMenu/Center/Panel/Margin/Controls/Title"]
+[node name="Words" type="TextureRect" parent="Interface/MainMenu/Center/Panel/Margin/Controls/Title" unique_id=83846408]
 custom_minimum_size = Vector2(332, 120)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -406,13 +405,13 @@ texture = ExtResource("8_menu_title")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="Goblin" type="TextureRect" parent="Interface/MainMenu/Center/Panel/Margin/Controls/Title"]
+[node name="Goblin" type="TextureRect" parent="Interface/MainMenu/Center/Panel/Margin/Controls/Title" unique_id=125521996]
 custom_minimum_size = Vector2(120, 120)
 layout_mode = 2
+tooltip_text = "On już wie, gdzie trzymasz kilof."
 texture = ExtResource("7_menu_goblin")
 expand_mode = 1
 stretch_mode = 5
-tooltip_text = "On już wie, gdzie trzymasz kilof."
 
 [node name="Subtitle" type="Label" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=542316023]
 layout_mode = 2
@@ -432,64 +431,54 @@ layout_mode = 2
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
-theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
-theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
 text = "Wróć do gry"
 
 [node name="NewGame" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=154478644]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
-theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
-theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
 text = "Nowa gra"
 
 [node name="LoadGame" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=615510638]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
-theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
-theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
 text = "Wczytaj ostatni zapis"
+
+[node name="Options" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+text = "Opcje"
 
 [node name="Quit" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=1146755296]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
-theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
-theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
 text = "Wyjście"
 
 [node name="BuildMenu" type="PopupPanel" parent="." unique_id=1640149946]
 size = Vector2i(164, 164)
-
-[node name="ManagementMenu" type="PopupPanel" parent="."]
-size = Vector2i(84, 84)
-
-[node name="Margin" type="MarginContainer" parent="ManagementMenu"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 4.0
-offset_top = 4.0
-offset_right = 80.0
-offset_bottom = 80.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="Grid" type="GridContainer" parent="ManagementMenu/Margin"]
-layout_mode = 2
-theme_override_constants/h_separation = 6
-theme_override_constants/v_separation = 6
-columns = 2
 
 [node name="Margin" type="MarginContainer" parent="BuildMenu" unique_id=1205575898]
 anchors_preset = 15
@@ -503,6 +492,26 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="Grid" type="GridContainer" parent="BuildMenu/Margin" unique_id=1910722532]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 2
+
+[node name="ManagementMenu" type="PopupPanel" parent="." unique_id=1142828906]
+size = Vector2i(84, 84)
+
+[node name="Margin" type="MarginContainer" parent="ManagementMenu" unique_id=1687891323]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 80.0
+offset_bottom = 80.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Grid" type="GridContainer" parent="ManagementMenu/Margin" unique_id=1792103445]
 layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
@@ -705,28 +714,28 @@ offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Content" type="VBoxContainer" parent="StatisticsWindow/Margin"]
+[node name="Content" type="VBoxContainer" parent="StatisticsWindow/Margin" unique_id=632919482]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="Population" type="HBoxContainer" parent="StatisticsWindow/Margin/Content"]
+[node name="Population" type="HBoxContainer" parent="StatisticsWindow/Margin/Content" unique_id=19668198]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Decrease" type="Button" parent="StatisticsWindow/Margin/Content/Population"]
+[node name="Decrease" type="Button" parent="StatisticsWindow/Margin/Content/Population" unique_id=1344120629]
 layout_mode = 2
 tooltip_text = "Zmniejsz docelową liczebność plemienia"
 text = "−"
 
-[node name="Target" type="Label" parent="StatisticsWindow/Margin/Content/Population"]
+[node name="Target" type="Label" parent="StatisticsWindow/Margin/Content/Population" unique_id=510727630]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Docelowa liczebność: 0"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="Increase" type="Button" parent="StatisticsWindow/Margin/Content/Population"]
+[node name="Increase" type="Button" parent="StatisticsWindow/Margin/Content/Population" unique_id=1699019556]
 layout_mode = 2
 tooltip_text = "Zaplanuj powiększenie plemienia o jednego goblina"
 text = "+"

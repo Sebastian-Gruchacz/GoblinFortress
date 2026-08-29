@@ -77,12 +77,24 @@ public sealed class WorldVisibilityState
 
     public CellVisibility Get(GridPosition position)
     {
-        if (!IsVisibilityPosition(position))
+        if (!TryGet(position, out var visibility))
         {
             throw new ArgumentOutOfRangeException(nameof(position));
         }
 
-        return _cells[GetIndex(position)];
+        return visibility;
+    }
+
+    public bool TryGet(GridPosition position, out CellVisibility visibility)
+    {
+        if (!IsVisibilityPosition(position))
+        {
+            visibility = default;
+            return false;
+        }
+
+        visibility = _cells[GetIndex(position)];
+        return true;
     }
 
     public IReadOnlyList<CellVisibility> CreateSnapshot() =>

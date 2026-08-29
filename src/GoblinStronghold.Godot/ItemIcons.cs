@@ -30,15 +30,7 @@ internal static class ItemIcons
     private const string AtlasPath = "res://Assets/UI/item-icons-v1.png";
 
     public static Texture2D LoadAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(AtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load item icon atlas: {AtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(AtlasPath, "item icon atlas");
 
     public static AtlasTexture CreateTexture(Texture2D atlas, ItemIcon icon) => new()
     {

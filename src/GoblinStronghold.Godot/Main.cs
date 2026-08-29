@@ -296,21 +296,21 @@ public partial class Main : Node
             "Planer plemienia\nPriorytety, obszary i stan zleceń",
             ShowPlanner,
             GameShortcutId.ShowPlanner);
-        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FoodStorage,
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateStorageIcon(ItemIcon.Food),
             "Skład żywności\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.FoodStorage),
             GameShortcutId.BuildFoodStorage);
-        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodStorage,
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateStorageIcon(ItemIcon.Wood),
             "Skład drewna\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodStorage),
             GameShortcutId.BuildWoodStorage);
-        CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateStorageIcon(ItemIcon.Stone),
             "Skład kamienia i urobku\nKoszt: 2 drewna",
             () => SelectBuildMode((long)BuildMode.StoneStorage),
             GameShortcutId.BuildStoneStorage);
-        CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Cargo,
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateStorageIcon(ItemIcon.Cargo),
             "Skład sprzętu\nKoszt: 2 drewna • wspólna pojemność 32",
             () => SelectBuildMode((long)BuildMode.EquipmentStorage),
             GameShortcutId.BuildEquipmentStorage);
-        CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Reeds,
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateStorageIcon(ItemIcon.Reeds),
             "Skład materiałów\nKoszt: 2 drewna • skóry, kości i sitowie",
             () => SelectBuildMode((long)BuildMode.MaterialsStorage),
             GameShortcutId.BuildMaterialsStorage);
@@ -320,20 +320,22 @@ public partial class Main : Node
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
             "Obozowisko wypadowe\nKoszt: 6 drewna", () => SelectBuildMode((long)BuildMode.FieldCamp),
             GameShortcutId.BuildFieldCamp);
-        CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateGoblinHutIcon(),
             "Chata goblinów\nKoszt: 8 drewna • zwiększa pojemność plemienia",
             () => SelectBuildMode((long)BuildMode.GoblinHut),
             GameShortcutId.BuildGoblinHut);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenWall,
             "Drewniana ściana\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodenWall),
             GameShortcutId.BuildWoodenWall);
-        CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateUiItemCompositeIcon(UiIcon.WoodenWall, ItemIcon.Stone),
             "Kamienny mur\nKoszt: 2 jednostki kamienia • wymaga kilofa",
             () => SelectBuildMode((long)BuildMode.StoneWall),
             GameShortcutId.BuildStoneWall);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenDoorFrame,
             "Drewniana ościeżnica\nKoszt: 1 drewno", () => SelectBuildMode((long)BuildMode.WoodenDoorFrame));
-        CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateUiItemCompositeIcon(UiIcon.WoodenDoorFrame, ItemIcon.Stone),
             "Kamienna ościeżnica\nKoszt: 1 kamień • wymaga kilofa",
             () => SelectBuildMode((long)BuildMode.StoneDoorFrame));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenDoor,
@@ -350,14 +352,14 @@ public partial class Main : Node
             "Zbierz żywność\nJagody, grzyby, korzonki i ryby",
             () => SelectWorkMode((long)WorkMode.GatherFood),
             GameShortcutId.GatherFood);
-        CreateItemTileButton(_workMenuGrid, _workMenu, ItemIcon.Reeds,
+        CreateTextureTileButton(_workMenuGrid, _workMenu, CreateGatherIcon(ItemIcon.Reeds),
             "Zbierz sitowie\nWskaż trzcinowiska na płytkiej wodzie",
             () => SelectWorkMode((long)WorkMode.GatherReeds),
             GameShortcutId.GatherReeds);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherBrushwood,
             "Zbierz chrust\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.GatherBrushwood),
             GameShortcutId.GatherBrushwood);
-        CreateItemTileButton(_workMenuGrid, _workMenu, ItemIcon.Stone,
+        CreateTextureTileButton(_workMenuGrid, _workMenu, CreateGatherIcon(ItemIcon.Stone),
             "Zbierz kamienie i urobek\nPrzeciągnij obszar",
             () => SelectWorkMode((long)WorkMode.GatherStone),
             GameShortcutId.GatherStone);
@@ -367,21 +369,25 @@ public partial class Main : Node
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.FellTree,
             "Wyrąb drzew i pni\nWymaga goblina z siekierą", () => SelectWorkMode((long)WorkMode.FellTrees),
             GameShortcutId.FellTrees);
-        CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
+        CreateTextureTileButton(_workMenuGrid, _workMenu,
+            CreateBadgedIcon(_pickaxeIcon, ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone)),
             "Rozbij głazy\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.QuarryBoulders),
             GameShortcutId.QuarryBoulders);
-        CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
+        CreateTextureTileButton(_workMenuGrid, _workMenu,
+            CreateBadgedIcon(_pickaxeIcon, CreateMineBadgeIcon()),
             "Kop w skale\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.MineRock),
             GameShortcutId.MineRock);
-        CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
+        CreateTextureTileButton(_workMenuGrid, _workMenu,
+            CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: false)),
             "Wykop pochylnię w dół\nWskaż odkrytą podłogę; wymaga kilofa",
             () => SelectWorkMode((long)WorkMode.CarveRampDown),
             GameShortcutId.CarveRampDown);
-        CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
+        CreateTextureTileButton(_workMenuGrid, _workMenu,
+            CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: true)),
             "Wykop pochylnię w górę\nWskaż odkrytą podłogę jaskini; wymaga kilofa",
             () => SelectWorkMode((long)WorkMode.CarveRampUp),
             GameShortcutId.CarveRampUp);
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.Expedition,
+        CreateTextureTileButton(_workMenuGrid, _workMenu, CreateSlingIcon(),
             "Poluj na zwierzęta\nPrzeciągnij obszar; pozostaną konkretne cele",
             () => SelectWorkMode((long)WorkMode.HuntAnimals),
             GameShortcutId.HuntAnimals);
@@ -389,23 +395,23 @@ public partial class Main : Node
             "Wyznacz obszar zwiadu\nSkauci nie wejdą w nieznany teren poza zaznaczeniem",
             () => SelectWorkMode((long)WorkMode.Scout),
             GameShortcutId.Scout);
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
+        CreateTextureTileButton(_workMenuGrid, _workMenu, CreateCleanBloodIcon(),
             "Zmyj zaschniętą krew\nWskaż plamy na podłogach i pomostach",
             () => SelectWorkMode((long)WorkMode.CleanBlood),
             GameShortcutId.CleanBlood);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
             "Usuń zlecenia\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.Clear),
             GameShortcutId.ClearOrders);
-        CreateItemTileButton(
+        CreateTextureTileButton(
             _statisticsMenuGrid,
             _statisticsMenu,
-            ItemIcon.Cargo,
+            CreateStoredResourcesOverviewIcon(),
             "Łączne zapasy w magazynach",
             ShowStoredResources);
-        CreateItemTileButton(
+        CreateTextureTileButton(
             _statisticsMenuGrid,
             _statisticsMenu,
-            ItemIcon.Wood,
+            CreateLooseResourcesOverviewIcon(),
             "Znane towary leżące na ziemi",
             ShowLooseResources);
         CreateTileButton(
@@ -422,20 +428,14 @@ public partial class Main : Node
             ShowStatistics);
         CreateNeedIndicators();
         _goblinDetails.CloseRequested += _goblinDetails.Hide;
-        _goblinDetails.GetNode<Control>("Scroll").GuiInput += inputEvent =>
-            CloseWindowOnSecondaryInput(inputEvent, _goblinDetails);
         ConfigureOverviewWindow(
-            _storedResourcesWindow,
-            _storedResourcesWindow.GetNode<Control>("Margin"));
+            _storedResourcesWindow);
         ConfigureOverviewWindow(
-            _looseResourcesWindow,
-            _looseResourcesWindow.GetNode<Control>("Margin"));
+            _looseResourcesWindow);
         ConfigureOverviewWindow(
-            _goblinRosterWindow,
-            _goblinRosterWindow.GetNode<Control>("Scroll"));
+            _goblinRosterWindow);
         ConfigureOverviewWindow(
-            _statisticsWindow,
-            _statisticsWindow.GetNode<Control>("Margin"));
+            _statisticsWindow);
         _storedResourcesDetailed.Toggled += _ =>
         {
             _storedResourcesSignature = string.Empty;
@@ -470,8 +470,6 @@ public partial class Main : Node
             _resourcePriority.AddItem(DescribeStoragePriority(priority));
         }
         _storageDetails.CloseRequested += _storageDetails.Hide;
-        _storageDetails.GetNode<Control>("Margin").GuiInput += inputEvent =>
-            CloseWindowOnSecondaryInput(inputEvent, _storageDetails);
         _constructionDetails = GetNode<Window>("ConstructionDetails");
         _constructionSummary = GetNode<Label>("ConstructionDetails/Margin/Controls/Summary");
         _constructionPriority = GetNode<OptionButton>(
@@ -481,16 +479,6 @@ public partial class Main : Node
             _constructionPriority.AddItem(DescribeStoragePriority(priority));
         }
         _constructionDetails.CloseRequested += _constructionDetails.Hide;
-        _constructionDetails.GetNode<Control>("Margin").GuiInput += inputEvent =>
-            CloseWindowOnSecondaryInput(inputEvent, _constructionDetails);
-        _buildMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
-            CloseWindowOnSecondaryInput(inputEvent, _buildMenu);
-        _managementMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
-            CloseWindowOnSecondaryInput(inputEvent, _managementMenu);
-        _workMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
-            CloseWindowOnSecondaryInput(inputEvent, _workMenu);
-        _statisticsMenu.GetNode<Control>("Margin").GuiInput += inputEvent =>
-            CloseWindowOnSecondaryInput(inputEvent, _statisticsMenu);
         _storagePullLoose.Toggled += enabled =>
         {
             _storageTarget.Editable = enabled;
@@ -656,13 +644,8 @@ public partial class Main : Node
             return;
         }
 
-        if (_optionsWindow.Visible &&
-            inputEvent is InputEventKey { Pressed: true, Echo: false } optionsKey)
+        if (TryDismissTopmostWindow(inputEvent))
         {
-            if (optionsKey.Keycode == Key.Escape)
-            {
-                CloseOptions();
-            }
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -983,8 +966,8 @@ public partial class Main : Node
 
     private void LoadGame()
     {
-        string? newestFailure = null;
-        foreach (var candidate in _saveStore.LoadNewestFirst())
+        string? preferredFailure = null;
+        foreach (var candidate in _saveStore.LoadPreferredFirst())
         {
             try
             {
@@ -1000,14 +983,14 @@ public partial class Main : Node
             }
             catch (Exception exception) when (exception is InvalidDataException or System.Text.Json.JsonException)
             {
-                newestFailure ??= $"{Path.GetFileName(candidate.Path)}: {exception.Message}";
-                // Try an older rotating slot if the newest save is incompatible or damaged.
+                preferredFailure ??= $"{Path.GetFileName(candidate.Path)}: {exception.Message}";
+                // Try rotating autosave recovery points if the preferred save cannot load.
             }
         }
 
-        _inspector.Text = newestFailure is null
+        _inspector.Text = preferredFailure is null
             ? "Nie znaleziono zapisu do wczytania."
-            : $"Nie znaleziono zgodnego zapisu • {newestFailure}";
+            : $"Nie znaleziono zgodnego zapisu • {preferredFailure}";
     }
 
     private void ShowMainMenu()
@@ -1055,18 +1038,6 @@ public partial class Main : Node
         margin.AddChild(content);
         content.AddChild(new Label
         {
-            Text = "Interfejs",
-            ThemeTypeVariation = "HeaderSmall",
-        });
-        content.AddChild(new Label
-        {
-            Text = "Motyw: ciemna sepia • tekst: jasne złoto\n" +
-                "Paleta jest wspólna dla menu kontekstowych, paneli i okien.",
-            AutowrapMode = TextServer.AutowrapMode.WordSmart,
-        });
-        content.AddChild(new HSeparator());
-        content.AddChild(new Label
-        {
             Text = "Skróty klawiaturowe",
             ThemeTypeVariation = "HeaderSmall",
         });
@@ -1096,22 +1067,38 @@ public partial class Main : Node
         shortcutMargin.AddChild(_shortcutRows);
         RebuildShortcutRows();
 
+        content.AddChild(new HSeparator());
+        content.AddChild(new Label
+        {
+            Text = "O grze",
+            ThemeTypeVariation = "HeaderSmall",
+        });
+        content.AddChild(new Label
+        {
+            Text = "Autor: Sebastian Gruchacz\n" +
+                "Wsparcie projektowe i programistyczne: OpenAI Codex\n" +
+                "ObscureWare Solutions",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
+        var musicNotice = new Label
+        {
+            Text = "Muzyka „The Hollow Council” jest tymczasowym utworem " +
+                "wygenerowanym przez AI, używanym wyłącznie w tym wewnętrznym demie. " +
+                "Nie posiada zgody na wykorzystanie komercyjne i musi zostać " +
+                "zastąpiona przed publiczną lub komercyjną dystrybucją.",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        };
+        musicNotice.AddThemeColorOverride("font_color", GameUiTheme.MutedText);
+        musicNotice.AddThemeFontSizeOverride("font_size", 10);
+        content.AddChild(musicNotice);
+
         var close = new Button { Text = "Zamknij" };
         close.Pressed += CloseOptions;
         content.AddChild(close);
 
-        var controls = GetNode<VBoxContainer>(
-            "Interface/MainMenu/Center/Panel/Margin/Controls");
-        var optionsButton = new Button
-        {
-            Text = "Opcje",
-            CustomMinimumSize = new Vector2(0, 42),
-        };
+        var optionsButton = GetNode<Button>(
+            "Interface/MainMenu/Center/Panel/Margin/Controls/Options");
         optionsButton.Pressed += ShowOptions;
-        controls.AddChild(optionsButton);
-        var quitButton = GetNode<Button>(
-            "Interface/MainMenu/Center/Panel/Margin/Controls/Quit");
-        controls.MoveChild(optionsButton, quitButton.GetIndex());
     }
 
     private void ShowOptions()
@@ -1455,25 +1442,56 @@ public partial class Main : Node
         UpdateStatus(_latestSnapshot);
     }
 
-    private void CloseWindowOnSecondaryInput(InputEvent inputEvent, Window window)
+    private bool TryDismissTopmostWindow(InputEvent inputEvent)
     {
-        if (inputEvent is not InputEventMouseButton
+        var window = GetChildren()
+            .OfType<Window>()
+            .Where(candidate => candidate.Visible)
+            .OrderByDescending(candidate => candidate.HasFocus())
+            .ThenByDescending(candidate => candidate.GetIndex())
+            .FirstOrDefault();
+        if (window is null)
+        {
+            return false;
+        }
+
+        var dismiss = inputEvent is InputEventKey
+            {
+                Pressed: true,
+                Echo: false,
+                Keycode: Key.Escape,
+            };
+        if (!dismiss && inputEvent is InputEventMouseButton
             {
                 Pressed: true,
                 ButtonIndex: MouseButton.Right,
-            })
+            } mouse)
         {
-            return;
+            var decoratedBounds = new Rect2(
+                new Vector2(window.Position.X, window.Position.Y - GameUiTheme.WindowTitleHeight),
+                new Vector2(window.Size.X, window.Size.Y + GameUiTheme.WindowTitleHeight));
+            dismiss = !decoratedBounds.HasPoint(mouse.Position);
         }
 
-        window.Hide();
-        GetViewport().SetInputAsHandled();
+        if (!dismiss)
+        {
+            return false;
+        }
+
+        if (window == _optionsWindow)
+        {
+            CloseOptions();
+        }
+        else
+        {
+            window.Hide();
+        }
+        return true;
     }
 
-    private void ConfigureOverviewWindow(Window window, Control content)
+    private static void ConfigureOverviewWindow(Window window)
     {
         window.CloseRequested += window.Hide;
-        content.GuiInput += inputEvent => CloseWindowOnSecondaryInput(inputEvent, window);
     }
 
     private void ClearSelection()
@@ -1816,32 +1834,6 @@ public partial class Main : Node
         RegisterShortcutTile(shortcut, button, tooltip);
     }
 
-    private void CreateItemTileButton(
-        GridContainer grid,
-        PopupPanel menu,
-        ItemIcon icon,
-        string tooltip,
-        Action action,
-        GameShortcutId? shortcut = null)
-    {
-        var button = new Button
-        {
-            CustomMinimumSize = new Vector2(68, 68),
-            Icon = ItemIcons.CreateTexture(_itemIconAtlas, icon),
-            ExpandIcon = true,
-            FocusMode = Control.FocusModeEnum.None,
-            TooltipText = tooltip,
-        };
-        button.Pressed += () =>
-        {
-            menu.Hide();
-            action();
-        };
-        grid.AddChild(button);
-        RegisterShortcutAction(shortcut, action);
-        RegisterShortcutTile(shortcut, button, tooltip);
-    }
-
     private void CreateTextureTileButton(
         GridContainer grid,
         PopupPanel menu,
@@ -1866,6 +1858,151 @@ public partial class Main : Node
         grid.AddChild(button);
         RegisterShortcutAction(shortcut, action);
         RegisterShortcutTile(shortcut, button, tooltip);
+    }
+
+    private Texture2D CreateStorageIcon(ItemIcon item) => CreateCompositeIcon(
+        CreateStorageBaseIcon(),
+        ItemIcons.CreateTexture(_itemIconAtlas, item),
+        new Rect2I(18, 20, 36, 36));
+
+    private Texture2D CreateUiItemCompositeIcon(UiIcon action, ItemIcon item) =>
+        CreateBadgedIcon(
+            UiIcons.CreateTexture(_iconAtlas, action),
+            ItemIcons.CreateTexture(_itemIconAtlas, item));
+
+    private Texture2D CreateGatherIcon(ItemIcon item) => CreateBadgedIcon(
+        ItemIcons.CreateTexture(_itemIconAtlas, item),
+        CreateGatherBadgeIcon());
+
+    private static Texture2D CreateBadgedIcon(Texture2D foundation, Texture2D badge) =>
+        CreateCompositeIcon(foundation, badge, new Rect2I(36, 36, 27, 27));
+
+    private static Texture2D CreateCompositeIcon(
+        Texture2D foundation,
+        Texture2D overlay,
+        Rect2I overlayRegion)
+    {
+        var image = foundation.GetImage();
+        image.Resize(64, 64, Image.Interpolation.Lanczos);
+        var overlayImage = overlay.GetImage();
+        overlayImage.Resize(
+            overlayRegion.Size.X,
+            overlayRegion.Size.Y,
+            Image.Interpolation.Lanczos);
+        image.BlendRect(
+            overlayImage,
+            new Rect2I(Vector2I.Zero, overlayRegion.Size),
+            overlayRegion.Position);
+        return ImageTexture.CreateFromImage(image);
+    }
+
+    private static Texture2D CreateStorageBaseIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <path d="M6 18 L32 6 L58 18 V57 H6 Z" fill="#6f4728" stroke="#2c1b12" stroke-width="4" stroke-linejoin="round"/>
+              <path d="M10 20 H54 M10 39 H54" stroke="#d09a52" stroke-width="4"/>
+              <path d="M13 23 H51 V53 H13 Z" fill="#241b14" stroke="#46301f" stroke-width="2"/>
+              <path d="M9 55 H55" stroke="#d09a52" stroke-width="5" stroke-linecap="round"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "storage base");
+    }
+
+    private static Texture2D CreateGatherBadgeIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+              <circle cx="16" cy="16" r="14" fill="#315b35" stroke="#f2d889" stroke-width="2"/>
+              <path d="M16 6 V18 M11 13 L16 19 L21 13" fill="none" stroke="#f7edc0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8 22 H24 L22 27 H10 Z" fill="#9b6532" stroke="#f2d889" stroke-width="2" stroke-linejoin="round"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "gathering badge");
+    }
+
+    private static Texture2D CreateMineBadgeIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+              <circle cx="16" cy="16" r="14" fill="#312d2b" stroke="#f2d889" stroke-width="2"/>
+              <path d="M7 25 V18 C7 9 25 9 25 18 V25" fill="#70655b" stroke="#d8c492" stroke-width="2"/>
+              <path d="M12 25 V19 C12 14 20 14 20 19 V25 Z" fill="#171514"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "mining badge");
+    }
+
+    private static Texture2D CreateDirectionBadgeIcon(bool upward)
+    {
+        var arrow = upward
+            ? "M16 7 L8 16 H13 V25 H19 V16 H24 Z"
+            : "M16 25 L8 16 H13 V7 H19 V16 H24 Z";
+        var svg = $"""
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+              <circle cx="16" cy="16" r="14" fill="#493522" stroke="#f2d889" stroke-width="2"/>
+              <path d="{arrow}" fill="#f7edc0" stroke="#241b14" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, upward ? "ramp-up badge" : "ramp-down badge");
+    }
+
+    private static Texture2D CreateGoblinHutIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <path d="M8 29 L32 8 L56 29 V57 H8 Z" fill="#79502f" stroke="#2b1b12" stroke-width="4" stroke-linejoin="round"/>
+              <path d="M4 30 L32 4 L60 30" fill="none" stroke="#54713b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M25 57 V39 Q32 31 39 39 V57 Z" fill="#211711" stroke="#d09a52" stroke-width="3"/>
+              <circle cx="32" cy="43" r="3" fill="#ffd968"/>
+              <path d="M15 35 H22 M42 35 H49" stroke="#d09a52" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "goblin hut");
+    }
+
+    private static Texture2D CreateCleanBloodIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <path d="M20 7 C20 7 9 22 9 31 C9 39 14 44 20 44 C26 44 31 39 31 31 C31 22 20 7 20 7 Z" fill="#a52d2d" stroke="#3b1515" stroke-width="3"/>
+              <path d="M33 12 L56 44" stroke="#8b5a2b" stroke-width="6" stroke-linecap="round"/>
+              <path d="M44 38 L58 34 L62 49 L48 54 Z" fill="#d7c28a" stroke="#4b3520" stroke-width="3"/>
+              <path d="M49 42 L59 40 M50 47 L60 45" stroke="#72a9c2" stroke-width="2"/>
+              <path d="M8 54 Q22 48 38 55" fill="none" stroke="#72a9c2" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "blood-cleaning");
+    }
+
+    private static Texture2D CreateStoredResourcesOverviewIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <rect x="7" y="8" width="50" height="48" rx="4" fill="#6f4728" stroke="#2c1b12" stroke-width="4"/>
+              <path d="M10 31 H54" stroke="#d09a52" stroke-width="4"/>
+              <rect x="13" y="14" width="14" height="12" rx="2" fill="#b53e36"/>
+              <rect x="34" y="14" width="16" height="12" rx="2" fill="#718f3b"/>
+              <rect x="13" y="37" width="16" height="13" rx="2" fill="#9a7448"/>
+              <rect x="35" y="37" width="15" height="13" rx="2" fill="#777d7f"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "stored-resources overview");
+    }
+
+    private static Texture2D CreateLooseResourcesOverviewIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <ellipse cx="32" cy="55" rx="27" ry="5" fill="#2c2118"/>
+              <path d="M9 45 L24 31 L34 49 Z" fill="#8b8d86" stroke="#343635" stroke-width="3"/>
+              <path d="M31 50 L43 24 L54 50 Z" fill="#6f4728" stroke="#2c1b12" stroke-width="3"/>
+              <circle cx="49" cy="22" r="7" fill="#b73535" stroke="#4a1717" stroke-width="2"/>
+              <path d="M47 15 Q52 9 57 14" fill="none" stroke="#5d873e" stroke-width="3" stroke-linecap="round"/>
+              <path d="M14 48 H56" stroke="#d09a52" stroke-width="3" stroke-dasharray="4 3"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "loose-resources overview");
     }
 
     private static Texture2D CreateWallTorchIcon()
@@ -2005,24 +2142,25 @@ public partial class Main : Node
         _buildMode = mode;
         _isDraggingLinearBuild = false;
         _worldView.SetConstructionPreview([]);
+        UpdateActiveToolCursor();
         _inspector.Text = _buildMode switch
         {
-            BuildMode.FoodStorage => "Budowa składu żywności: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
-            BuildMode.WoodStorage => "Budowa składu drewna: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
-            BuildMode.StoneStorage => "Budowa składu kamienia: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
-            BuildMode.EquipmentStorage => "Budowa składu sprzętu: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
-            BuildMode.MaterialsStorage => "Budowa składu materiałów: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
-            BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • Esc anuluje",
-            BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu",
+            BuildMode.FoodStorage => "Budowa składu żywności: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
+            BuildMode.WoodStorage => "Budowa składu drewna: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
+            BuildMode.StoneStorage => "Budowa składu kamienia: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
+            BuildMode.EquipmentStorage => "Budowa składu sprzętu: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
+            BuildMode.MaterialsStorage => "Budowa składu materiałów: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
+            BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • PPM lub Esc anuluje",
+            BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu • PPM lub Esc anuluje",
             BuildMode.GoblinHut => $"Chata 3×3: wskaż lewy górny narożnik • koszt 8 drewna • " +
-                $"daje {SimulationDefinitions.GoblinHutCapacity} miejsc i podnosi cel populacji",
-            BuildMode.WoodenWall => "Budowa drewnianej ściany: przeciągnij LPM od początku do końca • 2 drewna/segment • blokuje przejście",
-            BuildMode.StoneWall => "Budowa kamiennego muru: przeciągnij LPM od początku do końca • 2 jednostki kamienia/segment • wymaga kilofa",
-            BuildMode.WoodenDoorFrame => "Budowa drewnianej ościeżnicy: wskaż pole LPM • koszt 1 drewna • może zastąpić gotową ścianę",
-            BuildMode.StoneDoorFrame => "Budowa kamiennej ościeżnicy: wskaż pole LPM • koszt 1 kamienia • wymaga kilofa • może zastąpić gotowy kamienny mur",
-            BuildMode.WoodenDoor => "Budowa drewnianych drzwi: wskaż gotową ościeżnicę LPM • koszt 1 drewna • po budowie kliknij skrzydło, aby je otworzyć",
-            BuildMode.WallTorch => "Budowa pochodni: wskaż odkrytą ścianę LPM • koszt 1 drewna • strona montażu wynika z wnętrza i sąsiedztwa",
-            BuildMode.PrimitiveWorkshop => "Budowa prymitywnego warsztatu: wskaż pole LPM • koszt 4 drewna • Esc anuluje",
+                $"daje {SimulationDefinitions.GoblinHutCapacity} miejsc i podnosi cel populacji • PPM lub Esc anuluje",
+            BuildMode.WoodenWall => "Budowa drewnianej ściany: przeciągnij LPM od początku do końca • 2 drewna/segment • blokuje przejście • PPM lub Esc anuluje",
+            BuildMode.StoneWall => "Budowa kamiennego muru: przeciągnij LPM od początku do końca • 2 jednostki kamienia/segment • wymaga kilofa • PPM lub Esc anuluje",
+            BuildMode.WoodenDoorFrame => "Budowa drewnianej ościeżnicy: wskaż pole LPM • koszt 1 drewna • może zastąpić gotową ścianę • PPM lub Esc anuluje",
+            BuildMode.StoneDoorFrame => "Budowa kamiennej ościeżnicy: wskaż pole LPM • koszt 1 kamienia • wymaga kilofa • może zastąpić gotowy kamienny mur • PPM lub Esc anuluje",
+            BuildMode.WoodenDoor => "Budowa drewnianych drzwi: wskaż gotową ościeżnicę LPM • koszt 1 drewna • po budowie kliknij skrzydło, aby je otworzyć • PPM lub Esc anuluje",
+            BuildMode.WallTorch => "Budowa pochodni: wskaż odkrytą ścianę LPM • koszt 1 drewna • strona montażu wynika z wnętrza i sąsiedztwa • PPM lub Esc anuluje",
+            BuildMode.PrimitiveWorkshop => "Budowa prymitywnego warsztatu: wskaż pole LPM • koszt 4 drewna • PPM lub Esc anuluje",
             _ => _inspector.Text,
         };
     }
@@ -2036,22 +2174,23 @@ public partial class Main : Node
         _workMode = mode;
         _isDraggingWorkArea = false;
         _worldView.SetWorkPreview(default, []);
+        UpdateActiveToolCursor();
         _inspector.Text = _workMode switch
         {
-            WorkMode.GatherFood => "Praca: przeciągnij obszar zbierania żywności • Esc anuluje",
-            WorkMode.GatherReeds => "Praca: przeciągnij obszar zbierania sitowia • Esc anuluje",
-            WorkMode.GatherBrushwood => "Praca: przeciągnij obszar zbierania chrustu • Esc anuluje",
-            WorkMode.GatherStone => "Praca: przeciągnij obszar zbierania małych kamieni • Esc anuluje",
-            WorkMode.UprootBerryBushes => "Praca: przeciągnij obszar karczowania krzaków • usuwa je trwale • Esc anuluje",
-            WorkMode.FellTrees => "Praca: przeciągnij obszar wyrębu • pozostaną konkretne drzewa i martwe pnie • Esc anuluje",
-            WorkMode.QuarryBoulders => "Praca: przeciągnij obszar wydobycia • pozostaną konkretne głazy • wymaga kilofa • Esc anuluje",
-            WorkMode.MineRock => "Praca: przeciągnij obszar tunelu • nieznane pola pozostaną w planie aż front kopania je odsłoni • wymaga kilofa • Esc anuluje",
-            WorkMode.CarveRampDown => "Praca: wskaż odkrytą podłogę • goblin z kilofem wykopie pochylnię na poziom niżej • Esc anuluje",
-            WorkMode.CarveRampUp => "Praca: wskaż odkrytą podłogę jaskini • goblin z kilofem wykopie pochylnię na poziom wyżej • Esc anuluje",
-            WorkMode.HuntAnimals => "Polowanie: przeciągnij obszar • pozostaną konkretne zwierzęta • Esc anuluje",
-            WorkMode.Scout => "Zwiad: przeciągnij dozwolony obszar • skauci mogą przechodzić przez znany teren, ale nie wejdą w nieznany teren poza zaznaczeniem",
-            WorkMode.CleanBlood => "Praca: przeciągnij obszar sprzątania zaschniętej krwi z wykonanych podłóg • Esc anuluje",
-            WorkMode.Clear => "Praca: przeciągnij obszar usuwania zleceń • Esc anuluje",
+            WorkMode.GatherFood => "Praca: przeciągnij obszar zbierania żywności • PPM lub Esc anuluje",
+            WorkMode.GatherReeds => "Praca: przeciągnij obszar zbierania sitowia • PPM lub Esc anuluje",
+            WorkMode.GatherBrushwood => "Praca: przeciągnij obszar zbierania chrustu • PPM lub Esc anuluje",
+            WorkMode.GatherStone => "Praca: przeciągnij obszar zbierania małych kamieni • PPM lub Esc anuluje",
+            WorkMode.UprootBerryBushes => "Praca: przeciągnij obszar karczowania krzaków • usuwa je trwale • PPM lub Esc anuluje",
+            WorkMode.FellTrees => "Praca: przeciągnij obszar wyrębu • pozostaną konkretne drzewa i martwe pnie • PPM lub Esc anuluje",
+            WorkMode.QuarryBoulders => "Praca: przeciągnij obszar wydobycia • pozostaną konkretne głazy • wymaga kilofa • PPM lub Esc anuluje",
+            WorkMode.MineRock => "Praca: przeciągnij obszar tunelu • nieznane pola pozostaną w planie aż front kopania je odsłoni • wymaga kilofa • PPM lub Esc anuluje",
+            WorkMode.CarveRampDown => "Praca: wskaż odkrytą podłogę • goblin z kilofem wykopie pochylnię na poziom niżej • PPM lub Esc anuluje",
+            WorkMode.CarveRampUp => "Praca: wskaż odkrytą podłogę jaskini • goblin z kilofem wykopie pochylnię na poziom wyżej • PPM lub Esc anuluje",
+            WorkMode.HuntAnimals => "Polowanie: przeciągnij obszar • pozostaną konkretne zwierzęta • PPM lub Esc anuluje",
+            WorkMode.Scout => "Zwiad: przeciągnij dozwolony obszar • skauci mogą przechodzić przez znany teren, ale nie wejdą w nieznany teren poza zaznaczeniem • PPM lub Esc anuluje",
+            WorkMode.CleanBlood => "Praca: przeciągnij obszar sprzątania zaschniętej krwi z wykonanych podłóg • PPM lub Esc anuluje",
+            WorkMode.Clear => "Praca: przeciągnij obszar usuwania zleceń • PPM lub Esc anuluje",
             _ => _inspector.Text,
         };
     }
@@ -2084,7 +2223,7 @@ public partial class Main : Node
             CreateStorage(
                 cell,
                 resource);
-            CancelBuildMode(clearInspector: false);
+            UpdateBuildPreview(screenPosition);
             return;
         }
 
@@ -2094,7 +2233,6 @@ public partial class Main : Node
             if (!_engine.Visibility.Get(cell).IsDiscovered())
             {
                 _inspector.Text = "Konstrukcja musi stanąć na odkrytym polu.";
-                CancelBuildMode(clearInspector: false);
                 return;
             }
 
@@ -2124,7 +2262,7 @@ public partial class Main : Node
                     "Zlecono prymitywny warsztat • koszt 4 drewna",
                 _ => "Zlecono zamknięte drewniane drzwi w ościeżnicy • koszt 1 drewna",
             };
-            CancelBuildMode(clearInspector: false);
+            UpdateBuildPreview(screenPosition);
             return;
         }
 
@@ -2136,13 +2274,12 @@ public partial class Main : Node
                     !_engine.Visibility.Get(item).IsDiscovered()))
             {
                 _inspector.Text = "Całe obozowisko musi mieścić się na odkrytej, dostępnej warstwie.";
-                CancelBuildMode(clearInspector: false);
                 return;
             }
             _engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
                 _engine.CurrentTick.Next(), _commandSequence++, cell));
             _inspector.Text = "Zlecono obozowisko 2×2 • koszt 6 drewna • skład prowiantu do 48, cel zależny od liczebności plemienia";
-            CancelBuildMode(clearInspector: false);
+            UpdateBuildPreview(screenPosition);
             return;
         }
 
@@ -2153,7 +2290,7 @@ public partial class Main : Node
                 _commandSequence++,
                 cell));
             _inspector.Text = "Zlecono budowę chaty goblinów. Materiały mogą zostać dostarczone później.";
-            CancelBuildMode(clearInspector: false);
+            UpdateBuildPreview(screenPosition);
             return;
         }
 
@@ -2169,16 +2306,16 @@ public partial class Main : Node
         if (!IsBuildableLayerCell(end) || end.Z != _linearBuildStart.Z)
         {
             _inspector.Text = "Cała konstrukcja musi leżeć na jednym dostępnym poziomie.";
-            CancelBuildMode(clearInspector: false);
             return;
         }
 
         var cells = SimulationCommand.GetLinearCells(_linearBuildStart, end);
-        if (cells.Any(cell =>
-                !_engine.Visibility.Get(cell).IsDiscovered()))
+        if (!IsLinearConstructionPlacementValid(cells))
         {
-            _inspector.Text = "Cała liniowa konstrukcja musi przebiegać przez odkryty teren.";
-            CancelBuildMode(clearInspector: false);
+            _inspector.Text = _buildMode == BuildMode.Walkway
+                ? "Pomost musi mieścić się w wolnej przestrzeni i stykać odkryte krawędzie terenu."
+                : "Cała liniowa konstrukcja musi przebiegać przez odkryty teren.";
+            UpdateBuildPreview(screenPosition);
             return;
         }
 
@@ -2200,7 +2337,7 @@ public partial class Main : Node
                 $"Zlecono kamienny mur: {cells.Count} segmentów • koszt {cells.Count * 2} jednostek kamienia",
             _ => $"Zlecono pomost: {cells.Count} segmentów • koszt {cells.Count} drewna",
         };
-        CancelBuildMode(clearInspector: false);
+        UpdateBuildPreview(screenPosition);
     }
 
     private void UpdateBuildPreview(Vector2 screenPosition)
@@ -2221,7 +2358,7 @@ public partial class Main : Node
             BuildMode.GoblinHut => GetAreaCells(cell, cell with { X = cell.X + 2, Y = cell.Y + 2 }),
             _ => new[] { cell },
         };
-        _worldView.SetConstructionPreview(cells);
+        _worldView.SetConstructionPreview(cells, IsConstructionPreviewValid(cells));
         if (_isDraggingLinearBuild)
         {
             _inspector.Text = _buildMode switch
@@ -2241,11 +2378,43 @@ public partial class Main : Node
         _buildMode = BuildMode.None;
         _isDraggingLinearBuild = false;
         _worldView.SetConstructionPreview([]);
+        UpdateActiveToolCursor();
         if (clearInspector && wasActive)
         {
             _inspector.Text = "Tryb budowy anulowany.";
         }
     }
+
+    private bool IsConstructionPreviewValid(IReadOnlyList<GridPosition> cells) =>
+        cells.Count > 0 && (_buildMode is BuildMode.Walkway or BuildMode.WoodenWall or
+            BuildMode.StoneWall
+            ? IsLinearConstructionPlacementValid(cells)
+            : cells.All(IsDiscoveredConstructionCell));
+
+    private bool IsLinearConstructionPlacementValid(IReadOnlyList<GridPosition> cells)
+    {
+        if (_buildMode != BuildMode.Walkway)
+        {
+            return cells.All(IsDiscoveredConstructionCell);
+        }
+
+        return _engine.World.CanBuildWalkway(cells) &&
+            IsKnownWalkwayEndpoint(cells[0]) &&
+            IsKnownWalkwayEndpoint(cells[^1]);
+    }
+
+    private bool IsKnownWalkwayEndpoint(GridPosition position) =>
+        IsDiscoveredConstructionCell(position) ||
+        new[]
+        {
+            position with { Y = position.Y - 1 },
+            position with { X = position.X + 1 },
+            position with { Y = position.Y + 1 },
+            position with { X = position.X - 1 },
+        }.Any(IsDiscoveredConstructionCell);
+
+    private bool IsDiscoveredConstructionCell(GridPosition position) =>
+        _engine.Visibility.TryGet(position, out var visibility) && visibility.IsDiscovered();
 
     private void BeginWorkArea(Vector2 screenPosition)
     {
@@ -2263,6 +2432,9 @@ public partial class Main : Node
     private void UpdateWorkPreview(Vector2 screenPosition)
     {
         var cell = ClampToCurrentMapLevel(ScreenToVisibleCell(screenPosition));
+        _worldView.SetWorkAreaPreview(
+            _isDraggingWorkArea ? _workAreaStart : null,
+            _isDraggingWorkArea ? cell : null);
         if (!IsBuildableLayerCell(cell))
         {
             _worldView.SetWorkPreview(default, []);
@@ -2305,6 +2477,7 @@ public partial class Main : Node
     {
         var end = ClampToCurrentMapLevel(ScreenToVisibleCell(screenPosition));
         _isDraggingWorkArea = false;
+        _worldView.SetWorkAreaPreview(null, null);
         if (!IsBuildableLayerCell(end) || !IsValidWorkAreaSelection(_workAreaStart, end))
         {
             _worldView.SetWorkPreview(default, []);
@@ -2430,7 +2603,10 @@ public partial class Main : Node
                 ? "Zlecono wskazanie pasujących obiektów; cele dodano bez wznawiania czasu."
                 : "Zlecono wskazanie pasujących obiektów; cele pojawią się po następnym ticku.",
         };
-        CancelWorkMode(clearInspector: false);
+        _replacingWorkOrderId = EntityId.None;
+        _replacementWorkPriority = null;
+        _replacementWorkSuspended = false;
+        UpdateWorkPreview(screenPosition);
     }
 
     private void SubmitCommand(SimulationCommand command)
@@ -2466,7 +2642,9 @@ public partial class Main : Node
         _replacementWorkPriority = null;
         _replacementWorkSuspended = false;
         _isDraggingWorkArea = false;
+        _worldView.SetWorkAreaPreview(null, null);
         _worldView.SetWorkPreview(default, []);
+        UpdateActiveToolCursor();
         if (clearInspector && wasActive)
         {
             _inspector.Text = "Narzędzie obszaru pracy anulowane.";
@@ -2488,6 +2666,11 @@ public partial class Main : Node
             _inspector.Text = "Aktywne narzędzie anulowane.";
         }
     }
+
+    private void UpdateActiveToolCursor() => Input.SetDefaultCursorShape(
+        _buildMode != BuildMode.None || _workMode != WorkMode.None
+            ? Input.CursorShape.Cross
+            : Input.CursorShape.Arrow);
 
     private void BeginRaidTargetSelection(SimulationSnapshot snapshot)
     {
@@ -4811,7 +4994,6 @@ public partial class Main : Node
         margin.AddThemeConstantOverride("margin_right", 14);
         margin.AddThemeConstantOverride("margin_bottom", 14);
         _workshopDetails.AddChild(margin);
-        margin.GuiInput += inputEvent => CloseWindowOnSecondaryInput(inputEvent, _workshopDetails);
 
         var content = new VBoxContainer
         {
@@ -5411,9 +5593,11 @@ public partial class Main : Node
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
         _worldContextMenu.AddItem(
             storage.Id == EntityId.None
-                ? $"Prowiant: brak składu • obsada {occupants.Length}/{SimulationDefinitions.FieldCampCapacity}"
-                : $"Prowiant {storage.StoredQuantity}/{storage.Capacity} • obsada " +
-                  $"{occupants.Length}/{SimulationDefinitions.FieldCampCapacity}");
+                ? $"Prowiant: brak składu • miejsca " + DescribeCampOccupancy(occupants.Length)
+                : $"Prowiant {storage.StoredQuantity}/{storage.Capacity} • miejsca " +
+                  DescribeCampOccupancy(occupants.Length));
+        _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
+        _worldContextMenu.AddItem(DescribeCampRaidStatus(snapshot, camp.Anchor));
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
         _worldContextMenu.AddSeparator();
         _worldContextMenu.AddItem("Edytuj najazd…", (int)WorldContextAction.EditRaid);
@@ -5464,6 +5648,42 @@ public partial class Main : Node
             Mathf.RoundToInt(screenPosition.Y));
         _worldContextMenu.Popup();
         return true;
+    }
+
+    private static string DescribeCampOccupancy(int occupantCount)
+    {
+        var capacity = SimulationDefinitions.FieldCampCapacity;
+        return occupantCount <= capacity
+            ? $"{occupantCount}/{capacity}"
+            : $"{capacity}/{capacity} • opuszcza obóz: {occupantCount - capacity}";
+    }
+
+    private static string DescribeCampRaidStatus(
+        SimulationSnapshot snapshot,
+        GridPosition campAnchor)
+    {
+        if (snapshot.RaidPhase == GoblinRaidPhase.None)
+        {
+            return snapshot.RaidPartyIds.Count == 0
+                ? "Najazd: nieaktywny • brak wybranego oddziału"
+                : $"Najazd: nieaktywny • plan {snapshot.RaidPartyIds.Count}/" +
+                  SimulationDefinitions.FieldCampCapacity;
+        }
+        if (snapshot.RaidRallyPoint != campAnchor)
+        {
+            return "Najazd: inny obóz jest punktem zbiórki";
+        }
+
+        return snapshot.RaidPhase switch
+        {
+            GoblinRaidPhase.Preparing => "Najazd: przygotowanie oddziału",
+            GoblinRaidPhase.Ready => "Najazd: GOTOWY DO WYMARSZU",
+            GoblinRaidPhase.Suspended => "Najazd: przygotowania wstrzymane",
+            GoblinRaidPhase.Marching => "Najazd: oddział w drodze",
+            GoblinRaidPhase.Looting => "Najazd: plądrowanie",
+            GoblinRaidPhase.Returning => "Najazd: powrót do obozu",
+            _ => "Najazd: stan nieznany",
+        };
     }
 
     private void ShowCorpseContextMenu(
@@ -6121,11 +6341,17 @@ public partial class Main : Node
             return;
         }
 
-        CancelBuildMode(clearInspector: false);
-        CancelWorkMode(clearInspector: false);
         _visibleLevel = next;
         _worldView.SetVisibleLevel(next);
         UpdateLayerToolAvailability();
+        if (_buildMode != BuildMode.None)
+        {
+            UpdateBuildPreview(GetViewport().GetMousePosition());
+        }
+        else if (_workMode != WorkMode.None)
+        {
+            UpdateWorkPreview(GetViewport().GetMousePosition());
+        }
         var selectedActors = snapshot.Actors
             .Where(actor => _selectedActorIds.Contains(actor.Id))
             .OrderBy(actor => actor.Id)

@@ -52,10 +52,11 @@ public sealed partial class SimulationEngine
         var reservedConstructionQuantities = CreateConstructionReservations();
         var reservedCraftingQuantities = CreateCraftingReservations();
         var activeExplorers = _actors.Values.Count(actor => actor.JobKind == ActorJobKind.Explore);
-        var raidPartyIds = _raidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Marching or
-            GoblinRaidPhase.Looting or GoblinRaidPhase.Returning
+        var raidPartyIds = _raidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready or
+            GoblinRaidPhase.Marching or GoblinRaidPhase.Looting or GoblinRaidPhase.Returning
             ? GetRaidParty().Select(actor => actor.Id).ToHashSet()
             : [];
+        var fieldCampEvacuees = CreateFieldCampEvacuees();
         _lastActorJobStageStopwatchTicks[1] =
             System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
         var needInterruptTicks = 0L;
@@ -64,6 +65,10 @@ public sealed partial class SimulationEngine
 
         foreach (var actor in _actors.Values)
         {
+            if (actor.JobKind == ActorJobKind.Rest && fieldCampEvacuees.Contains(actor.Id))
+            {
+                actor.ClearJob();
+            }
             if (actor.JobKind == ActorJobKind.Collapsed)
             {
                 UpdateCollapsedJob(actor);
@@ -136,6 +141,11 @@ public sealed partial class SimulationEngine
                 {
                     // With no prepared food, gathering becomes survival work.
                 }
+                else if (fieldCampEvacuees.Contains(actor.Id) &&
+                         TryPlanFieldCampDeparture(actor))
+                {
+                    // Raiders reserve camp beds; excess occupants return to huts or the start area.
+                }
                 else if (actor.Fatigue >= Definitions.RestThreshold && TryPlanRestJob(actor))
                 {
                     // Survival work outranks gathering once the current job has ended.
@@ -149,6 +159,10 @@ public sealed partial class SimulationEngine
                          TryPlanRaidMarch(actor))
                 {
                     // A raider resumes the expedition after satisfying an urgent personal need.
+                }
+                else if (_raidPhase == GoblinRaidPhase.Ready && raidPartyIds.Contains(actor.Id))
+                {
+                    // A ready expedition holds its places in camp until explicitly launched.
                 }
                 else if (TryPlanTacticalOrder(actor))
                 {
@@ -1146,15 +1160,18 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanRestJob(ActorState actor)
     {
-        var destinations = World.CreateWorldObjectSnapshot()
-            .Where(worldObject =>
-                (worldObject.Kind is WorldObjectKind.GoblinHut or WorldObjectKind.GoblinFieldCamp) &&
-                worldObject.Owner == WorldObjectOwner.GoblinTribe)
-            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+        var shelters = World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .ToArray();
+        var destinations = shelters
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut)
+            .SelectMany(GetShelterFloorCells)
+            .Concat(shelters
+                .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+                    CanReserveFieldCampBed(actor, worldObject))
+                .SelectMany(GetShelterFloorCells))
             .Where(item =>
-                item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door &&
-                World.IsTerrainTraversable(item.Position))
-            .Select(item => item.Position)
+                World.IsTerrainTraversable(item))
             .Distinct()
             .ToHashSet();
         var route = FindActorPathToNearest(actor, destinations);
@@ -1168,6 +1185,112 @@ public sealed partial class SimulationEngine
         BeginJobLeg(actor, route, GetRestWorkTicks(actor));
         return true;
     }
+
+    private HashSet<EntityId> CreateFieldCampEvacuees()
+    {
+        var result = new HashSet<EntityId>();
+        foreach (var camp in World.CreateWorldObjectSnapshot().Where(worldObject =>
+                     worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+                     worldObject.Owner == WorldObjectOwner.GoblinTribe))
+        {
+            var floorCells = GetShelterFloorCells(camp).ToHashSet();
+            var prioritizedRaiders = IsFieldCampReservedForRaid(camp)
+                ? _raidPartyIds.Where(id =>
+                        _actors.TryGetValue(id, out var raider) && raider.Health > 0)
+                    .ToHashSet()
+                : [];
+            var availableCivilianBeds = Math.Max(
+                0,
+                SimulationDefinitions.FieldCampCapacity - prioritizedRaiders.Count);
+            var civilianOccupants = _actors.Values
+                .Where(candidate => candidate.Health > 0 &&
+                    floorCells.Contains(candidate.Position) &&
+                    !prioritizedRaiders.Contains(candidate.Id))
+                .OrderBy(candidate => candidate.Id)
+                .ToArray();
+            foreach (var occupant in civilianOccupants.Skip(availableCivilianBeds))
+            {
+                result.Add(occupant.Id);
+            }
+        }
+
+        return result;
+    }
+
+    private bool TryPlanFieldCampDeparture(ActorState actor)
+    {
+        var worldObjects = World.CreateWorldObjectSnapshot();
+        var destinations = worldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut &&
+                worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .SelectMany(GetShelterFloorCells)
+            .Where(World.IsTerrainTraversable)
+            .Distinct()
+            .ToHashSet();
+        var route = FindActorPathToNearest(actor, destinations);
+        if (route is null)
+        {
+            var campCells = worldObjects
+                .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+                    worldObject.Owner == WorldObjectOwner.GoblinTribe)
+                .SelectMany(GetShelterFloorCells)
+                .ToHashSet();
+            var startArea = Enumerable.Range(-3, 7)
+                .SelectMany(y => Enumerable.Range(-3, 7)
+                    .Select(x => new GridPosition(
+                        Map.GoblinSpawn.X + x,
+                        Map.GoblinSpawn.Y + y,
+                        Map.GoblinSpawn.Z)))
+                .Where(position => !campCells.Contains(position) &&
+                    World.IsTerrainTraversable(position))
+                .ToHashSet();
+            route = FindActorPathToNearest(actor, startArea);
+        }
+        if (route is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        actor.JobKind = ActorJobKind.Move;
+        actor.JobTarget = route[^1];
+        BeginJobLeg(actor, route, workTicks: 0);
+        return true;
+    }
+
+    private bool CanReserveFieldCampBed(ActorState actor, WorldObjectSnapshot camp)
+    {
+        var floorCells = GetShelterFloorCells(camp).ToHashSet();
+        var prioritizedRaiders = IsFieldCampReservedForRaid(camp)
+            ? _raidPartyIds.Where(id =>
+                    _actors.TryGetValue(id, out var raider) && raider.Health > 0)
+                .ToHashSet()
+            : [];
+        if (prioritizedRaiders.Contains(actor.Id))
+        {
+            return true;
+        }
+
+        var availableCivilianBeds = Math.Max(
+            0,
+            SimulationDefinitions.FieldCampCapacity - prioritizedRaiders.Count);
+        var civilianReservations = _actors.Values.Count(candidate =>
+            candidate.Health > 0 && !prioritizedRaiders.Contains(candidate.Id) &&
+            (floorCells.Contains(candidate.Position) ||
+             candidate.JobKind == ActorJobKind.Rest && floorCells.Contains(candidate.JobTarget)));
+        return civilianReservations < availableCivilianBeds ||
+            floorCells.Contains(actor.Position);
+    }
+
+    private bool IsFieldCampReservedForRaid(WorldObjectSnapshot camp) =>
+        camp.Anchor == _raidRallyPoint &&
+        _raidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready or
+            GoblinRaidPhase.Returning;
+
+    private static IEnumerable<GridPosition> GetShelterFloorCells(
+        WorldObjectSnapshot worldObject) => worldObject.GetAbsoluteParts()
+        .Where(item => item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door)
+        .Select(item => item.Position)
+        .Distinct();
 
     private void UpdateRestJob(ActorState actor)
     {
@@ -3510,7 +3633,8 @@ public sealed partial class SimulationEngine
                     World.GetQuarriableBoulder(designation.Target) is null,
                 WorkDesignationKind.MineRock =>
                     Visibility.Get(designation.Target) != CellVisibility.Unknown &&
-                    !World.IsSolidRock(designation.Target),
+                    !World.IsSolidRock(designation.Target) &&
+                    !World.IsTerrainRampIntact(designation.Target),
                 WorkDesignationKind.CarveRampDown =>
                     !World.CanCarveRampDown(designation.Target),
                 WorkDesignationKind.CarveRampUp =>

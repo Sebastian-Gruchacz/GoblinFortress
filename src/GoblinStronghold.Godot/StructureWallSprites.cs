@@ -15,15 +15,7 @@ internal static class StructureWallSprites
     private const string AtlasPath = "res://Assets/Generated/connected-structure-walls-v1.png";
 
     public static Texture2D LoadAtlas()
-    {
-        var image = Image.LoadFromFile(ProjectSettings.GlobalizePath(AtlasPath));
-        if (image is null || image.IsEmpty())
-        {
-            throw new InvalidOperationException($"Cannot load structure wall atlas: {AtlasPath}");
-        }
-
-        return ImageTexture.CreateFromImage(image);
-    }
+        => TextureResources.LoadRequired(AtlasPath, "structure wall atlas");
 
     public static Rect2 GetRegion(
         Texture2D atlas,

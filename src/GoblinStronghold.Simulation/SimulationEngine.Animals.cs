@@ -13,6 +13,10 @@ public sealed partial class SimulationEngine
     private const int BoarMaximumFatigue = 24;
     private const int BoarMovementFatigue = 1;
     private const int BoarRestRecovery = 4;
+    private const int SpiderMaximumHealth = 180;
+    private const int SpiderMaximumFatigue = 18;
+    private const int SpiderMovementFatigue = 1;
+    private const int SpiderRestRecovery = 3;
 
     private void CreateInitialAnimals()
     {
@@ -23,16 +27,24 @@ public sealed partial class SimulationEngine
 
         CreateInitialAnimals(AnimalKind.MarshHare, Math.Max(6, Map.CellCount / 400));
         CreateInitialAnimals(AnimalKind.SwampBoar, Math.Max(3, Map.CellCount / 1_200));
+        for (var depth = 1; depth <= Map.CaveLevelCount; depth++)
+        {
+            CreateInitialAnimals(
+                AnimalKind.CaveSpider,
+                Math.Max(1, Map.CellCount / 8_000) * depth,
+                level: -depth);
+        }
     }
 
-    private void CreateInitialAnimals(AnimalKind kind, int count)
+    private void CreateInitialAnimals(AnimalKind kind, int count, int level = 0)
     {
         var candidates = Enumerable.Range(0, Map.Height)
             .SelectMany(y => Enumerable.Range(0, Map.Width)
-                .Select(x => new GridPosition(x, y, 0)))
+                .Select(x => new GridPosition(x, y, level)))
             .Where(position => IsAnimalHabitat(kind, position) &&
-                Distance(position, Map.GoblinSpawn) > 10 &&
-                Distance(position, Map.HumanVillage) > 7)
+                (level < 0 ||
+                 Distance(position, Map.GoblinSpawn) > 10 &&
+                 Distance(position, Map.HumanVillage) > 7))
             .OrderBy(position => position.Y)
             .ThenBy(position => position.X)
             .ToList();
@@ -46,7 +58,10 @@ public sealed partial class SimulationEngine
                 (ulong)index,
                 0,
                 candidates.Count);
-            AllocateAnimal(kind, candidates[candidateIndex]);
+            AllocateAnimal(
+                kind,
+                candidates[candidateIndex],
+                ageTicks: GetAnimalMaturityTicks(kind));
             candidates.RemoveAt(candidateIndex);
         }
     }
@@ -77,11 +92,29 @@ public sealed partial class SimulationEngine
         }
 
         var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
-        if (CurrentTick.Value % AnimalUpdateIntervalTicks == 0 &&
-            calendar.TickOfDay == 0 && calendar.AbsoluteDay > 0 && calendar.AbsoluteDay % 10 == 0)
+        if (calendar.TickOfDay == 0 && calendar.AbsoluteDay > 0)
         {
-            TryReproduceAnimal(AnimalKind.MarshHare, Math.Max(10, Map.CellCount / 300));
-            TryReproduceAnimal(AnimalKind.SwampBoar, Math.Max(5, Map.CellCount / 900));
+            foreach (var animal in _animals.Values.Where(animal =>
+                         animal.AgeTicks >= animal.MaximumAgeTicks))
+            {
+                animal.Health = Math.Max(0, animal.Health - 1);
+            }
+        }
+        if (CurrentTick.Value % AnimalUpdateIntervalTicks == 0 &&
+            calendar.TickOfDay == 0 && calendar.AbsoluteDay > 0)
+        {
+            foreach (var kind in Enum.GetValues<AnimalKind>())
+            {
+                var ecology = Definitions.AnimalEcology.Get(kind);
+                if (calendar.AbsoluteDay % ecology.BreedingIntervalDays == 0)
+                {
+                    TryReproduceAnimal(
+                        kind,
+                        Math.Max(
+                            ecology.MinimumPopulationCapacity,
+                            Map.CellCount / ecology.MapCellsPerAnimal));
+                }
+            }
         }
     }
 
@@ -104,19 +137,22 @@ public sealed partial class SimulationEngine
         }
 
         var nearbyActors = _actors.Values
-            .Where(actor => actor.Health > 0 && actor.Position.Z == 0)
+            .Where(actor => actor.Health > 0 && actor.Position.Z == animal.Position.Z)
             .Select(actor => new { Actor = actor, Distance = Distance(actor.Position, animal.Position) })
             .Where(candidate => candidate.Distance <= 5)
             .OrderBy(candidate => candidate.Distance)
             .ThenBy(candidate => candidate.Actor.Id)
             .ToArray();
 
-        if (animal.Kind == AnimalKind.SwampBoar && nearbyActors.Length == 1)
+        if ((animal.Kind == AnimalKind.SwampBoar && nearbyActors.Length == 1) ||
+            (animal.Kind == AnimalKind.CaveSpider && nearbyActors.Length > 0))
         {
             var target = nearbyActors[0];
             if (target.Distance <= 1)
             {
-                const int damage = 90;
+                var damage = animal.Kind == AnimalKind.CaveSpider
+                    ? 45 + (Math.Abs(animal.Position.Z) * 25)
+                    : 90;
                 ApplyTraumaDamage(target.Actor, damage);
                 animal.Activity = AnimalActivity.Threatening;
                 Publish(SimulationEventKind.AnimalHitGoblin, EntityId.None, target.Actor.Id, damage);
@@ -142,10 +178,7 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        var neighbors = Map.GetCardinalNeighbors(animal.Position)
-            .Where(position => IsAnimalHabitat(animal.Kind, position) &&
-                World.IsSurfaceTraversable(position) &&
-                Map.CanTraverseSurfaceEdge(animal.Position, position))
+        var neighbors = GetAnimalTraversableNeighbors(animal.Kind, animal.Position)
             .OrderBy(position => position.Y)
             .ThenBy(position => position.X)
             .ToArray();
@@ -167,10 +200,7 @@ public sealed partial class SimulationEngine
 
     private void MoveAnimal(AnimalState animal, GridPosition threat, bool flee)
     {
-        var destination = Map.GetCardinalNeighbors(animal.Position)
-            .Where(position => IsAnimalHabitat(animal.Kind, position) &&
-                World.IsSurfaceTraversable(position) &&
-                Map.CanTraverseSurfaceEdge(animal.Position, position))
+        var destination = GetAnimalTraversableNeighbors(animal.Kind, animal.Position)
             .OrderBy(position => flee ? -Distance(position, threat) : Distance(position, threat))
             .ThenBy(position => position.Y)
             .ThenBy(position => position.X)
@@ -189,11 +219,25 @@ public sealed partial class SimulationEngine
         {
             return;
         }
-        foreach (var parent in population.OrderBy(animal => animal.Id))
+        var ecology = Definitions.AnimalEcology.Get(kind);
+        var adults = population
+            .Where(IsAnimalReadyToBreed)
+            .OrderBy(animal => animal.Id)
+            .ToArray();
+        var males = adults.Where(animal => animal.Sex == AnimalSex.Male).ToArray();
+        foreach (var mother in adults.Where(animal => animal.Sex == AnimalSex.Female))
         {
-            var position = Map.GetCardinalNeighbors(parent.Position)
-                .FirstOrDefault(candidate => IsAnimalHabitat(kind, candidate) &&
-                    World.IsSurfaceTraversable(candidate), parent.Position);
+            var mate = males.FirstOrDefault(candidate =>
+                Distance(candidate.Position, mother.Position) <= ecology.MateSearchRadius);
+            if (mate is null)
+            {
+                continue;
+            }
+            var position = GetAnimalTraversableNeighbors(kind, mother.Position)
+                .FirstOrDefault(candidate =>
+                    !_animals.Values.Any(animal =>
+                        animal.Position == candidate && animal.Kind == kind),
+                    mother.Position);
             if (_animals.Values.Any(animal => animal.Position == position && animal.Kind == kind))
             {
                 continue;
@@ -204,9 +248,38 @@ public sealed partial class SimulationEngine
         }
     }
 
+    private IEnumerable<GridPosition> GetAnimalTraversableNeighbors(
+        AnimalKind kind,
+        GridPosition position) => kind == AnimalKind.CaveSpider
+        ? World.GetTerrainNeighbors(position).Where(candidate => IsAnimalHabitat(kind, candidate))
+        : Map.GetCardinalNeighbors(position).Where(candidate =>
+            IsAnimalHabitat(kind, candidate) &&
+            World.IsSurfaceTraversable(candidate) &&
+            Map.CanTraverseSurfaceEdge(position, candidate));
+
+    private bool IsAnimalReadyToBreed(AnimalState animal) =>
+        animal.AgeTicks >= animal.MaturityAgeTicks &&
+        animal.AgeTicks < animal.MaximumAgeTicks &&
+        animal.Health * 4 >= MaximumAnimalHealth(animal.Kind) * 3 &&
+        animal.Hunger <= 12 &&
+        animal.Fatigue < MaximumAnimalFatigue(animal.Kind) / 2 &&
+        animal.Activity is not (AnimalActivity.Fleeing or AnimalActivity.Threatening) &&
+        !_actors.Values.Any(actor =>
+            actor.Health > 0 && actor.Position.Z == animal.Position.Z &&
+            Distance(actor.Position, animal.Position) <= 6);
+
     private bool IsAnimalHabitat(AnimalKind kind, GridPosition position)
     {
-        if (position.Z != 0 || !Map.IsWithin(position))
+        if (!Map.IsColumnWithin(position))
+        {
+            return false;
+        }
+        if (kind == AnimalKind.CaveSpider)
+        {
+            return position.Z < 0 && Map.IsCavePosition(position) &&
+                Map.GetCaveCell(position).IsOpen && World.IsTerrainTraversable(position);
+        }
+        if (position.Z != 0)
         {
             return false;
         }
@@ -221,10 +294,24 @@ public sealed partial class SimulationEngine
         };
     }
 
-    private AnimalState AllocateAnimal(AnimalKind kind, GridPosition position)
+    private AnimalState AllocateAnimal(
+        AnimalKind kind,
+        GridPosition position,
+        long ageTicks = 0)
     {
         var id = _nextAnimalId++;
-        var animal = new AnimalState(id, kind, position, MaximumAnimalHealth(kind));
+        var sex = id % 2 == 0 ? AnimalSex.Male : AnimalSex.Female;
+        var animal = new AnimalState(
+            id,
+            kind,
+            sex,
+            position,
+            MaximumAnimalHealth(kind),
+            GetAnimalMaturityTicks(kind),
+            GetAnimalMaximumAgeTicks(kind))
+        {
+            AgeTicks = ageTicks,
+        };
         _animals.Add(id, animal);
         return animal;
     }
@@ -234,13 +321,20 @@ public sealed partial class SimulationEngine
         foreach (var model in models.OrderBy(model => model.Id))
         {
             var position = new GridPosition(model.X, model.Y, model.Z);
-            if (model.Id == 0 || !Enum.IsDefined(model.Kind) || !Enum.IsDefined(model.Activity) ||
+            if (model.Id == 0 || !Enum.IsDefined(model.Kind) || !Enum.IsDefined(model.Sex) ||
+                !Enum.IsDefined(model.Activity) ||
                 !IsAnimalHabitat(model.Kind, position) || model.Health <= 0 ||
                 model.Health > MaximumAnimalHealth(model.Kind) || model.Hunger < 0 ||
                 model.Fatigue < 0 || model.Fatigue > MaximumAnimalFatigue(model.Kind) ||
                 model.AgeTicks < 0 ||
                 !_animals.TryAdd(model.Id, new AnimalState(
-                    model.Id, model.Kind, position, model.Health)
+                    model.Id,
+                    model.Kind,
+                    model.Sex,
+                    position,
+                    model.Health,
+                    GetAnimalMaturityTicks(model.Kind),
+                    GetAnimalMaximumAgeTicks(model.Kind))
                 {
                     Activity = model.Activity,
                     Hunger = model.Hunger,
@@ -262,6 +356,7 @@ public sealed partial class SimulationEngine
     {
         AnimalKind.MarshHare => HareMaximumHealth,
         AnimalKind.SwampBoar => BoarMaximumHealth,
+        AnimalKind.CaveSpider => SpiderMaximumHealth,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -269,6 +364,7 @@ public sealed partial class SimulationEngine
     {
         AnimalKind.MarshHare => HareMaximumFatigue,
         AnimalKind.SwampBoar => BoarMaximumFatigue,
+        AnimalKind.CaveSpider => SpiderMaximumFatigue,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -276,6 +372,7 @@ public sealed partial class SimulationEngine
     {
         AnimalKind.MarshHare => HareMovementFatigue,
         AnimalKind.SwampBoar => BoarMovementFatigue,
+        AnimalKind.CaveSpider => SpiderMovementFatigue,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -283,18 +380,45 @@ public sealed partial class SimulationEngine
     {
         AnimalKind.MarshHare => HareRestRecovery,
         AnimalKind.SwampBoar => BoarRestRecovery,
+        AnimalKind.CaveSpider => SpiderRestRecovery,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
+
+    private long GetAnimalMaturityTicks(AnimalKind kind)
+    {
+        var seasonCount = Definitions.AnimalEcology.Get(kind).MaturitySeasonCount;
+        var seasons = Definitions.Clock.Climate.Seasons;
+        long ticks = 0;
+        for (var index = 0; index < seasonCount; index++)
+        {
+            ticks = checked(ticks + seasons[index % seasons.Count].TotalTicks);
+        }
+        return ticks;
+    }
+
+    private long GetAnimalMaximumAgeTicks(AnimalKind kind) => checked(
+        Definitions.Clock.Climate.TicksPerYear *
+        Definitions.AnimalEcology.Get(kind).MaximumAgeYears);
 
     private static void AddMovementFatigue(AnimalState animal) =>
         animal.Fatigue = Math.Min(
             MaximumAnimalFatigue(animal.Kind),
             checked(animal.Fatigue + AnimalMovementFatigue(animal.Kind)));
 
-    private sealed class AnimalState(ulong id, AnimalKind kind, GridPosition position, int health)
+    private sealed class AnimalState(
+        ulong id,
+        AnimalKind kind,
+        AnimalSex sex,
+        GridPosition position,
+        int health,
+        long maturityAgeTicks,
+        long maximumAgeTicks)
     {
         public ulong Id { get; } = id;
         public AnimalKind Kind { get; } = kind;
+        public AnimalSex Sex { get; } = sex;
+        public long MaturityAgeTicks { get; } = maturityAgeTicks;
+        public long MaximumAgeTicks { get; } = maximumAgeTicks;
         public GridPosition Position { get; set; } = position;
         public AnimalActivity Activity { get; set; }
         public int Health { get; set; } = health;
@@ -306,6 +430,7 @@ public sealed partial class SimulationEngine
             new(
                 Id,
                 Kind,
+                Sex,
                 Position,
                 Activity,
                 Health,
@@ -313,12 +438,15 @@ public sealed partial class SimulationEngine
                 Hunger,
                 Fatigue,
                 MaximumAnimalFatigue(Kind),
-                AgeTicks);
+                AgeTicks,
+                MaturityAgeTicks,
+                MaximumAgeTicks);
 
         public AnimalSaveModel ToSaveModel() => new()
         {
             Id = Id,
             Kind = Kind,
+            Sex = Sex,
             X = Position.X,
             Y = Position.Y,
             Z = Position.Z,

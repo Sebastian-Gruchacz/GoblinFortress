@@ -99,6 +99,14 @@ When a caravan, patrol, worker group or notable person enters a detailed region,
 
 This resolves the requirement that all represented characters have personal needs without requiring every inhabitant of a distant city to exist as a permanently updated individual.
 
+### Deep factions and fortress bands
+
+**Decision:** Intelligent underground societies are not simulated before the goblin tribe reaches level `z=-6`. From that boundary downward, depth is divided into deterministic ten-level bands: `-6..-15`, `-16..-25` and so on. Each band independently rolls whether it contains a fortress. A fortress begins as a coarse persistent record with a stable identity, culture, population, fighters, provisions, mineral stock, defenses and relations to other generated factions.
+
+Entering a band activates its tribal dispatcher. The dispatcher works on aggregate stocks and population until the fortress or one of its expeditions enters the detailed region. It can secure the fortress, gather provisions, expand mines or wage war. Hostile active factions may fight one another without involving the player; casualties and stock changes remain authoritative and are later materialized rather than rerolled. The first implemented culture is a placeholder dark-dwarf society. Additional underground peoples, diplomacy, expeditions, spatial fortress generation and concrete inhabitants extend the same record instead of creating a parallel simulation.
+
+The current two-level cave map does not reach this boundary and therefore pays no update cost for underground factions. Extending generation below `z=-5` automatically enables the dormant system.
+
 ### Randomness across simulation detail
 
 **Decision:** No subsystem, tribe or map generator relies on one mutable random stream whose future depends on how many updates happened to consume it. Random samples are addressed by stable inputs such as world seed, domain, stable entity or region identity, logical interval and sample purpose.
@@ -123,7 +131,7 @@ The design supports three related paths:
 2. **Corpse bloom** — a dead goblin may release growth from which one or more descendants emerge, allowing fragments of its experience to survive.
 3. **Carcass seeding** — suitable biological remains are deliberately used as substrate for new goblins. This is less reliable and may expose descendants to traits or contamination from the substrate.
 
-**Working rule:** A descendant may receive incomplete skill familiarity from a goblin parent or goblin corpse. Inheritance never creates knowledge the source did not possess, is lossier for advanced skills and may leave fragments below the threshold required to operate a facility.
+**Working rule:** A descendant may receive incomplete skill familiarity from both the goblin that pollinated its bud and the body used as substrate. A corpse preserves an imprint of the carrier's actual skills, traits, experience and predispositions; it never invents knowledge the carrier did not possess. Each source resolves independently, inheritance is lossier for advanced skills and may leave fragments below the threshold required to operate a facility. Corpse handling is a separate order from pollination: a body may be recovered to camp unchanged, recovered and pollinated there, or pollinated where it fell.
 
 The first reproduction slice retains one parental skill and one parental trait, ten percent of the parent's practical experience and softened work preferences. A newborn remains a juvenile for one complete season as defined by the active climate profile. During that time it satisfies personal needs but is excluded from public work, raids and combat.
 
@@ -245,6 +253,8 @@ These pressures drive alerts, priorities, reproductive permission and coarse AI 
 ### Player control
 
 The player sets zones, jobs, priorities, policies and blueprints. Goblins select and execute permitted work according to need, skill, distance, risk and disposition.
+
+Area input is interpreted by a declared tool policy. A filtered-target tool sends the complete gesture area through one authoritative query and keeps only matching physical objects. An apply-to-area tool creates every valid segment or cell-level intent inside the gesture. A zone, field, stockpile, dumping area or other multi-cell facility instead owns its complete footprint under one stable object identity, even when construction and damage proceed part by part. Preview color and outline style are presentation metadata of the tool and do not alter target resolution.
 
 Direct selection remains useful for inspection and exceptional orders, but routine survival must not require manually walking every goblin to every berry.
 

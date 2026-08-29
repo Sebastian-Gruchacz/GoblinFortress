@@ -42,4 +42,24 @@ public sealed class RaidPreparationPolicyTests
         Assert.Equal(PersonalEquipment.PrimitivePickaxe, profile.PreferredEquipment);
         Assert.True(profile.KeepCargoHandsFree);
     }
+
+    [Theory]
+    [InlineData(RaidDirective.RecoverCorpses)]
+    [InlineData(RaidDirective.BudCorpses)]
+    [InlineData(RaidDirective.BudCorpsesInPlace)]
+    public void CorpseHandlingModesPrepareForAnExtendedRaid(RaidDirective corpseDirective)
+    {
+        var definitions = SimulationDefinitions.Foundation;
+
+        var profile = RaidPreparationPolicy.ResolveAutomatic(
+            RaidDirective.AttackGuards | corpseDirective,
+            definitions,
+            PersonalEquipment.PrimitiveWaterskin);
+
+        Assert.Equal(definitions.PersonalFoodCapacity, profile.FoodTarget);
+        Assert.Equal(definitions.PersonalWaterCapacity, profile.WaterTarget);
+        Assert.Equal(
+            corpseDirective is RaidDirective.RecoverCorpses or RaidDirective.BudCorpses,
+            profile.KeepCargoHandsFree);
+    }
 }

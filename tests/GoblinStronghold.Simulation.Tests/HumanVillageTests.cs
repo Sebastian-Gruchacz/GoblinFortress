@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Resources;
 using System.Text.Json.Nodes;
 using Xunit;
 
@@ -6,6 +7,33 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class HumanVillageTests
 {
+    [Fact]
+    public void NewVillageExposesRaidLootInPhysicalHumanBuildings()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(84591),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+
+        var snapshot = engine.CreateSnapshot();
+        var contents = snapshot.VillageLootContainers.SelectMany(item => item.Contents).ToArray();
+        Assert.Equal(snapshot.HumanVillage.FoodStock, contents
+            .Where(item => item.Resource == ResourceKind.Food).Sum(item => item.Quantity));
+        Assert.Equal(snapshot.HumanVillage.WoodStock, contents
+            .Where(item => item.Resource == ResourceKind.Wood).Sum(item => item.Quantity));
+        Assert.Contains(contents, item =>
+            item.Variant == ResourceVariant.EquipmentWoodenSpear);
+        Assert.All(snapshot.VillageLootContainers, container =>
+        {
+            Assert.Contains(snapshot.WorldObjects, worldObject =>
+                worldObject.Id == container.StructureId &&
+                worldObject.Owner == WorldObjectOwner.HumanVillage);
+            Assert.True(engine.World.IsTerrainTraversable(container.Position));
+        });
+        Assert.Empty(snapshot.ItemStacks);
+    }
+
     [Fact]
     public void VillageStartsWithMaterializedPeopleAndThreeDispatcherCohorts()
     {

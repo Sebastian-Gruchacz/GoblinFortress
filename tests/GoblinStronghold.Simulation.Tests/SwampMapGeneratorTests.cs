@@ -300,6 +300,28 @@ public sealed class SwampMapGeneratorTests
     }
 
     [Fact]
+    public void RaisedMudCoversAContinuousMineableRockMass()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(4882149368200903417UL),
+            96,
+            96);
+        var column = Positions(map)
+            .First(position => map.GetCell(position) is
+                { Terrain: TerrainKind.Mud, SurfaceLevel: > 0 });
+        var surface = map.GetTerrainSurfacePosition(column);
+
+        Assert.True(surface.Z > 0);
+        Assert.False(map.IsHillRockPosition(column));
+        Assert.True(map.IsHillMassPosition(column));
+        Assert.True(map.TryGetInitialGeometry(column, out var geometry));
+        Assert.True(geometry.IsSolid);
+        Assert.Equal(CaveCellKind.SolidRock, map.GetHillMassCell(column).Kind);
+        Assert.Equal(MineralDepositKind.None, map.GetHillMassCell(column).Deposit);
+        Assert.Equal(map.GetHillMassCell(column), map.GetRockCell(column));
+    }
+
+    [Fact]
     public void InitialGeometryUsesOneContractAboveAndBelowZero()
     {
         var map = SwampMapGenerator.Generate(new WorldSeed(0x554E4946494544UL), 96, 96);
@@ -451,6 +473,14 @@ public sealed class SwampMapGeneratorTests
         Assert.Contains(caveCells, cell => cell.Deposit == MineralDepositKind.IronOre);
         Assert.All(caveCells.Where(cell => cell.Deposit != MineralDepositKind.None), cell =>
             Assert.Equal(CaveCellKind.SolidRock, cell.Kind));
+        var depositCountsByLevel = Enumerable.Range(1, map.CaveLevelCount)
+            .ToDictionary(
+                level => level,
+                level => Enumerable.Range(0, map.Height)
+                    .SelectMany(y => Enumerable.Range(0, map.Width)
+                        .Select(x => map.GetCaveCell(new GridPosition(x, y, -level))))
+                    .Count(cell => cell.Deposit != MineralDepositKind.None));
+        Assert.True(depositCountsByLevel[2] > depositCountsByLevel[1]);
 
         var offsets = new[]
         {

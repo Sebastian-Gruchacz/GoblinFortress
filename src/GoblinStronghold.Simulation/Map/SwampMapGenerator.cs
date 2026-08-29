@@ -2,7 +2,7 @@ namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
-    public const int CurrentVersion = 11;
+    public const int CurrentVersion = 12;
     public const int DefaultDimension = 96;
     public const int MinimumDimension = 16;
     public const int MaximumDimension = 2_048;
@@ -727,7 +727,12 @@ public static class SwampMapGenerator
         SetCaveKind(caveCells, width, height, deepStart, CaveCellKind.Ramp);
         if (generatorVersion >= 8)
         {
-            AssignMineralDeposits(caveCells, seed, width, height);
+            AssignMineralDeposits(
+                caveCells,
+                seed,
+                width,
+                height,
+                generatorVersion);
             if (generatorVersion >= 10)
             {
                 EnsureExposedMineralDeposit(
@@ -756,7 +761,8 @@ public static class SwampMapGenerator
         CaveCell[] cells,
         WorldSeed seed,
         int width,
-        int height)
+        int height,
+        int generatorVersion)
     {
         var cellCount = checked(width * height);
         for (var levelIndex = 0; levelIndex < 2; levelIndex++)
@@ -779,12 +785,16 @@ public static class SwampMapGenerator
                         seed,
                         normalizedX,
                         normalizedY,
-                        sampleKey: checked(29_100UL + (ulong)levelIndex));
+                        sampleKey: generatorVersion >= 12
+                            ? 29_100UL
+                            : checked(29_100UL + (ulong)levelIndex));
                     var ironNoise = FractalValueNoise(
                         seed,
                         normalizedX,
                         normalizedY,
-                        sampleKey: checked(29_200UL + (ulong)levelIndex));
+                        sampleKey: generatorVersion >= 12
+                            ? 29_200UL
+                            : checked(29_200UL + (ulong)levelIndex));
                     var deposit = ironNoise >= ironThreshold && ironNoise - ironThreshold >=
                         coalNoise - coalThreshold
                         ? MineralDepositKind.IronOre

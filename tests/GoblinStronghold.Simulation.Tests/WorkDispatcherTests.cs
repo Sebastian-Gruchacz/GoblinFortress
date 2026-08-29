@@ -131,6 +131,17 @@ public sealed class WorkDispatcherTests
         save["visibility"]!.AsArray()[visibilityIndex] = (int)CellVisibility.Explored;
         engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
 
+        Assert.Empty(engine.QueryWorkDesignationTargets(
+            WorkDesignationKind.GatherFood,
+            target.Position,
+            target.Position));
+        Assert.Equal(
+            new[] { target.Position },
+            engine.QueryWorkDesignationTargets(
+                WorkDesignationKind.GatherReeds,
+                target.Position,
+                target.Position));
+
         engine.QueueCommand(SimulationCommand.DesignateWork(
             engine.CurrentTick.Next(),
             sequence: 1,

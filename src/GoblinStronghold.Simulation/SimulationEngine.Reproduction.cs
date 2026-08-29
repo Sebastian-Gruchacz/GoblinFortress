@@ -42,6 +42,8 @@ public sealed partial class SimulationEngine
         _goblinBuds.Add(budId, new GoblinBudState(
             budId,
             parent.Id,
+            EntityId.None,
+            default,
             site.Value,
             Definitions.Reproduction.TendWorkTicks));
         parent.Health = Math.Max(1, parent.Health - Definitions.Reproduction.ParentHealthCost);
@@ -59,6 +61,38 @@ public sealed partial class SimulationEngine
             parent.Id,
             budId,
             Definitions.Reproduction.FoodCost);
+    }
+
+    private bool TryCreateGoblinBudFromCorpse(
+        EntityId corpseId,
+        EntityId pollinatorId,
+        GridPosition position)
+    {
+        if (pollinatorId == EntityId.None ||
+            !_actors.TryGetValue(pollinatorId, out var pollinator) ||
+            pollinator.Position != position ||
+            !_corpses.TryGetValue(corpseId, out var corpse) ||
+            corpse.Kind != CorpseKind.Human || corpse.Position != position ||
+            !World.IsTerrainTraversable(position))
+        {
+            return false;
+        }
+
+        _corpses.Remove(corpseId);
+        var budId = AllocateEntityId();
+        _goblinBuds.Add(budId, new GoblinBudState(
+            budId,
+            pollinatorId,
+            corpseId,
+            corpse.InheritanceImprint,
+            position,
+            Definitions.Reproduction.TendWorkTicks));
+        Publish(
+            SimulationEventKind.GoblinBudCreated,
+            pollinatorId,
+            budId,
+            0);
+        return true;
     }
 
     private bool IsEligibleBudParent(ActorState actor) =>
@@ -259,6 +293,14 @@ public sealed partial class SimulationEngine
             {
                 ApplyPartialInheritance(newborn, parent);
             }
+            if (bud.OriginCorpseId != EntityId.None)
+            {
+                ApplyPartialInheritance(
+                    newborn,
+                    bud.OriginImprint,
+                    sampleKey: bud.OriginCorpseId.Value,
+                    maySkip: true);
+            }
             Publish(SimulationEventKind.GoblinBorn, newborn.Id, bud.ParentId, 1);
         }
     }
@@ -280,27 +322,69 @@ public sealed partial class SimulationEngine
 
     private void ApplyPartialInheritance(ActorState child, ActorState parent)
     {
-        child.KnownSkills |= SelectInheritedFlag(
-            parent.KnownSkills,
+        ApplyPartialInheritance(
+            child,
+            new GoblinInheritanceImprint(
+                parent.KnownSkills,
+                parent.KnownTraits,
+                new GoblinExperienceSnapshot(
+                    parent.ForagingExperience,
+                    parent.HaulingExperience,
+                    parent.BuildingExperience),
+                parent.WorkPreferences),
+            sampleKey: parent.Id.Value,
+            maySkip: false);
+    }
+
+    private void ApplyPartialInheritance(
+        ActorState child,
+        GoblinInheritanceImprint source,
+        ulong sampleKey,
+        bool maySkip)
+    {
+        var inheritedSkills = SelectInheritedFlag(
+            source.KnownSkills,
             child.Id,
-            sampleKey: 0x534B494C4CUL);
+            sampleKey: 0x534B494C4CUL ^ sampleKey,
+            maySkip);
+        child.KnownSkills |= inheritedSkills;
         child.KnownTraits |= SelectInheritedFlag(
-            parent.KnownTraits,
+            source.KnownTraits,
             child.Id,
-            sampleKey: 0x5452414954UL);
-        child.ForagingExperience = parent.ForagingExperience / 10;
-        child.HaulingExperience = parent.HaulingExperience / 10;
-        child.BuildingExperience = parent.BuildingExperience / 10;
-        child.WorkPreferences = new GoblinWorkPreferences(
-            (child.WorkPreferences.Foraging + parent.WorkPreferences.Foraging) / 2,
-            (child.WorkPreferences.Hauling + parent.WorkPreferences.Hauling) / 2,
-            (child.WorkPreferences.Building + parent.WorkPreferences.Building) / 2);
+            sampleKey: 0x5452414954UL ^ sampleKey,
+            maySkip);
+        if (inheritedSkills.HasFlag(GoblinSkill.Foraging))
+        {
+            child.ForagingExperience = Math.Max(
+                child.ForagingExperience,
+                source.Experience.Foraging / 10);
+        }
+        if (inheritedSkills.HasFlag(GoblinSkill.Hauling))
+        {
+            child.HaulingExperience = Math.Max(
+                child.HaulingExperience,
+                source.Experience.Hauling / 10);
+        }
+        if (inheritedSkills.HasFlag(GoblinSkill.Building))
+        {
+            child.BuildingExperience = Math.Max(
+                child.BuildingExperience,
+                source.Experience.Building / 10);
+        }
+        if (Convert.ToUInt64(inheritedSkills) != 0)
+        {
+            child.WorkPreferences = new GoblinWorkPreferences(
+                (child.WorkPreferences.Foraging + source.WorkPreferences.Foraging) / 2,
+                (child.WorkPreferences.Hauling + source.WorkPreferences.Hauling) / 2,
+                (child.WorkPreferences.Building + source.WorkPreferences.Building) / 2);
+        }
     }
 
     private TFlag SelectInheritedFlag<TFlag>(
         TFlag parentFlags,
         EntityId childId,
-        ulong sampleKey)
+        ulong sampleKey,
+        bool maySkip)
         where TFlag : struct, Enum
     {
         var flags = Enum.GetValues<TFlag>()
@@ -318,8 +402,8 @@ public sealed partial class SimulationEngine
             CurrentTick,
             sampleKey,
             minimumInclusive: 0,
-            maximumExclusive: flags.Length);
-        return flags[index];
+            maximumExclusive: flags.Length + (maySkip ? 1 : 0));
+        return index == flags.Length ? default : flags[index];
     }
 
     private void LoadGoblinBuds(IEnumerable<GoblinBudSaveModel> models)
@@ -328,15 +412,38 @@ public sealed partial class SimulationEngine
         {
             var id = new EntityId(model.Id);
             var parentId = new EntityId(model.ParentId);
+            var originCorpseId = new EntityId(model.OriginCorpseId);
+            var originImprint = new GoblinInheritanceImprint(
+                model.OriginSkills,
+                model.OriginTraits,
+                new GoblinExperienceSnapshot(
+                    model.OriginForagingExperience,
+                    model.OriginHaulingExperience,
+                    model.OriginBuildingExperience),
+                new GoblinWorkPreferences(
+                    model.OriginForagingPreference,
+                    model.OriginHaulingPreference,
+                    model.OriginBuildingPreference));
             var position = new GridPosition(model.X, model.Y, model.Z);
-            if (id == EntityId.None || parentId == EntityId.None ||
+            if (id == EntityId.None ||
+                parentId == EntityId.None && originCorpseId == EntityId.None ||
+                !HasOnlyKnownFlags(originImprint.KnownSkills, GoblinSkill.Building) ||
+                !HasOnlyKnownFlags(originImprint.KnownTraits, GoblinTrait.Fastidious) ||
+                originImprint.Experience.Foraging < 0 ||
+                originImprint.Experience.Hauling < 0 ||
+                originImprint.Experience.Building < 0 ||
+                !originImprint.WorkPreferences.IsValid ||
                 model.RemainingCareTicks <= 0 ||
                 model.RemainingCareTicks > Definitions.Reproduction.TendWorkTicks ||
-                !IsSuitableBudSite(position) ||
+                (originCorpseId == EntityId.None
+                    ? !IsSuitableBudSite(position)
+                    : !World.IsTerrainTraversable(position)) ||
                 _goblinBuds.Values.Any(bud => bud.Position == position) ||
                 !_goblinBuds.TryAdd(id, new GoblinBudState(
                     id,
                     parentId,
+                    originCorpseId,
+                    originImprint,
                     position,
                     model.RemainingCareTicks)))
             {

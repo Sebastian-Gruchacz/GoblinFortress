@@ -32,7 +32,7 @@ internal sealed class SimulationSaveLoadPlan(
 
 internal static class SimulationSaveMigrationManager
 {
-    public const int CurrentVersion = 54;
+    public const int CurrentVersion = 59;
 
     private static readonly ISimulationSaveMigration[] Migrations =
     [
@@ -60,6 +60,11 @@ internal static class SimulationSaveMigrationManager
         new SimulationSaveMigration51To52(),
         new SimulationSaveMigration52To53(),
         new SimulationSaveMigration53To54(),
+        new SimulationSaveMigration54To55(),
+        new SimulationSaveMigration55To56(),
+        new SimulationSaveMigration56To57(),
+        new SimulationSaveMigration57To58(),
+        new SimulationSaveMigration58To59(),
     ];
 
     public static SimulationSaveLoadPlan Prepare(
@@ -93,6 +98,95 @@ internal static class SimulationSaveMigrationManager
         }
 
         return new SimulationSaveLoadPlan(save, applied);
+    }
+}
+
+internal sealed class SimulationSaveMigration58To59 : ISimulationSaveMigration
+{
+    public int SourceVersion => 58;
+
+    public int TargetVersion => 59;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        save.ExcavatedTerrainRamps = [];
+        foreach (var site in save.ConstructionSites)
+        {
+            site.OrderId = site.Id;
+            site.SequenceIndex = 0;
+        }
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration57To58 : ISimulationSaveMigration
+{
+    public int SourceVersion => 57;
+
+    public int TargetVersion => 58;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        save.UndergroundFactions = [];
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration56To57 : ISimulationSaveMigration
+{
+    public int SourceVersion => 56;
+
+    public int TargetVersion => 57;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        foreach (var animal in save.Animals ?? [])
+        {
+            animal.Sex = animal.Id % 2 == 0 ? AnimalSex.Male : AnimalSex.Female;
+        }
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration55To56 : ISimulationSaveMigration
+{
+    public int SourceVersion => 55;
+
+    public int TargetVersion => 56;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        // Version 55 did not retain biological knowledge in corpses or corpse-origin buds.
+        // Default zero-valued imprints preserve those existing saves without inventing a donor.
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration54To55 : ISimulationSaveMigration
+{
+    public int SourceVersion => 54;
+
+    public int TargetVersion => 55;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        save.Corpses = [];
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
     }
 }
 

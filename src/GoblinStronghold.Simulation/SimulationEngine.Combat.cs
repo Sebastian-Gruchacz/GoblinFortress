@@ -25,6 +25,10 @@ public sealed partial class SimulationEngine
         }
         foreach (var death in result.Deaths)
         {
+            if (_humanVillage.GetVillagerSnapshot(death.VillagerId) is { } villager)
+            {
+                CreateHumanCorpse(villager);
+            }
             Publish(
                 SimulationEventKind.HumanDied,
                 EntityId.None,
@@ -51,10 +55,6 @@ public sealed partial class SimulationEngine
         var guards = _humanVillage.GetLivingGuardSnapshots()
             .Where(guard => guard.Task == HumanCohortTask.Guard)
             .ToArray();
-        if (guards.Length == 0)
-        {
-            return;
-        }
 
         foreach (var guard in guards)
         {
@@ -89,17 +89,27 @@ public sealed partial class SimulationEngine
         foreach (var goblin in _actors.Values.Where(actor =>
                      !IsJuvenile(actor) && actor.Health > 0).OrderBy(actor => actor.Id))
         {
-            var livingGuards = _humanVillage.GetLivingGuardSnapshots()
-                .Where(guard => guard.Task == HumanCohortTask.Guard)
-                .OrderBy(guard => Distance(goblin.Position, guard.Position))
-                .ThenBy(guard => guard.Id)
+            var isActiveRaider = _raidPhase == GoblinRaidPhase.Marching &&
+                _raidPartyIds.Contains(goblin.Id);
+            var humanTargets = _humanVillage.GetLivingVillagerSnapshots()
+                .Where(villager => villager.Role == HumanCohortRole.Guards
+                    ? villager.Task == HumanCohortTask.Guard ||
+                      isActiveRaider &&
+                      Distance(villager.Position, _raidTarget) <= _raidTargetRadius
+                    : isActiveRaider &&
+                      _raidDirectives.HasFlag(RaidDirective.AttackNonFleeing) &&
+                      villager.Task != HumanCohortTask.Flee &&
+                      Distance(villager.Position, _raidTarget) <= _raidTargetRadius)
+                .OrderBy(villager => Distance(goblin.Position, villager.Position))
+                .ThenBy(villager => villager.Role == HumanCohortRole.Guards ? 0 : 1)
+                .ThenBy(villager => villager.Id)
                 .ToArray();
-            if (livingGuards.Length == 0)
+            if (humanTargets.Length == 0)
             {
-                break;
+                continue;
             }
 
-            var target = livingGuards[0];
+            var target = humanTargets[0];
             var distance = Distance(goblin.Position, target.Position);
             var hasSling = goblin.Equipment.HasFlag(PersonalEquipment.PrimitiveSling);
             var range = hasSling
@@ -132,19 +142,25 @@ public sealed partial class SimulationEngine
                     maximumExclusive: isMelee
                         ? Definitions.GoblinDamageVariance + 1
                         : Definitions.RangedCombat.DamageVariance + 1);
-            var result = _humanVillage.ApplyGuardDamage(target.Id, goblinDamage);
+            var result = _humanVillage.ApplyVillagerDamage(target.Id, goblinDamage);
             if (result.VillagerId == 0)
             {
                 continue;
             }
             AddBlood(result.Position, result.Damage);
             Publish(
-                SimulationEventKind.GoblinHitHumanGuard,
+                target.Role == HumanCohortRole.Guards
+                    ? SimulationEventKind.GoblinHitHumanGuard
+                    : SimulationEventKind.GoblinHitHumanCivilian,
                 goblin.Id,
                 HumanVillagerEntityId(result.VillagerId),
                 result.Damage);
             if (result.Died)
             {
+                if (_humanVillage.GetVillagerSnapshot(result.VillagerId) is { } villager)
+                {
+                    CreateHumanCorpse(villager);
+                }
                 Publish(
                     SimulationEventKind.HumanDied,
                     goblin.Id,
@@ -174,7 +190,8 @@ public sealed partial class SimulationEngine
 
     private void TryCompleteRaid()
     {
-        if (_raidPhase != GoblinRaidPhase.Marching)
+        if (_raidPhase is not (GoblinRaidPhase.Marching or GoblinRaidPhase.Looting or
+            GoblinRaidPhase.Returning))
         {
             return;
         }
@@ -183,6 +200,45 @@ public sealed partial class SimulationEngine
             !_actors.TryGetValue(id, out var actor) || actor.Health <= 0);
         var victory = _humanVillage.GetGuardSnapshot().Population == 0;
         var defeated = _raidPartyIds.Count == 0;
+        if (_raidPhase == GoblinRaidPhase.Marching && victory)
+        {
+            _humanVillage.EndGoblinAttack();
+            _raidPhase = HasRemainingRaidCorpseLoot() || HasRemainingRaidBuildingLoot() ||
+                HasRemainingRaidCorpseConsumption() || HasRemainingRaidCorpseRecovery()
+                    ? GoblinRaidPhase.Looting
+                    : GoblinRaidPhase.Returning;
+            foreach (var actor in GetRaidParty())
+            {
+                actor.ClearJob();
+            }
+            return;
+        }
+        if (_raidPhase == GoblinRaidPhase.Looting &&
+            (HasRemainingRaidCorpseLoot() || HasRemainingRaidBuildingLoot() ||
+             HasRemainingRaidCorpseConsumption() ||
+             HasRemainingRaidCorpseRecovery() ||
+             GetRaidParty().Any(actor =>
+                actor.CarriedStackId != EntityId.None ||
+                actor.CarriedCorpseId != EntityId.None ||
+                actor.JobKind is ActorJobKind.LootRaid or ActorJobKind.RecoverRaidCorpse or
+                    ActorJobKind.ConsumeRaidCorpse)))
+        {
+            return;
+        }
+        if (_raidPhase == GoblinRaidPhase.Looting && victory)
+        {
+            _raidPhase = GoblinRaidPhase.Returning;
+            foreach (var actor in GetRaidParty())
+            {
+                actor.ClearJob();
+            }
+            return;
+        }
+        if (_raidPhase == GoblinRaidPhase.Returning &&
+            GetRaidParty().Any(actor => actor.Position != _raidRallyPoint))
+        {
+            return;
+        }
         if (!victory && !defeated)
         {
             return;

@@ -102,6 +102,33 @@ public sealed record GoblinAgingSettings(
     int InitialMinimumAgeYears,
     int InitialMaximumAgeYearsExclusive);
 
+public sealed record AnimalSpeciesEcologySettings(
+    int MaturitySeasonCount,
+    int MaximumAgeYears,
+    int BreedingIntervalDays,
+    int MateSearchRadius,
+    int MinimumPopulationCapacity,
+    int MapCellsPerAnimal);
+
+public sealed record AnimalEcologySettings(
+    AnimalSpeciesEcologySettings MarshHare,
+    AnimalSpeciesEcologySettings SwampBoar,
+    AnimalSpeciesEcologySettings CaveSpider)
+{
+    public AnimalSpeciesEcologySettings Get(AnimalKind kind) => kind switch
+    {
+        AnimalKind.MarshHare => MarshHare,
+        AnimalKind.SwampBoar => SwampBoar,
+        AnimalKind.CaveSpider => CaveSpider,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+}
+
+public sealed record FishRegrowthSettings(
+    int BaseMultiplier,
+    int DeepWaterBonusMultiplier,
+    int RiverChannelBonusMultiplier);
+
 public sealed record HumanVillageNeedSettings(
     int MaximumNeed,
     int DailyHungerIncrease,
@@ -286,7 +313,9 @@ public sealed class SimulationDefinitions
         int goblinStructureVisionRadius = 0,
         ActorPlanningSettings? actorPlanning = null,
         HumanVillageNeedSettings? humanVillageNeeds = null,
-        HumanVillageEconomySettings? humanVillageEconomy = null)
+        HumanVillageEconomySettings? humanVillageEconomy = null,
+        AnimalEcologySettings? animalEcology = null,
+        FishRegrowthSettings? fishRegrowth = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(clock);
@@ -454,6 +483,49 @@ public sealed class SimulationDefinitions
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.GoodsWoodCost);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.GoodsPopulationDivisor);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.StorehouseWork);
+        animalEcology ??= new(
+            MarshHare: new(
+                MaturitySeasonCount: 1,
+                MaximumAgeYears: 3,
+                BreedingIntervalDays: 10,
+                MateSearchRadius: 12,
+                MinimumPopulationCapacity: 10,
+                MapCellsPerAnimal: 300),
+            SwampBoar: new(
+                MaturitySeasonCount: 2,
+                MaximumAgeYears: 8,
+                BreedingIntervalDays: 20,
+                MateSearchRadius: 16,
+                MinimumPopulationCapacity: 5,
+                MapCellsPerAnimal: 900),
+            CaveSpider: new(
+                MaturitySeasonCount: 2,
+                MaximumAgeYears: 5,
+                BreedingIntervalDays: 20,
+                MateSearchRadius: 8,
+                MinimumPopulationCapacity: 3,
+                MapCellsPerAnimal: 2_000));
+        foreach (var species in new[]
+                 {
+                     animalEcology.MarshHare,
+                     animalEcology.SwampBoar,
+                     animalEcology.CaveSpider,
+                 })
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(species.MaturitySeasonCount);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(species.MaximumAgeYears);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(species.BreedingIntervalDays);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(species.MateSearchRadius);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(species.MinimumPopulationCapacity);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(species.MapCellsPerAnimal);
+        }
+        fishRegrowth ??= new(
+            BaseMultiplier: 1,
+            DeepWaterBonusMultiplier: 1,
+            RiverChannelBonusMultiplier: 1);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fishRegrowth.BaseMultiplier);
+        ArgumentOutOfRangeException.ThrowIfNegative(fishRegrowth.DeepWaterBonusMultiplier);
+        ArgumentOutOfRangeException.ThrowIfNegative(fishRegrowth.RiverChannelBonusMultiplier);
 
         Id = id;
         Clock = clock;
@@ -552,6 +624,8 @@ public sealed class SimulationDefinitions
             InitialMaximumAgeYearsExclusive: 5);
         HumanVillageNeeds = humanVillageNeeds;
         HumanVillageEconomy = humanVillageEconomy;
+        AnimalEcology = animalEcology;
+        FishRegrowth = fishRegrowth;
     }
 
     public string Id { get; }
@@ -581,6 +655,10 @@ public sealed class SimulationDefinitions
     public HumanVillageNeedSettings HumanVillageNeeds { get; }
 
     public HumanVillageEconomySettings HumanVillageEconomy { get; }
+
+    public AnimalEcologySettings AnimalEcology { get; }
+
+    public FishRegrowthSettings FishRegrowth { get; }
 
     public int MaximumHunger { get; }
 

@@ -19,7 +19,15 @@ public sealed class StarvationTests
 
         engine.AdvanceTicks(2);
 
-        Assert.Empty(engine.CreateSnapshot().Actors);
+        var snapshot = engine.CreateSnapshot();
+        Assert.Empty(snapshot.Actors);
+        var corpse = Assert.Single(snapshot.Corpses);
+        Assert.Equal(CorpseKind.Goblin, corpse.Kind);
+        Assert.Contains(corpse.Contents, item =>
+            item.Variant == ResourceVariant.EquipmentWoodenAxe);
+        Assert.Contains(corpse.Contents, item =>
+            item.Variant == ResourceVariant.EquipmentPrimitivePickaxe);
+        Assert.True(corpse.ContainedWater > 0);
         Assert.Contains(
             engine.DrainEvents(),
             simulationEvent => simulationEvent.Kind == SimulationEventKind.ActorDied);
@@ -43,6 +51,12 @@ public sealed class StarvationTests
         Assert.Contains(events, item => item.Kind == SimulationEventKind.CommandRejected);
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Equal(
+            engine.CreateSnapshot().Corpses.Single().Contents,
+            restored.CreateSnapshot().Corpses.Single().Contents);
+        Assert.Equal(
+            engine.CreateSnapshot().Corpses.Single().ContainedWater,
+            restored.CreateSnapshot().Corpses.Single().ContainedWater);
 
         restored.AdvanceTicks(20);
         Assert.DoesNotContain(

@@ -111,7 +111,12 @@ public sealed partial class SimulationEngine
                     sampleKey: 0x48554E54UL,
                     minimumInclusive: 0,
                     maximumExclusive: Definitions.RangedCombat.DamageVariance + 1)
-            : animal.Kind == AnimalKind.MarshHare ? 120 : 110;
+            : animal.Kind switch
+            {
+                AnimalKind.MarshHare => 120,
+                AnimalKind.CaveSpider => 80,
+                _ => 110,
+            };
         if (usesStone)
         {
             actor.PersonalStoneAmmo--;
@@ -125,38 +130,47 @@ public sealed partial class SimulationEngine
         }
 
         _animals.Remove(animal.Id);
-        var meat = animal.Kind == AnimalKind.MarshHare ? 3 : 10;
-        var existing = FindMergeableGroundStack(
-            ResourceKind.Food,
-            animal.Position,
-            FoodKind.RawMeat);
-        if (existing is null)
+        var harvest = animal.Kind switch
         {
-            AllocateItemStack(
+            AnimalKind.MarshHare => (Meat: 3, Hide: 1, Bone: 1, Experience: 12),
+            AnimalKind.SwampBoar => (Meat: 10, Hide: 3, Bone: 4, Experience: 30),
+            AnimalKind.CaveSpider => (Meat: 0, Hide: 0, Bone: 0, Experience: 25),
+            _ => throw new ArgumentOutOfRangeException(),
+        };
+        if (harvest.Meat > 0)
+        {
+            var existing = FindMergeableGroundStack(
                 ResourceKind.Food,
-                meat,
-                ItemLocation.OnGround(animal.Position),
+                animal.Position,
                 FoodKind.RawMeat);
+            if (existing is null)
+            {
+                AllocateItemStack(
+                    ResourceKind.Food,
+                    harvest.Meat,
+                    ItemLocation.OnGround(animal.Position),
+                    FoodKind.RawMeat);
+            }
+            else
+            {
+                existing.Quantity = checked(existing.Quantity + harvest.Meat);
+            }
         }
-        else
+        if (harvest.Hide > 0)
         {
-            existing.Quantity = checked(existing.Quantity + meat);
+            DropAnimalMaterial(animal.Position, ResourceKind.Hide, harvest.Hide);
         }
-        DropAnimalMaterial(
-            animal.Position,
-            ResourceKind.Hide,
-            animal.Kind == AnimalKind.MarshHare ? 1 : 3);
-        DropAnimalMaterial(
-            animal.Position,
-            ResourceKind.Bone,
-            animal.Kind == AnimalKind.MarshHare ? 1 : 4);
+        if (harvest.Bone > 0)
+        {
+            DropAnimalMaterial(animal.Position, ResourceKind.Bone, harvest.Bone);
+        }
         if (hasDesignation)
         {
             _workDesignations.Remove(designation.Id);
         }
         actor.TacticalTargetEntityId = EntityId.None;
-        GainForagingExperience(actor, animal.Kind == AnimalKind.MarshHare ? 12 : 30);
-        Publish(SimulationEventKind.AnimalHunted, actor.Id, EntityId.None, meat);
+        GainForagingExperience(actor, harvest.Experience);
+        Publish(SimulationEventKind.AnimalHunted, actor.Id, EntityId.None, harvest.Meat);
         if (hasDesignation)
         {
             Publish(SimulationEventKind.WorkDesignationRemoved, EntityId.None, designation.Id, 0);
@@ -189,7 +203,7 @@ public sealed partial class SimulationEngine
                  x <= Math.Min(Map.Width - 1, animal.Position.X + range);
                  x++)
             {
-                var position = Map.GetTerrainSurfacePosition(new GridPosition(x, y));
+                var position = new GridPosition(x, y, animal.Position.Z);
                 var distance = Distance(position, animal.Position);
                 if (distance is > 0 && distance <= range && World.IsTerrainTraversable(position))
                 {

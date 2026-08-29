@@ -35,6 +35,8 @@ public partial class WorldView : Node2D
     private Texture2D _walkwayAtlas = null!;
     private Texture2D _structureWallAtlas = null!;
     private Texture2D _bloodAtlas = null!;
+    private Texture2D _undergroundFaunaAtlas = null!;
+    private Texture2D _mineralDepositAtlas = null!;
     private int _visibleLevel;
     private double _waterAnimationElapsed;
     private double _waterAnimationRedrawElapsed;
@@ -62,6 +64,8 @@ public partial class WorldView : Node2D
         _walkwayAtlas = WalkwaySprites.LoadAtlas();
         _structureWallAtlas = StructureWallSprites.LoadAtlas();
         _bloodAtlas = BloodSprites.LoadAtlas();
+        _undergroundFaunaAtlas = UndergroundSprites.LoadFaunaAtlas();
+        _mineralDepositAtlas = UndergroundSprites.LoadMineralAtlas();
     }
 
     public void SetWorld(SimulationEngine engine)
@@ -217,6 +221,7 @@ public partial class WorldView : Node2D
         DrawConstructionSites();
         DrawCraftingOrders();
         DrawItems();
+        DrawCorpses();
         DrawJobTargets();
         DrawGoblinBuds();
         DrawAnimals();
@@ -271,6 +276,8 @@ public partial class WorldView : Node2D
             {
                 var position = new GridPosition(x, y, _visibleLevel);
                 var cell = _engine.Map.GetColumnCell(position);
+                var terrainRampIntact = _engine.World.IsTerrainRampIntact(
+                    new GridPosition(x, y, cell.SurfaceLevel));
                 if (cell.SurfaceLevel == _visibleLevel)
                 {
                     if (cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater)
@@ -280,7 +287,7 @@ public partial class WorldView : Node2D
                     }
 
                     var sprite = ResolveTerrainSprite(x, y, cell.Terrain, livingTrees);
-                    var useGeneratedTransition = cell.RampDirection != TerrainRampDirection.None &&
+                    var useGeneratedTransition = terrainRampIntact &&
                         TerrainTransitionSprites.Supports(sprite);
                     DrawTextureRectRegion(
                         useGeneratedTransition ? _terrainTransitionAtlas : _terrainAtlas,
@@ -290,7 +297,7 @@ public partial class WorldView : Node2D
                                 _terrainTransitionAtlas, sprite, cell.RampDirection)
                             : TerrainSprites.GetRegion(_terrainAtlas, sprite));
                     DrawTerrainRelief(x, y, cell, drawSlopeOverlay: !useGeneratedTransition);
-                    if (cell.RampDirection != TerrainRampDirection.None)
+                    if (terrainRampIntact)
                     {
                         DrawTerrainRampSteps(CellRect(x, y), cell.RampDirection);
                     }
@@ -316,6 +323,8 @@ public partial class WorldView : Node2D
         HashSet<GridPosition> livingTrees)
     {
         var rect = CellRect(x, y);
+        var terrainRampIntact = _engine.World.IsTerrainRampIntact(
+            new GridPosition(x, y, cell.SurfaceLevel));
         if (cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater)
         {
             DrawWaterTile(x, y, cell.Terrain);
@@ -323,7 +332,7 @@ public partial class WorldView : Node2D
         else
         {
             var sprite = ResolveTerrainSprite(x, y, cell.Terrain, livingTrees);
-            var useGeneratedTransition = cell.RampDirection != TerrainRampDirection.None &&
+            var useGeneratedTransition = terrainRampIntact &&
                 TerrainTransitionSprites.Supports(sprite);
             DrawTextureRectRegion(
                 useGeneratedTransition ? _terrainTransitionAtlas : _terrainAtlas,
@@ -336,11 +345,13 @@ public partial class WorldView : Node2D
         }
 
         var levelDifference = _visibleLevel - cell.SurfaceLevel;
-        var darkness = Math.Min(0.84f, 0.68f + ((levelDifference - 1) * 0.08f));
+        var darkness = levelDifference == 1 && terrainRampIntact
+            ? 0.44f
+            : Math.Min(0.84f, 0.68f + ((levelDifference - 1) * 0.08f));
         DrawRect(rect, new Color(0.008f, 0.014f, 0.016f, darkness));
-        if (cell.RampDirection != TerrainRampDirection.None)
+        if (terrainRampIntact)
         {
-            DrawTerrainRampSteps(rect, cell.RampDirection, 0.55f);
+            DrawTerrainRampSteps(rect, cell.RampDirection, 0.82f);
         }
     }
 
@@ -379,13 +390,23 @@ public partial class WorldView : Node2D
     private void DrawHillInterior(GridPosition position)
     {
         var rect = CellRect(position.X, position.Y);
-        if (!_engine.Map.IsHillRockPosition(position))
+        if (!_engine.Map.IsHillMassPosition(position))
         {
             DrawRect(rect, new Color("17130f"));
             return;
         }
 
-        var rock = _engine.Map.GetHillRockCell(position).Rock;
+        var rock = _engine.Map.GetHillMassCell(position).Rock;
+        if (!_engine.World.IsSolidHillRock(position))
+        {
+            DrawTextureRectRegion(
+                _caveAtlas,
+                rect,
+                CaveSprites.GetFloorRegion(_caveAtlas, rock));
+            DrawRect(rect, CaveSprites.GetFloorShade(rock));
+            return;
+        }
+
         var openNeighborMask = GetOpenHillNeighborMask(position);
         if (openNeighborMask != 0)
         {
@@ -429,7 +450,7 @@ public partial class WorldView : Node2D
 
     private bool IsOpenHillCell(GridPosition position) =>
         _engine.Map.IsColumnWithin(position) &&
-        !_engine.Map.IsHillRockPosition(position);
+        !_engine.World.IsSolidHillRock(position);
 
     private int GetOpenHillNeighborMask(GridPosition position)
     {
@@ -537,22 +558,10 @@ public partial class WorldView : Node2D
     private void DrawMineralDeposit(GridPosition position, MineralDepositKind deposit)
     {
         var rect = CellRect(position.X, position.Y);
-        var primary = deposit == MineralDepositKind.Coal
-            ? new Color("292b2c")
-            : new Color("a34f28");
-        var highlight = deposit == MineralDepositKind.Coal
-            ? new Color("64686a")
-            : new Color("d48648");
-        var left = rect.Position + new Vector2(rect.Size.X * 0.15f, rect.Size.Y * 0.68f);
-        var right = rect.Position + new Vector2(rect.Size.X * 0.85f, rect.Size.Y * 0.32f);
-        if (((position.X + position.Y) & 1) != 0)
-        {
-            (left.Y, right.Y) = (right.Y, left.Y);
-        }
-        DrawLine(left, right, primary, 4f, antialiased: true);
-        DrawLine(left, right, highlight, 1.4f, antialiased: true);
-        DrawCircle(left.Lerp(right, 0.28f), 2.2f, primary);
-        DrawCircle(left.Lerp(right, 0.72f), 1.8f, highlight);
+        DrawTextureRectRegion(
+            _mineralDepositAtlas,
+            rect,
+            UndergroundSprites.GetMineralRegion(_mineralDepositAtlas, deposit));
     }
 
     private void DrawCaveInnerCorners(GridPosition position, RockKind rock)
@@ -646,7 +655,8 @@ public partial class WorldView : Node2D
             DrawRect(rect, new Color(0.02f, 0.04f, 0.07f, 0.2f));
         }
 
-        if (drawSlopeOverlay && cell.RampDirection != TerrainRampDirection.None)
+        if (drawSlopeOverlay && _engine.World.IsTerrainRampIntact(
+                new GridPosition(x, y, cell.SurfaceLevel)))
         {
             DrawTerrainSlope(rect, cell.RampDirection);
         }
@@ -757,8 +767,11 @@ public partial class WorldView : Node2D
 
         var neighborCell = _engine.Map.GetCell(neighbor);
         var drop = cell.SurfaceLevel - neighborCell.SurfaceLevel;
+        var neighborRampIntact = _engine.World.IsTerrainRampIntact(
+            new GridPosition(neighbor.X, neighbor.Y, neighborCell.SurfaceLevel));
         if (drop <= 0 ||
-            (drop == 1 && neighborCell.RampDirection == Opposite(direction)))
+            (drop == 1 && neighborRampIntact &&
+             neighborCell.RampDirection == Opposite(direction)))
         {
             return;
         }
@@ -1636,26 +1649,14 @@ public partial class WorldView : Node2D
 
     private void DrawWorkPreview()
     {
-        var color = _workPreviewKind switch
-        {
-            WorkDesignationKind.GatherFood => new Color(0.65f, 1f, 0.3f, 0.9f),
-            WorkDesignationKind.GatherReeds => new Color(0.78f, 0.96f, 0.36f, 0.92f),
-            WorkDesignationKind.GatherBrushwood => new Color(0.9f, 0.58f, 0.25f, 0.9f),
-            WorkDesignationKind.UprootBerryBush => new Color(1f, 0.32f, 0.2f, 0.92f),
-            WorkDesignationKind.FellTree => new Color(1f, 0.78f, 0.18f, 0.95f),
-            WorkDesignationKind.GatherStone => new Color(0.7f, 0.8f, 0.88f, 0.92f),
-            WorkDesignationKind.QuarryBoulder => new Color(0.84f, 0.9f, 0.96f, 0.96f),
-            WorkDesignationKind.MineRock => new Color(1f, 0.7f, 0.24f, 0.96f),
-            WorkDesignationKind.CarveRampDown => new Color(0.34f, 0.76f, 1f, 0.98f),
-            WorkDesignationKind.CarveRampUp => new Color(1f, 0.82f, 0.34f, 0.98f),
-            WorkDesignationKind.Scout => new Color(0.42f, 0.86f, 1f, 0.88f),
-            WorkDesignationKind.HuntAnimal => new Color(1f, 0.36f, 0.2f, 0.96f),
-            WorkDesignationKind.CleanBlood => new Color(0.92f, 0.84f, 1f, 0.98f),
-            _ => new Color(0.95f, 0.28f, 0.24f, 0.9f),
-        };
+        var style = WorkToolCatalog.GetPreviewStyle(_workPreviewKind);
         foreach (var cell in _workPreview.Where(cell => cell.Z == _visibleLevel))
         {
-            DrawRect(CellRect(cell.X, cell.Y).Grow(-1.5f), color, filled: false, width: 2f);
+            DrawRect(
+                CellRect(cell.X, cell.Y).Grow(-style.Inset),
+                style.Color,
+                style.Filled,
+                style.Width);
         }
     }
 
@@ -1689,6 +1690,26 @@ public partial class WorldView : Node2D
         }
     }
 
+    private void DrawCorpses()
+    {
+        foreach (var corpse in _snapshot.Corpses.Where(corpse =>
+                     corpse.Position.Z == _visibleLevel &&
+                     _snapshot.GetVisibility(corpse.Position, _engine.Map.Width) !=
+                         CellVisibility.Unknown))
+        {
+            var center = CellCenter(corpse.Position);
+            var color = corpse.Kind == CorpseKind.Goblin
+                ? new Color("52693f")
+                : new Color("765f4a");
+            DrawCircle(center, 5.2f, new Color(0.05f, 0.04f, 0.03f, 0.72f));
+            DrawCircle(center + new Vector2(0f, 1f), 4.1f, color);
+            DrawLine(center + new Vector2(-2.2f, -1.2f), center + new Vector2(2.2f, 1.2f),
+                new Color(0.16f, 0.11f, 0.09f, 0.95f), 1.3f, true);
+            DrawLine(center + new Vector2(2.2f, -1.2f), center + new Vector2(-2.2f, 1.2f),
+                new Color(0.16f, 0.11f, 0.09f, 0.95f), 1.3f, true);
+        }
+    }
+
     private void DrawGoblinBuds()
     {
         foreach (var bud in _snapshot.GoblinBuds.Where(bud =>
@@ -1698,7 +1719,9 @@ public partial class WorldView : Node2D
             var center = CellCenter(bud.Position);
             var progress = 1f - (float)bud.RemainingCareTicks / bud.TotalCareTicks;
             DrawCircle(center + new Vector2(0, 2), 5.5f, new Color(0.15f, 0.23f, 0.12f, 0.9f));
-            DrawCircle(center, 4.2f, new Color("91c95a"));
+            DrawCircle(center, 4.2f, bud.OriginCorpseId == EntityId.None
+                ? new Color("91c95a")
+                : new Color("b6c870"));
             DrawCircle(center + new Vector2(-2.5f, -3.5f), 1.5f, new Color("bfdc72"));
             DrawCircle(center + new Vector2(2.2f, -3f), 1.2f, new Color("bfdc72"));
             DrawArc(
@@ -1730,7 +1753,7 @@ public partial class WorldView : Node2D
                     new Color("d5c9a8"), 1.8f);
                 DrawCircle(center + new Vector2(2.6f, -0.4f), 0.65f, new Color("241d18"));
             }
-            else
+            else if (animal.Kind == AnimalKind.SwampBoar)
             {
                 DrawEllipse(center, new Vector2(6.2f, 4.2f), new Color("665044"));
                 DrawCircle(center + new Vector2(5, 1), 2.3f, new Color("7b5d4c"));
@@ -1739,6 +1762,18 @@ public partial class WorldView : Node2D
                 if (animal.Activity == AnimalActivity.Threatening)
                 {
                     DrawArc(center, 8f, 0, Mathf.Tau, 20, new Color("e15b45"), 1.8f);
+                }
+            }
+            else
+            {
+                var size = new Vector2(TileSize, TileSize);
+                DrawTextureRectRegion(
+                    _undergroundFaunaAtlas,
+                    new Rect2(center - (size / 2f), size),
+                    UndergroundSprites.GetCaveSpiderRegion(_undergroundFaunaAtlas));
+                if (animal.Activity == AnimalActivity.Threatening)
+                {
+                    DrawArc(center, 9f, 0, Mathf.Tau, 20, new Color("e15b45"), 1.8f);
                 }
             }
         }
@@ -2006,7 +2041,7 @@ public partial class WorldView : Node2D
     private CellVisibility GetRenderedVisibility(GridPosition position)
     {
         var visibility = GetColumnVisibility(position);
-        if (!_engine.Map.IsHillRockPosition(position))
+        if (!_engine.Map.IsHillMassPosition(position))
         {
             return visibility;
         }
@@ -2020,7 +2055,7 @@ public partial class WorldView : Node2D
                 position.Y + offset.Y,
                 position.Z);
             if (!_engine.Map.IsColumnWithin(neighbor) ||
-                _engine.Map.IsHillRockPosition(neighbor))
+                _engine.Map.IsHillMassPosition(neighbor))
             {
                 continue;
             }
@@ -2111,6 +2146,9 @@ public partial class WorldView : Node2D
             ActorJobKind.CarveRamp => UiIcon.Work,
             ActorJobKind.TendBud => UiIcon.GatherFood,
             ActorJobKind.HuntAnimal => UiIcon.Expedition,
+            ActorJobKind.LootRaid => UiIcon.FoodStorage,
+            ActorJobKind.RecoverRaidCorpse => UiIcon.Expedition,
+            ActorJobKind.ConsumeRaidCorpse => UiIcon.Hunger,
             ActorJobKind.CleanBlood => UiIcon.ClearOrders,
             ActorJobKind.Haul => UiIcon.FoodStorage,
             ActorJobKind.ClearConstructionSite => UiIcon.GatherBrushwood,

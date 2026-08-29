@@ -47,6 +47,7 @@ public sealed class WorldMapState
     private readonly SortedDictionary<WorldObjectId, WorldObjectSnapshot> _worldObjects;
     private readonly Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> _occupancy;
     private readonly HashSet<GridPosition> _excavatedCaveCells;
+    private readonly HashSet<GridPosition> _excavatedTerrainRamps;
     private readonly HashSet<VerticalPassage> _excavatedVerticalPassages;
     private readonly Dictionary<GridPosition, GridPosition> _verticalPassageDestinations;
 
@@ -57,6 +58,7 @@ public sealed class WorldMapState
         SortedDictionary<WorldObjectId, WorldObjectSnapshot> worldObjects,
         Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> occupancy,
         IEnumerable<GridPosition>? excavatedCaveCells = null,
+        IEnumerable<GridPosition>? excavatedTerrainRamps = null,
         IEnumerable<VerticalPassage>? excavatedVerticalPassages = null)
     {
         Baseline = baseline;
@@ -65,6 +67,7 @@ public sealed class WorldMapState
         _worldObjects = worldObjects;
         _occupancy = occupancy;
         _excavatedCaveCells = excavatedCaveCells?.ToHashSet() ?? [];
+        _excavatedTerrainRamps = excavatedTerrainRamps?.ToHashSet() ?? [];
         _excavatedVerticalPassages = excavatedVerticalPassages?.ToHashSet() ?? [];
         _verticalPassageDestinations = BuildVerticalPassageIndex(
             Baseline.VerticalPassages.Concat(_excavatedVerticalPassages));
@@ -81,6 +84,8 @@ public sealed class WorldMapState
     public int WorldObjectCount => _worldObjects.Count;
 
     public IReadOnlyCollection<GridPosition> ExcavatedCaveCells => _excavatedCaveCells;
+
+    public IReadOnlyCollection<GridPosition> ExcavatedTerrainRamps => _excavatedTerrainRamps;
 
     public IReadOnlyCollection<VerticalPassage> ExcavatedVerticalPassages =>
         _excavatedVerticalPassages;
@@ -151,6 +156,7 @@ public sealed class WorldMapState
         IEnumerable<PlantPatchSnapshot> plantPatches,
         IEnumerable<WorldObjectSnapshot> worldObjects,
         IEnumerable<GridPosition>? excavatedCaveCells = null,
+        IEnumerable<GridPosition>? excavatedTerrainRamps = null,
         IEnumerable<VerticalPassage>? excavatedVerticalPassages = null)
     {
         ArgumentNullException.ThrowIfNull(baseline);
@@ -181,11 +187,20 @@ public sealed class WorldMapState
 
         var excavated = excavatedCaveCells?.ToArray() ?? [];
         if (excavated.Any(position =>
-                !baseline.IsCavePosition(position) ||
-                baseline.GetCaveCell(position).Kind != CaveCellKind.SolidRock) ||
+                !baseline.IsRockPosition(position) ||
+                baseline.GetRockCell(position).Kind != CaveCellKind.SolidRock) ||
             excavated.Distinct().Count() != excavated.Length)
         {
             throw new InvalidDataException("The save contains invalid excavated cave cells.");
+        }
+
+        var excavatedRamps = excavatedTerrainRamps?.ToArray() ?? [];
+        if (excavatedRamps.Any(position =>
+                !baseline.IsTerrainSurfacePosition(position) ||
+                baseline.GetColumnCell(position).RampDirection == TerrainRampDirection.None) ||
+            excavatedRamps.Distinct().Count() != excavatedRamps.Length)
+        {
+            throw new InvalidDataException("The save contains invalid excavated terrain ramps.");
         }
 
         var passages = excavatedVerticalPassages?.ToArray() ?? [];
@@ -226,6 +241,7 @@ public sealed class WorldMapState
             restoredObjects,
             occupancy,
             excavated,
+            excavatedRamps,
             passages);
     }
 
@@ -365,7 +381,8 @@ public sealed class WorldMapState
             ? IsMaterialSurfaceReachable(position)
             : Baseline.IsTerrainSurfacePosition(position)
             ? IsMaterialSurfaceReachable(position)
-            : position.Z < 0 && IsSubterraneanReachable(position);
+            : IsExcavatedHillReachable(position) ||
+              position.Z < 0 && IsSubterraneanReachable(position);
 
     public bool IsTerrainTraversable(GridPosition position) =>
         IsTerrainReachable(position) && !HasClosedDoorLeaf(position);
@@ -452,6 +469,11 @@ public sealed class WorldMapState
         (Baseline.GetCaveCell(position).IsOpen || _excavatedCaveCells.Contains(position)) &&
         IsSpatiallyReachable(position);
 
+    private bool IsExcavatedHillReachable(GridPosition position) =>
+        Baseline.IsHillMassPosition(position) &&
+        _excavatedCaveCells.Contains(position) &&
+        IsSpatiallyReachable(position);
+
     public IEnumerable<GridPosition> GetTerrainNeighbors(
         GridPosition position,
         bool canOpenDoors = false)
@@ -486,8 +508,14 @@ public sealed class WorldMapState
             }
 
             var surfaceNeighbor = Baseline.GetTerrainSurfacePosition(adjacent);
+            if (adjacent != surfaceNeighbor && IsExcavatedHillReachable(adjacent) &&
+                canTraverse(adjacent))
+            {
+                yield return adjacent;
+                continue;
+            }
             if (canTraverse(surfaceNeighbor) &&
-                Baseline.CanTraverseTerrainSurfaceEdge(position, surfaceNeighbor))
+                CanTraverseMaterialSurfaceEdge(position, surfaceNeighbor))
             {
                 yield return surfaceNeighbor;
             }
@@ -1751,15 +1779,25 @@ public sealed class WorldMapState
         !_excavatedCaveCells.Contains(position);
 
     public bool IsSolidHillRock(GridPosition position) =>
-        Baseline.IsHillRockPosition(position) &&
+        Baseline.IsHillMassPosition(position) &&
         !_excavatedCaveCells.Contains(position);
 
     public bool IsSolidRock(GridPosition position) =>
         IsSolidCaveRock(position) || IsSolidHillRock(position);
 
-    public bool CanExcavateRock(GridPosition position) =>
-        IsSolidCaveRock(position) &&
+    public bool IsTerrainRampIntact(GridPosition position) =>
+        Baseline.IsTerrainSurfacePosition(position) &&
+        Baseline.GetColumnCell(position).RampDirection != TerrainRampDirection.None &&
+        !_excavatedTerrainRamps.Contains(position);
+
+    private bool CanExcavateTerrainRamp(GridPosition position) =>
+        IsTerrainRampIntact(position) &&
         GetCardinalWorldNeighbors(position).Any(IsTerrainTraversable);
+
+    public bool CanExcavateRock(GridPosition position) =>
+        (IsSolidRock(position) &&
+         GetCardinalWorldNeighbors(position).Any(IsTerrainTraversable)) ||
+        CanExcavateTerrainRamp(position);
 
     internal bool TryExcavateRock(
         GridPosition position,
@@ -1776,12 +1814,39 @@ public sealed class WorldMapState
             return false;
         }
 
-        var cell = Baseline.GetCaveCell(position);
+        if (IsTerrainRampIntact(position))
+        {
+            rock = RockKind.Sandstone;
+            deposit = MineralDepositKind.None;
+            _excavatedTerrainRamps.Add(position);
+            change = CreateChange(tick, WorldChangeKind.RampExcavated, position, 1);
+            return true;
+        }
+
+        var cell = Baseline.GetRockCell(position);
         rock = cell.Rock;
         deposit = cell.Deposit;
         _excavatedCaveCells.Add(position);
         change = CreateChange(tick, WorldChangeKind.RockExcavated, position, 1);
         return true;
+    }
+
+    private bool CanTraverseMaterialSurfaceEdge(GridPosition from, GridPosition to)
+    {
+        if (!Baseline.CanTraverseTerrainSurfaceEdge(from, to))
+        {
+            return false;
+        }
+
+        var fromLevel = Baseline.GetColumnCell(from).SurfaceLevel;
+        var toLevel = Baseline.GetColumnCell(to).SurfaceLevel;
+        if (fromLevel == toLevel)
+        {
+            return true;
+        }
+
+        var lower = fromLevel < toLevel ? from : to;
+        return !_excavatedTerrainRamps.Contains(lower);
     }
 
     public bool CanCarveRampDown(GridPosition upper)
@@ -1876,9 +1941,11 @@ public sealed class WorldMapState
     internal IReadOnlyList<WorldChangeEvent> GrowPlants(
         SimulationTick tick,
         int growthPerPatch,
-        SeasonKind season)
+        SeasonKind season,
+        FishRegrowthSettings fishRegrowth)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(growthPerPatch);
+        ArgumentNullException.ThrowIfNull(fishRegrowth);
 
         var changes = new List<WorldChangeEvent>();
         foreach (var patch in _plantPatches.Values)
@@ -1897,10 +1964,14 @@ public sealed class WorldMapState
                 continue;
             }
 
-            var growthMultiplier = patch.Kind is PlantKind.MushroomCluster or PlantKind.FishShoal or
-                PlantKind.ReedBed
-                ? 2
-                : 1;
+            var growthMultiplier = patch.Kind switch
+            {
+                PlantKind.MushroomCluster or PlantKind.ReedBed => 2,
+                PlantKind.FishShoal => GetFishRegrowthMultiplier(
+                    patch.Position,
+                    fishRegrowth),
+                _ => 1,
+            };
             var grown = Math.Min(
                 checked(growthPerPatch * growthMultiplier),
                 patch.Capacity - patch.Biomass);
@@ -1918,6 +1989,22 @@ public sealed class WorldMapState
         }
 
         return changes;
+    }
+
+    private int GetFishRegrowthMultiplier(
+        GridPosition position,
+        FishRegrowthSettings settings)
+    {
+        var neighbors = Baseline.GetCardinalNeighbors(position)
+            .Select(Baseline.GetCell)
+            .ToArray();
+        var deepWaterNeighbors = neighbors.Count(cell => cell.Terrain == TerrainKind.DeepWater);
+        var waterNeighbors = neighbors.Count(IsWater);
+        return settings.BaseMultiplier +
+            (deepWaterNeighbors > 0 ? settings.DeepWaterBonusMultiplier : 0) +
+            (deepWaterNeighbors > 0 && waterNeighbors >= 3
+                ? settings.RiverChannelBonusMultiplier
+                : 0);
     }
 
     private static void EnsureBerryPatch(

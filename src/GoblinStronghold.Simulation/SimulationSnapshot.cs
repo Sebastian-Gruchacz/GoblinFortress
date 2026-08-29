@@ -28,6 +28,9 @@ public enum ActorJobKind : byte
     ClearConstructionSite = 19,
     CarveRamp = 20,
     CleanBlood = 21,
+    LootRaid = 22,
+    RecoverRaidCorpse = 23,
+    ConsumeRaidCorpse = 24,
 }
 
 public readonly record struct GoblinBudSnapshot(
@@ -35,7 +38,12 @@ public readonly record struct GoblinBudSnapshot(
     EntityId ParentId,
     GridPosition Position,
     int RemainingCareTicks,
-    int TotalCareTicks);
+    int TotalCareTicks)
+{
+    public EntityId OriginCorpseId { get; init; }
+
+    public GoblinInheritanceImprint OriginImprint { get; init; }
+}
 
 public enum GoblinReproductionReadinessKind : byte
 {
@@ -73,6 +81,7 @@ public enum AnimalKind : byte
 {
     MarshHare = 1,
     SwampBoar = 2,
+    CaveSpider = 3,
 }
 
 public enum AnimalActivity : byte
@@ -84,9 +93,16 @@ public enum AnimalActivity : byte
     Threatening = 4,
 }
 
+public enum AnimalSex : byte
+{
+    Female = 1,
+    Male = 2,
+}
+
 public readonly record struct AnimalSnapshot(
     ulong Id,
     AnimalKind Kind,
+    AnimalSex Sex,
     GridPosition Position,
     AnimalActivity Activity,
     int Health,
@@ -94,7 +110,12 @@ public readonly record struct AnimalSnapshot(
     int Hunger,
     int Fatigue,
     int MaximumFatigue,
-    long AgeTicks);
+    long AgeTicks,
+    long MaturityAgeTicks,
+    long MaximumAgeTicks)
+{
+    public bool IsAdult => AgeTicks >= MaturityAgeTicks;
+}
 
 public enum ActorJobStage : byte
 {
@@ -277,6 +298,10 @@ public readonly record struct ActorSnapshot(
     ActorJobSnapshot Job,
     IReadOnlyList<ActorPlanEntrySnapshot> Plan)
 {
+    public EquipmentLoadoutSnapshot Loadout { get; init; } = new([], 0, 0, 0);
+
+    public EntityId CarriedCorpseId { get; init; }
+
     public ActorTacticalOrderSnapshot TacticalOrder { get; init; }
 }
 
@@ -453,6 +478,8 @@ public enum GoblinRaidPhase : byte
     Marching = 2,
     Suspended = 3,
     Ready = 4,
+    Looting = 5,
+    Returning = 6,
 }
 
 public sealed class SimulationSnapshot
@@ -466,6 +493,10 @@ public sealed class SimulationSnapshot
         GoblinBudSnapshot[] goblinBuds,
         TribeNeedsSnapshot tribeNeeds,
         AnimalSnapshot[] animals,
+        UndergroundFactionSnapshot[] undergroundFactions,
+        UndergroundFactionRelationSnapshot[] undergroundFactionRelations,
+        CorpseSnapshot[] corpses,
+        VillageLootContainerSnapshot[] villageLootContainers,
         ItemStackSnapshot[] itemStacks,
         StorageZoneSnapshot[] storageZones,
         ResourcePrioritySnapshot[] resourcePriorities,
@@ -499,6 +530,14 @@ public sealed class SimulationSnapshot
         GoblinBuds = new ReadOnlyCollection<GoblinBudSnapshot>(goblinBuds);
         TribeNeeds = tribeNeeds;
         Animals = new ReadOnlyCollection<AnimalSnapshot>(animals);
+        UndergroundFactions = new ReadOnlyCollection<UndergroundFactionSnapshot>(
+            undergroundFactions);
+        UndergroundFactionRelations =
+            new ReadOnlyCollection<UndergroundFactionRelationSnapshot>(
+                undergroundFactionRelations);
+        Corpses = new ReadOnlyCollection<CorpseSnapshot>(corpses);
+        VillageLootContainers = new ReadOnlyCollection<VillageLootContainerSnapshot>(
+            villageLootContainers);
         ItemStacks = new ReadOnlyCollection<ItemStackSnapshot>(itemStacks);
         StorageZones = new ReadOnlyCollection<StorageZoneSnapshot>(storageZones);
         ResourcePriorities = new ReadOnlyCollection<ResourcePrioritySnapshot>(resourcePriorities);
@@ -542,6 +581,14 @@ public sealed class SimulationSnapshot
     public TribeNeedsSnapshot TribeNeeds { get; }
 
     public IReadOnlyList<AnimalSnapshot> Animals { get; }
+
+    public IReadOnlyList<UndergroundFactionSnapshot> UndergroundFactions { get; }
+
+    public IReadOnlyList<UndergroundFactionRelationSnapshot> UndergroundFactionRelations { get; }
+
+    public IReadOnlyList<CorpseSnapshot> Corpses { get; }
+
+    public IReadOnlyList<VillageLootContainerSnapshot> VillageLootContainers { get; }
 
     public IReadOnlyList<ItemStackSnapshot> ItemStacks { get; }
 

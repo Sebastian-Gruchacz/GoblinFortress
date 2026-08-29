@@ -9,6 +9,76 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class WorldMapStateTests
 {
     [Fact]
+    public void ExcavatedTerrainRampStopsConnectingItsLevelsAndSurvivesSaveLoad()
+    {
+        SimulationEngine? engine = null;
+        GridPosition ramp = default;
+        GridPosition uphill = default;
+        for (ulong seedValue = 1; seedValue <= 64 && engine is null; seedValue++)
+        {
+            var seed = new WorldSeed(seedValue);
+            var candidate = SimulationEngine.Create(
+                seed,
+                SimulationDefinitions.Foundation,
+                SwampMapGenerator.Generate(seed, 64, 64),
+                initialGoblinCount: 1,
+                initialFoodStock: 8);
+            for (var y = 1; y < candidate.Map.Height - 1 && engine is null; y++)
+            {
+                for (var x = 1; x < candidate.Map.Width - 1; x++)
+                {
+                    var cell = candidate.Map.GetColumnCell(new GridPosition(x, y));
+                    if (cell.RampDirection == TerrainRampDirection.None)
+                    {
+                        continue;
+                    }
+
+                    var position = new GridPosition(x, y, cell.SurfaceLevel);
+                    var destination = GetUphillNeighbor(position, cell.RampDirection) with
+                    {
+                        Z = cell.SurfaceLevel + 1,
+                    };
+                    if (candidate.World.CanExcavateRock(position) &&
+                        candidate.World.CanTraverseTerrainEdge(position, destination))
+                    {
+                        engine = candidate;
+                        ramp = position;
+                        uphill = destination;
+                        break;
+                    }
+                }
+            }
+        }
+
+        var rampEngine = engine ?? throw new InvalidOperationException(
+            "The deterministic generator sample did not contain an excavatable terrain ramp.");
+        var topologyVersion = rampEngine.World.TopologyVersion;
+        Assert.Contains(ramp, rampEngine.QueryWorkDesignationTargets(
+            WorkDesignationKind.MineRock, ramp, ramp));
+        Assert.True(rampEngine.World.TryExcavateRock(
+            ramp,
+            rampEngine.CurrentTick,
+            out _,
+            out var deposit,
+            out _));
+
+        Assert.Equal(MineralDepositKind.None, deposit);
+        Assert.Contains(ramp, rampEngine.World.ExcavatedTerrainRamps);
+        Assert.True(rampEngine.World.IsTerrainTraversable(ramp));
+        Assert.False(rampEngine.World.IsTerrainRampIntact(ramp));
+        Assert.False(rampEngine.World.CanTraverseTerrainEdge(ramp, uphill));
+        Assert.False(rampEngine.World.CanTraverseTerrainEdge(uphill, ramp));
+        Assert.True(rampEngine.World.TopologyVersion > topologyVersion);
+
+        var restored = SimulationEngine.Load(
+            rampEngine.Save(),
+            SimulationDefinitions.Foundation);
+        Assert.Contains(ramp, restored.World.ExcavatedTerrainRamps);
+        Assert.False(restored.World.CanTraverseTerrainEdge(ramp, uphill));
+        Assert.Equal(rampEngine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
     public void ElevatedWalkwayBridgesUnsupportedOpenCell()
     {
         SimulationEngine? engine = null;
@@ -80,6 +150,17 @@ public sealed class WorldMapStateTests
         Assert.True(bridgeEngine.World.CanTraverseTerrainEdge(bridge.Left, bridge.Gap));
         Assert.True(bridgeEngine.World.CanTraverseTerrainEdge(bridge.Gap, bridge.Right));
     }
+
+    private static GridPosition GetUphillNeighbor(
+        GridPosition position,
+        TerrainRampDirection direction) => direction switch
+    {
+        TerrainRampDirection.North => position with { Y = position.Y - 1 },
+        TerrainRampDirection.East => position with { X = position.X + 1 },
+        TerrainRampDirection.South => position with { Y = position.Y + 1 },
+        TerrainRampDirection.West => position with { X = position.X - 1 },
+        _ => throw new ArgumentOutOfRangeException(nameof(direction)),
+    };
 
     [Fact]
     public void DeepRiverVolumeOverridesLegacyCaveRockAfterSaveLoad()
@@ -272,6 +353,46 @@ public sealed class WorldMapStateTests
             Assert.Equal(TerrainKind.ShallowWater, map.GetCell(shoal.Position).Terrain);
             Assert.True(MeasureWaterBody(map, shoal.Position) >= 12);
         }
+    }
+
+    [Fact]
+    public void FishShoalRegrowsFasterBesideADeepRiverChannel()
+    {
+        var seed = new WorldSeed(0x4649534852495645UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+        var shoal = engine.World.CreatePlantSnapshot()
+            .Where(patch => patch.Kind == PlantKind.FishShoal)
+            .First(patch =>
+            {
+                var neighbors = map.GetCardinalNeighbors(patch.Position).ToArray();
+                return neighbors.Any(position =>
+                           map.GetCell(position).Terrain == TerrainKind.DeepWater) &&
+                    neighbors.Count(position => map.GetCell(position).Terrain is
+                        TerrainKind.ShallowWater or TerrainKind.DeepWater) >= 3;
+            });
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var savedShoal = save["plantPatches"]!.AsArray().Single(node =>
+            node!["x"]!.GetValue<int>() == shoal.Position.X &&
+            node["y"]!.GetValue<int>() == shoal.Position.Y &&
+            node["z"]!.GetValue<int>() == shoal.Position.Z)!.AsObject();
+        savedShoal["biomass"] = 0;
+        save["currentTick"] = engine.Definitions.PlantGrowthIntervalTicks - 1L;
+        engine = SimulationEngine.Load(save.ToJsonString(), engine.Definitions);
+
+        engine.AdvanceTicks(1);
+
+        var change = Assert.Single(engine.DrainWorldChanges(),
+            item => item.Position == shoal.Position &&
+                item.Kind == WorldChangeKind.VegetationRegrown);
+
+        Assert.Equal(3, change.Amount);
+        Assert.Equal(3, engine.World.GetPlantPatch(shoal.Position)!.Value.Biomass);
     }
 
     [Fact]

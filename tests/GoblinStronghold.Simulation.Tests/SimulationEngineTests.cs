@@ -1205,6 +1205,16 @@ public sealed class SimulationEngineTests
         var sites = engine.CreateSnapshot().ConstructionSites;
         Assert.Equal(2, sites.Count);
         Assert.All(sites, site => Assert.Equal(-1, site.Anchor.Z));
+        var savedSites = JsonNode.Parse(engine.Save())!["constructionSites"]!.AsArray();
+        Assert.Equal(2, savedSites.Count);
+        Assert.NotEqual(0UL, savedSites[0]!["orderId"]!.GetValue<ulong>());
+        Assert.Equal(
+            savedSites[0]!["orderId"]!.GetValue<ulong>(),
+            savedSites[1]!["orderId"]!.GetValue<ulong>());
+        Assert.Equal(0, savedSites[0]!["sequenceIndex"]!.GetValue<int>());
+        Assert.Equal(1, savedSites[1]!["sequenceIndex"]!.GetValue<int>());
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
 
     [Fact]

@@ -120,11 +120,11 @@ public sealed class GeneratedMap
             return true;
         }
 
-        if (IsHillRockPosition(position))
+        if (IsHillMassPosition(position))
         {
             geometry = new InitialCellGeometry(
                 CellVolumeKind.Solid,
-                GetHillRockCell(position).Rock);
+                GetHillMassCell(position).Rock);
             return true;
         }
 
@@ -212,6 +212,18 @@ public sealed class GeneratedMap
             position.Z >= 0 && position.Z < cell.SurfaceLevel;
     }
 
+    public bool IsHillMassPosition(GridPosition position)
+    {
+        if (GeneratorVersion < 9 || !IsColumnWithin(position))
+        {
+            return false;
+        }
+
+        var cell = GetColumnCell(position);
+        return cell.Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
+            position.Z >= 0 && position.Z < cell.SurfaceLevel;
+    }
+
     public CaveCell GetHillRockCell(GridPosition position)
     {
         if (!IsHillRockPosition(position))
@@ -219,6 +231,21 @@ public sealed class GeneratedMap
             throw new ArgumentOutOfRangeException(nameof(position));
         }
 
+        return CreateHillRockCell(position);
+    }
+
+    public CaveCell GetHillMassCell(GridPosition position)
+    {
+        if (!IsHillMassPosition(position))
+        {
+            throw new ArgumentOutOfRangeException(nameof(position));
+        }
+
+        return CreateHillRockCell(position);
+    }
+
+    private CaveCell CreateHillRockCell(GridPosition position)
+    {
         var sample = Seed.Value ^
             ((ulong)(uint)position.X * 0x9E3779B185EBCA87UL) ^
             ((ulong)(uint)position.Y * 0xC2B2AE3D27D4EB4FUL) ^
@@ -228,11 +255,11 @@ public sealed class GeneratedMap
     }
 
     public bool IsRockPosition(GridPosition position) =>
-        IsCavePosition(position) || IsHillRockPosition(position);
+        IsCavePosition(position) || IsHillMassPosition(position);
 
     public CaveCell GetRockCell(GridPosition position) => position.Z < 0
         ? GetCaveCell(position)
-        : GetHillRockCell(position);
+        : GetHillMassCell(position);
 
     public CaveCell GetCaveCell(GridPosition position)
     {

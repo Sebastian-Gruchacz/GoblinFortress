@@ -100,7 +100,9 @@ internal sealed class ConstructionSiteState(
     int remainingWorkTicks,
     int totalWorkTicks,
     ConstructionCapabilityRequirements capabilities,
-    StoragePriority priority)
+    StoragePriority priority,
+    EntityId orderId,
+    int sequenceIndex)
 {
     public EntityId Id { get; } = id;
 
@@ -123,6 +125,10 @@ internal sealed class ConstructionSiteState(
     public ConstructionCapabilityRequirements Capabilities { get; } = capabilities;
 
     public StoragePriority Priority { get; set; } = priority;
+
+    public EntityId OrderId { get; } = orderId;
+
+    public int SequenceIndex { get; } = sequenceIndex;
 
     public int MissingQuantity => Math.Max(0, RequiredQuantity - DeliveredQuantity);
 
@@ -169,7 +175,9 @@ internal static class ConstructionBlueprintCatalog
         EntityId id,
         ConstructionKind kind,
         GridPosition anchor,
-        GridPosition end)
+        GridPosition end,
+        EntityId orderId = default,
+        int sequenceIndex = 0)
     {
         var segmentCount = kind is ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall or
             ConstructionKind.StoneWall
@@ -234,6 +242,8 @@ internal static class ConstructionBlueprintCatalog
             remainingWorkTicks: workTicks,
             totalWorkTicks: workTicks,
             capabilities,
-            StoragePriority.Normal);
+            StoragePriority.Normal,
+            orderId == EntityId.None ? id : orderId,
+            sequenceIndex);
     }
 }

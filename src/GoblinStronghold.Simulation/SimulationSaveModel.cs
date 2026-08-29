@@ -30,9 +30,15 @@ internal sealed class SimulationSaveModel
 
     public List<GoblinBudSaveModel> GoblinBuds { get; set; } = [];
 
+    public List<CorpseSaveModel> Corpses { get; set; } = [];
+
+    public List<Resources.ResourceVariant> StolenVillageEquipment { get; set; } = [];
+
     public ulong NextAnimalId { get; set; }
 
     public List<AnimalSaveModel>? Animals { get; set; }
+
+    public List<UndergroundFactionSaveModel> UndergroundFactions { get; set; } = [];
 
     public GoblinRaidPhase RaidPhase { get; set; }
 
@@ -62,6 +68,8 @@ internal sealed class SimulationSaveModel
 
     public List<GridPositionSaveModel> ExcavatedCaveCells { get; set; } = [];
 
+    public List<GridPositionSaveModel> ExcavatedTerrainRamps { get; set; } = [];
+
     public List<VerticalPassageSaveModel> ExcavatedVerticalPassages { get; set; } = [];
 
     public HumanVillageSaveModel HumanVillage { get; set; } = new();
@@ -89,6 +97,58 @@ internal sealed class SimulationSaveModel
     public List<EventSaveModel> UndeliveredEvents { get; set; } = [];
 
     public List<WorldChangeSaveModel> UndeliveredWorldChanges { get; set; } = [];
+}
+
+internal sealed class CorpseSaveModel
+{
+    public ulong Id { get; set; }
+
+    public CorpseKind Kind { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public int X { get; set; }
+
+    public int Y { get; set; }
+
+    public int Z { get; set; }
+
+    public long CreatedAtTick { get; set; }
+
+    public int ContainedWater { get; set; }
+
+    public int? EdiblePortions { get; set; }
+
+    public GoblinSkill InheritableSkills { get; set; }
+
+    public GoblinTrait InheritableTraits { get; set; }
+
+    public int InheritableForagingExperience { get; set; }
+
+    public int InheritableHaulingExperience { get; set; }
+
+    public int InheritableBuildingExperience { get; set; }
+
+    public int InheritableForagingPreference { get; set; }
+
+    public int InheritableHaulingPreference { get; set; }
+
+    public int InheritableBuildingPreference { get; set; }
+
+    public List<CorpseItemSaveModel> Contents { get; set; } = [];
+}
+
+internal sealed class CorpseItemSaveModel
+{
+    public Resources.ResourceKind Resource { get; set; }
+
+    public Resources.FoodKind FoodKind { get; set; }
+
+    public Resources.ResourceVariant Variant { get; set; }
+
+    public int Quantity { get; set; }
+
+    public int UnitWeight { get; set; }
 }
 
 internal sealed class BloodStainSaveModel
@@ -129,6 +189,7 @@ internal sealed class AnimalSaveModel
 {
     public ulong Id { get; set; }
     public AnimalKind Kind { get; set; }
+    public AnimalSex Sex { get; set; }
     public int X { get; set; }
     public int Y { get; set; }
     public int Z { get; set; }
@@ -144,6 +205,24 @@ internal sealed class GoblinBudSaveModel
     public ulong Id { get; set; }
 
     public ulong ParentId { get; set; }
+
+    public ulong OriginCorpseId { get; set; }
+
+    public GoblinSkill OriginSkills { get; set; }
+
+    public GoblinTrait OriginTraits { get; set; }
+
+    public int OriginForagingExperience { get; set; }
+
+    public int OriginHaulingExperience { get; set; }
+
+    public int OriginBuildingExperience { get; set; }
+
+    public int OriginForagingPreference { get; set; }
+
+    public int OriginHaulingPreference { get; set; }
+
+    public int OriginBuildingPreference { get; set; }
 
     public int X { get; set; }
 
@@ -376,6 +455,8 @@ internal sealed class ActorSaveModel
 
     public ulong CarriedStackId { get; set; }
 
+    public ulong CarriedCorpseId { get; set; }
+
     public ActorJobKind JobKind { get; set; }
 
     public ActorJobPhase JobPhase { get; set; }
@@ -590,6 +671,10 @@ internal sealed class ConstructionSiteSaveModel
     public PersonalEquipment RequiredEquipment { get; set; }
 
     public Resources.StoragePriority? Priority { get; set; }
+
+    public ulong OrderId { get; set; }
+
+    public int SequenceIndex { get; set; }
 }
 
 internal sealed class CraftingOrderSaveModel

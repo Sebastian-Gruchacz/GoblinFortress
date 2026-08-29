@@ -65,6 +65,7 @@ public partial class Main : Node
     private VBoxContainer _raidRows = null!;
     private Button _raidStartButton = null!;
     private OptionButton _raidEngagement = null!;
+    private OptionButton _raidCorpseHandling = null!;
     private readonly Dictionary<RaidDirective, CheckButton> _raidDirectiveChecks = [];
     private readonly HashSet<EntityId> _raidDraftIds = [];
     private bool _updatingRaidSelection;
@@ -73,6 +74,7 @@ public partial class Main : Node
     private int _raidTargetRadius = SimulationEngine.DefaultRaidTargetRadius;
     private PopupMenu _worldContextMenu = null!;
     private GridPosition? _contextCampAnchor;
+    private EntityId _contextCorpseId = EntityId.None;
     private Window _plannerWindow = null!;
     private VBoxContainer _plannerRows = null!;
     private Label _plannerSummary = null!;
@@ -131,6 +133,16 @@ public partial class Main : Node
     private Button _resumeGameButton = null!;
     private Button _newGameButton = null!;
     private Button _loadMenuButton = null!;
+    private Window _optionsWindow = null!;
+    private VBoxContainer _shortcutRows = null!;
+    private ShortcutSettings _shortcutSettings = null!;
+    private Theme _gameUiTheme = null!;
+    private readonly Dictionary<GameShortcutId, Action> _shortcutActions = [];
+    private readonly Dictionary<GameShortcutId, Button> _shortcutBindingButtons = [];
+    private readonly Dictionary<GameShortcutId, (Button Button, string Tooltip)> _shortcutTiles = [];
+    private GameShortcutId? _capturedShortcut;
+    private GameShortcutId? _activeShortcutMenu;
+    private ulong _shortcutMenuExpiresAt;
     private AudioStreamPlayer _titleMusic = null!;
     private bool _hasActiveSession;
     private int _speedBeforeMenu = 1;
@@ -206,11 +218,19 @@ public partial class Main : Node
         LaunchRaid = 4,
         SelectCampOccupants = 5,
         OpenCampStorage = 6,
+        LootRaidCorpses = 100,
+        ConsumeRaidCorpses = 101,
+        RecoverRaidCorpses = 102,
+        RecoverAndBudRaidCorpses = 103,
+        BudRaidCorpsesInPlace = 104,
     }
 
     public override void _Ready()
     {
         _saveStore = new GameSaveStore(ProjectSettings.GlobalizePath("user://saves"));
+        _shortcutSettings = new ShortcutSettings(
+            ProjectSettings.GlobalizePath("user://settings/shortcuts.json"));
+        _gameUiTheme = GameUiTheme.Create();
 
         _worldView = GetNode<WorldView>("WorldView");
         _worldView3D = GetNode<WorldView3D>("WorldView3D");
@@ -274,81 +294,108 @@ public partial class Main : Node
             _managementMenu,
             _commandingHandIcon,
             "Planer plemienia\nPriorytety, obszary i stan zleceń",
-            ShowPlanner);
+            ShowPlanner,
+            GameShortcutId.ShowPlanner);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FoodStorage,
-            "Skład żywności\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.FoodStorage));
+            "Skład żywności\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.FoodStorage),
+            GameShortcutId.BuildFoodStorage);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodStorage,
-            "Skład drewna\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodStorage));
+            "Skład drewna\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodStorage),
+            GameShortcutId.BuildWoodStorage);
         CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
             "Skład kamienia i urobku\nKoszt: 2 drewna",
-            () => SelectBuildMode((long)BuildMode.StoneStorage));
+            () => SelectBuildMode((long)BuildMode.StoneStorage),
+            GameShortcutId.BuildStoneStorage);
         CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Cargo,
             "Skład sprzętu\nKoszt: 2 drewna • wspólna pojemność 32",
-            () => SelectBuildMode((long)BuildMode.EquipmentStorage));
+            () => SelectBuildMode((long)BuildMode.EquipmentStorage),
+            GameShortcutId.BuildEquipmentStorage);
         CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Reeds,
             "Skład materiałów\nKoszt: 2 drewna • skóry, kości i sitowie",
-            () => SelectBuildMode((long)BuildMode.MaterialsStorage));
+            () => SelectBuildMode((long)BuildMode.MaterialsStorage),
+            GameShortcutId.BuildMaterialsStorage);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.Walkway,
-            "Pomost\nKoszt: 1 drewno za segment", () => SelectBuildMode((long)BuildMode.Walkway));
+            "Pomost\nKoszt: 1 drewno za segment", () => SelectBuildMode((long)BuildMode.Walkway),
+            GameShortcutId.BuildWalkway);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
-            "Obozowisko wypadowe\nKoszt: 6 drewna", () => SelectBuildMode((long)BuildMode.FieldCamp));
+            "Obozowisko wypadowe\nKoszt: 6 drewna", () => SelectBuildMode((long)BuildMode.FieldCamp),
+            GameShortcutId.BuildFieldCamp);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
             "Chata goblinów\nKoszt: 8 drewna • zwiększa pojemność plemienia",
-            () => SelectBuildMode((long)BuildMode.GoblinHut));
+            () => SelectBuildMode((long)BuildMode.GoblinHut),
+            GameShortcutId.BuildGoblinHut);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenWall,
-            "Drewniana ściana\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodenWall));
+            "Drewniana ściana\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodenWall),
+            GameShortcutId.BuildWoodenWall);
         CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
             "Kamienny mur\nKoszt: 2 jednostki kamienia • wymaga kilofa",
-            () => SelectBuildMode((long)BuildMode.StoneWall));
+            () => SelectBuildMode((long)BuildMode.StoneWall),
+            GameShortcutId.BuildStoneWall);
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenDoorFrame,
             "Drewniana ościeżnica\nKoszt: 1 drewno", () => SelectBuildMode((long)BuildMode.WoodenDoorFrame));
         CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
             "Kamienna ościeżnica\nKoszt: 1 kamień • wymaga kilofa",
             () => SelectBuildMode((long)BuildMode.StoneDoorFrame));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.WoodenDoor,
-            "Drewniane drzwi\nKoszt: 1 drewno", () => SelectBuildMode((long)BuildMode.WoodenDoor));
+            "Drewniane drzwi\nKoszt: 1 drewno", () => SelectBuildMode((long)BuildMode.WoodenDoor),
+            GameShortcutId.BuildWoodenDoor);
         CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateWallTorchIcon(),
             "Pochodnia ścienna\nKoszt: 1 drewno • wskaż ścianę",
             () => SelectBuildMode((long)BuildMode.WallTorch));
         CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreatePrimitiveWorkshopIcon(),
             "Prymitywny warsztat\nKoszt: 4 drewna",
-            () => SelectBuildMode((long)BuildMode.PrimitiveWorkshop));
+            () => SelectBuildMode((long)BuildMode.PrimitiveWorkshop),
+            GameShortcutId.BuildPrimitiveWorkshop);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherFood,
             "Zbierz żywność\nJagody, grzyby, korzonki i ryby",
-            () => SelectWorkMode((long)WorkMode.GatherFood));
+            () => SelectWorkMode((long)WorkMode.GatherFood),
+            GameShortcutId.GatherFood);
         CreateItemTileButton(_workMenuGrid, _workMenu, ItemIcon.Reeds,
             "Zbierz sitowie\nWskaż trzcinowiska na płytkiej wodzie",
-            () => SelectWorkMode((long)WorkMode.GatherReeds));
+            () => SelectWorkMode((long)WorkMode.GatherReeds),
+            GameShortcutId.GatherReeds);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherBrushwood,
-            "Zbierz chrust\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.GatherBrushwood));
+            "Zbierz chrust\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.GatherBrushwood),
+            GameShortcutId.GatherBrushwood);
         CreateItemTileButton(_workMenuGrid, _workMenu, ItemIcon.Stone,
             "Zbierz kamienie i urobek\nPrzeciągnij obszar",
-            () => SelectWorkMode((long)WorkMode.GatherStone));
+            () => SelectWorkMode((long)WorkMode.GatherStone),
+            GameShortcutId.GatherStone);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.UprootBush,
-            "Wykarcz krzaki\nTrwale usuwa źródła jagód", () => SelectWorkMode((long)WorkMode.UprootBerryBushes));
+            "Wykarcz krzaki\nTrwale usuwa źródła jagód", () => SelectWorkMode((long)WorkMode.UprootBerryBushes),
+            GameShortcutId.UprootBushes);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.FellTree,
-            "Wyrąb drzew i pni\nWymaga goblina z siekierą", () => SelectWorkMode((long)WorkMode.FellTrees));
+            "Wyrąb drzew i pni\nWymaga goblina z siekierą", () => SelectWorkMode((long)WorkMode.FellTrees),
+            GameShortcutId.FellTrees);
         CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
-            "Rozbij głazy\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.QuarryBoulders));
+            "Rozbij głazy\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.QuarryBoulders),
+            GameShortcutId.QuarryBoulders);
         CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
-            "Kop w skale\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.MineRock));
+            "Kop w skale\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.MineRock),
+            GameShortcutId.MineRock);
         CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
             "Wykop pochylnię w dół\nWskaż odkrytą podłogę; wymaga kilofa",
-            () => SelectWorkMode((long)WorkMode.CarveRampDown));
+            () => SelectWorkMode((long)WorkMode.CarveRampDown),
+            GameShortcutId.CarveRampDown);
         CreateTextureTileButton(_workMenuGrid, _workMenu, _pickaxeIcon,
             "Wykop pochylnię w górę\nWskaż odkrytą podłogę jaskini; wymaga kilofa",
-            () => SelectWorkMode((long)WorkMode.CarveRampUp));
+            () => SelectWorkMode((long)WorkMode.CarveRampUp),
+            GameShortcutId.CarveRampUp);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.Expedition,
             "Poluj na zwierzęta\nPrzeciągnij obszar; pozostaną konkretne cele",
-            () => SelectWorkMode((long)WorkMode.HuntAnimals));
+            () => SelectWorkMode((long)WorkMode.HuntAnimals),
+            GameShortcutId.HuntAnimals);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.Expedition,
             "Wyznacz obszar zwiadu\nSkauci nie wejdą w nieznany teren poza zaznaczeniem",
-            () => SelectWorkMode((long)WorkMode.Scout));
+            () => SelectWorkMode((long)WorkMode.Scout),
+            GameShortcutId.Scout);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
             "Zmyj zaschniętą krew\nWskaż plamy na podłogach i pomostach",
-            () => SelectWorkMode((long)WorkMode.CleanBlood));
+            () => SelectWorkMode((long)WorkMode.CleanBlood),
+            GameShortcutId.CleanBlood);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
-            "Usuń zlecenia\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.Clear));
+            "Usuń zlecenia\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.Clear),
+            GameShortcutId.ClearOrders);
         CreateItemTileButton(
             _statisticsMenuGrid,
             _statisticsMenu,
@@ -504,11 +551,38 @@ public partial class Main : Node
         GetToolbarButton("Move").Pressed += ShowUnitOrderMenu;
         GetToolbarButton("Raid").Hide();
         statisticsButton.Pressed += ShowStatisticsMenu;
+        RegisterShortcutAction(GameShortcutId.OpenManagement, ShowManagementMenu);
+        RegisterShortcutAction(GameShortcutId.OpenConstruction, ShowBuildMenu);
+        RegisterShortcutAction(GameShortcutId.OpenWork, ShowWorkMenu);
+        RegisterShortcutAction(GameShortcutId.OpenStatistics, ShowStatisticsMenu);
+        RegisterShortcutAction(GameShortcutId.OpenUnitOrders, ShowUnitOrderMenu);
+        RegisterShortcutTile(
+            GameShortcutId.OpenManagement,
+            GetToolbarButton("Management"),
+            "Zarządzanie plemieniem");
+        RegisterShortcutTile(
+            GameShortcutId.OpenConstruction,
+            GetToolbarButton("Build"),
+            "Budowanie");
+        RegisterShortcutTile(
+            GameShortcutId.OpenWork,
+            GetToolbarButton("Work"),
+            "Zlecenia pracy");
+        RegisterShortcutTile(
+            GameShortcutId.OpenStatistics,
+            statisticsButton,
+            "Zestawienia i statystyki");
+        RegisterShortcutTile(
+            GameShortcutId.OpenUnitOrders,
+            GetToolbarButton("Move"),
+            "Rozkazy wybranych goblinów • M/A/H/P");
         CreatePlannerWindow();
         CreateRaidWindow();
         CreateWorkshopWindow();
         CreateWorldContextMenu();
         CreateUnitOrderMenu();
+        CreateOptionsWindow();
+        ApplyGameThemeToWindows();
         UpdateSpeedButtons();
         ShowMainMenu();
     }
@@ -575,6 +649,24 @@ public partial class Main : Node
 
     public override void _UnhandledInput(InputEvent inputEvent)
     {
+        if (inputEvent is InputEventKey { Pressed: true, Echo: false } shortcutKey &&
+            TryHandleShortcutInput(shortcutKey))
+        {
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (_optionsWindow.Visible &&
+            inputEvent is InputEventKey { Pressed: true, Echo: false } optionsKey)
+        {
+            if (optionsKey.Keycode == Key.Escape)
+            {
+                CloseOptions();
+            }
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
         if (_mainMenu.Visible)
         {
             if (inputEvent is InputEventKey { Pressed: true, Echo: false } menuKey)
@@ -936,6 +1028,312 @@ public partial class Main : Node
         _loadMenuButton.Disabled = !_saveStore.HasAnySave;
         _mainMenu.Show();
         (_hasActiveSession ? _resumeGameButton : _newGameButton).GrabFocus();
+    }
+
+    private void CreateOptionsWindow()
+    {
+        _optionsWindow = new Window
+        {
+            Title = "Opcje",
+            Size = new Vector2I(650, 680),
+            MinSize = new Vector2I(520, 420),
+            Visible = false,
+        };
+        _optionsWindow.CloseRequested += CloseOptions;
+        AddChild(_optionsWindow);
+
+        var margin = new MarginContainer();
+        foreach (var side in new[] { "left", "top", "right", "bottom" })
+        {
+            margin.AddThemeConstantOverride($"margin_{side}", 14);
+        }
+        margin.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _optionsWindow.AddChild(margin);
+
+        var content = new VBoxContainer();
+        content.AddThemeConstantOverride("separation", 10);
+        margin.AddChild(content);
+        content.AddChild(new Label
+        {
+            Text = "Interfejs",
+            ThemeTypeVariation = "HeaderSmall",
+        });
+        content.AddChild(new Label
+        {
+            Text = "Motyw: ciemna sepia • tekst: jasne złoto\n" +
+                "Paleta jest wspólna dla menu kontekstowych, paneli i okien.",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
+        content.AddChild(new HSeparator());
+        content.AddChild(new Label
+        {
+            Text = "Skróty klawiaturowe",
+            ThemeTypeVariation = "HeaderSmall",
+        });
+        content.AddChild(new Label
+        {
+            Text = "Kliknij skrót i naciśnij nowy klawisz. Pozycje wcięte działają " +
+                "po wcześniejszym otwarciu nadrzędnego menu.",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
+
+        var scroll = new ScrollContainer
+        {
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        content.AddChild(scroll);
+        var shortcutMargin = new MarginContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        shortcutMargin.AddThemeConstantOverride("margin_right", 18);
+        scroll.AddChild(shortcutMargin);
+        _shortcutRows = new VBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        _shortcutRows.AddThemeConstantOverride("separation", 5);
+        shortcutMargin.AddChild(_shortcutRows);
+        RebuildShortcutRows();
+
+        var close = new Button { Text = "Zamknij" };
+        close.Pressed += CloseOptions;
+        content.AddChild(close);
+
+        var controls = GetNode<VBoxContainer>(
+            "Interface/MainMenu/Center/Panel/Margin/Controls");
+        var optionsButton = new Button
+        {
+            Text = "Opcje",
+            CustomMinimumSize = new Vector2(0, 42),
+        };
+        optionsButton.Pressed += ShowOptions;
+        controls.AddChild(optionsButton);
+        var quitButton = GetNode<Button>(
+            "Interface/MainMenu/Center/Panel/Margin/Controls/Quit");
+        controls.MoveChild(optionsButton, quitButton.GetIndex());
+    }
+
+    private void ShowOptions()
+    {
+        _capturedShortcut = null;
+        RebuildShortcutRows();
+        _optionsWindow.PopupCentered();
+    }
+
+    private void CloseOptions()
+    {
+        _capturedShortcut = null;
+        _optionsWindow.Hide();
+    }
+
+    private void RebuildShortcutRows()
+    {
+        foreach (var child in _shortcutRows.GetChildren())
+        {
+            child.QueueFree();
+        }
+        _shortcutBindingButtons.Clear();
+
+        string? currentSection = null;
+        foreach (var definition in ShortcutSettings.Definitions)
+        {
+            if (definition.Section != currentSection)
+            {
+                currentSection = definition.Section;
+                var section = new Label { Text = currentSection };
+                section.AddThemeColorOverride("font_color", GameUiTheme.Accent);
+                section.AddThemeFontSizeOverride("font_size", 17);
+                _shortcutRows.AddChild(section);
+            }
+
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 8);
+            row.AddChild(new Label
+            {
+                Text = definition.Parent is null
+                    ? definition.Label
+                    : $"    {definition.Label}",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            var binding = new Button
+            {
+                Text = _shortcutSettings.Describe(definition.Id),
+                CustomMinimumSize = new Vector2(150, 34),
+            };
+            var shortcutId = definition.Id;
+            binding.Pressed += () => BeginShortcutCapture(shortcutId);
+            row.AddChild(binding);
+            _shortcutBindingButtons[shortcutId] = binding;
+            _shortcutRows.AddChild(row);
+        }
+    }
+
+    private void BeginShortcutCapture(GameShortcutId shortcut)
+    {
+        if (_capturedShortcut is { } previous &&
+            _shortcutBindingButtons.TryGetValue(previous, out var previousButton))
+        {
+            previousButton.Text = _shortcutSettings.Describe(previous);
+        }
+        _capturedShortcut = shortcut;
+        _shortcutBindingButtons[shortcut].Text = "Naciśnij klawisz…";
+    }
+
+    private bool TryHandleShortcutInput(InputEventKey key)
+    {
+        if (_capturedShortcut is { } captured)
+        {
+            if (key.Keycode == Key.Escape)
+            {
+                _shortcutBindingButtons[captured].Text = _shortcutSettings.Describe(captured);
+                _capturedShortcut = null;
+                return true;
+            }
+
+            var stroke = new ShortcutStroke(
+                key.Keycode,
+                key.CtrlPressed,
+                key.AltPressed,
+                key.ShiftPressed);
+            if (FindShortcutConflict(captured, stroke) is { } conflict)
+            {
+                _shortcutBindingButtons[captured].Text =
+                    $"Zajęty: {ShortcutSettings.Definitions.First(item => item.Id == conflict).Label}";
+                return true;
+            }
+
+            _shortcutSettings.Set(captured, stroke);
+            _capturedShortcut = null;
+            RefreshShortcutTooltips();
+            RebuildShortcutRows();
+            return true;
+        }
+
+        if (_mainMenu.Visible)
+        {
+            return false;
+        }
+
+        var now = Time.GetTicksMsec();
+        if (_activeShortcutMenu is { } activeParent && now <= _shortcutMenuExpiresAt)
+        {
+            var child = ShortcutSettings.Definitions.FirstOrDefault(definition =>
+                definition.Parent == activeParent &&
+                _shortcutSettings[definition.Id].Matches(key));
+            if (child is not null && _shortcutActions.TryGetValue(child.Id, out var childAction))
+            {
+                HideShortcutMenu(activeParent);
+                _activeShortcutMenu = null;
+                childAction();
+                return true;
+            }
+        }
+        _activeShortcutMenu = null;
+
+        var parent = ShortcutSettings.Definitions.FirstOrDefault(definition =>
+            definition.Parent is null &&
+            _shortcutSettings[definition.Id].Matches(key));
+        if (parent is null || !_shortcutActions.TryGetValue(parent.Id, out var parentAction))
+        {
+            return false;
+        }
+
+        parentAction();
+        _activeShortcutMenu = parent.Id;
+        _shortcutMenuExpiresAt = now + 3000;
+        return true;
+    }
+
+    private GameShortcutId? FindShortcutConflict(GameShortcutId changed, ShortcutStroke stroke)
+    {
+        var changedDefinition = ShortcutSettings.Definitions.First(item => item.Id == changed);
+        return ShortcutSettings.Definitions
+            .Where(item => item.Id != changed && item.Parent == changedDefinition.Parent)
+            .Where(item => _shortcutSettings[item.Id] == stroke)
+            .Select(item => (GameShortcutId?)item.Id)
+            .FirstOrDefault();
+    }
+
+    private void HideShortcutMenu(GameShortcutId parent)
+    {
+        switch (parent)
+        {
+            case GameShortcutId.OpenManagement:
+                _managementMenu.Hide();
+                break;
+            case GameShortcutId.OpenConstruction:
+                _buildMenu.Hide();
+                break;
+            case GameShortcutId.OpenWork:
+                _workMenu.Hide();
+                break;
+            case GameShortcutId.OpenStatistics:
+                _statisticsMenu.Hide();
+                break;
+            case GameShortcutId.OpenUnitOrders:
+                _unitOrderMenu.Hide();
+                break;
+        }
+    }
+
+    private void RegisterShortcutAction(GameShortcutId shortcut, Action action) =>
+        _shortcutActions[shortcut] = action;
+
+    private void RegisterShortcutAction(GameShortcutId? shortcut, Action action)
+    {
+        if (shortcut is { } id)
+        {
+            RegisterShortcutAction(id, action);
+        }
+    }
+
+    private void RegisterShortcutTile(
+        GameShortcutId shortcut,
+        Button button,
+        string tooltip)
+    {
+        _shortcutTiles[shortcut] = (button, tooltip);
+        button.TooltipText = $"{tooltip}\nSkrót: {_shortcutSettings.Describe(shortcut)}";
+    }
+
+    private void RegisterShortcutTile(
+        GameShortcutId? shortcut,
+        Button button,
+        string tooltip)
+    {
+        if (shortcut is { } id)
+        {
+            RegisterShortcutTile(id, button, tooltip);
+        }
+    }
+
+    private void RefreshShortcutTooltips()
+    {
+        foreach (var (shortcut, tile) in _shortcutTiles)
+        {
+            tile.Button.TooltipText =
+                $"{tile.Tooltip}\nSkrót: {_shortcutSettings.Describe(shortcut)}";
+        }
+    }
+
+    private void ApplyGameThemeToWindows() => ApplyGameThemeToWindows(this);
+
+    private void ApplyGameThemeToWindows(Node node)
+    {
+        if (node is Control control)
+        {
+            control.Theme = _gameUiTheme;
+        }
+        else if (node is Window window)
+        {
+            window.Theme = _gameUiTheme;
+        }
+        foreach (var child in node.GetChildren())
+        {
+            ApplyGameThemeToWindows(child);
+        }
     }
 
     private void ResumeGame()
@@ -1397,7 +1795,8 @@ public partial class Main : Node
         PopupPanel menu,
         UiIcon icon,
         string tooltip,
-        Action action)
+        Action action,
+        GameShortcutId? shortcut = null)
     {
         var button = new Button
         {
@@ -1413,6 +1812,8 @@ public partial class Main : Node
             action();
         };
         grid.AddChild(button);
+        RegisterShortcutAction(shortcut, action);
+        RegisterShortcutTile(shortcut, button, tooltip);
     }
 
     private void CreateItemTileButton(
@@ -1420,7 +1821,8 @@ public partial class Main : Node
         PopupPanel menu,
         ItemIcon icon,
         string tooltip,
-        Action action)
+        Action action,
+        GameShortcutId? shortcut = null)
     {
         var button = new Button
         {
@@ -1436,14 +1838,17 @@ public partial class Main : Node
             action();
         };
         grid.AddChild(button);
+        RegisterShortcutAction(shortcut, action);
+        RegisterShortcutTile(shortcut, button, tooltip);
     }
 
-    private static void CreateTextureTileButton(
+    private void CreateTextureTileButton(
         GridContainer grid,
         PopupPanel menu,
         Texture2D texture,
         string tooltip,
-        Action action)
+        Action action,
+        GameShortcutId? shortcut = null)
     {
         var button = new Button
         {
@@ -1459,6 +1864,8 @@ public partial class Main : Node
             action();
         };
         grid.AddChild(button);
+        RegisterShortcutAction(shortcut, action);
+        RegisterShortcutTile(shortcut, button, tooltip);
     }
 
     private static Texture2D CreateWallTorchIcon()
@@ -1518,12 +1925,13 @@ public partial class Main : Node
         return ImageTexture.CreateFromImage(image);
     }
 
-    private static void CreateTextTileButton(
+    private void CreateTextTileButton(
         GridContainer grid,
         PopupPanel menu,
         string text,
         string tooltip,
-        Action action)
+        Action action,
+        GameShortcutId? shortcut = null)
     {
         var button = new Button
         {
@@ -1539,6 +1947,8 @@ public partial class Main : Node
             action();
         };
         grid.AddChild(button);
+        RegisterShortcutAction(shortcut, action);
+        RegisterShortcutTile(shortcut, button, tooltip);
     }
 
     private void CreateNeedIndicators()
@@ -1859,35 +2269,23 @@ public partial class Main : Node
             return;
         }
 
-        var cells = _isDraggingWorkArea
+        var area = _isDraggingWorkArea
             ? GetAreaCells(_workAreaStart, cell)
             : new[] { cell };
-        var snapshot = _latestSnapshot;
-        cells = _workMode switch
-        {
-            WorkMode.GatherFood => cells.Where(position =>
-                snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
-                _engine.World.GetPlantPatch(position) is { Biomass: > 0, Kind: not PlantKind.ReedBed }).ToArray(),
-            WorkMode.GatherReeds => cells.Where(position =>
-                snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
-                _engine.World.GetPlantPatch(position) is { Biomass: > 0, Kind: PlantKind.ReedBed }).ToArray(),
-            WorkMode.MineRock => cells,
-            WorkMode.CarveRampDown => new[] { _isDraggingWorkArea ? _workAreaStart : cell }
-                .Where(position => snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
-                    _engine.World.CanCarveRampDown(position)).ToArray(),
-            WorkMode.CarveRampUp => new[] { _isDraggingWorkArea ? _workAreaStart : cell }
-                .Where(position => snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
-                    _engine.World.CanCarveRampUp(position)).ToArray(),
-            WorkMode.Scout => cells.Where(position =>
-                position.Z == 0 && _engine.World.IsSurfaceTraversable(position)).ToArray(),
-            WorkMode.CleanBlood => cells.Where(position =>
-                snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered() &&
-                snapshot.BloodStains.Any(stain => stain.Position == position &&
-                    stain.Surface == BloodSurfaceKind.ConstructedFloor)).ToArray(),
-            _ => cells.Where(position =>
-                snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered()).ToArray(),
-        };
-        _worldView.SetWorkPreview(ToDesignationKind(_workMode), cells);
+        var designationKind = ToDesignationKind(_workMode);
+        var behavior = _workMode == WorkMode.Clear
+            ? WorkAreaSelectionBehavior.ApplyToApplicableCells
+            : WorkToolCatalog.GetSelectionBehavior(designationKind);
+        var candidates = behavior == WorkAreaSelectionBehavior.SingleApplicableCell
+            ? new[] { _isDraggingWorkArea ? _workAreaStart : cell }
+            : area;
+        var cells = _workMode == WorkMode.Clear
+            ? candidates
+            : _engine.QueryWorkDesignationTargets(
+                designationKind,
+                candidates[0],
+                candidates[^1]);
+        _worldView.SetWorkPreview(designationKind, cells);
         if (_isDraggingWorkArea)
         {
             _inspector.Text = _workMode switch
@@ -1896,7 +2294,9 @@ public partial class Main : Node
                 WorkMode.CarveRampDown or WorkMode.CarveRampUp => cells.Count == 1
                     ? "Pochylnia połączy tę komórkę z sąsiednim poziomem."
                     : "Tu nie można wykopać pochylni: potrzebna jest wolna podłoga i pełna skała po drugiej stronie.",
-                _ => $"Zaznaczanie pracy: {cells.Count} pól; po zatwierdzeniu pozostaną tylko pasujące obiekty.",
+                _ when behavior == WorkAreaSelectionBehavior.FilterTargets =>
+                    $"Zaznaczanie pracy: filtr znalazł {cells.Count} pasujących celów.",
+                _ => $"Zaznaczanie pracy: {cells.Count} pasujących pól.",
             };
         }
     }
@@ -2007,7 +2407,7 @@ public partial class Main : Node
         }
         try
         {
-            _engine.QueueCommand(command);
+            SubmitCommand(command);
         }
         catch (ArgumentException exception)
         {
@@ -2026,9 +2426,36 @@ public partial class Main : Node
             WorkMode.CarveRampDown => "Zlecono wykopanie pochylni na poziom niżej.",
             WorkMode.CarveRampUp => "Zlecono wykopanie pochylni na poziom wyżej.",
             WorkMode.CleanBlood => "Zlecono sprzątanie zaschniętych plam z wykonanych podłóg.",
-            _ => "Zlecono wskazanie pasujących obiektów; cele pojawią się po następnym ticku.",
+            _ => _speed == 0
+                ? "Zlecono wskazanie pasujących obiektów; cele dodano bez wznawiania czasu."
+                : "Zlecono wskazanie pasujących obiektów; cele pojawią się po następnym ticku.",
         };
         CancelWorkMode(clearInspector: false);
+    }
+
+    private void SubmitCommand(SimulationCommand command)
+    {
+        if (_speed > 0)
+        {
+            _engine.QueueCommand(command);
+            return;
+        }
+
+        _engine.ApplyCommandImmediately(command);
+        var events = _engine.DrainEvents();
+        var snapshot = _engine.CreatePresentationSnapshot();
+        _latestSnapshot = snapshot;
+        HandleEvents(events, snapshot);
+        if (_use3DView)
+        {
+            _worldView3D.Refresh(snapshot);
+        }
+        else
+        {
+            _worldView.Refresh(snapshot);
+        }
+        _minimap.Refresh(snapshot);
+        UpdateStatus(snapshot);
     }
 
     private void CancelWorkMode(bool clearInspector = true)
@@ -2495,6 +2922,9 @@ public partial class Main : Node
         var actors = snapshot.Actors.Where(actor => actor.Position == cell).ToArray();
         var buds = snapshot.GoblinBuds.Where(bud => bud.Position == cell).ToArray();
         var animals = snapshot.Animals.Where(animal => animal.Position == cell).ToArray();
+        var corpses = snapshot.Corpses.Where(corpse => corpse.Position == cell).ToArray();
+        var villageLoot = snapshot.VillageLootContainers.Where(container =>
+            container.Position == cell).ToArray();
         var humanVillagers = snapshot.HumanVillage.Villagers
             .Where(villager => villager.Health > 0 && villager.Position == cell)
             .ToArray();
@@ -2586,12 +3016,20 @@ public partial class Main : Node
                 : $" • warsztat: {string.Join(", ", craftingOrders.Select(DescribeCraftingOrder))}") +
             (buds.Length == 0
                 ? string.Empty
-                : $" • żywy pąk: opieka " +
+                : $" • żywy pąk{(buds.Any(bud => bud.OriginCorpseId != EntityId.None) ? " ze zwłok" : string.Empty)}: opieka " +
                   $"{buds.Min(bud => bud.TotalCareTicks - bud.RemainingCareTicks)}/" +
                   $"{buds.Max(bud => bud.TotalCareTicks)}") +
             (animals.Length == 0
                 ? string.Empty
                 : $" • zwierzęta: {string.Join(", ", animals.Select(DescribeAnimal))}") +
+            (corpses.Length == 0
+                ? string.Empty
+                : $" • zwłoki: {string.Join(", ", corpses.Select(DescribeCorpse))}") +
+            (villageLoot.Length == 0
+                ? string.Empty
+                : $" • zapasy w budynku: {string.Join(", ", villageLoot.SelectMany(container =>
+                    container.Contents).Select(item =>
+                    $"{DescribeResourceVariant(item.Resource, item.FoodKind, item.Variant)} ×{item.Quantity}"))}") +
             (actors.Length == 0
                 ? string.Empty
                 : $" • gobliny ×{actors.Length}, nasycenie " +
@@ -2621,6 +3059,34 @@ public partial class Main : Node
             $"{order.TotalWorkTicks - order.RemainingWorkTicks}/" +
             order.TotalWorkTicks;
     }
+
+    private static string DescribeCorpse(CorpseSnapshot corpse)
+    {
+        var contents = corpse.Contents.Count == 0
+            ? "puste"
+            : string.Join(", ", corpse.Contents.Select(item =>
+                $"{DescribeResourceVariant(item.Resource, item.FoodKind, item.Variant)} ×{item.Quantity}"));
+        var water = corpse.ContainedWater > 0 ? $" • woda {corpse.ContainedWater}" : string.Empty;
+        var imprintParts = new[]
+        {
+            DescribeSkills(corpse.InheritanceImprint.KnownSkills),
+            DescribeTraits(corpse.InheritanceImprint.KnownTraits),
+        }.Where(item => !string.IsNullOrWhiteSpace(item));
+        var imprint = string.Join(", ", imprintParts);
+        var imprintText = imprint.Length > 0 ? $" • odcisk: {imprint}" : string.Empty;
+        return $"{corpse.Name} [{corpse.Kind}] • mięso {corpse.EdiblePortions} porcji • " +
+            $"pojemnik {corpse.ContentsWeight} wag.{water}{imprintText} • {contents}";
+    }
+
+    private static string DescribeResourceVariant(
+        ResourceKind resource,
+        FoodKind foodKind,
+        ResourceVariant variant) => resource switch
+    {
+        ResourceKind.Food => DescribeFood(foodKind),
+        ResourceKind.Equipment => DescribeResourceVariant(variant),
+        _ => DescribeResource(resource),
+    };
 
     private static string DescribeCaveRock(RockKind rock) => rock switch
     {
@@ -2716,6 +3182,13 @@ public partial class Main : Node
         ResourceVariant.EquipmentHideClothes => "skórzany ubiór",
         ResourceVariant.EquipmentReedClothes => "sitowiowy ubiór",
         ResourceVariant.EquipmentPrimitiveWaterskin => "prymitywny bukłak",
+        ResourceVariant.EquipmentRagClothes => "łachmany",
+        ResourceVariant.EquipmentWoodenAxe => "drewniana siekiera",
+        ResourceVariant.EquipmentPrimitivePickaxe => "prymitywny kilof",
+        ResourceVariant.EquipmentWoodenHoe => "drewniana motyka",
+        ResourceVariant.EquipmentHumanWoodenAxe => "ludzka drewniana siekiera",
+        ResourceVariant.EquipmentWoodenBucket => "drewniane wiadro",
+        ResourceVariant.EquipmentWoodenSpear => "drewniana włócznia",
         _ => "towar",
     };
 
@@ -2869,6 +3342,15 @@ public partial class Main : Node
         ActorJobKind.CleanBlood when job.Phase == ActorJobPhase.Traveling =>
             $"idzie zmyć krew → {job.Target}",
         ActorJobKind.CleanBlood => $"szoruje podłogę ({job.RemainingWorkTicks})",
+        ActorJobKind.LootRaid when job.Stage == ActorJobStage.Collecting =>
+            $"idzie po łupy → {job.Target}",
+        ActorJobKind.LootRaid => $"odnosi łupy do obozu → {job.Target}",
+        ActorJobKind.RecoverRaidCorpse when job.Stage == ActorJobStage.Collecting =>
+            $"idzie po zwłoki → {job.Target}",
+        ActorJobKind.RecoverRaidCorpse => $"niesie zwłoki do obozu → {job.Target}",
+        ActorJobKind.ConsumeRaidCorpse when job.Phase == ActorJobPhase.Traveling =>
+            $"idzie pożreć zwłoki → {job.Target}",
+        ActorJobKind.ConsumeRaidCorpse => $"pożera zwłoki ({job.RemainingWorkTicks})",
         _ => "bez zadania",
     };
 
@@ -3281,6 +3763,9 @@ public partial class Main : Node
         ActorJobKind.Craft => "⚒",
         ActorJobKind.ClearConstructionSite => "↗",
         ActorJobKind.CleanBlood => "✦",
+        ActorJobKind.LootRaid => "▣",
+        ActorJobKind.RecoverRaidCorpse => "†",
+        ActorJobKind.ConsumeRaidCorpse => "☠",
         _ => "·",
     };
 
@@ -3316,7 +3801,8 @@ public partial class Main : Node
             $"Rozmnażanie: {DescribeReproductionReadiness(needs.Reproduction)}\n" +
             $"Wrogość wsi: {needs.HumanHostility}/100\n\n" +
             $"Zwierzęta: zające {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.MarshHare)} " +
-            $"• dziki {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.SwampBoar)}\n" +
+            $"• dziki {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.SwampBoar)} " +
+            $"• pająki jaskiniowe {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.CaveSpider)}\n" +
             $"Magazyny: {snapshot.StorageZones.Count} • towary {stored:N0}\n" +
             $"Znane luźne towary: {loose:N0}\n" +
             $"Budowy: {snapshot.ConstructionSites.Count}\n" +
@@ -3359,7 +3845,13 @@ public partial class Main : Node
 
     private static string DescribeAnimal(AnimalSnapshot animal)
     {
-        var name = animal.Kind == AnimalKind.MarshHare ? "zając bagienny" : "dzik bagienny";
+        var name = animal.Kind switch
+        {
+            AnimalKind.MarshHare => "zając bagienny",
+            AnimalKind.SwampBoar => "dzik bagienny",
+            AnimalKind.CaveSpider => "pająk jaskiniowy",
+            _ => "nieznane stworzenie",
+        };
         var activity = animal.Activity switch
         {
             AnimalActivity.Foraging => "żeruje",
@@ -3368,7 +3860,9 @@ public partial class Main : Node
             AnimalActivity.Threatening => "atakuje",
             _ => "wędruje",
         };
-        return $"{name} • {activity} • zdrowie {animal.Health}";
+        var sex = animal.Sex == AnimalSex.Female ? "samica" : "samiec";
+        var age = animal.IsAdult ? "dorosły" : "młode";
+        return $"{name} • {sex} • {age} • {activity} • zdrowie {animal.Health}";
     }
 
     private void SelectActor(EntityId actorId, bool showDetails = false)
@@ -3844,6 +4338,11 @@ public partial class Main : Node
                 $"transport {DescribeWorkPreference(actor.WorkPreferences.Hauling)}, " +
                 $"budowanie {DescribeWorkPreference(actor.WorkPreferences.Building)}")
             .AppendLine($"Znane cechy: {DescribeTraits(actor.KnownTraits)}")
+            .AppendLine($"Wyposażenie: {string.Join(", ", actor.Loadout.Items.Select(item =>
+                $"{item.Slot}: {DescribeResourceVariant(item.Variant)} ({item.Weight} wag.)"))}")
+            .AppendLine($"Obciążenie: sprzęt {actor.Loadout.EquipmentWeight}, plecak " +
+                $"{actor.Loadout.PackWeight}, ładunek {actor.Loadout.CarriedCargoWeight}; " +
+                $"razem {actor.Loadout.TotalWeight}/{actor.Loadout.CarryingCapacity}")
             .AppendLine($"Służba logistyczna: " +
                 (logisticsDuty.Length == 0 ? "brak przydziału" : string.Join(", ", logisticsDuty)))
             .AppendLine($"Rozkaz nadrzędny: {DescribeTacticalOrder(actor.TacticalOrder)}")
@@ -3928,6 +4427,9 @@ public partial class Main : Node
         ActorJobKind.TendBud => "opieki nad pąkiem",
         ActorJobKind.HuntAnimal => "polowania",
         ActorJobKind.CleanBlood => "sprzątania krwi",
+        ActorJobKind.LootRaid => "plądrowania",
+        ActorJobKind.RecoverRaidCorpse => "przenoszenia zwłok",
+        ActorJobKind.ConsumeRaidCorpse => "pożerania zwłok",
         _ => "bezczynności",
     };
 
@@ -4866,6 +5368,21 @@ public partial class Main : Node
 
         var clicked = ScreenToVisibleCell(screenPosition);
         var snapshot = _engine.CreateSnapshot();
+        if (!snapshot.GetVisibility(clicked, _engine.Map.Width).IsDiscovered())
+        {
+            return false;
+        }
+
+        var corpse = snapshot.Corpses
+            .Where(item => item.Position == clicked)
+            .OrderBy(item => item.Id)
+            .FirstOrDefault();
+        if (corpse is not null)
+        {
+            ShowCorpseContextMenu(screenPosition, snapshot, corpse);
+            return true;
+        }
+
         var camp = snapshot.WorldObjects.FirstOrDefault(worldObject =>
             worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
             worldObject.Owner == WorldObjectOwner.GoblinTribe &&
@@ -4876,6 +5393,7 @@ public partial class Main : Node
             return false;
         }
 
+        _contextCorpseId = EntityId.None;
         _contextCampAnchor = camp.Anchor;
         var floorCells = camp.GetAbsoluteParts()
             .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
@@ -4901,20 +5419,27 @@ public partial class Main : Node
         _worldContextMenu.AddItem("Edytuj najazd…", (int)WorldContextAction.EditRaid);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.EditRaid),
-            snapshot.RaidPhase == GoblinRaidPhase.Marching);
+            snapshot.RaidPhase is GoblinRaidPhase.Marching or GoblinRaidPhase.Looting or
+                GoblinRaidPhase.Returning);
         _worldContextMenu.AddItem(
             snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready
                 ? "Wstrzymaj przygotowania"
                 : snapshot.RaidPhase == GoblinRaidPhase.Marching
                     ? "Odwołaj najazd"
+                : snapshot.RaidPhase is GoblinRaidPhase.Looting or GoblinRaidPhase.Returning
+                    ? "Najazd w toku"
                 : "Przygotuj najazd",
             (int)WorldContextAction.ToggleRaidPreparation);
+        _worldContextMenu.SetItemDisabled(
+            _worldContextMenu.GetItemIndex((int)WorldContextAction.ToggleRaidPreparation),
+            snapshot.RaidPhase is GoblinRaidPhase.Looting or GoblinRaidPhase.Returning);
         _worldContextMenu.AddItem(
             $"Wybierz cel… (promień {snapshot.RaidPlan.TargetRadius})",
             (int)WorldContextAction.SelectRaidTarget);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.SelectRaidTarget),
-            snapshot.RaidPhase == GoblinRaidPhase.Marching);
+            snapshot.RaidPhase is GoblinRaidPhase.Marching or GoblinRaidPhase.Looting or
+                GoblinRaidPhase.Returning);
         if (snapshot.RaidPhase == GoblinRaidPhase.Ready)
         {
             _worldContextMenu.AddItem("ATAK!", (int)WorldContextAction.LaunchRaid);
@@ -4941,6 +5466,73 @@ public partial class Main : Node
         return true;
     }
 
+    private void ShowCorpseContextMenu(
+        Vector2 screenPosition,
+        SimulationSnapshot snapshot,
+        CorpseSnapshot corpse)
+    {
+        _contextCampAnchor = null;
+        _contextCorpseId = corpse.Id;
+        var isActiveRaid = snapshot.RaidPhase is GoblinRaidPhase.Marching or
+            GoblinRaidPhase.Looting;
+        var isInRaidArea = corpse.Position.Z == snapshot.RaidPlan.Target.Z &&
+            Math.Abs(corpse.Position.X - snapshot.RaidPlan.Target.X) +
+            Math.Abs(corpse.Position.Y - snapshot.RaidPlan.Target.Y) <=
+            snapshot.RaidPlan.TargetRadius;
+        var enabled = corpse.Kind == CorpseKind.Human && isActiveRaid && isInRaidArea;
+
+        _worldContextMenu.Clear();
+        _worldContextMenu.AddItem($"{corpse.Name} • zwłoki");
+        _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
+        _worldContextMenu.AddItem(
+            $"Mięso: {corpse.EdiblePortions} • przedmioty: {corpse.Contents.Count}");
+        _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
+        _worldContextMenu.AddSeparator("Los zwłok w obszarze najazdu");
+        AddCorpseContextAction(
+            "Przeszukaj wyposażenie i zapasy",
+            WorldContextAction.LootRaidCorpses,
+            enabled);
+        AddCorpseContextAction(
+            "Pożryj zwłoki",
+            WorldContextAction.ConsumeRaidCorpses,
+            enabled);
+        AddCorpseContextAction(
+            "Zanieś do obozu",
+            WorldContextAction.RecoverRaidCorpses,
+            enabled);
+        AddCorpseContextAction(
+            "Zanieś i zapyl w obozie",
+            WorldContextAction.RecoverAndBudRaidCorpses,
+            enabled);
+        AddCorpseContextAction(
+            "Zapyl na miejscu",
+            WorldContextAction.BudRaidCorpsesInPlace,
+            enabled);
+        if (!enabled)
+        {
+            _worldContextMenu.AddSeparator();
+            _worldContextMenu.AddItem(isActiveRaid
+                ? "Zwłoki leżą poza obszarem tego najazdu"
+                : "Brak aktywnego najazdu — rozkaz pozostaje niedostępny");
+            _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
+        }
+        _worldContextMenu.Position = new Vector2I(
+            Mathf.RoundToInt(screenPosition.X),
+            Mathf.RoundToInt(screenPosition.Y));
+        _worldContextMenu.Popup();
+    }
+
+    private void AddCorpseContextAction(
+        string label,
+        WorldContextAction action,
+        bool enabled)
+    {
+        _worldContextMenu.AddItem(label, (int)action);
+        _worldContextMenu.SetItemDisabled(
+            _worldContextMenu.GetItemIndex((int)action),
+            !enabled);
+    }
+
     private static bool IsCampContextHit(WorldObjectSnapshot camp, GridPosition clicked)
     {
         if (camp.Anchor.Z != clicked.Z)
@@ -4961,6 +5553,13 @@ public partial class Main : Node
 
     private void HandleWorldContextAction(long actionId)
     {
+        if (_contextCorpseId != EntityId.None)
+        {
+            HandleCorpseContextAction((WorldContextAction)actionId);
+            _contextCorpseId = EntityId.None;
+            return;
+        }
+
         var campAnchor = _contextCampAnchor;
         _contextCampAnchor = null;
         if (campAnchor is null)
@@ -5026,6 +5625,54 @@ public partial class Main : Node
                 break;
         }
     }
+
+    private void HandleCorpseContextAction(WorldContextAction action)
+    {
+        var snapshot = _engine.CreateSnapshot();
+        var directives = snapshot.RaidPlan.Directives;
+        switch (action)
+        {
+            case WorldContextAction.LootRaidCorpses:
+                directives |= RaidDirective.LootEquipment |
+                    RaidDirective.LootSupplies |
+                    RaidDirective.LootFood;
+                break;
+            case WorldContextAction.ConsumeRaidCorpses:
+                directives |= RaidDirective.ConsumeCorpses;
+                break;
+            case WorldContextAction.RecoverRaidCorpses:
+                directives = SetCorpseHandling(
+                    directives,
+                    RaidDirective.RecoverCorpses);
+                break;
+            case WorldContextAction.RecoverAndBudRaidCorpses:
+                directives = SetCorpseHandling(
+                    directives,
+                    RaidDirective.BudCorpses);
+                break;
+            case WorldContextAction.BudRaidCorpsesInPlace:
+                directives = SetCorpseHandling(
+                    directives,
+                    RaidDirective.BudCorpsesInPlace);
+                break;
+            default:
+                return;
+        }
+
+        _engine.QueueCommand(SimulationCommand.ConfigureRaidDirectives(
+            _engine.CurrentTick.Next(),
+            _commandSequence++,
+            directives));
+        _inspector.Text = "Zmieniono sposób traktowania zwłok po walce. " +
+            "Rozkaz obejmuje zwłoki w aktualnym obszarze najazdu.";
+    }
+
+    private static RaidDirective SetCorpseHandling(
+        RaidDirective directives,
+        RaidDirective selected) =>
+        (directives & ~(RaidDirective.RecoverCorpses |
+            RaidDirective.BudCorpses |
+            RaidDirective.BudCorpsesInPlace)) | selected;
 
     private void SelectCampOccupants(
         SimulationSnapshot snapshot,
@@ -5096,13 +5743,21 @@ public partial class Main : Node
         AddRaidDirectiveCheck(directiveGrid, RaidDirective.LootSupplies, "Zabierz zapasy");
         AddRaidDirectiveCheck(directiveGrid, RaidDirective.LootFood, "Zabierz żywność");
         AddRaidDirectiveCheck(directiveGrid, RaidDirective.ConsumeCorpses, "Pożryj zwłoki");
-        AddRaidDirectiveCheck(directiveGrid, RaidDirective.BudCorpses, "Zapączkuj zwłoki");
         AddRaidDirectiveCheck(directiveGrid, RaidDirective.BurnBuildings, "Spal budynki");
         AddRaidDirectiveCheck(directiveGrid, RaidDirective.DemolishBuildings, "Wyburz budynki");
         AddRaidDirectiveCheck(directiveGrid, RaidDirective.ContinueWhileTargetsVisible,
             "Kontynuuj, gdy widać cele");
         AddRaidDirectiveCheck(directiveGrid, RaidDirective.AutoLaunchWhenReady,
             "Atakuj automatycznie po przygotowaniu");
+        content.AddChild(new Label { Text = "Postępowanie ze zwłokami:" });
+        _raidCorpseHandling = new OptionButton();
+        _raidCorpseHandling.AddItem("Pozostaw zwłoki", (int)RaidCorpseHandlingMode.None);
+        _raidCorpseHandling.AddItem("Tylko zanieś do obozu", (int)RaidCorpseHandlingMode.RecoverToCamp);
+        _raidCorpseHandling.AddItem(
+            "Zanieś i zapyl w obozie",
+            (int)RaidCorpseHandlingMode.RecoverAndBudAtCamp);
+        _raidCorpseHandling.AddItem("Zapyl na miejscu", (int)RaidCorpseHandlingMode.BudInPlace);
+        content.AddChild(_raidCorpseHandling);
         var scroll = new ScrollContainer
         {
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
@@ -5147,6 +5802,13 @@ public partial class Main : Node
         var snapshot = _engine.CreateSnapshot();
         _raidDraftRallyPoint = rallyPoint;
         _raidEngagement.Select(snapshot.RaidPlan.Has(RaidDirective.AttackNonFleeing) ? 1 : 0);
+        _raidCorpseHandling.Select(snapshot.RaidPlan.Has(RaidDirective.BudCorpsesInPlace)
+            ? (int)RaidCorpseHandlingMode.BudInPlace
+            : snapshot.RaidPlan.Has(RaidDirective.BudCorpses)
+                ? (int)RaidCorpseHandlingMode.RecoverAndBudAtCamp
+                : snapshot.RaidPlan.Has(RaidDirective.RecoverCorpses)
+                    ? (int)RaidCorpseHandlingMode.RecoverToCamp
+                    : (int)RaidCorpseHandlingMode.None);
         foreach (var (directive, check) in _raidDirectiveChecks)
         {
             check.ButtonPressed = snapshot.RaidPlan.Has(directive);
@@ -5193,9 +5855,11 @@ public partial class Main : Node
         {
             child.QueueFree();
         }
-        var selectionLocked = snapshot.RaidPhase == GoblinRaidPhase.Marching ||
+        var selectionLocked = snapshot.RaidPhase is GoblinRaidPhase.Marching or
+            GoblinRaidPhase.Looting or GoblinRaidPhase.Returning ||
             snapshot.HumanVillage.GoblinAttackOrdered;
         _raidEngagement.Disabled = selectionLocked;
+        _raidCorpseHandling.Disabled = selectionLocked;
         foreach (var check in _raidDirectiveChecks.Values)
         {
             check.Disabled = selectionLocked;
@@ -5259,6 +5923,8 @@ public partial class Main : Node
             GoblinRaidPhase.Ready => "Oddział gotowy — czeka na rozkaz ATAK!.",
             GoblinRaidPhase.Suspended => "Przygotowania wstrzymane; plan można edytować.",
             GoblinRaidPhase.Marching => $"Oddział maszeruje do {snapshot.RaidPlan.Target}.",
+            GoblinRaidPhase.Looting => "Walka zakończona — oddział zbiera łupy i odnosi je do obozu.",
+            GoblinRaidPhase.Returning => "Łupy zabezpieczone — oddział wraca do obozu.",
             _ when _raidDraftRallyPoint is not null =>
                 $"Punkt zbiórki: obóz {_raidDraftRallyPoint.Value}. Wybierz od 1 do 5 goblinów.",
             _ => "Wybierz od 1 do 5 goblinów. Wyruszą po zebraniu się w obozie i uzupełnieniu zapasów.",
@@ -5274,7 +5940,8 @@ public partial class Main : Node
             GoblinRaidPhase.Ready
                 ? "Zapisz zmiany"
                 : "Zapisz plan";
-        _raidStartButton.Disabled = snapshot.RaidPhase == GoblinRaidPhase.Marching ||
+        _raidStartButton.Disabled = snapshot.RaidPhase is GoblinRaidPhase.Marching or
+            GoblinRaidPhase.Looting or GoblinRaidPhase.Returning ||
             snapshot.HumanVillage.GoblinAttackOrdered || !hasCamp || _raidDraftIds.Count == 0;
     }
 
@@ -5335,7 +6002,8 @@ public partial class Main : Node
     private void StartSelectedRaid()
     {
         var snapshot = _engine.CreateSnapshot();
-        if (_raidDraftIds.Count == 0 || snapshot.RaidPhase == GoblinRaidPhase.Marching ||
+        if (_raidDraftIds.Count == 0 || snapshot.RaidPhase is GoblinRaidPhase.Marching or
+            GoblinRaidPhase.Looting or GoblinRaidPhase.Returning ||
             snapshot.HumanVillage.GoblinAttackOrdered)
         {
             return;
@@ -5360,6 +6028,13 @@ public partial class Main : Node
                 directives |= directive;
             }
         }
+        directives |= (RaidCorpseHandlingMode)_raidCorpseHandling.Selected switch
+        {
+            RaidCorpseHandlingMode.RecoverToCamp => RaidDirective.RecoverCorpses,
+            RaidCorpseHandlingMode.RecoverAndBudAtCamp => RaidDirective.BudCorpses,
+            RaidCorpseHandlingMode.BudInPlace => RaidDirective.BudCorpsesInPlace,
+            _ => RaidDirective.None,
+        };
         _engine.QueueCommand(SimulationCommand.ConfigureRaidDirectives(
             executeAt,
             _commandSequence++,
@@ -5631,6 +6306,14 @@ public partial class Main : Node
         else if (snapshot.RaidPhase == GoblinRaidPhase.Marching)
         {
             _status.Text += "  •  najazd: wymarsz";
+        }
+        else if (snapshot.RaidPhase == GoblinRaidPhase.Looting)
+        {
+            _status.Text += "  •  najazd: plądrowanie";
+        }
+        else if (snapshot.RaidPhase == GoblinRaidPhase.Returning)
+        {
+            _status.Text += "  •  najazd: powrót do obozu";
         }
         else if (villageVisibility == CellVisibility.Explored)
         {

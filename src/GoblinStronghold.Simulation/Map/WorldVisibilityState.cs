@@ -95,7 +95,9 @@ public sealed class WorldVisibilityState
         Reveal(observers.Select(observer => (observer, radius)));
     }
 
-    internal void Reveal(IEnumerable<(GridPosition Position, int Radius)> observers)
+    internal void Reveal(
+        IEnumerable<(GridPosition Position, int Radius)> observers,
+        Func<GridPosition, bool>? isSolidHillRock = null)
     {
         ArgumentNullException.ThrowIfNull(observers);
         var observerArray = observers.ToArray();
@@ -122,7 +124,7 @@ public sealed class WorldVisibilityState
                         ((x - observer.X) * (x - observer.X)) +
                         ((y - observer.Y) * (y - observer.Y)));
                     if (distanceSquared <= radiusSquared && IsVisibilityPosition(position) &&
-                        !Map.IsHillRockPosition(position))
+                        !(isSolidHillRock?.Invoke(position) ?? Map.IsHillMassPosition(position)))
                     {
                         var index = GetIndex(position);
                         if (_cells[index] != CellVisibility.Visible)
@@ -138,7 +140,7 @@ public sealed class WorldVisibilityState
 
     private bool IsVisibilityPosition(GridPosition position) =>
         Map.IsWithin(position) || Map.IsCavePosition(position) ||
-        Map.IsHillRockPosition(position) ||
+        Map.IsHillMassPosition(position) ||
         Map.IsTerrainSurfacePosition(position);
 
     private int GetIndex(GridPosition position) => checked(

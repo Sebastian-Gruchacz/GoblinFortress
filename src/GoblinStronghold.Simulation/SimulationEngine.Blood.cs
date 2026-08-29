@@ -107,6 +107,11 @@ public sealed partial class SimulationEngine
         }
 
         actor.Position = destination;
+        if (actor.CarriedCorpseId != EntityId.None &&
+            _corpses.TryGetValue(actor.CarriedCorpseId, out var carriedCorpse))
+        {
+            carriedCorpse.Position = destination;
+        }
         if (Map.IsTerrainSurfacePosition(destination) &&
             Map.GetColumnCell(destination).Terrain is
                 TerrainKind.ShallowWater or TerrainKind.DeepWater)

@@ -52,7 +52,8 @@ public sealed partial class SimulationEngine
         var reservedConstructionQuantities = CreateConstructionReservations();
         var reservedCraftingQuantities = CreateCraftingReservations();
         var activeExplorers = _actors.Values.Count(actor => actor.JobKind == ActorJobKind.Explore);
-        var raidPartyIds = _raidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Marching
+        var raidPartyIds = _raidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Marching or
+            GoblinRaidPhase.Looting or GoblinRaidPhase.Returning
             ? GetRaidParty().Select(actor => actor.Id).ToHashSet()
             : [];
         _lastActorJobStageStopwatchTicks[1] =
@@ -97,6 +98,18 @@ public sealed partial class SimulationEngine
                 else if (needsWater && TryPlanWaterResupply(actor))
                 {
                     // Water outranks cargo and ordinary work once the carried supply is empty.
+                }
+                else if (_raidPhase == GoblinRaidPhase.Looting &&
+                         raidPartyIds.Contains(actor.Id) &&
+                         TryPlanRaidLoot(actor))
+                {
+                    // Surviving raiders physically recover selected spoils before returning.
+                }
+                else if (_raidPhase == GoblinRaidPhase.Returning &&
+                         raidPartyIds.Contains(actor.Id) &&
+                         TryPlanRaidReturn(actor))
+                {
+                    // Once the aftermath is complete, every survivor returns to the rally camp.
                 }
                 else if (actor.CarriedStackId != EntityId.None)
                 {
@@ -263,6 +276,15 @@ public sealed partial class SimulationEngine
                     break;
                 case ActorJobKind.CleanBlood:
                     UpdateCleanBloodJob(actor);
+                    break;
+                case ActorJobKind.LootRaid:
+                    UpdateRaidLootJob(actor);
+                    break;
+                case ActorJobKind.RecoverRaidCorpse:
+                    UpdateRaidCorpseRecoveryJob(actor);
+                    break;
+                case ActorJobKind.ConsumeRaidCorpse:
+                    UpdateRaidCorpseConsumptionJob(actor);
                     break;
                 case ActorJobKind.SupplyConstruction:
                     UpdateConstructionSupplyJob(actor);
@@ -2325,13 +2347,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var pageCount = (candidates.Length + MaximumPublicWorkRouteCandidatesPerPlanningTick - 1) /
-            MaximumPublicWorkRouteCandidatesPerPlanningTick;
-        var planningRound = CurrentTick.Value /
-            Definitions.ActorPlanning.BackgroundPlanningIntervalTicks;
-        var page = (int)((planningRound + (long)actor.Id.Value) % pageCount);
         foreach (var candidate in candidates
-                     .Skip(page * MaximumPublicWorkRouteCandidatesPerPlanningTick)
                      .Take(MaximumPublicWorkRouteCandidatesPerPlanningTick))
         {
             var route = FindTribePath(actor.Position, candidate.Position);
@@ -2902,6 +2918,7 @@ public sealed partial class SimulationEngine
             var candidates = (
                     from site in _constructionSites.Values
                     where site.Priority == priority
+                    where IsConstructionSequenceReady(site)
                     let missing = site.MissingQuantity -
                         constructionReservations.GetValueOrDefault(site.Id)
                     where missing > 0
@@ -2988,6 +3005,7 @@ public sealed partial class SimulationEngine
 
         var candidates = _constructionSites.Values
             .Where(site => site.RequiredResource == carried.Resource &&
+                IsConstructionSequenceReady(site) &&
                 site.MissingQuantity - constructionReservations.GetValueOrDefault(site.Id) >=
                     carried.Quantity)
             .OrderByDescending(site => site.Priority)
@@ -3154,6 +3172,7 @@ public sealed partial class SimulationEngine
             .ToHashSet();
         var candidates = _constructionSites.Values
             .Where(site => site.HasAllMaterials &&
+                IsConstructionSequenceReady(site) &&
                 !HasGroundStackInConstructionFootprint(site) &&
                 !reservedSites.Contains(site.Id) &&
                 CanActorBuild(actor, site))
@@ -3183,6 +3202,11 @@ public sealed partial class SimulationEngine
 
         return false;
     }
+
+    private bool IsConstructionSequenceReady(ConstructionSiteState site) =>
+        !_constructionSites.Values.Any(candidate =>
+            candidate.OrderId == site.OrderId &&
+            candidate.SequenceIndex < site.SequenceIndex);
 
     private void UpdateConstructionBuildJob(ActorState actor)
     {
@@ -3486,7 +3510,7 @@ public sealed partial class SimulationEngine
                     World.GetQuarriableBoulder(designation.Target) is null,
                 WorkDesignationKind.MineRock =>
                     Visibility.Get(designation.Target) != CellVisibility.Unknown &&
-                    !World.IsSolidCaveRock(designation.Target),
+                    !World.IsSolidRock(designation.Target),
                 WorkDesignationKind.CarveRampDown =>
                     !World.CanCarveRampDown(designation.Target),
                 WorkDesignationKind.CarveRampUp =>
@@ -4147,6 +4171,15 @@ public sealed partial class SimulationEngine
                 case ActorJobKind.CleanBlood:
                     ValidateLoadedCleanBloodJob(actor);
                     break;
+                case ActorJobKind.LootRaid:
+                    ValidateLoadedRaidLootJob(actor);
+                    break;
+                case ActorJobKind.RecoverRaidCorpse:
+                    ValidateLoadedRaidCorpseRecoveryJob(actor);
+                    break;
+                case ActorJobKind.ConsumeRaidCorpse:
+                    ValidateLoadedRaidCorpseConsumptionJob(actor);
+                    break;
                 default:
                     throw new InvalidDataException("The save contains an unsupported actor job.");
             }
@@ -4172,6 +4205,82 @@ public sealed partial class SimulationEngine
             actor.ReservedQuantity != 0)
         {
             throw new InvalidDataException("The save contains an invalid collapsed actor job.");
+        }
+    }
+
+    private void ValidateLoadedRaidLootJob(ActorState actor)
+    {
+        if (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id) ||
+            actor.CarriedCorpseId != EntityId.None || actor.ReservedQuantity != 0)
+        {
+            throw new InvalidDataException("The save contains an invalid raid-looting job.");
+        }
+
+        if (actor.JobStage == ActorJobStage.Collecting)
+        {
+            var hasCorpse = actor.SourceStackId != EntityId.None &&
+                _corpses.TryGetValue(actor.SourceStackId, out var corpse) &&
+                corpse.Position == actor.JobTarget && corpse.Contents.Any(IsRaidLootAllowed);
+            var hasContainer = actor.SourceStackId == EntityId.None &&
+                actor.DestinationZoneId != EntityId.None &&
+                CreateVillageLootSnapshot().Any(container =>
+                    container.StructureId.Value == actor.DestinationZoneId.Value &&
+                    container.Position == actor.JobTarget &&
+                    container.Contents.Any(IsRaidLootAllowed));
+            if (actor.CarriedStackId != EntityId.None || (!hasCorpse && !hasContainer))
+            {
+                throw new InvalidDataException("The save contains invalid raid loot collection.");
+            }
+            return;
+        }
+
+        if (actor.JobStage != ActorJobStage.Delivering ||
+            actor.SourceStackId != EntityId.None || actor.DestinationZoneId != EntityId.None ||
+            actor.CarriedStackId == EntityId.None || actor.JobTarget != _raidRallyPoint)
+        {
+            throw new InvalidDataException("The save contains invalid raid loot delivery.");
+        }
+    }
+
+    private void ValidateLoadedRaidCorpseRecoveryJob(ActorState actor)
+    {
+        if (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id) ||
+            actor.CarriedStackId != EntityId.None || actor.DestinationZoneId != EntityId.None ||
+            actor.ReservedQuantity != 0)
+        {
+            throw new InvalidDataException("The save contains an invalid corpse-recovery job.");
+        }
+
+        if (actor.JobStage == ActorJobStage.Collecting)
+        {
+            if (actor.CarriedCorpseId != EntityId.None ||
+                !_corpses.TryGetValue(actor.SourceStackId, out var corpse) ||
+                corpse.Position != actor.JobTarget || corpse.Kind != CorpseKind.Human)
+            {
+                throw new InvalidDataException("The save contains invalid corpse collection.");
+            }
+            return;
+        }
+
+        if (actor.JobStage != ActorJobStage.Delivering ||
+            actor.SourceStackId != EntityId.None || actor.CarriedCorpseId == EntityId.None ||
+            actor.JobTarget != _raidRallyPoint)
+        {
+            throw new InvalidDataException("The save contains invalid corpse delivery.");
+        }
+    }
+
+    private void ValidateLoadedRaidCorpseConsumptionJob(ActorState actor)
+    {
+        if (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id) ||
+            actor.JobStage != ActorJobStage.Collecting ||
+            actor.CarriedStackId != EntityId.None || actor.CarriedCorpseId != EntityId.None ||
+            actor.DestinationZoneId != EntityId.None || actor.ReservedQuantity != 0 ||
+            !_corpses.TryGetValue(actor.SourceStackId, out var corpse) ||
+            corpse.Kind != CorpseKind.Human || corpse.EdiblePortions <= 0 ||
+            corpse.Position != actor.JobTarget)
+        {
+            throw new InvalidDataException("The save contains an invalid corpse-consumption job.");
         }
     }
 
@@ -4522,6 +4631,9 @@ public sealed partial class SimulationEngine
                 _craftingOrders.TryGetValue(actor.DestinationZoneId, out var craftingOrder) =>
                 craftingOrder.TotalWorkTicks,
             ActorJobKind.CleanBlood => BloodCleaningWorkTicks,
+            ActorJobKind.LootRaid => Definitions.HaulHandlingTicks,
+            ActorJobKind.RecoverRaidCorpse => Definitions.HaulHandlingTicks,
+            ActorJobKind.ConsumeRaidCorpse => Definitions.EatWorkTicks,
             _ => 0,
         };
         if (actor.JobPhase == ActorJobPhase.Working)
@@ -4676,6 +4788,9 @@ public sealed partial class SimulationEngine
             _craftingOrders.TryGetValue(actor.DestinationZoneId, out var craftingOrder) =>
             craftingOrder.RemainingWorkTicks,
         ActorJobKind.CleanBlood => BloodCleaningWorkTicks,
+        ActorJobKind.LootRaid => Definitions.HaulHandlingTicks,
+        ActorJobKind.RecoverRaidCorpse => Definitions.HaulHandlingTicks,
+        ActorJobKind.ConsumeRaidCorpse => Definitions.EatWorkTicks,
         _ => throw new InvalidOperationException("An idle actor cannot begin work."),
     };
 

@@ -11,6 +11,7 @@ public enum RandomDomain : ulong
     GoblinIdentity = 7,
     Brushwood = 8,
     Stone = 9,
+    UndergroundFactions = 10,
 }
 
 public static class DeterministicRandom

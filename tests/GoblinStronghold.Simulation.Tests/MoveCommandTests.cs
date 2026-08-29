@@ -479,6 +479,61 @@ public sealed class MoveCommandTests
     }
 
     [Fact]
+    public void MiningDesignationCutsAHorizontalTunnelIntoAHill()
+    {
+        var seed = new WorldSeed(4882149368200903417UL);
+        var map = SwampMapGenerator.Generate(seed, width: 96, height: 96);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 40);
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.True(actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe));
+        var target =
+            (from y in Enumerable.Range(0, map.Height)
+             from x in Enumerable.Range(0, map.Width)
+             let position = new GridPosition(x, y, 0)
+             where map.GetColumnCell(position).Terrain == TerrainKind.Mud &&
+                 engine.World.CanExcavateRock(position) && map.IsHillMassPosition(position)
+             from access in engine.World.GetCardinalWorldNeighbors(position)
+             where engine.World.IsTerrainTraversable(access)
+             select (Rock: position, Access: access)).First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["actors"]![0]!["x"] = target.Access.X;
+        save["actors"]![0]!["y"] = target.Access.Y;
+        save["actors"]![0]!["z"] = target.Access.Z;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        var tickBeforeDesignation = engine.CurrentTick;
+        engine.ApplyCommandImmediately(SimulationCommand.DesignateRockMining(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            target.Rock,
+            target.Rock));
+
+        Assert.Equal(tickBeforeDesignation, engine.CurrentTick);
+        Assert.Contains(engine.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.MineRock && designation.Target == target.Rock);
+        for (var tick = 0; tick < 5_000 &&
+             !engine.World.ExcavatedCaveCells.Contains(target.Rock); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        Assert.Contains(target.Rock, engine.World.ExcavatedCaveCells);
+        Assert.True(engine.World.IsTerrainTraversable(target.Rock));
+        Assert.NotNull(engine.Navigation.FindPath(target.Access, target.Rock));
+        Assert.Contains(engine.CreateSnapshot().ItemStacks, stack =>
+            stack.Location == ItemLocation.OnGround(target.Rock) &&
+            stack.Resource == ResourceKind.Stone);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.True(restored.World.IsTerrainTraversable(target.Rock));
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
     public void MiningAnExposedVeinProducesRockAndItsMineral()
     {
         var seed = new WorldSeed(0x4D494E4552414CUL);

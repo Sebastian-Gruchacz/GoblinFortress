@@ -48,6 +48,13 @@ public enum ResourceVariant : byte
     EquipmentHideClothes = 14,
     EquipmentReedClothes = 15,
     EquipmentPrimitiveWaterskin = 16,
+    EquipmentRagClothes = 17,
+    EquipmentWoodenAxe = 18,
+    EquipmentPrimitivePickaxe = 19,
+    EquipmentWoodenHoe = 20,
+    EquipmentHumanWoodenAxe = 21,
+    EquipmentWoodenBucket = 22,
+    EquipmentWoodenSpear = 23,
 }
 
 public enum ItemLocationKind : byte
@@ -162,6 +169,7 @@ public readonly record struct ItemLocation
 
     public static ItemLocation StoredIn(EntityId zoneId, GridPosition position) =>
         new(ItemLocationKind.StorageZone, position, zoneId);
+
 }
 
 public readonly record struct ItemStackSnapshot(

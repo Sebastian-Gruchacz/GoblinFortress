@@ -8,6 +8,36 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class SaveMigrationTests
 {
     [Fact]
+    public void VersionFiftySevenInitializesUndergroundFactionState()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 57;
+        save.Remove("undergroundFactions");
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Empty(restored.CreateSnapshot().UndergroundFactions);
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VersionFiftyFourInitializesPersistentCorpses()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 54;
+        save.Remove("corpses");
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Empty(restored.CreateSnapshot().Corpses);
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
     public void VersionFiftyThreeDisablesLegacyDefaultAutomaticRaidLaunch()
     {
         var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
@@ -20,7 +50,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
         var migrated = JsonNode.Parse(restored.Save())!.AsObject();
 
-        Assert.Equal(54, migrated["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, migrated["formatVersion"]!.GetValue<int>());
         Assert.False(restored.CreateSnapshot().RaidPlan.Has(
             RaidDirective.AutoLaunchWhenReady));
     }
@@ -39,7 +69,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
         var migrated = JsonNode.Parse(restored.Save())!.AsObject();
 
-        Assert.Equal(54, migrated["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, migrated["formatVersion"]!.GetValue<int>());
         Assert.Contains(migrated["resourcePriorities"]!.AsArray(), priority =>
             priority!["resource"]!.GetValue<int>() == (int)ResourceKind.Equipment &&
             priority["priority"]!.GetValue<int>() == (int)StoragePriority.Normal);
@@ -61,7 +91,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
         var migrated = JsonNode.Parse(restored.Save())!.AsObject();
 
-        Assert.Equal(54, migrated["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, migrated["formatVersion"]!.GetValue<int>());
         Assert.Contains(migrated["resourcePriorities"]!.AsArray(), priority =>
             priority!["resource"]!.GetValue<int>() == (int)ResourceKind.Hide &&
             priority["priority"]!.GetValue<int>() == (int)StoragePriority.Normal);
@@ -94,7 +124,7 @@ public sealed class SaveMigrationTests
         Assert.NotEqual(blockedPosition, restoredActor.Position);
         Assert.True(restored.World.IsTerrainTraversable(restoredActor.Position));
         Assert.Equal(ActorJobKind.None, restoredActor.Job.Kind);
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -109,7 +139,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
 
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -128,7 +158,7 @@ public sealed class SaveMigrationTests
             animal.Kind == AnimalKind.MarshHare);
 
         Assert.Equal(restoredHare.MaximumFatigue, restoredHare.Fatigue);
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -169,7 +199,7 @@ public sealed class SaveMigrationTests
             village.Cohorts.Single(cohort => cohort.Role == HumanCohortRole.Guards).Population,
             village.Villagers.Count(villager =>
                 villager.Role == HumanCohortRole.Guards && villager.Health > 0));
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -192,7 +222,7 @@ public sealed class SaveMigrationTests
             Assert.Equal(0, villager.Hunger);
             Assert.Equal(0, villager.Thirst);
         });
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -211,7 +241,7 @@ public sealed class SaveMigrationTests
 
         Assert.All(restored.CreateSnapshot().HumanVillage.Villagers,
             villager => Assert.Equal(0, villager.WorkProgress));
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -230,7 +260,7 @@ public sealed class SaveMigrationTests
 
         Assert.All(restored.CreateSnapshot().HumanVillage.Fields,
             field => Assert.Equal(0, field.WorkProgress));
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -250,7 +280,7 @@ public sealed class SaveMigrationTests
 
         Assert.Null(restored.CreateSnapshot().HumanVillage.TreeFellingTarget);
         Assert.Equal(0, restored.CreateSnapshot().HumanVillage.TreeFellingProgress);
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -265,7 +295,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
 
         Assert.Equal(0, restored.CreateSnapshot().HumanVillage.GoodsWorkProgress);
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -285,7 +315,7 @@ public sealed class SaveMigrationTests
 
         Assert.Null(restored.CreateSnapshot().HumanVillage.StorehouseSite);
         Assert.Equal(0, restored.CreateSnapshot().HumanVillage.StorehouseWorkProgress);
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -317,20 +347,45 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
 
         Assert.Equal(10, restored.CreateSnapshot().PopulationTarget);
-        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VersionFiftySixAssignsDeterministicAnimalSex()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 56;
+        foreach (var animal in save["animals"]!.AsArray())
+        {
+            animal!.AsObject().Remove("sex");
+        }
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.All(restored.CreateSnapshot().Animals, animal =>
+            Assert.Equal(
+                animal.Id % 2 == 0 ? AnimalSex.Male : AnimalSex.Female,
+                animal.Sex));
+        Assert.Equal(59, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        var roundTripped = SimulationEngine.Load(
+            restored.Save(),
+            SimulationDefinitions.Foundation);
+        Assert.Equal(restored.ComputeStateHash(), roundTripped.ComputeStateHash());
     }
 
     [Fact]
     public void SaveFromNewerFormatIsRejectedClearly()
     {
         var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
-        save["formatVersion"] = 55;
+        save["formatVersion"] = 60;
 
         var exception = Assert.Throws<InvalidDataException>(() => SimulationEngine.Load(
             save.ToJsonString(),
             SimulationDefinitions.Foundation));
 
-        Assert.Contains("newer than supported version 54", exception.Message);
+        Assert.Contains("newer than supported version 59", exception.Message);
     }
 
     private static SimulationEngine CreateEngine() => SimulationEngine.Create(

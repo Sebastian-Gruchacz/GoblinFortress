@@ -50,6 +50,8 @@ public enum SimulationEventKind
     CraftingMaterialDelivered = 46,
     CraftingCompleted = 47,
     ActorCollectedStoneAmmo = 48,
+    CorpseConsumed = 49,
+    GoblinHitHumanCivilian = 50,
 }
 
 public readonly record struct SimulationEvent(

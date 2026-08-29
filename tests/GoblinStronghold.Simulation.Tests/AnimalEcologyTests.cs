@@ -64,6 +64,107 @@ public sealed class AnimalEcologyTests
     }
 
     [Fact]
+    public void UndisturbedAdultPairProducesOneYoungAnimalAtBreedingInterval()
+    {
+        var definitions = SimulationDefinitions.Foundation;
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x4252454544494E47UL),
+            definitions,
+            initialGoblinCount: 1,
+            initialFoodStock: 8);
+        var hares = engine.CreateSnapshot().Animals
+            .Where(animal => animal.Kind == AnimalKind.MarshHare)
+            .Take(2)
+            .ToArray();
+        Assert.Equal(2, hares.Length);
+        var breedingSite = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(position =>
+                engine.Map.GetCell(position) is
+                    { Terrain: TerrainKind.SolidGround, Fertility: >= 45 } &&
+                engine.World.IsSurfaceTraversable(position) &&
+                engine.CreateSnapshot().Actors.All(actor =>
+                    Math.Abs(actor.Position.X - position.X) +
+                    Math.Abs(actor.Position.Y - position.Y) > 6))
+            .Select(position => new
+            {
+                Position = position,
+                Neighbors = engine.Map.GetCardinalNeighbors(position)
+                    .Where(neighbor =>
+                        engine.World.IsSurfaceTraversable(neighbor) &&
+                        engine.Map.CanTraverseSurfaceEdge(position, neighbor) &&
+                        engine.CreateSnapshot().Actors.All(actor =>
+                            Math.Abs(actor.Position.X - neighbor.X) +
+                            Math.Abs(actor.Position.Y - neighbor.Y) > 6) &&
+                        engine.Map.GetCell(neighbor) is
+                            { Terrain: TerrainKind.SolidGround, Fertility: >= 45 })
+                    .ToArray(),
+            })
+            .First(candidate => candidate.Neighbors.Length >= 2);
+        var habitat = breedingSite.Position;
+        var adjacentHabitat = breedingSite.Neighbors[0];
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var savedAnimals = save["animals"]!.AsArray();
+        var pair = savedAnimals
+            .Where(node => node!["kind"]!.GetValue<int>() == (int)AnimalKind.MarshHare)
+            .Take(2)
+            .Select(node => node!.DeepClone())
+            .ToArray();
+        savedAnimals.Clear();
+        for (var index = 0; index < pair.Length; index++)
+        {
+            var animal = pair[index].AsObject();
+            var position = index == 0 ? habitat : adjacentHabitat;
+            animal["sex"] = index == 0 ? (int)AnimalSex.Female : (int)AnimalSex.Male;
+            animal["x"] = position.X;
+            animal["y"] = position.Y;
+            animal["z"] = position.Z;
+            animal["activity"] = (int)AnimalActivity.Roaming;
+            animal["health"] = hares[index].MaximumHealth;
+            animal["hunger"] = 0;
+            animal["fatigue"] = 0;
+            animal["ageTicks"] = hares[index].MaturityAgeTicks;
+            savedAnimals.Add(animal);
+        }
+        var breedingDay = definitions.AnimalEcology.MarshHare.BreedingIntervalDays;
+        save["currentTick"] = checked(
+            breedingDay * definitions.Clock.Climate.Seasons[0].TicksPerDay - 1L);
+        engine = SimulationEngine.Load(save.ToJsonString(), definitions);
+        var preparedPair = engine.CreateSnapshot().Animals;
+        Assert.Equal(2, preparedPair.Count);
+        Assert.Contains(preparedPair, animal => animal.Sex == AnimalSex.Female);
+        Assert.Contains(preparedPair, animal => animal.Sex == AnimalSex.Male);
+        Assert.All(preparedPair, animal =>
+        {
+            Assert.True(animal.IsAdult);
+            Assert.Equal(0, animal.Hunger);
+            Assert.Equal(0, animal.Fatigue);
+            Assert.True(animal.Health * 4 >= animal.MaximumHealth * 3);
+            Assert.All(engine.CreateSnapshot().Actors, actor =>
+                Assert.True(
+                    Math.Abs(actor.Position.X - animal.Position.X) +
+                    Math.Abs(actor.Position.Y - animal.Position.Y) > 6));
+        });
+        var breedingCalendar = SimulationCalendar.At(
+            engine.CurrentTick.Next(),
+            definitions.Clock);
+        Assert.Equal(0, breedingCalendar.TickOfDay);
+        Assert.Equal(0, breedingCalendar.AbsoluteDay % breedingDay);
+
+        engine.AdvanceTicks(1);
+
+        var offspring = Assert.Single(
+            engine.CreateSnapshot().Animals.Where(animal => !animal.IsAdult));
+        Assert.Equal(AnimalKind.MarshHare, offspring.Kind);
+        Assert.Equal(0, offspring.AgeTicks);
+        Assert.True(Enum.IsDefined(offspring.Sex));
+        Assert.Equal(3, engine.CreateSnapshot().Animals.Count);
+        var restored = SimulationEngine.Load(engine.Save(), definitions);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
     public void SwampBoarCanInjureAnIsolatedGoblin()
     {
         var definitions = SimulationDefinitions.Foundation;
@@ -89,6 +190,48 @@ public sealed class AnimalEcologyTests
         Assert.True(engine.CreateSnapshot().Actors[0].BleedingTicksRemaining > 0);
         Assert.Contains(engine.DrainEvents(), simulationEvent =>
             simulationEvent.Kind == SimulationEventKind.AnimalHitGoblin);
+    }
+
+    [Fact]
+    public void CaveSpidersBecomeMoreNumerousAndDangerousWithDepth()
+    {
+        var seed = new WorldSeed(0x535049444552UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 8);
+        var spiders = engine.CreateSnapshot().Animals
+            .Where(animal => animal.Kind == AnimalKind.CaveSpider)
+            .ToArray();
+
+        Assert.NotEmpty(spiders);
+        Assert.True(
+            spiders.Count(animal => animal.Position.Z == -2) >
+            spiders.Count(animal => animal.Position.Z == -1));
+        Assert.All(spiders, spider =>
+        {
+            Assert.True(spider.Position.Z < 0);
+            Assert.True(map.GetCaveCell(spider.Position).IsOpen);
+        });
+
+        var deepSpider = spiders.First(animal => animal.Position.Z == -2);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["actors"]![0]!["x"] = deepSpider.Position.X;
+        save["actors"]![0]!["y"] = deepSpider.Position.Y;
+        save["actors"]![0]!["z"] = deepSpider.Position.Z;
+        engine = SimulationEngine.Load(save.ToJsonString(), engine.Definitions);
+        var healthBefore = engine.CreateSnapshot().Actors[0].Health;
+
+        engine.AdvanceTicks(SimulationEngine.AnimalUpdateIntervalTicks);
+
+        Assert.True(engine.CreateSnapshot().Actors[0].Health < healthBefore);
+        Assert.Contains(engine.DrainEvents(), simulationEvent =>
+            simulationEvent.Kind == SimulationEventKind.AnimalHitGoblin);
+        var restored = SimulationEngine.Load(engine.Save(), engine.Definitions);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
 
     [Fact]

@@ -70,6 +70,26 @@ internal sealed class HumanVillageState
     public int GoodsStock { get; private set; }
     public int WaterStock { get; private set; }
     public int StorehouseCount { get; private set; }
+
+    public bool TryTakeRaidLoot(Resources.ResourceKind resource, int quantity)
+    {
+        if (quantity <= 0)
+        {
+            return false;
+        }
+        return resource switch
+        {
+            Resources.ResourceKind.Food when FoodStock >= quantity => TakeFood(),
+            Resources.ResourceKind.Wood when WoodStock >= quantity => TakeWood(),
+            Resources.ResourceKind.Hide or Resources.ResourceKind.Reeds
+                when GoodsStock >= quantity => TakeGoods(),
+            _ => false,
+        };
+
+        bool TakeFood() { FoodStock -= quantity; return true; }
+        bool TakeWood() { WoodStock -= quantity; return true; }
+        bool TakeGoods() { GoodsStock -= quantity; return true; }
+    }
     public bool GoblinAttackOrdered { get; private set; }
     public int Hostility { get; private set; }
     public long LastIntruderSeenTick { get; private set; }
@@ -413,11 +433,22 @@ internal sealed class HumanVillageState
             .Select(ToSnapshot)
             .ToArray();
 
+    public IReadOnlyList<HumanVillagerSnapshot> GetLivingVillagerSnapshots() =>
+        _villagers.Values.Where(item => item.Health > 0)
+            .OrderBy(item => item.Id)
+            .Select(ToSnapshot)
+            .ToArray();
+
+    public HumanVillagerSnapshot? GetVillagerSnapshot(int villagerId) =>
+        _villagers.TryGetValue(villagerId, out var villager)
+            ? ToSnapshot(villager)
+            : null;
+
     internal IEnumerable<GridPosition> GetLivingCohortPositions() => _villagers.Values
         .Where(villager => villager.Health > 0)
         .Select(villager => villager.Position);
 
-    public HumanGuardDamageResult ApplyGuardDamage(int villagerId, int damage)
+    public HumanVillagerDamageResult ApplyGuardDamage(int villagerId, int damage)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(damage);
         if (!_villagers.TryGetValue(villagerId, out var villager) ||
@@ -426,23 +457,37 @@ internal sealed class HumanVillageState
             return default;
         }
 
-        var guard = GetCohort(HumanCohortRole.Guards);
+        return ApplyVillagerDamage(villagerId, damage);
+    }
+
+    public HumanVillagerDamageResult ApplyVillagerDamage(int villagerId, int damage)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(damage);
+        if (!_villagers.TryGetValue(villagerId, out var villager) || villager.Health <= 0)
+        {
+            return default;
+        }
+
+        var cohort = GetCohort(villager.Role);
         var appliedDamage = Math.Min(villager.Health, damage);
         villager.Health -= appliedDamage;
-        GuardHitPoints = _villagers.Values.Where(item =>
-                item.Role == HumanCohortRole.Guards)
-            .Sum(item => item.Health);
         var died = villager.Health == 0;
-        guard.Population = _villagers.Values.Count(item =>
-            item.Role == HumanCohortRole.Guards && item.Health > 0);
-        guard.Position = _villagers.Values.FirstOrDefault(item =>
-            item.Role == HumanCohortRole.Guards && item.Health > 0)?.Position ?? guard.Position;
+        cohort.Population = _villagers.Values.Count(item =>
+            item.Role == villager.Role && item.Health > 0);
+        cohort.Position = _villagers.Values.FirstOrDefault(item =>
+            item.Role == villager.Role && item.Health > 0)?.Position ?? cohort.Position;
+        if (villager.Role == HumanCohortRole.Guards)
+        {
+            GuardHitPoints = _villagers.Values.Where(item =>
+                    item.Role == HumanCohortRole.Guards)
+                .Sum(item => item.Health);
+        }
         if (died)
         {
             Population--;
         }
         Hostility = Math.Min(100, Hostility + 10);
-        return new HumanGuardDamageResult(
+        return new HumanVillagerDamageResult(
             villager.Id,
             villager.Position,
             appliedDamage,
@@ -1194,7 +1239,7 @@ internal sealed class HumanVillageState
 
 internal readonly record struct HumanIntruderSnapshot(EntityId Id, GridPosition Position);
 
-internal readonly record struct HumanGuardDamageResult(
+internal readonly record struct HumanVillagerDamageResult(
     int VillagerId,
     GridPosition Position,
     int Damage,

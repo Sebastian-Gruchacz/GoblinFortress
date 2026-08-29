@@ -17,6 +17,16 @@ public enum RaidDirective : ushort
     DemolishBuildings = 1 << 8,
     ContinueWhileTargetsVisible = 1 << 9,
     AutoLaunchWhenReady = 1 << 10,
+    RecoverCorpses = 1 << 11,
+    BudCorpsesInPlace = 1 << 12,
+}
+
+public enum RaidCorpseHandlingMode : byte
+{
+    None = 0,
+    RecoverToCamp = 1,
+    RecoverAndBudAtCamp = 2,
+    BudInPlace = 3,
 }
 
 public readonly record struct RaidPlanSnapshot(
@@ -54,6 +64,8 @@ public static class RaidPreparationPolicy
             directives.HasFlag(RaidDirective.LootFood) ||
             directives.HasFlag(RaidDirective.ConsumeCorpses) ||
             directives.HasFlag(RaidDirective.BudCorpses) ||
+            directives.HasFlag(RaidDirective.RecoverCorpses) ||
+            directives.HasFlag(RaidDirective.BudCorpsesInPlace) ||
             directives.HasFlag(RaidDirective.BurnBuildings) ||
             directives.HasFlag(RaidDirective.DemolishBuildings) ||
             directives.HasFlag(RaidDirective.ContinueWhileTargetsVisible);
@@ -76,6 +88,8 @@ public static class RaidPreparationPolicy
             preferredEquipment,
             KeepCargoHandsFree: directives.HasFlag(RaidDirective.LootEquipment) ||
                 directives.HasFlag(RaidDirective.LootSupplies) ||
-                directives.HasFlag(RaidDirective.LootFood));
+                directives.HasFlag(RaidDirective.LootFood) ||
+                directives.HasFlag(RaidDirective.RecoverCorpses) ||
+                directives.HasFlag(RaidDirective.BudCorpses));
     }
 }

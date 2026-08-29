@@ -6,10 +6,15 @@ namespace GoblinStronghold.Simulation;
 public sealed partial class SimulationEngine
 {
     private const int MaximumConstructionRouteCandidatesPerPlanningTick = 12;
+    private const int MaximumHaulRouteCandidatesPerPlanningTick = 1;
+    private const int MaximumPublicWorkRouteCandidatesPerPlanningTick = 1;
+    private const int MaximumPersonalSupplyRouteCandidates = 8;
     private const int SpecialistPublicWorkBonus =
         GoblinWorkPreferences.Maximum - GoblinWorkPreferences.Minimum + 1;
     private const int FastidiousCleaningPreferenceBonus = SpecialistPublicWorkBonus;
     private long[] _lastActorJobStageStopwatchTicks = new long[6];
+    private readonly List<ActorPlanningAttemptProfile> _lastPlanningAttempts = [];
+    private int _burstPlannersThisTick;
 
     public ActorJobUpdateProfile GetLastActorJobUpdateProfile() => new(
         Reproduction: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[0]),
@@ -19,8 +24,13 @@ public sealed partial class SimulationEngine
         ActiveJobs: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[4]),
         Finalization: StopwatchTicksToTimeSpan(_lastActorJobStageStopwatchTicks[5]));
 
+    public IReadOnlyList<ActorPlanningAttemptProfile> GetLastActorPlanningAttempts() =>
+        _lastPlanningAttempts;
+
     private void UpdateActorJobs()
     {
+        _lastPlanningAttempts.Clear();
+        _burstPlannersThisTick = 0;
         var stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         TryCreateGoblinBud();
         _lastActorJobStageStopwatchTicks[0] =
@@ -42,7 +52,7 @@ public sealed partial class SimulationEngine
         var reservedConstructionQuantities = CreateConstructionReservations();
         var reservedCraftingQuantities = CreateCraftingReservations();
         var activeExplorers = _actors.Values.Count(actor => actor.JobKind == ActorJobKind.Explore);
-        var raidPartyIds = _raidPhase == GoblinRaidPhase.Preparing
+        var raidPartyIds = _raidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Marching
             ? GetRaidParty().Select(actor => actor.Id).ToHashSet()
             : [];
         _lastActorJobStageStopwatchTicks[1] =
@@ -121,6 +131,12 @@ public sealed partial class SimulationEngine
                 {
                     // Young goblins eat, drink, sleep and observe for one local season.
                 }
+                else if (_raidPhase == GoblinRaidPhase.Marching &&
+                         raidPartyIds.Contains(actor.Id) &&
+                         TryPlanRaidMarch(actor))
+                {
+                    // A raider resumes the expedition after satisfying an urgent personal need.
+                }
                 else if (TryPlanTacticalOrder(actor))
                 {
                     // A persistent personal order resumes after food, water and rest interruptions.
@@ -132,6 +148,10 @@ public sealed partial class SimulationEngine
                 else if (TryPlanTendBudJob(actor))
                 {
                     // A living bud is finite, already-paid-for work and receives prompt care.
+                }
+                else if (TryPlanEquipmentResupply(actor, reservedSourceQuantities))
+                {
+                    // Finished gear remains physical until a goblin collects a missing item.
                 }
                 else if (HasAssignedStorageDuty(actor.Id) &&
                          TryPlanHaulCollection(
@@ -191,6 +211,8 @@ public sealed partial class SimulationEngine
             }
             idlePlanningTicks += System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
 
+            var activeJobKind = actor.JobKind;
+            var navigationBeforeActiveJob = Navigation.GetMetrics();
             stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             switch (actor.JobKind)
             {
@@ -258,7 +280,20 @@ public sealed partial class SimulationEngine
                     UpdateCollapsedJob(actor);
                     break;
             }
-            activeJobTicks += System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
+            var activeDuration = System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
+            activeJobTicks += activeDuration;
+            var navigationAfterActiveJob = Navigation.GetMetrics();
+            if (activeDuration > System.Diagnostics.Stopwatch.Frequency / 1_000 ||
+                navigationAfterActiveJob.Searches != navigationBeforeActiveJob.Searches)
+            {
+                _lastPlanningAttempts.Add(new ActorPlanningAttemptProfile(
+                    actor.Id,
+                    $"active-{activeJobKind}",
+                    StopwatchTicksToTimeSpan(activeDuration),
+                    navigationAfterActiveJob.Requests - navigationBeforeActiveJob.Requests,
+                    navigationAfterActiveJob.Searches - navigationBeforeActiveJob.Searches,
+                    Assigned: false));
+            }
         }
 
         _lastActorJobStageStopwatchTicks[2] = needInterruptTicks;
@@ -395,6 +430,31 @@ public sealed partial class SimulationEngine
         }
     }
 
+    private bool TryPlanRaidMarch(ActorState actor)
+    {
+        if (actor.Position == _raidTarget)
+        {
+            return true;
+        }
+
+        var request = RequestActorPath(actor, _raidTarget);
+        if (request.Status == NavigationPathRequestStatus.Pending)
+        {
+            return true;
+        }
+        if (request.Status == NavigationPathRequestStatus.Unreachable ||
+            request.Path is not { Count: > 0 } route)
+        {
+            return true;
+        }
+
+        actor.JobKind = ActorJobKind.Move;
+        actor.JobPhase = ActorJobPhase.Traveling;
+        actor.JobTarget = _raidTarget;
+        actor.RemainingRoute.AddRange(route);
+        return true;
+    }
+
     private List<ActorState> GetRaidParty() => _raidPartyIds
         .Select(id => _actors.GetValueOrDefault(id))
         .Where(actor => actor is { Health: > 0 })
@@ -407,52 +467,34 @@ public sealed partial class SimulationEngine
             .Where(designation => designation.Kind == WorkDesignationKind.Scout &&
                 !designation.IsSuspended)
             .Select(designation => designation.Target)
+            .Where(position => Visibility.Get(position) == CellVisibility.Unknown)
             .ToHashSet();
         if (Definitions.MaximumExplorers == 0 || scoutingTargets.Count == 0)
         {
             return false;
         }
 
-        var visited = new HashSet<GridPosition> { actor.Position };
-        var predecessors = new Dictionary<GridPosition, GridPosition>();
-        var queue = new Queue<GridPosition>();
-        queue.Enqueue(actor.Position);
-
-        while (queue.TryDequeue(out var current))
+        var request = RequestActorPathToNearest(
+            actor,
+            scoutingTargets,
+            (_, to) => to.Z >= 0 &&
+                (Visibility.Get(to) != CellVisibility.Unknown || scoutingTargets.Contains(to)),
+            constraintKey: 1);
+        if (request.Status == NavigationPathRequestStatus.Pending)
         {
-            if (Visibility.Get(current) == CellVisibility.Unknown &&
-                scoutingTargets.Contains(current))
-            {
-                var route = new List<GridPosition>();
-                while (current != actor.Position)
-                {
-                    route.Add(current);
-                    current = predecessors[current];
-                }
-
-                route.Reverse();
-                actor.JobKind = ActorJobKind.Explore;
-                actor.JobTarget = route[^1];
-                actor.JobPhase = ActorJobPhase.Traveling;
-                actor.RemainingRoute.AddRange(route);
-                return true;
-            }
-
-            foreach (var neighbor in World.GetTerrainNeighbors(current, canOpenDoors: true))
-            {
-                if (neighbor.Z < 0 || !visited.Add(neighbor) ||
-                    (Visibility.Get(neighbor) == CellVisibility.Unknown &&
-                     !scoutingTargets.Contains(neighbor)))
-                {
-                    continue;
-                }
-
-                predecessors[neighbor] = current;
-                queue.Enqueue(neighbor);
-            }
+            return true;
+        }
+        if (request.Status == NavigationPathRequestStatus.Unreachable ||
+            request.Path is not { Count: > 0 } route)
+        {
+            return false;
         }
 
-        return false;
+        actor.JobKind = ActorJobKind.Explore;
+        actor.JobTarget = route[^1];
+        actor.JobPhase = ActorJobPhase.Traveling;
+        actor.RemainingRoute.AddRange(route);
+        return true;
     }
 
     private void UpdateExploreJob(ActorState actor)
@@ -515,64 +557,92 @@ public sealed partial class SimulationEngine
             .Select(designation => designation.Priority)
             .DefaultIfEmpty(StoragePriority.Normal)
             .Max();
-        var options = new (int Score, int Order, Func<bool> TryPlan)[]
+        var options = new (string Name, int Score, int Order, Func<bool> TryPlan)[]
         {
-            (Score(constructionClearancePriority, actor.WorkPreferences.Hauling), 0,
+            ("construction-clearance", Score(constructionClearancePriority, actor.WorkPreferences.Hauling), 0,
                 () => TryPlanConstructionClearance(
                     actor,
                     sourceReservations,
                     destinationReservations)),
-            (Score(constructionSupplyPriority, actor.WorkPreferences.Hauling), 1,
+            ("construction-supply", Score(constructionSupplyPriority, actor.WorkPreferences.Hauling), 1,
                 () => TryPlanConstructionSupply(
                     actor,
                     sourceReservations,
                     constructionReservations)),
-            (Score(constructionWorkPriority, actor.WorkPreferences.Building), 2,
+            ("construction-work", Score(constructionWorkPriority, actor.WorkPreferences.Building), 2,
                 () => TryPlanConstructionWork(actor)),
-            (Score(hasCraftingSupply ? StoragePriority.Normal : StoragePriority.Low,
+            ("crafting-supply", Score(hasCraftingSupply ? StoragePriority.Normal : StoragePriority.Low,
                     actor.WorkPreferences.Hauling), 3,
                 () => TryPlanCraftingSupply(actor, sourceReservations, craftingReservations)),
-            (Score(hasCraftingWork ? StoragePriority.Normal : StoragePriority.Low,
+            ("crafting-work", Score(hasCraftingWork ? StoragePriority.Normal : StoragePriority.Low,
                     actor.WorkPreferences.Building), 4,
                 () => TryPlanCraftingWork(actor)),
-            (Score(haulingPriority, actor.WorkPreferences.Hauling), 5,
+            ("hauling", Score(haulingPriority, actor.WorkPreferences.Hauling), 5,
                 () => TryPlanHaulCollection(
                     actor,
                     sourceReservations,
                     destinationReservations)),
-            (Score(GetWorkDesignationPriority(WorkDesignationKind.UprootBerryBush), actor.WorkPreferences.Foraging), 6,
+            ("clear-vegetation", Score(GetWorkDesignationPriority(WorkDesignationKind.UprootBerryBush), actor.WorkPreferences.Foraging), 6,
                 () => TryPlanClearVegetationJob(actor, reservedForageTargets)),
-            (Score(GetWorkDesignationPriority(WorkDesignationKind.FellTree),
+            ("fell-tree", Score(GetWorkDesignationPriority(WorkDesignationKind.FellTree),
                     actor.WorkPreferences.Building, specialist: true), 7,
                 () => TryPlanFellTreeJob(actor, reservedFellingDesignations)),
-            (Score(GetWorkDesignationPriority(WorkDesignationKind.QuarryBoulder),
+            ("quarry-boulder", Score(GetWorkDesignationPriority(WorkDesignationKind.QuarryBoulder),
                     actor.WorkPreferences.Building, specialist: true), 8,
                 () => TryPlanQuarryBoulderJob(actor, reservedFellingDesignations)),
-            (Score(GetWorkDesignationPriority(WorkDesignationKind.MineRock),
+            ("mine-rock", Score(GetWorkDesignationPriority(WorkDesignationKind.MineRock),
                     actor.WorkPreferences.Building, specialist: true), 9,
                 () => TryPlanMineRockJob(actor, reservedFellingDesignations)),
-            (Score(rampPriority, actor.WorkPreferences.Building, specialist: true), 10,
+            ("carve-ramp", Score(rampPriority, actor.WorkPreferences.Building, specialist: true), 10,
                 () => TryPlanCarveRampJob(actor, reservedFellingDesignations)),
-            (Score(GetWorkDesignationPriority(WorkDesignationKind.GatherFood), actor.WorkPreferences.Foraging), 11,
+            ("gather-food", Score(GetWorkDesignationPriority(WorkDesignationKind.GatherFood), actor.WorkPreferences.Foraging), 11,
                 () => allowDesignatedForage &&
                     TryPlanForageJob(actor, reservedForageTargets, requireDesignation: true)),
-            (Score(GetWorkDesignationPriority(WorkDesignationKind.GatherReeds), actor.WorkPreferences.Foraging), 12,
+            ("gather-reeds", Score(GetWorkDesignationPriority(WorkDesignationKind.GatherReeds), actor.WorkPreferences.Foraging), 12,
                 () => TryPlanForageJob(
                     actor,
                     reservedForageTargets,
                     requireDesignation: true,
                     designationKind: WorkDesignationKind.GatherReeds)),
-            (Score(GetWorkDesignationPriority(WorkDesignationKind.HuntAnimal),
+            ("hunt", Score(GetWorkDesignationPriority(WorkDesignationKind.HuntAnimal),
                     actor.WorkPreferences.Foraging), 13,
                 () => TryPlanHuntAnimalJob(actor, reservedFellingDesignations)),
-            (Score(GetWorkDesignationPriority(WorkDesignationKind.CleanBlood),
+            ("clean-blood", Score(GetWorkDesignationPriority(WorkDesignationKind.CleanBlood),
                     GetCleaningPreference(actor)), 14,
                 () => TryPlanCleanBloodJob(actor, reservedFellingDesignations)),
         };
-        return options
-            .OrderByDescending(option => option.Score)
-            .ThenBy(option => option.Order)
-            .Any(option => option.TryPlan());
+        foreach (var option in options
+                     .OrderByDescending(option => option.Score)
+                     .ThenBy(option => option.Order))
+        {
+            var navigationBefore = Navigation.GetMetrics();
+            var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            var assigned = option.TryPlan();
+            var duration = System.Diagnostics.Stopwatch.GetTimestamp() - startedAt;
+            var navigationAfter = Navigation.GetMetrics();
+            if (duration > System.Diagnostics.Stopwatch.Frequency / 1_000 ||
+                navigationAfter.Searches != navigationBefore.Searches)
+            {
+                _lastPlanningAttempts.Add(new ActorPlanningAttemptProfile(
+                    actor.Id,
+                    option.Name,
+                    StopwatchTicksToTimeSpan(duration),
+                    navigationAfter.Requests - navigationBefore.Requests,
+                    navigationAfter.Searches - navigationBefore.Searches,
+                    assigned));
+            }
+            if (assigned)
+            {
+                return true;
+            }
+            if (navigationAfter.Searches != navigationBefore.Searches)
+            {
+                // One new strategic route is enough work for this actor in one simulation tick.
+                // A later planning round continues with another category or candidate page.
+                return false;
+            }
+        }
+        return false;
 
         static int Score(
             StoragePriority priority,
@@ -1054,7 +1124,7 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanRestJob(ActorState actor)
     {
-        var best = World.CreateWorldObjectSnapshot()
+        var destinations = World.CreateWorldObjectSnapshot()
             .Where(worldObject =>
                 (worldObject.Kind is WorldObjectKind.GoblinHut or WorldObjectKind.GoblinFieldCamp) &&
                 worldObject.Owner == WorldObjectOwner.GoblinTribe)
@@ -1064,24 +1134,16 @@ public sealed partial class SimulationEngine
                 World.IsTerrainTraversable(item.Position))
             .Select(item => item.Position)
             .Distinct()
-            .Select(position => new
-            {
-                Position = position,
-                Route = FindActorPath(actor, position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Position.Y)
-            .ThenBy(candidate => candidate.Position.X)
-            .FirstOrDefault();
-        if (best is null)
+            .ToHashSet();
+        var route = FindActorPathToNearest(actor, destinations);
+        if (route is null)
         {
             return false;
         }
 
         actor.JobKind = ActorJobKind.Rest;
-        actor.JobTarget = best.Position;
-        BeginJobLeg(actor, best.Route!, GetRestWorkTicks(actor));
+        actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+        BeginJobLeg(actor, route, GetRestWorkTicks(actor));
         return true;
     }
 
@@ -1296,7 +1358,8 @@ public sealed partial class SimulationEngine
                 (actor.JobKind == ActorJobKind.Eat ||
                 (actor.JobKind == ActorJobKind.Resupply &&
                   actor.JobStage is ActorJobStage.ProvisioningFood or
-                      ActorJobStage.ProvisioningAmmo)))
+                      ActorJobStage.ProvisioningAmmo or
+                      ActorJobStage.ProvisioningEquipment)))
             {
                 reservations[actor.SourceStackId] = checked(
                     reservations.GetValueOrDefault(actor.SourceStackId) + actor.ReservedQuantity);
@@ -1366,34 +1429,24 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = _itemStacks.Values
-            .Where(stack =>
-                stack.Resource == ResourceKind.Food &&
-                stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
-                (requiredPosition is null || stack.Location.Position == requiredPosition.Value) &&
-                stack.Quantity - itemReservations.GetValueOrDefault(stack.Id) > 0)
-            .Select(stack => new
-            {
-                Stack = stack,
-                Route = FindActorPath(actor, stack.Location.Position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Stack.Id)
-            .FirstOrDefault();
-        if (best is null)
+        var best = FindPersonalSupplySource(
+            actor,
+            ResourceKind.Food,
+            itemReservations,
+            requiredPosition);
+        if (best is not { } source)
         {
             return false;
         }
 
         actor.JobKind = ActorJobKind.Resupply;
         actor.JobStage = ActorJobStage.ProvisioningFood;
-        actor.SourceStackId = best.Stack.Id;
+        actor.SourceStackId = source.Stack.Id;
         actor.ReservedQuantity = 1;
-        actor.JobTarget = best.Stack.Location.Position;
-        BeginJobLeg(actor, best.Route!, Definitions.ResupplyWorkTicks);
-        itemReservations[best.Stack.Id] = checked(
-            itemReservations.GetValueOrDefault(best.Stack.Id) + 1);
+        actor.JobTarget = source.Stack.Location.Position;
+        BeginJobLeg(actor, source.Route, Definitions.ResupplyWorkTicks);
+        itemReservations[source.Stack.Id] = checked(
+            itemReservations.GetValueOrDefault(source.Stack.Id) + 1);
         return true;
     }
 
@@ -1439,37 +1492,92 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = _itemStacks.Values
-            .Where(stack =>
-                stack.Resource == ResourceKind.Stone &&
-                stack.Location.Kind == ItemLocationKind.StorageZone &&
-                stack.Quantity - itemReservations.GetValueOrDefault(stack.Id) > 0)
-            .Select(stack => new
-            {
-                Stack = stack,
-                Route = FindActorPath(actor, stack.Location.Position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Stack.Id)
-            .FirstOrDefault();
-        if (best is null)
+        var best = FindPersonalSupplySource(
+            actor,
+            ResourceKind.Stone,
+            itemReservations,
+            requiredPosition: null,
+            storageOnly: true);
+        if (best is not { } source)
         {
             return false;
         }
 
         var quantity = Math.Min(
             missing,
-            best.Stack.Quantity - itemReservations.GetValueOrDefault(best.Stack.Id));
+            source.Stack.Quantity - itemReservations.GetValueOrDefault(source.Stack.Id));
         actor.JobKind = ActorJobKind.Resupply;
         actor.JobStage = ActorJobStage.ProvisioningAmmo;
-        actor.SourceStackId = best.Stack.Id;
+        actor.SourceStackId = source.Stack.Id;
         actor.ReservedQuantity = quantity;
-        actor.JobTarget = best.Stack.Location.Position;
-        BeginJobLeg(actor, best.Route!, Definitions.ResupplyWorkTicks);
-        itemReservations[best.Stack.Id] = checked(
-            itemReservations.GetValueOrDefault(best.Stack.Id) + quantity);
+        actor.JobTarget = source.Stack.Location.Position;
+        BeginJobLeg(actor, source.Route, Definitions.ResupplyWorkTicks);
+        itemReservations[source.Stack.Id] = checked(
+            itemReservations.GetValueOrDefault(source.Stack.Id) + quantity);
         return true;
+    }
+
+    private bool TryPlanEquipmentResupply(
+        ActorState actor,
+        Dictionary<EntityId, int> itemReservations)
+    {
+        var best = FindPersonalSupplySource(
+            actor,
+            ResourceKind.Equipment,
+            itemReservations,
+            requiredPosition: null,
+            storageOnly: true,
+            filter: stack =>
+            {
+                var equipment = GetEquipmentForVariant(stack.Variant);
+                return equipment != PersonalEquipment.None &&
+                    !actor.Equipment.HasFlag(equipment);
+            });
+        if (best is not { } source)
+        {
+            return false;
+        }
+
+        actor.JobKind = ActorJobKind.Resupply;
+        actor.JobStage = ActorJobStage.ProvisioningEquipment;
+        actor.SourceStackId = source.Stack.Id;
+        actor.ReservedQuantity = 1;
+        actor.JobTarget = source.Stack.Location.Position;
+        BeginJobLeg(actor, source.Route, Definitions.ResupplyWorkTicks);
+        itemReservations[source.Stack.Id] = checked(
+            itemReservations.GetValueOrDefault(source.Stack.Id) + 1);
+        return true;
+    }
+
+    private PersonalSupplySource? FindPersonalSupplySource(
+        ActorState actor,
+        ResourceKind resource,
+        Dictionary<EntityId, int> itemReservations,
+        GridPosition? requiredPosition,
+        bool storageOnly = false,
+        Func<ItemStackState, bool>? filter = null)
+    {
+        IEnumerable<ItemStackState> candidates = requiredPosition is { } position
+            ? _itemStacks.Values.Where(stack => stack.Location.Position == position)
+            : _resourceSpatialIndex.FindNearestStackIds(
+                    resource,
+                    actor.Position,
+                    MaximumPersonalSupplyRouteCandidates)
+                .Select(id => _itemStacks[id]);
+        foreach (var stack in candidates.Where(stack =>
+                     stack.Resource == resource &&
+                     stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
+                     (!storageOnly || stack.Location.Kind == ItemLocationKind.StorageZone) &&
+                     (filter is null || filter(stack)) &&
+                     stack.Quantity - itemReservations.GetValueOrDefault(stack.Id) > 0))
+        {
+            var route = FindActorPath(actor, stack.Location.Position);
+            if (route is not null)
+            {
+                return new PersonalSupplySource(stack, route);
+            }
+        }
+        return null;
     }
 
     private IReadOnlyList<GridPosition>? FindNearestShallowWaterPath(GridPosition start)
@@ -1554,6 +1662,16 @@ public sealed partial class SimulationEngine
             stones.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
             stones.Location.Position == actor.JobTarget &&
             stones.Quantity >= actor.ReservedQuantity,
+        ActorJobStage.ProvisioningEquipment =>
+            actor.CarriedStackId == EntityId.None &&
+            _itemStacks.TryGetValue(actor.SourceStackId, out var equipment) &&
+            equipment.Resource == ResourceKind.Equipment &&
+            equipment.Location.Kind == ItemLocationKind.StorageZone &&
+            equipment.Location.Position == actor.JobTarget &&
+            equipment.Quantity >= 1 &&
+            GetEquipmentForVariant(equipment.Variant) is var item &&
+            item != PersonalEquipment.None &&
+            !actor.Equipment.HasFlag(item),
         _ => false,
     };
 
@@ -1575,6 +1693,18 @@ public sealed partial class SimulationEngine
         {
             actor.PersonalWater++;
             Publish(SimulationEventKind.ActorCollectedWater, actor.Id, EntityId.None, 1);
+        }
+        else if (actor.JobStage == ActorJobStage.ProvisioningEquipment)
+        {
+            var equipment = _itemStacks[actor.SourceStackId];
+            actor.Equipment |= GetEquipmentForVariant(equipment.Variant);
+            equipment.Quantity--;
+            Publish(SimulationEventKind.ItemPickedUp, actor.Id, equipment.Id, 1);
+            if (equipment.Quantity == 0)
+            {
+                RemoveItemStack(equipment.Id);
+                Publish(SimulationEventKind.ItemStackDepleted, actor.Id, equipment.Id, 0);
+            }
         }
         else
         {
@@ -1603,33 +1733,23 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> itemReservations,
         GridPosition? requiredPosition = null)
     {
-        var best = _itemStacks.Values
-            .Where(stack =>
-                stack.Resource == ResourceKind.Food &&
-                stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
-                (requiredPosition is null || stack.Location.Position == requiredPosition.Value) &&
-                stack.Quantity - itemReservations.GetValueOrDefault(stack.Id) > 0)
-            .Select(stack => new
-            {
-                Stack = stack,
-                Route = FindActorPath(actor, stack.Location.Position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Stack.Id)
-            .FirstOrDefault();
-        if (best is null)
+        var best = FindPersonalSupplySource(
+            actor,
+            ResourceKind.Food,
+            itemReservations,
+            requiredPosition);
+        if (best is not { } source)
         {
             return false;
         }
 
         actor.JobKind = ActorJobKind.Eat;
-        actor.SourceStackId = best.Stack.Id;
+        actor.SourceStackId = source.Stack.Id;
         actor.ReservedQuantity = 1;
-        actor.JobTarget = best.Stack.Location.Position;
-        BeginJobLeg(actor, best.Route!, Definitions.EatWorkTicks);
-        itemReservations[best.Stack.Id] = checked(
-            itemReservations.GetValueOrDefault(best.Stack.Id) + 1);
+        actor.JobTarget = source.Stack.Location.Position;
+        BeginJobLeg(actor, source.Route, Definitions.EatWorkTicks);
+        itemReservations[source.Stack.Id] = checked(
+            itemReservations.GetValueOrDefault(source.Stack.Id) + 1);
         return true;
     }
 
@@ -2180,7 +2300,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = _workDesignations.Values
+        var candidates = _workDesignations.Values
             .Where(designation => designation.Kind == WorkDesignationKind.MineRock &&
                 !designation.IsSuspended &&
                 !reservedDesignations.Contains(designation.Id) &&
@@ -2191,26 +2311,43 @@ public sealed partial class SimulationEngine
                 {
                     Designation = designation,
                     Position = position,
-                    Route = FindActorPath(actor, position),
+                    EstimatedDistance = ManhattanDistance(actor.Position, position),
                 }))
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
+            .OrderByDescending(candidate => candidate.Designation.Priority)
+            .ThenBy(candidate => candidate.EstimatedDistance)
             .ThenBy(candidate => candidate.Designation.Id)
             .ThenBy(candidate => candidate.Position.Z)
             .ThenBy(candidate => candidate.Position.Y)
             .ThenBy(candidate => candidate.Position.X)
-            .FirstOrDefault();
-        if (best is null)
+            .ToArray();
+        if (candidates.Length == 0)
         {
             return false;
         }
 
-        actor.JobKind = ActorJobKind.MineRock;
-        actor.JobTarget = best.Position;
-        actor.SourceStackId = best.Designation.Id;
-        BeginJobLeg(actor, best.Route!, GetMineRockWorkTicks());
-        reservedDesignations.Add(best.Designation.Id);
-        return true;
+        var pageCount = (candidates.Length + MaximumPublicWorkRouteCandidatesPerPlanningTick - 1) /
+            MaximumPublicWorkRouteCandidatesPerPlanningTick;
+        var planningRound = CurrentTick.Value /
+            Definitions.ActorPlanning.BackgroundPlanningIntervalTicks;
+        var page = (int)((planningRound + (long)actor.Id.Value) % pageCount);
+        foreach (var candidate in candidates
+                     .Skip(page * MaximumPublicWorkRouteCandidatesPerPlanningTick)
+                     .Take(MaximumPublicWorkRouteCandidatesPerPlanningTick))
+        {
+            var route = FindTribePath(actor.Position, candidate.Position);
+            if (route is null)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.MineRock;
+            actor.JobTarget = candidate.Position;
+            actor.SourceStackId = candidate.Designation.Id;
+            BeginJobLeg(actor, route, GetMineRockWorkTicks());
+            reservedDesignations.Add(candidate.Designation.Id);
+            return true;
+        }
+        return false;
     }
 
     private void UpdateMineRockJob(ActorState actor)
@@ -2454,7 +2591,7 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> sourceReservations,
         Dictionary<EntityId, int> destinationReservations)
     {
-        var candidate = _constructionSites.Values
+        var candidates = _constructionSites.Values
             .SelectMany(site =>
             {
                 var footprint = site.GetFootprint();
@@ -2466,65 +2603,65 @@ public sealed partial class SimulationEngine
                     {
                         Site = site,
                         Stack = stack,
-                        Route = FindActorPath(actor, stack.Location.Position),
                     });
             })
-            .Where(item => item.Route is not null)
             .OrderByDescending(item => item.Site.Priority)
-            .ThenBy(item => item.Route!.Count)
+            .ThenBy(item => ManhattanDistance(actor.Position, item.Stack.Location.Position))
             .ThenBy(item => item.Site.Id)
             .ThenBy(item => item.Stack.Id)
-            .FirstOrDefault();
-        if (candidate is null)
+            .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
+        foreach (var candidate in candidates)
         {
-            return false;
-        }
-
-        var available = candidate.Stack.Quantity -
-            sourceReservations.GetValueOrDefault(candidate.Stack.Id);
-        var quantity = Math.Min(Definitions.ActorCarryCapacity, available);
-        var destination = _storageZones.Values
-            .Where(zone =>
-                ZoneAccepts(zone, candidate.Stack) &&
-                CanStoreStack(zone, candidate.Stack, quantity) &&
-                zone.Capacity - GetStoredQuantity(zone.Id) -
-                    destinationReservations.GetValueOrDefault(zone.Id) >= quantity)
-            .Select(zone => new
+            var routeRequest = RequestActorPath(actor, candidate.Stack.Location.Position);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
             {
-                Zone = zone,
-                Route = FindActorPathFrom(
-                    actor,
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+                routeRequest.Path is not { } route)
+            {
+                continue;
+            }
+
+            var available = candidate.Stack.Quantity -
+                sourceReservations.GetValueOrDefault(candidate.Stack.Id);
+            var quantity = Math.Min(Definitions.ActorCarryCapacity, available);
+            var destination = _storageZones.Values
+                .Where(zone =>
+                    ZoneAccepts(zone, candidate.Stack) &&
+                    CanStoreStack(zone, candidate.Stack, quantity) &&
+                    zone.Capacity - GetStoredQuantity(zone.Id) -
+                        destinationReservations.GetValueOrDefault(zone.Id) >= quantity)
+                .OrderByDescending(zone => zone.Priority)
+                .ThenBy(zone => ManhattanDistance(
                     candidate.Stack.Location.Position,
-                    zone.Position),
-            })
-            .Where(item => item.Route is not null)
-            .OrderByDescending(item => item.Zone.Priority)
-            .ThenBy(item => item.Route!.Count)
-            .ThenBy(item => item.Zone.Id)
-            .FirstOrDefault();
-        if (destination is null &&
-            FindConstructionClearanceDropPosition(
-                candidate.Stack.Location.Position,
-                actor) is null)
-        {
-            return false;
+                    zone.Position))
+                .ThenBy(zone => zone.Id)
+                .FirstOrDefault();
+            if (destination is null &&
+                FindConstructionClearanceDropPosition(candidate.Stack.Location.Position) is null)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.ClearConstructionSite;
+            actor.JobStage = ActorJobStage.Collecting;
+            actor.SourceStackId = candidate.Stack.Id;
+            actor.DestinationZoneId = destination?.Id ?? EntityId.None;
+            actor.ReservedQuantity = quantity;
+            actor.JobTarget = candidate.Stack.Location.Position;
+            BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
+            sourceReservations[candidate.Stack.Id] = checked(
+                sourceReservations.GetValueOrDefault(candidate.Stack.Id) + quantity);
+            if (destination is not null)
+            {
+                destinationReservations[destination.Id] = checked(
+                    destinationReservations.GetValueOrDefault(destination.Id) + quantity);
+            }
+            return true;
         }
 
-        actor.JobKind = ActorJobKind.ClearConstructionSite;
-        actor.JobStage = ActorJobStage.Collecting;
-        actor.SourceStackId = candidate.Stack.Id;
-        actor.DestinationZoneId = destination?.Zone.Id ?? EntityId.None;
-        actor.ReservedQuantity = quantity;
-        actor.JobTarget = candidate.Stack.Location.Position;
-        BeginJobLeg(actor, candidate.Route!, Definitions.HaulHandlingTicks);
-        sourceReservations[candidate.Stack.Id] = checked(
-            sourceReservations.GetValueOrDefault(candidate.Stack.Id) + quantity);
-        if (destination is not null)
-        {
-            destinationReservations[destination.Zone.Id] = checked(
-                destinationReservations.GetValueOrDefault(destination.Zone.Id) + quantity);
-        }
-        return true;
+        return false;
     }
 
     private void UpdateConstructionClearanceJob(ActorState actor)
@@ -2612,6 +2749,30 @@ public sealed partial class SimulationEngine
     private void CompleteConstructionClearanceCollection(ActorState actor)
     {
         var source = _itemStacks[actor.SourceStackId];
+        var destination = actor.DestinationZoneId != EntityId.None &&
+            _storageZones.TryGetValue(actor.DestinationZoneId, out var zone) &&
+            CanStoreStack(zone, source, actor.ReservedQuantity)
+                ? zone.Position
+                : FindConstructionClearanceDropPosition(actor.Position);
+        if (destination is null)
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        var routeRequest = RequestActorPath(actor, destination.Value);
+        if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+        {
+            actor.RemainingWorkTicks = 1;
+            return;
+        }
+        if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+            routeRequest.Path is not { } route)
+        {
+            actor.ClearJob();
+            return;
+        }
+
         ItemStackState carried;
         if (source.Quantity == actor.ReservedQuantity)
         {
@@ -2633,30 +2794,21 @@ public sealed partial class SimulationEngine
         actor.SourceStackId = EntityId.None;
         actor.JobStage = ActorJobStage.Delivering;
         Publish(SimulationEventKind.ItemPickedUp, actor.Id, carried.Id, carried.Quantity);
-        if (actor.DestinationZoneId != EntityId.None &&
-            _storageZones.TryGetValue(actor.DestinationZoneId, out var zone) &&
-            CanStoreStack(zone, carried, carried.Quantity))
+        if (actor.DestinationZoneId != EntityId.None)
         {
-            var route = FindActorPath(actor, zone.Position);
-            if (route is not null)
-            {
-                actor.JobTarget = zone.Position;
-                BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
-                return;
-            }
+            actor.JobTarget = destination.Value;
+            BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
+            return;
         }
 
         actor.DestinationZoneId = EntityId.None;
-        if (!TryRedirectConstructionClearanceToGround(actor))
-        {
-            DropCarriedStack(actor);
-            actor.ClearJob();
-        }
+        actor.JobTarget = destination.Value;
+        BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
     }
 
     private bool TryRedirectConstructionClearanceToGround(ActorState actor)
     {
-        var destination = FindConstructionClearanceDropPosition(actor.Position, actor);
+        var destination = FindConstructionClearanceDropPosition(actor.Position);
         if (destination is null)
         {
             return false;
@@ -2678,8 +2830,7 @@ public sealed partial class SimulationEngine
     }
 
     private GridPosition? FindConstructionClearanceDropPosition(
-        GridPosition origin,
-        ActorState? actor = null)
+        GridPosition origin)
     {
         var blocked = _constructionSites.Values
             .SelectMany(site => site.GetFootprint())
@@ -2687,23 +2838,34 @@ public sealed partial class SimulationEngine
         var storagePositions = _storageZones.Values
             .Select(zone => zone.Position)
             .ToHashSet();
-        return Enumerable.Range(0, Map.CellCount)
-            .Select(index => new GridPosition(
-                index % Map.Width,
-                index / Map.Width,
-                origin.Z))
-            .Where(position =>
-                !blocked.Contains(position) &&
-                !storagePositions.Contains(position) &&
-                World.IsTerrainTraversable(position))
-            .OrderBy(position => ManhattanDistance(origin, position))
-            .ThenBy(position => position.Y)
-            .ThenBy(position => position.X)
-            .Where(position => actor is null
-                ? Navigation.HasPath(origin, position)
-                : FindActorPathFrom(actor, origin, position) is not null)
-            .Select(position => (GridPosition?)position)
-            .FirstOrDefault();
+        for (var distance = 1; distance <= Map.Width + Map.Height; distance++)
+        {
+            var minimumY = Math.Max(0, origin.Y - distance);
+            var maximumY = Math.Min(Map.Height - 1, origin.Y + distance);
+            for (var y = minimumY; y <= maximumY; y++)
+            {
+                var offsetX = distance - Math.Abs(y - origin.Y);
+                var left = new GridPosition(origin.X - offsetX, y, origin.Z);
+                if (CanDropAt(left))
+                {
+                    return left;
+                }
+
+                var right = new GridPosition(origin.X + offsetX, y, origin.Z);
+                if (offsetX > 0 && CanDropAt(right))
+                {
+                    return right;
+                }
+            }
+        }
+
+        return null;
+
+        bool CanDropAt(GridPosition position) =>
+            position.X >= 0 && position.X < Map.Width &&
+            !blocked.Contains(position) &&
+            !storagePositions.Contains(position) &&
+            World.IsTerrainTraversable(position);
     }
 
     private void CompleteConstructionClearanceDelivery(ActorState actor)
@@ -2759,14 +2921,15 @@ public sealed partial class SimulationEngine
                 .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
             foreach (var candidate in candidates)
             {
-                var routeToSource = FindActorPath(
+                var routeRequest = RequestActorPath(
                     actor,
                     candidate.Source.Location.Position);
-                var routeToSite = FindConstructionAccessPath(
-                    candidate.Source.Location.Position,
-                    candidate.Site,
-                    actor);
-                if (routeToSource is null || routeToSite is null)
+                if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+                {
+                    return true;
+                }
+                if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+                    routeRequest.Path is not { } routeToSource)
                 {
                     continue;
                 }
@@ -2783,7 +2946,8 @@ public sealed partial class SimulationEngine
                     routeToSource,
                     GetResourcePriority(candidate.Site.RequiredResource),
                     candidate.Site.Priority,
-                    checked(routeToSource.Count + routeToSite.Count));
+                    checked(routeToSource.Count +
+                        ManhattanDistance(candidate.Source.Location.Position, candidate.Site.Anchor)));
                 break;
             }
 
@@ -2822,35 +2986,40 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = _constructionSites.Values
+        var candidates = _constructionSites.Values
             .Where(site => site.RequiredResource == carried.Resource &&
                 site.MissingQuantity - constructionReservations.GetValueOrDefault(site.Id) >=
                     carried.Quantity)
-            .Select(site => new
-            {
-                Site = site,
-                Route = FindConstructionAccessPath(actor.Position, site, actor),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderByDescending(candidate => candidate.Site.Priority)
-            .ThenBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Site.Id)
-            .FirstOrDefault();
-        if (best is null)
+            .OrderByDescending(site => site.Priority)
+            .ThenBy(site => ManhattanDistance(actor.Position, site.Anchor))
+            .ThenBy(site => site.Id)
+            .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
+        foreach (var site in candidates)
         {
-            return false;
+            var routeRequest = RequestConstructionAccessPath(actor, site);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+            {
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+                routeRequest.Path is not { } route)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.SupplyConstruction;
+            actor.JobStage = ActorJobStage.Delivering;
+            actor.SourceStackId = EntityId.None;
+            actor.DestinationZoneId = site.Id;
+            actor.ReservedQuantity = carried.Quantity;
+            actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+            BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
+            constructionReservations[site.Id] = checked(
+                constructionReservations.GetValueOrDefault(site.Id) + carried.Quantity);
+            return true;
         }
 
-        actor.JobKind = ActorJobKind.SupplyConstruction;
-        actor.JobStage = ActorJobStage.Delivering;
-        actor.SourceStackId = EntityId.None;
-        actor.DestinationZoneId = best.Site.Id;
-        actor.ReservedQuantity = carried.Quantity;
-        actor.JobTarget = best.Route!.Count == 0 ? actor.Position : best.Route[^1];
-        BeginJobLeg(actor, best.Route, Definitions.HaulHandlingTicks);
-        constructionReservations[best.Site.Id] = checked(
-            constructionReservations.GetValueOrDefault(best.Site.Id) + carried.Quantity);
-        return true;
+        return false;
     }
 
     private void UpdateConstructionSupplyJob(ActorState actor)
@@ -2926,6 +3095,19 @@ public sealed partial class SimulationEngine
 
     private void CompleteConstructionCollection(ActorState actor, ConstructionSiteState site)
     {
+        var routeRequest = RequestConstructionAccessPath(actor, site);
+        if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+        {
+            actor.RemainingWorkTicks = 1;
+            return;
+        }
+        if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+            routeRequest.Path is not { } route)
+        {
+            actor.ClearJob();
+            return;
+        }
+
         var source = _itemStacks[actor.SourceStackId];
         ItemStackState carried;
         if (source.Quantity == actor.ReservedQuantity)
@@ -2947,14 +3129,6 @@ public sealed partial class SimulationEngine
         actor.CarriedStackId = carried.Id;
         actor.SourceStackId = EntityId.None;
         actor.JobStage = ActorJobStage.Delivering;
-        var route = FindConstructionAccessPath(actor.Position, site, actor);
-        if (route is null)
-        {
-            DropCarriedStack(actor);
-            actor.ClearJob();
-            return;
-        }
-
         actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
         BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
         Publish(SimulationEventKind.ItemPickedUp, actor.Id, carried.Id, carried.Quantity);
@@ -2978,31 +3152,36 @@ public sealed partial class SimulationEngine
             .Where(candidate => candidate.JobKind == ActorJobKind.BuildConstruction)
             .Select(candidate => candidate.DestinationZoneId)
             .ToHashSet();
-        var best = _constructionSites.Values
+        var candidates = _constructionSites.Values
             .Where(site => site.HasAllMaterials &&
                 !HasGroundStackInConstructionFootprint(site) &&
                 !reservedSites.Contains(site.Id) &&
                 CanActorBuild(actor, site))
-            .Select(site => new
-            {
-                Site = site,
-                Route = FindConstructionAccessPath(actor.Position, site, actor),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderByDescending(candidate => candidate.Site.Priority)
-            .ThenBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Site.Id)
-            .FirstOrDefault();
-        if (best is null)
+            .OrderByDescending(site => site.Priority)
+            .ThenBy(site => ManhattanDistance(actor.Position, site.Anchor))
+            .ThenBy(site => site.Id)
+            .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
+        foreach (var site in candidates)
         {
-            return false;
+            var routeRequest = RequestConstructionAccessPath(actor, site);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+            {
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+                routeRequest.Path is not { } route)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.BuildConstruction;
+            actor.DestinationZoneId = site.Id;
+            actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+            BeginJobLeg(actor, route, site.RemainingWorkTicks);
+            return true;
         }
 
-        actor.JobKind = ActorJobKind.BuildConstruction;
-        actor.DestinationZoneId = best.Site.Id;
-        actor.JobTarget = best.Route!.Count == 0 ? actor.Position : best.Route[^1];
-        BeginJobLeg(actor, best.Route, best.Site.RemainingWorkTicks);
-        return true;
+        return false;
     }
 
     private void UpdateConstructionBuildJob(ActorState actor)
@@ -3052,8 +3231,8 @@ public sealed partial class SimulationEngine
         ActorState? actor = null)
     {
         if (site.Kind is ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
-            ConstructionKind.StoneStorage or
-            ConstructionKind.GoblinFieldCamp)
+            ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
+            ConstructionKind.MaterialsStorage or ConstructionKind.GoblinFieldCamp)
         {
             return actor is null
                 ? Navigation.FindPath(start, site.Anchor)
@@ -3068,22 +3247,39 @@ public sealed partial class SimulationEngine
             ? footprint.SelectMany(World.GetCardinalWorldNeighbors)
             : footprint.SelectMany(position =>
                 World.GetCardinalWorldNeighbors(position).Append(position));
-        return accessPositions
+        var destinations = accessPositions
             .Where(World.IsTerrainTraversable)
             .Distinct()
-            .Select(position => new
-            {
-                Position = position,
-                Route = actor is null
-                    ? Navigation.FindPath(start, position)
-                    : FindActorPathFrom(actor, start, position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Position.Y)
-            .ThenBy(candidate => candidate.Position.X)
-            .Select(candidate => candidate.Route)
-            .FirstOrDefault();
+            .ToHashSet();
+        return actor is null
+            ? Navigation.FindPathToNearest(start, destinations)
+            : FindActorPathToNearestFrom(actor, start, destinations);
+    }
+
+    private NavigationPathRequestResult RequestConstructionAccessPath(
+        ActorState actor,
+        ConstructionSiteState site)
+    {
+        if (site.Kind is ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
+            ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
+            ConstructionKind.MaterialsStorage or ConstructionKind.GoblinFieldCamp)
+        {
+            return RequestActorPath(actor, site.Anchor);
+        }
+
+        var footprint = site.GetFootprint();
+        var accessPositions = site.Kind is ConstructionKind.WoodenWall or
+            ConstructionKind.StoneWall or ConstructionKind.WoodenDoor or
+            ConstructionKind.WallTorch or ConstructionKind.PrimitiveWorkshop or
+            ConstructionKind.GoblinHut
+            ? footprint.SelectMany(World.GetCardinalWorldNeighbors)
+            : footprint.SelectMany(position =>
+                World.GetCardinalWorldNeighbors(position).Append(position));
+        var destinations = accessPositions
+            .Where(World.IsTerrainTraversable)
+            .Distinct()
+            .ToHashSet();
+        return RequestActorPathToNearest(actor, destinations);
     }
 
     private bool TryPlanHaulCollection(
@@ -3093,7 +3289,7 @@ public sealed partial class SimulationEngine
         EntityId? requiredDestination = null,
         bool assignedDestinationsOnly = false)
     {
-        HaulPlan? best = null;
+        var candidates = new List<HaulCandidate>();
         foreach (var source in _itemStacks.Values.Where(stack =>
                      stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
                      Visibility.Get(stack.Location.Position) != CellVisibility.Unknown))
@@ -3134,12 +3330,6 @@ public sealed partial class SimulationEngine
                 continue;
             }
 
-            var routeToSource = FindActorPath(actor, source.Location.Position);
-            if (routeToSource is null)
-            {
-                continue;
-            }
-
             foreach (var zone in candidateZones)
             {
                 if (source.Location.Kind == ItemLocationKind.StorageZone &&
@@ -3161,51 +3351,74 @@ public sealed partial class SimulationEngine
                     continue;
                 }
 
-                var routeToDestination = FindActorPathFrom(
-                    actor,
-                    source.Location.Position,
-                    zone.Position);
-                if (routeToDestination is null)
-                {
-                    continue;
-                }
-
                 var quantity = Math.Min(
                     Definitions.ActorCarryCapacity,
                     Math.Min(availableSource, availableDestination));
-                var candidate = new HaulPlan(
+                candidates.Add(new HaulCandidate(
                     source.Id,
                     zone.Id,
                     quantity,
-                    routeToSource,
                     GetResourcePriority(source.Resource),
                     zone.Priority,
-                    checked(routeToSource.Count + routeToDestination.Count));
-                if (best is null || IsBetter(candidate, best.Value))
-                {
-                    best = candidate;
-                }
+                    source.Location.Position,
+                    zone.Position,
+                    checked(
+                        ManhattanDistance(actor.Position, source.Location.Position) +
+                        ManhattanDistance(source.Location.Position, zone.Position))));
             }
         }
 
-        if (best is null)
+        if (candidates.Count == 0)
         {
             return false;
         }
 
-        var plan = best.Value;
-        actor.JobKind = ActorJobKind.Haul;
-        actor.JobStage = ActorJobStage.Collecting;
-        actor.SourceStackId = plan.SourceStackId;
-        actor.DestinationZoneId = plan.DestinationZoneId;
-        actor.ReservedQuantity = plan.Quantity;
-        actor.JobTarget = _itemStacks[plan.SourceStackId].Location.Position;
-        BeginJobLeg(actor, plan.Route, Definitions.HaulHandlingTicks);
-        sourceReservations[plan.SourceStackId] = checked(
-            sourceReservations.GetValueOrDefault(plan.SourceStackId) + plan.Quantity);
-        destinationReservations[plan.DestinationZoneId] = checked(
-            destinationReservations.GetValueOrDefault(plan.DestinationZoneId) + plan.Quantity);
-        return true;
+        var orderedCandidates = candidates
+            .OrderByDescending(candidate => candidate.ResourcePriority)
+            .ThenByDescending(candidate => candidate.DestinationPriority)
+            .ThenBy(candidate => candidate.EstimatedDistance)
+            .ThenBy(candidate => candidate.SourceStackId)
+            .ThenBy(candidate => candidate.DestinationZoneId)
+            .ToArray();
+        var highestResourcePriority = orderedCandidates[0].ResourcePriority;
+        var highestDestinationPriority = orderedCandidates
+            .Where(candidate => candidate.ResourcePriority == highestResourcePriority)
+            .Max(candidate => candidate.DestinationPriority);
+        var priorityCandidates = orderedCandidates
+            .Where(candidate =>
+                candidate.ResourcePriority == highestResourcePriority &&
+                candidate.DestinationPriority == highestDestinationPriority)
+            .ToArray();
+        var pageCount = (priorityCandidates.Length + MaximumHaulRouteCandidatesPerPlanningTick - 1) /
+            MaximumHaulRouteCandidatesPerPlanningTick;
+        var planningRound = CurrentTick.Value /
+            Definitions.ActorPlanning.BackgroundPlanningIntervalTicks;
+        var page = (int)((planningRound + (long)actor.Id.Value) % pageCount);
+        foreach (var candidate in priorityCandidates
+                     .Skip(page * MaximumHaulRouteCandidatesPerPlanningTick)
+                     .Take(MaximumHaulRouteCandidatesPerPlanningTick))
+        {
+            var routeToSource = FindTribePath(actor.Position, candidate.SourcePosition);
+            if (routeToSource is null)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.Haul;
+            actor.JobStage = ActorJobStage.Collecting;
+            actor.SourceStackId = candidate.SourceStackId;
+            actor.DestinationZoneId = candidate.DestinationZoneId;
+            actor.ReservedQuantity = candidate.Quantity;
+            actor.JobTarget = candidate.SourcePosition;
+            BeginJobLeg(actor, routeToSource, Definitions.HaulHandlingTicks);
+            sourceReservations[candidate.SourceStackId] = checked(
+                sourceReservations.GetValueOrDefault(candidate.SourceStackId) + candidate.Quantity);
+            destinationReservations[candidate.DestinationZoneId] = checked(
+                destinationReservations.GetValueOrDefault(candidate.DestinationZoneId) +
+                candidate.Quantity);
+            return true;
+        }
+        return false;
     }
 
     private bool HasAssignedStorageDuty(EntityId actorId) =>
@@ -3213,8 +3426,32 @@ public sealed partial class SimulationEngine
 
     private bool IsBackgroundPlanningTick(ActorState actor)
     {
-        if (CurrentTick.Value == 1 || _lastCommandExecutionTick == CurrentTick.Value)
+        if (CurrentTick.Value == 1)
         {
+            if (_burstPlannersThisTick >=
+                Definitions.ActorPlanning.MaximumBurstPlannersPerTick)
+            {
+                return false;
+            }
+
+            _burstPlannersThisTick++;
+            return true;
+        }
+
+        if (_lastConstructionCommandExecutionTick == CurrentTick.Value)
+        {
+            return false;
+        }
+
+        if (_lastCommandExecutionTick == CurrentTick.Value)
+        {
+            if (_burstPlannersThisTick >=
+                Definitions.ActorPlanning.MaximumBurstPlannersPerTick)
+            {
+                return false;
+            }
+
+            _burstPlannersThisTick++;
             return true;
         }
 
@@ -3224,16 +3461,15 @@ public sealed partial class SimulationEngine
 
     private void RemoveExhaustedWorkDesignations()
     {
-        var plants = World.CreatePlantSnapshot();
         var completed = _workDesignations.Values
             .Where(designation => designation.Kind switch
             {
-                WorkDesignationKind.GatherFood => !plants.Any(plant =>
-                    plant.Kind != PlantKind.ReedBed && plant.Biomass > 0 &&
-                    designation.Matches(plant.Position)),
-                WorkDesignationKind.GatherReeds => !plants.Any(plant =>
-                    plant.Kind == PlantKind.ReedBed && plant.Biomass > 0 &&
-                    designation.Matches(plant.Position)),
+                WorkDesignationKind.GatherFood =>
+                    World.GetPlantPatch(designation.Target) is not
+                        { Kind: not PlantKind.ReedBed, Biomass: > 0 },
+                WorkDesignationKind.GatherReeds =>
+                    World.GetPlantPatch(designation.Target) is not
+                        { Kind: PlantKind.ReedBed, Biomass: > 0 },
                 WorkDesignationKind.GatherBrushwood =>
                     !_itemStacks.TryGetValue(designation.TargetEntityId, out var stack) ||
                     stack.Resource != ResourceKind.Wood ||
@@ -3242,8 +3478,9 @@ public sealed partial class SimulationEngine
                     !_itemStacks.TryGetValue(designation.TargetEntityId, out var stone) ||
                     !IsMineralResource(stone.Resource) ||
                     stone.Location.Kind != ItemLocationKind.Ground,
-                WorkDesignationKind.UprootBerryBush => !plants.Any(plant =>
-                    plant.Kind == PlantKind.BerryBush && designation.Matches(plant.Position)),
+                WorkDesignationKind.UprootBerryBush =>
+                    World.GetPlantPatch(designation.Target) is not
+                        { Kind: PlantKind.BerryBush },
                 WorkDesignationKind.FellTree => World.GetFellableWood(designation.Target) is null,
                 WorkDesignationKind.QuarryBoulder =>
                     World.GetQuarriableBoulder(designation.Target) is null,
@@ -3574,6 +3811,123 @@ public sealed partial class SimulationEngine
         GridPosition destination) =>
         FindActorPathFrom(actor, actor.Position, destination);
 
+    private NavigationPathRequestResult RequestActorPath(
+        ActorState actor,
+        GridPosition destination)
+    {
+        var maximumExpandedNodes = Definitions.ActorPlanning.MaximumPathExpansionsPerSlice;
+        if (!actor.NavigationKnowledge.HasBlockedBeliefs &&
+            !_tribeNavigationKnowledge.HasBlockedBeliefs)
+        {
+            return Navigation.RequestPath(
+                actor.Position,
+                destination,
+                maximumExpandedNodes);
+        }
+
+        var beliefDuration = GetNavigationBeliefDurationTicks();
+        var requestTick = CurrentTick;
+        return Navigation.RequestPath(
+            actor.Position,
+            destination,
+            new NavigationPathContext(
+                actor.Id.Value,
+                actor.NavigationKnowledge.Version,
+                _tribeNavigationKnowledge.Version,
+                requestTick.Value / beliefDuration),
+            (from, to) => actor.NavigationKnowledge.AllowsTraversal(
+                from,
+                to,
+                _tribeNavigationKnowledge,
+                requestTick,
+                beliefDuration,
+                beliefDuration),
+            maximumExpandedNodes);
+    }
+
+    private NavigationPathRequestResult RequestActorPathToNearest(
+        ActorState actor,
+        IReadOnlySet<GridPosition> destinations,
+        Func<GridPosition, GridPosition, bool>? additionalEdgeFilter = null,
+        ulong constraintKey = 0)
+    {
+        var maximumExpandedNodes = Definitions.ActorPlanning.MaximumPathExpansionsPerSlice;
+        if (!actor.NavigationKnowledge.HasBlockedBeliefs &&
+            !_tribeNavigationKnowledge.HasBlockedBeliefs)
+        {
+            if (additionalEdgeFilter is not null)
+            {
+                return Navigation.RequestPathToNearest(
+                    actor.Position,
+                    destinations,
+                    new NavigationPathContext(
+                        actor.Id.Value,
+                        PersonalKnowledgeVersion: 0,
+                        SharedKnowledgeVersion: 0,
+                        FreshnessBucket: 0,
+                        ConstraintKey: constraintKey),
+                    additionalEdgeFilter,
+                    maximumExpandedNodes);
+            }
+            return Navigation.RequestPathToNearest(
+                actor.Position,
+                destinations,
+                maximumExpandedNodes,
+                additionalEdgeFilter);
+        }
+
+        var beliefDuration = GetNavigationBeliefDurationTicks();
+        var requestTick = CurrentTick;
+        return Navigation.RequestPathToNearest(
+            actor.Position,
+            destinations,
+            new NavigationPathContext(
+                actor.Id.Value,
+                actor.NavigationKnowledge.Version,
+                _tribeNavigationKnowledge.Version,
+                requestTick.Value / beliefDuration,
+                constraintKey),
+            (from, to) =>
+                (additionalEdgeFilter is null || additionalEdgeFilter(from, to)) &&
+                actor.NavigationKnowledge.AllowsTraversal(
+                    from,
+                    to,
+                    _tribeNavigationKnowledge,
+                    requestTick,
+                    beliefDuration,
+                    beliefDuration),
+            maximumExpandedNodes);
+    }
+
+    private IReadOnlyList<GridPosition>? FindActorPathToNearest(
+        ActorState actor,
+        IReadOnlySet<GridPosition> destinations) =>
+        FindActorPathToNearestFrom(actor, actor.Position, destinations);
+
+    private IReadOnlyList<GridPosition>? FindActorPathToNearestFrom(
+        ActorState actor,
+        GridPosition start,
+        IReadOnlySet<GridPosition> destinations)
+    {
+        if (!actor.NavigationKnowledge.HasBlockedBeliefs &&
+            !_tribeNavigationKnowledge.HasBlockedBeliefs)
+        {
+            return Navigation.FindPathToNearest(start, destinations);
+        }
+
+        var beliefDuration = GetNavigationBeliefDurationTicks();
+        return Navigation.FindPathToNearest(
+            start,
+            destinations,
+            (from, to) => actor.NavigationKnowledge.AllowsTraversal(
+                from,
+                to,
+                _tribeNavigationKnowledge,
+                CurrentTick,
+                beliefDuration,
+                beliefDuration));
+    }
+
     private IReadOnlyList<GridPosition>? FindActorPathFrom(
         ActorState actor,
         GridPosition start,
@@ -3585,24 +3939,53 @@ public sealed partial class SimulationEngine
             return Navigation.FindPath(start, destination);
         }
 
+        var beliefDuration = GetNavigationBeliefDurationTicks();
         return Navigation.FindPath(
             start,
             destination,
+            new NavigationPathContext(
+                actor.Id.Value,
+                actor.NavigationKnowledge.Version,
+                _tribeNavigationKnowledge.Version,
+                CurrentTick.Value / beliefDuration),
             (from, to) => actor.NavigationKnowledge.AllowsTraversal(
                 from,
                 to,
-                _tribeNavigationKnowledge));
+                _tribeNavigationKnowledge,
+                CurrentTick,
+                beliefDuration,
+                beliefDuration));
     }
 
     private IReadOnlyList<GridPosition>? FindTribePath(
         GridPosition start,
-        GridPosition destination) =>
-        _tribeNavigationKnowledge.HasBlockedBeliefs
-            ? Navigation.FindPath(
+        GridPosition destination)
+    {
+        if (!_tribeNavigationKnowledge.HasBlockedBeliefs)
+        {
+            return Navigation.FindPath(start, destination);
+        }
+
+        var beliefDuration = GetNavigationBeliefDurationTicks();
+        return Navigation.FindPath(
                 start,
                 destination,
-                _tribeNavigationKnowledge.AllowsTraversal)
-            : Navigation.FindPath(start, destination);
+                new NavigationPathContext(
+                    OwnerId: 0,
+                    PersonalKnowledgeVersion: 0,
+                    SharedKnowledgeVersion: _tribeNavigationKnowledge.Version,
+                    FreshnessBucket: CurrentTick.Value / beliefDuration),
+                (from, to) => _tribeNavigationKnowledge.AllowsTraversal(
+                    from,
+                    to,
+                    CurrentTick,
+                    beliefDuration,
+                    beliefDuration));
+    }
+
+    private long GetNavigationBeliefDurationTicks() =>
+        Definitions.Clock.Climate.GetSeason(
+            SimulationCalendar.At(CurrentTick, Definitions.Clock).Season).TicksPerDay;
 
     private void ObserveNavigationEdge(
         ActorState actor,
@@ -4101,9 +4484,10 @@ public sealed partial class SimulationEngine
         if (actor.DestinationZoneId != EntityId.None ||
             actor.ReservedQuantity <= 0 ||
             (actor.JobStage is ActorJobStage.ProvisioningFood or
-                ActorJobStage.ProvisioningWater && actor.ReservedQuantity != 1) ||
+                ActorJobStage.ProvisioningWater or ActorJobStage.ProvisioningEquipment &&
+             actor.ReservedQuantity != 1) ||
             (actor.JobStage is ActorJobStage.ProvisioningFood or
-                 ActorJobStage.ProvisioningAmmo &&
+                 ActorJobStage.ProvisioningAmmo or ActorJobStage.ProvisioningEquipment &&
              actor.CarriedStackId != EntityId.None) ||
             !IsResupplyJobValid(actor))
         {
@@ -4363,4 +4747,18 @@ public sealed partial class SimulationEngine
         StoragePriority ResourcePriority,
         StoragePriority DestinationPriority,
         int TotalDistance);
+
+    private readonly record struct HaulCandidate(
+        EntityId SourceStackId,
+        EntityId DestinationZoneId,
+        int Quantity,
+        StoragePriority ResourcePriority,
+        StoragePriority DestinationPriority,
+        GridPosition SourcePosition,
+        GridPosition DestinationPosition,
+        int EstimatedDistance);
+
+    private readonly record struct PersonalSupplySource(
+        ItemStackState Stack,
+        IReadOnlyList<GridPosition> Route);
 }

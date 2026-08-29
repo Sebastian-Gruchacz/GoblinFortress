@@ -53,13 +53,14 @@ public sealed partial class SimulationEngine
 
     private void UpdateAnimals()
     {
-        if (CurrentTick.Value % AnimalUpdateIntervalTicks != 0)
-        {
-            return;
-        }
-
         foreach (var animal in _animals.Values.ToArray())
         {
+            if (CurrentTick.Value % AnimalUpdateIntervalTicks !=
+                (long)(animal.Id % AnimalUpdateIntervalTicks))
+            {
+                continue;
+            }
+
             animal.AgeTicks = checked(animal.AgeTicks + AnimalUpdateIntervalTicks);
             animal.Hunger++;
             UpdateAnimal(animal);
@@ -76,7 +77,8 @@ public sealed partial class SimulationEngine
         }
 
         var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
-        if (calendar.TickOfDay == 0 && calendar.AbsoluteDay > 0 && calendar.AbsoluteDay % 10 == 0)
+        if (CurrentTick.Value % AnimalUpdateIntervalTicks == 0 &&
+            calendar.TickOfDay == 0 && calendar.AbsoluteDay > 0 && calendar.AbsoluteDay % 10 == 0)
         {
             TryReproduceAnimal(AnimalKind.MarshHare, Math.Max(10, Map.CellCount / 300));
             TryReproduceAnimal(AnimalKind.SwampBoar, Math.Max(5, Map.CellCount / 900));
@@ -94,7 +96,7 @@ public sealed partial class SimulationEngine
         }
 
         if (animal.Kind == AnimalKind.MarshHare &&
-            CurrentTick.Value % (AnimalUpdateIntervalTicks * 2) != 0)
+            animal.AgeTicks % (AnimalUpdateIntervalTicks * 2) != 0)
         {
             animal.Fatigue = Math.Max(0, animal.Fatigue - 1);
             animal.Activity = AnimalActivity.Resting;

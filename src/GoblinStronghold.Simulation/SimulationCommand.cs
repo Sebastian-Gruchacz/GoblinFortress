@@ -52,6 +52,8 @@ public enum ConstructionKind : byte
     WallTorch = 11,
     PrimitiveWorkshop = 12,
     GoblinHut = 13,
+    EquipmentStorage = 14,
+    MaterialsStorage = 15,
 }
 
 public enum CraftingRecipeKind : byte
@@ -62,6 +64,7 @@ public enum CraftingRecipeKind : byte
     StoneClub = 4,
     HideClothes = 5,
     ReedClothes = 6,
+    PrimitiveWaterskin = 7,
 }
 
 public readonly record struct SimulationCommand(
@@ -254,6 +257,38 @@ public readonly record struct SimulationCommand(
             position,
             position,
             ConstructionKind.StoneStorage,
+            ResourceKind.Wood,
+            Amount: 2);
+
+    public static SimulationCommand BuildEquipmentStorage(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.EquipmentStorage,
+            ResourceKind.Wood,
+            Amount: 2);
+
+    public static SimulationCommand BuildMaterialsStorage(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.MaterialsStorage,
             ResourceKind.Wood,
             Amount: 2);
 

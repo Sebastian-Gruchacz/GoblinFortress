@@ -38,51 +38,62 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> sourceReservations,
         Dictionary<(EntityId OrderId, ResourceKind Resource), int> craftingReservations)
     {
-        var candidates =
-            from order in _craftingOrders.Values
-            from material in CraftingRecipeCatalog.GetMaterials(order.Recipe)
-            let key = (order.Id, material.Resource)
-            let missing = order.GetMissing(material.Resource) -
-                craftingReservations.GetValueOrDefault(key)
-            where missing > 0
-            from source in _itemStacks.Values
-            where source.Resource == material.Resource &&
-                source.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone
-            let available = source.Quantity - sourceReservations.GetValueOrDefault(source.Id)
-            where available > 0
-            let routeToSource = FindActorPath(actor, source.Location.Position)
-            let routeToWorkshop = FindWorkshopAccessPath(
-                source.Location.Position,
-                order.Workshop,
-                actor)
-            where routeToSource is not null && routeToWorkshop is not null
-            orderby routeToSource.Count + routeToWorkshop.Count, order.Id, source.Id
-            select new
-            {
-                Order = order,
-                Source = source,
-                Route = routeToSource,
-                Quantity = Math.Min(available, missing),
-            };
-        var best = candidates.FirstOrDefault();
-        if (best is null)
+        var candidates = (
+                from order in _craftingOrders.Values
+                from material in CraftingRecipeCatalog.GetMaterials(order.Recipe)
+                let key = (order.Id, material.Resource)
+                let missing = order.GetMissing(material.Resource) -
+                    craftingReservations.GetValueOrDefault(key)
+                where missing > 0
+                from source in _itemStacks.Values
+                where source.Resource == material.Resource &&
+                    source.Location.Kind == ItemLocationKind.StorageZone
+                let available = source.Quantity - sourceReservations.GetValueOrDefault(source.Id)
+                where available > 0
+                let estimatedDistance =
+                    ManhattanDistance(actor.Position, source.Location.Position) +
+                    ManhattanDistance(source.Location.Position, order.Workshop)
+                orderby estimatedDistance, order.Id, source.Id
+                select new
+                {
+                    Order = order,
+                    Source = source,
+                    Quantity = Math.Min(available, missing),
+                })
+            .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
+        foreach (var candidate in candidates)
         {
-            return false;
+            var routeRequest = RequestActorPath(actor, candidate.Source.Location.Position);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+            {
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+                routeRequest.Path is not { } route)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.SupplyCrafting;
+            actor.JobStage = ActorJobStage.Collecting;
+            actor.SourceStackId = candidate.Source.Id;
+            actor.DestinationZoneId = candidate.Order.Id;
+            actor.ReservedQuantity = Math.Min(
+                Definitions.ActorCarryCapacity,
+                candidate.Quantity);
+            actor.JobTarget = candidate.Source.Location.Position;
+            BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
+            sourceReservations[candidate.Source.Id] = checked(
+                sourceReservations.GetValueOrDefault(candidate.Source.Id) +
+                actor.ReservedQuantity);
+            var reservationKey = (candidate.Order.Id, candidate.Source.Resource);
+            craftingReservations[reservationKey] = checked(
+                craftingReservations.GetValueOrDefault(reservationKey) +
+                actor.ReservedQuantity);
+            return true;
         }
 
-        actor.JobKind = ActorJobKind.SupplyCrafting;
-        actor.JobStage = ActorJobStage.Collecting;
-        actor.SourceStackId = best.Source.Id;
-        actor.DestinationZoneId = best.Order.Id;
-        actor.ReservedQuantity = Math.Min(Definitions.ActorCarryCapacity, best.Quantity);
-        actor.JobTarget = best.Source.Location.Position;
-        BeginJobLeg(actor, best.Route, Definitions.HaulHandlingTicks);
-        sourceReservations[best.Source.Id] = checked(
-            sourceReservations.GetValueOrDefault(best.Source.Id) + actor.ReservedQuantity);
-        var reservationKey = (best.Order.Id, best.Source.Resource);
-        craftingReservations[reservationKey] = checked(
-            craftingReservations.GetValueOrDefault(reservationKey) + actor.ReservedQuantity);
-        return true;
+        return false;
     }
 
     private bool TryPlanCarriedCraftingDelivery(
@@ -94,35 +105,40 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = _craftingOrders.Values
+        var candidates = _craftingOrders.Values
             .Where(order => order.GetMissing(carried.Resource) -
                 craftingReservations.GetValueOrDefault((order.Id, carried.Resource)) >=
                     carried.Quantity)
-            .Select(order => new
-            {
-                Order = order,
-                Route = FindWorkshopAccessPath(actor.Position, order.Workshop, actor),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Order.Id)
-            .FirstOrDefault();
-        if (best is null)
+            .OrderBy(order => ManhattanDistance(actor.Position, order.Workshop))
+            .ThenBy(order => order.Id)
+            .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
+        foreach (var order in candidates)
         {
-            return false;
+            var routeRequest = RequestWorkshopAccessPath(actor, order.Workshop);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+            {
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+                routeRequest.Path is not { } route)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.SupplyCrafting;
+            actor.JobStage = ActorJobStage.Delivering;
+            actor.SourceStackId = EntityId.None;
+            actor.DestinationZoneId = order.Id;
+            actor.ReservedQuantity = carried.Quantity;
+            actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+            BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
+            var key = (order.Id, carried.Resource);
+            craftingReservations[key] = checked(
+                craftingReservations.GetValueOrDefault(key) + carried.Quantity);
+            return true;
         }
 
-        actor.JobKind = ActorJobKind.SupplyCrafting;
-        actor.JobStage = ActorJobStage.Delivering;
-        actor.SourceStackId = EntityId.None;
-        actor.DestinationZoneId = best.Order.Id;
-        actor.ReservedQuantity = carried.Quantity;
-        actor.JobTarget = best.Route!.Count == 0 ? actor.Position : best.Route[^1];
-        BeginJobLeg(actor, best.Route, Definitions.HaulHandlingTicks);
-        var key = (best.Order.Id, carried.Resource);
-        craftingReservations[key] = checked(
-            craftingReservations.GetValueOrDefault(key) + carried.Quantity);
-        return true;
+        return false;
     }
 
     private void UpdateCraftingSupplyJob(ActorState actor)
@@ -206,6 +222,19 @@ public sealed partial class SimulationEngine
 
     private void CompleteCraftingCollection(ActorState actor, CraftingOrderState order)
     {
+        var routeRequest = RequestWorkshopAccessPath(actor, order.Workshop);
+        if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+        {
+            actor.RemainingWorkTicks = 1;
+            return;
+        }
+        if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+            routeRequest.Path is not { } route)
+        {
+            actor.ClearJob();
+            return;
+        }
+
         var source = _itemStacks[actor.SourceStackId];
         ItemStackState carried;
         if (source.Quantity == actor.ReservedQuantity)
@@ -227,13 +256,6 @@ public sealed partial class SimulationEngine
         actor.CarriedStackId = carried.Id;
         actor.SourceStackId = EntityId.None;
         actor.JobStage = ActorJobStage.Delivering;
-        var route = FindWorkshopAccessPath(actor.Position, order.Workshop, actor);
-        if (route is null)
-        {
-            DropCarriedStack(actor);
-            actor.ClearJob();
-            return;
-        }
         actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
         BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
         Publish(SimulationEventKind.ItemPickedUp, actor.Id, carried.Id, carried.Quantity);
@@ -258,34 +280,39 @@ public sealed partial class SimulationEngine
             .Where(candidate => candidate.JobKind == ActorJobKind.Craft)
             .Select(candidate => candidate.DestinationZoneId)
             .ToHashSet();
-        var best = _craftingOrders.Values
-            .Where(order => order.HasAllMaterials &&
-                !reservedOrders.Contains(order.Id))
-            .Select(order => new
-            {
-                Order = order,
-                Route = FindWorkshopAccessPath(actor.Position, order.Workshop, actor),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Order.Id)
-            .FirstOrDefault();
-        if (best is null)
+        var candidates = _craftingOrders.Values
+            .Where(order => order.HasAllMaterials && !reservedOrders.Contains(order.Id))
+            .OrderBy(order => ManhattanDistance(actor.Position, order.Workshop))
+            .ThenBy(order => order.Id)
+            .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
+        foreach (var order in candidates)
         {
-            return false;
+            var routeRequest = RequestWorkshopAccessPath(actor, order.Workshop);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+            {
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+                routeRequest.Path is not { } route)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.Craft;
+            actor.DestinationZoneId = order.Id;
+            actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+            BeginJobLeg(actor, route, order.RemainingWorkTicks);
+            return true;
         }
 
-        actor.JobKind = ActorJobKind.Craft;
-        actor.DestinationZoneId = best.Order.Id;
-        actor.JobTarget = best.Route!.Count == 0 ? actor.Position : best.Route[^1];
-        BeginJobLeg(actor, best.Route, best.Order.RemainingWorkTicks);
-        return true;
+        return false;
     }
 
     private void UpdateCraftingWorkJob(ActorState actor)
     {
         if (!_craftingOrders.TryGetValue(actor.DestinationZoneId, out var order) ||
-            !order.HasAllMaterials || !World.HasPrimitiveWorkshop(order.Workshop))
+            !order.HasAllMaterials ||
+            !World.HasPrimitiveWorkshop(order.Workshop))
         {
             actor.ClearJob();
             return;
@@ -307,7 +334,11 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        actor.Equipment |= GetCraftedEquipment(order.Recipe);
+        AllocateItemStack(
+            ResourceKind.Equipment,
+            quantity: 1,
+            ItemLocation.OnGround(actor.Position),
+            variant: GetCraftedEquipmentVariant(order.Recipe));
         _craftingOrders.Remove(order.Id);
         GainBuildingExperience(actor, 16);
         Publish(SimulationEventKind.CraftingCompleted, actor.Id, order.Id, (int)order.Recipe);
@@ -322,20 +353,47 @@ public sealed partial class SimulationEngine
         CraftingRecipeKind.StoneClub => PersonalEquipment.StoneClub,
         CraftingRecipeKind.HideClothes => PersonalEquipment.HideClothes,
         CraftingRecipeKind.ReedClothes => PersonalEquipment.ReedClothes,
+        CraftingRecipeKind.PrimitiveWaterskin => PersonalEquipment.PrimitiveWaterskin,
         _ => throw new ArgumentOutOfRangeException(nameof(recipe), recipe, null),
     };
 
-    private IReadOnlyList<GridPosition>? FindWorkshopAccessPath(
-        GridPosition start,
-        GridPosition workshop,
-        ActorState? actor = null) => World.GetCardinalWorldNeighbors(workshop)
-        .Where(World.IsTerrainTraversable)
-        .Select(position => actor is null
-            ? Navigation.FindPath(start, position)
-            : FindActorPathFrom(actor, start, position))
-        .Where(route => route is not null)
-        .OrderBy(route => route!.Count)
-        .FirstOrDefault();
+    private static ResourceVariant GetCraftedEquipmentVariant(CraftingRecipeKind recipe) =>
+        recipe switch
+        {
+            CraftingRecipeKind.PrimitiveSling => ResourceVariant.EquipmentPrimitiveSling,
+            CraftingRecipeKind.BoneKnife => ResourceVariant.EquipmentBoneKnife,
+            CraftingRecipeKind.FightingStick => ResourceVariant.EquipmentFightingStick,
+            CraftingRecipeKind.StoneClub => ResourceVariant.EquipmentStoneClub,
+            CraftingRecipeKind.HideClothes => ResourceVariant.EquipmentHideClothes,
+            CraftingRecipeKind.ReedClothes => ResourceVariant.EquipmentReedClothes,
+            CraftingRecipeKind.PrimitiveWaterskin =>
+                ResourceVariant.EquipmentPrimitiveWaterskin,
+            _ => throw new ArgumentOutOfRangeException(nameof(recipe), recipe, null),
+        };
+
+    private static PersonalEquipment GetEquipmentForVariant(ResourceVariant variant) =>
+        variant switch
+        {
+            ResourceVariant.EquipmentPrimitiveSling => PersonalEquipment.PrimitiveSling,
+            ResourceVariant.EquipmentBoneKnife => PersonalEquipment.BoneKnife,
+            ResourceVariant.EquipmentFightingStick => PersonalEquipment.FightingStick,
+            ResourceVariant.EquipmentStoneClub => PersonalEquipment.StoneClub,
+            ResourceVariant.EquipmentHideClothes => PersonalEquipment.HideClothes,
+            ResourceVariant.EquipmentReedClothes => PersonalEquipment.ReedClothes,
+            ResourceVariant.EquipmentPrimitiveWaterskin =>
+                PersonalEquipment.PrimitiveWaterskin,
+            _ => PersonalEquipment.None,
+        };
+
+    private NavigationPathRequestResult RequestWorkshopAccessPath(
+        ActorState actor,
+        GridPosition workshop)
+    {
+        var destinations = World.GetCardinalWorldNeighbors(workshop)
+            .Where(World.IsTerrainTraversable)
+            .ToHashSet();
+        return RequestActorPathToNearest(actor, destinations);
+    }
 
     private void ValidateLoadedCraftingSupplyJob(ActorState actor)
     {

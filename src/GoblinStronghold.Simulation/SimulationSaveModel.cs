@@ -183,9 +183,58 @@ internal sealed class HumanVillageSaveModel
 
     public int GuardHitPoints { get; set; }
 
+    public int? TreeFellingX { get; set; }
+
+    public int? TreeFellingY { get; set; }
+
+    public int? TreeFellingZ { get; set; }
+
+    public int TreeFellingProgress { get; set; }
+
+    public int GoodsWorkProgress { get; set; }
+
+    public int? StorehouseSiteX { get; set; }
+
+    public int? StorehouseSiteY { get; set; }
+
+    public int? StorehouseSiteZ { get; set; }
+
+    public int StorehouseWorkProgress { get; set; }
+
     public List<HumanCohortSaveModel> Cohorts { get; set; } = [];
 
+    public List<HumanVillagerSaveModel> Villagers { get; set; } = [];
+
     public List<HumanFieldSaveModel> Fields { get; set; } = [];
+}
+
+internal sealed class HumanVillagerSaveModel
+{
+    public int Id { get; set; }
+
+    public HumanCohortRole Role { get; set; }
+
+    public int X { get; set; }
+
+    public int Y { get; set; }
+
+    public int Z { get; set; }
+
+    public HumanCohortTask Task { get; set; }
+
+    public int SkillLevel { get; set; }
+
+    public HumanTool Tools { get; set; }
+
+    public int Health { get; set; }
+
+    public int Fatigue { get; set; }
+
+    public int Hunger { get; set; }
+
+    public int Thirst { get; set; }
+
+    public int WorkProgress { get; set; }
 }
 
 internal sealed class HumanCohortSaveModel
@@ -217,6 +266,7 @@ internal sealed class HumanFieldSaveModel
     public int Z { get; set; }
     public HumanFieldPhase Phase { get; set; }
     public int GrowthDays { get; set; }
+    public int WorkProgress { get; set; }
 }
 
 internal sealed class PlantPatchSaveModel

@@ -182,7 +182,8 @@ internal static class ConstructionBlueprintCatalog
         var requiredQuantity = kind switch
         {
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
-                ConstructionKind.StoneStorage => 2,
+                ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
+                ConstructionKind.MaterialsStorage => 2,
             ConstructionKind.WoodenWalkway => segmentCount,
             ConstructionKind.GoblinFieldCamp => 6,
             ConstructionKind.GoblinHut => 8,
@@ -198,7 +199,8 @@ internal static class ConstructionBlueprintCatalog
         var workTicks = kind switch
         {
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
-                ConstructionKind.StoneStorage => 40,
+                ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
+                ConstructionKind.MaterialsStorage => 40,
             ConstructionKind.WoodenWalkway => checked(segmentCount * 25),
             ConstructionKind.GoblinFieldCamp => 120,
             ConstructionKind.GoblinHut => 180,

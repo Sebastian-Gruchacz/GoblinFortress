@@ -23,6 +23,14 @@ public sealed partial class SimulationEngine
         {
             _undeliveredWorldChanges.Add(worldChange);
         }
+        foreach (var death in result.Deaths)
+        {
+            Publish(
+                SimulationEventKind.HumanDied,
+                EntityId.None,
+                HumanVillagerEntityId(death.VillagerId),
+                1);
+        }
         if (result.Alerted)
         {
             Publish(
@@ -40,132 +48,114 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        var guards = _humanVillage.GetGuardSnapshot();
-        if (guards.Population == 0 || guards.Task != HumanCohortTask.Guard)
+        var guards = _humanVillage.GetLivingGuardSnapshots()
+            .Where(guard => guard.Task == HumanCohortTask.Guard)
+            .ToArray();
+        if (guards.Length == 0)
         {
             return;
         }
 
-        var adjacentGoblins = _actors.Values
-            .Where(actor => !IsJuvenile(actor) && Distance(actor.Position, guards.Position) <= 1)
-            .OrderBy(actor => actor.Id)
-            .ToArray();
-        var rangedGoblins = _actors.Values
-            .Where(actor =>
+        foreach (var guard in guards)
+        {
+            var guardTarget = _actors.Values
+                .Where(actor => !IsJuvenile(actor) && actor.Health > 0 &&
+                    Distance(actor.Position, guard.Position) <= 1)
+                .OrderBy(actor => Distance(actor.Position, guard.Position))
+                .ThenBy(actor => actor.Id)
+                .FirstOrDefault();
+            if (guardTarget is null)
             {
-                if (IsJuvenile(actor))
-                {
-                    return false;
-                }
-                var distance = Distance(actor.Position, guards.Position);
-                var range = actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling)
-                    ? Definitions.RangedCombat.SlingRange
-                    : Definitions.RangedCombat.ThrownStoneRange;
-                return distance > 1 && distance <= range && actor.PersonalStoneAmmo > 0;
-            })
-            .OrderBy(actor => actor.Id)
-            .ToArray();
-        if (adjacentGoblins.Length == 0 && rangedGoblins.Length == 0)
-        {
-            return;
-        }
+                continue;
+            }
 
-        if (adjacentGoblins.Length > 0)
-        {
-            var guardTarget = adjacentGoblins[0];
-            var guardDamagePerFighter = Definitions.HumanGuardMinimumDamage +
+            var guardDamage = Definitions.HumanGuardMinimumDamage +
                 DeterministicRandom.NextInt(
                     WorldSeed,
                     RandomDomain.Combat,
-                    guardTarget.Id,
+                    HumanVillagerEntityId(guard.Id),
                     CurrentTick,
                     sampleKey: 1,
                     minimumInclusive: 0,
                     maximumExclusive: Definitions.HumanGuardDamageVariance + 1);
-            var guardDamage = checked(guards.Population * guardDamagePerFighter);
             ApplyTraumaDamage(guardTarget, guardDamage);
             Publish(
                 SimulationEventKind.HumanGuardHitGoblin,
-                EntityId.None,
+                HumanVillagerEntityId(guard.Id),
                 guardTarget.Id,
                 guardDamage);
         }
 
-        foreach (var goblin in adjacentGoblins)
+        foreach (var goblin in _actors.Values.Where(actor =>
+                     !IsJuvenile(actor) && actor.Health > 0).OrderBy(actor => actor.Id))
         {
-            var goblinDamage = Definitions.GoblinMinimumDamage +
-                GetMeleeEquipmentDamageBonus(goblin.Equipment) +
-                DeterministicRandom.NextInt(
-                    WorldSeed,
-                    RandomDomain.Combat,
-                    goblin.Id,
-                    CurrentTick,
-                    sampleKey: 2,
-                    minimumInclusive: 0,
-                    maximumExclusive: Definitions.GoblinDamageVariance + 1);
-            var humanDeaths = _humanVillage.ApplyGuardDamage(
-                goblinDamage,
-                Definitions.HumanGuardHealth);
-            AddBlood(guards.Position, goblinDamage, Math.Max(1, humanDeaths));
-            Publish(
-                SimulationEventKind.GoblinHitHumanGuard,
-                goblin.Id,
-                EntityId.None,
-                goblinDamage);
-            if (humanDeaths > 0)
-            {
-                Publish(
-                    SimulationEventKind.HumanDied,
-                    goblin.Id,
-                    EntityId.None,
-                    humanDeaths);
-            }
-
-            if (_humanVillage.GetGuardSnapshot().Population == 0)
-            {
-                break;
-            }
-        }
-
-        foreach (var goblin in rangedGoblins)
-        {
-            if (_humanVillage.GetGuardSnapshot().Population == 0)
+            var livingGuards = _humanVillage.GetLivingGuardSnapshots()
+                .Where(guard => guard.Task == HumanCohortTask.Guard)
+                .OrderBy(guard => Distance(goblin.Position, guard.Position))
+                .ThenBy(guard => guard.Id)
+                .ToArray();
+            if (livingGuards.Length == 0)
             {
                 break;
             }
 
-            goblin.PersonalStoneAmmo--;
+            var target = livingGuards[0];
+            var distance = Distance(goblin.Position, target.Position);
             var hasSling = goblin.Equipment.HasFlag(PersonalEquipment.PrimitiveSling);
-            var goblinDamage = (hasSling
+            var range = hasSling
+                ? Definitions.RangedCombat.SlingRange
+                : Definitions.RangedCombat.ThrownStoneRange;
+            var isMelee = distance <= 1;
+            var isRanged = !isMelee && goblin.PersonalStoneAmmo > 0 && distance <= range;
+            if (!isMelee && !isRanged)
+            {
+                continue;
+            }
+
+            if (isRanged)
+            {
+                goblin.PersonalStoneAmmo--;
+            }
+            var baseDamage = isMelee
+                ? Definitions.GoblinMinimumDamage + GetMeleeEquipmentDamageBonus(goblin.Equipment)
+                : hasSling
                     ? Definitions.RangedCombat.SlingDamage
-                    : Definitions.RangedCombat.ThrownStoneDamage) +
+                    : Definitions.RangedCombat.ThrownStoneDamage;
+            var goblinDamage = baseDamage +
                 DeterministicRandom.NextInt(
                     WorldSeed,
                     RandomDomain.Combat,
                     goblin.Id,
                     CurrentTick,
-                    sampleKey: 3,
+                    sampleKey: isMelee ? 2UL : 3UL,
                     minimumInclusive: 0,
-                    maximumExclusive: Definitions.RangedCombat.DamageVariance + 1);
-            var humanDeaths = _humanVillage.ApplyGuardDamage(
-                goblinDamage,
-                Definitions.HumanGuardHealth);
-            AddBlood(guards.Position, goblinDamage, Math.Max(1, humanDeaths));
+                    maximumExclusive: isMelee
+                        ? Definitions.GoblinDamageVariance + 1
+                        : Definitions.RangedCombat.DamageVariance + 1);
+            var result = _humanVillage.ApplyGuardDamage(target.Id, goblinDamage);
+            if (result.VillagerId == 0)
+            {
+                continue;
+            }
+            AddBlood(result.Position, result.Damage);
             Publish(
                 SimulationEventKind.GoblinHitHumanGuard,
                 goblin.Id,
-                EntityId.None,
-                goblinDamage);
-            if (humanDeaths > 0)
+                HumanVillagerEntityId(result.VillagerId),
+                result.Damage);
+            if (result.Died)
             {
                 Publish(
                     SimulationEventKind.HumanDied,
                     goblin.Id,
-                    EntityId.None,
-                    humanDeaths);
+                    HumanVillagerEntityId(result.VillagerId),
+                    1);
             }
         }
     }
+
+    private static EntityId HumanVillagerEntityId(int villagerId) =>
+        new(0x8000000000000000UL | (uint)villagerId);
 
     private int GetMeleeEquipmentDamageBonus(PersonalEquipment equipment)
     {

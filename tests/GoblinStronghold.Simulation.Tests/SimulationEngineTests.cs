@@ -1169,12 +1169,42 @@ public sealed class SimulationEngineTests
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
 
-        Assert.Throws<ArgumentException>(() => engine.QueueCommand(
-            SimulationCommand.BuildWalkway(
-                engine.CurrentTick.Next(),
-                sequence: 2,
-                caveFloor,
-                caveFloor with { X = caveFloor.X + 1 })));
+    }
+
+    [Fact]
+    public void WalkwayBlueprintPreservesItsNonSurfaceLevel()
+    {
+        var seed = new WorldSeed(0x425249444745UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 8,
+            initialWoodStock: 4);
+        var crossing = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, -1)))
+            .Select(position => new
+            {
+                Start = position,
+                End = position with { X = position.X + 1 },
+            })
+            .First(candidate =>
+                map.IsColumnWithin(candidate.End) &&
+                engine.World.CanBuildWalkway([candidate.Start, candidate.End]));
+
+        engine.QueueCommand(SimulationCommand.BuildWalkway(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            crossing.Start,
+            crossing.End));
+        engine.AdvanceTicks(1);
+
+        var sites = engine.CreateSnapshot().ConstructionSites;
+        Assert.Equal(2, sites.Count);
+        Assert.All(sites, site => Assert.Equal(-1, site.Anchor.Z));
     }
 
     [Fact]

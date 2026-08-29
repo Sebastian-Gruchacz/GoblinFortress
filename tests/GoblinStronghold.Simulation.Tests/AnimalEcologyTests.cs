@@ -8,6 +8,30 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class AnimalEcologyTests
 {
     [Fact]
+    public void AnimalUpdatesAreDeterministicallyDistributedAcrossTheirInterval()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0xA11A1UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 4);
+        var initial = engine.CreateSnapshot().Animals.ToDictionary(animal => animal.Id);
+
+        engine.AdvanceTicks(1);
+
+        var afterFirstPhase = engine.CreateSnapshot().Animals;
+        Assert.Contains(afterFirstPhase, animal => animal.AgeTicks > initial[animal.Id].AgeTicks);
+        Assert.Contains(afterFirstPhase, animal => animal.AgeTicks == initial[animal.Id].AgeTicks);
+
+        engine.AdvanceTicks(SimulationEngine.AnimalUpdateIntervalTicks - 1);
+
+        Assert.All(engine.CreateSnapshot().Animals, animal =>
+            Assert.Equal(
+                initial[animal.Id].AgeTicks + SimulationEngine.AnimalUpdateIntervalTicks,
+                animal.AgeTicks));
+    }
+
+    [Fact]
     public void InitialAnimalsMoveDeterministicallyAndSurviveSaveLoad()
     {
         var first = SimulationEngine.Create(

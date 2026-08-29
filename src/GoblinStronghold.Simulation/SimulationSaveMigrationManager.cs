@@ -32,7 +32,7 @@ internal sealed class SimulationSaveLoadPlan(
 
 internal static class SimulationSaveMigrationManager
 {
-    public const int CurrentVersion = 45;
+    public const int CurrentVersion = 54;
 
     private static readonly ISimulationSaveMigration[] Migrations =
     [
@@ -51,6 +51,15 @@ internal static class SimulationSaveMigrationManager
         new SimulationSaveMigration42To43(),
         new SimulationSaveMigration43To44(),
         new SimulationSaveMigration44To45(),
+        new SimulationSaveMigration45To46(),
+        new SimulationSaveMigration46To47(),
+        new SimulationSaveMigration47To48(),
+        new SimulationSaveMigration48To49(),
+        new SimulationSaveMigration49To50(),
+        new SimulationSaveMigration50To51(),
+        new SimulationSaveMigration51To52(),
+        new SimulationSaveMigration52To53(),
+        new SimulationSaveMigration53To54(),
     ];
 
     public static SimulationSaveLoadPlan Prepare(
@@ -84,6 +93,251 @@ internal static class SimulationSaveMigrationManager
         }
 
         return new SimulationSaveLoadPlan(save, applied);
+    }
+}
+
+internal sealed class SimulationSaveMigration53To54 : ISimulationSaveMigration
+{
+    public int SourceVersion => 53;
+
+    public int TargetVersion => 54;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        var legacyDefault = SimulationEngine.DefaultRaidDirectives |
+            RaidDirective.AutoLaunchWhenReady;
+        if (save.RaidDirectives == legacyDefault)
+        {
+            save.RaidDirectives &= ~RaidDirective.AutoLaunchWhenReady;
+        }
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration52To53 : ISimulationSaveMigration
+{
+    public int SourceVersion => 52;
+
+    public int TargetVersion => 53;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        if (save.ResourcePriorities.All(priority => priority.Resource != ResourceKind.Equipment))
+        {
+            save.ResourcePriorities.Add(new ResourcePrioritySaveModel
+            {
+                Resource = ResourceKind.Equipment,
+                Priority = StoragePriority.Normal,
+            });
+        }
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration51To52 : ISimulationSaveMigration
+{
+    public int SourceVersion => 51;
+
+    public int TargetVersion => 52;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        save.HumanVillage.StorehouseSiteX = null;
+        save.HumanVillage.StorehouseSiteY = null;
+        save.HumanVillage.StorehouseSiteZ = null;
+        save.HumanVillage.StorehouseWorkProgress = 0;
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration50To51 : ISimulationSaveMigration
+{
+    public int SourceVersion => 50;
+
+    public int TargetVersion => 51;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        save.HumanVillage.GoodsWorkProgress = 0;
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration49To50 : ISimulationSaveMigration
+{
+    public int SourceVersion => 49;
+
+    public int TargetVersion => 50;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        save.HumanVillage.TreeFellingX = null;
+        save.HumanVillage.TreeFellingY = null;
+        save.HumanVillage.TreeFellingZ = null;
+        save.HumanVillage.TreeFellingProgress = 0;
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration48To49 : ISimulationSaveMigration
+{
+    public int SourceVersion => 48;
+
+    public int TargetVersion => 49;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        foreach (var field in save.HumanVillage.Fields)
+        {
+            field.WorkProgress = 0;
+        }
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration47To48 : ISimulationSaveMigration
+{
+    public int SourceVersion => 47;
+
+    public int TargetVersion => 48;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        foreach (var villager in save.HumanVillage.Villagers)
+        {
+            villager.WorkProgress = 0;
+        }
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration46To47 : ISimulationSaveMigration
+{
+    public int SourceVersion => 46;
+
+    public int TargetVersion => 47;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        foreach (var villager in save.HumanVillage.Villagers)
+        {
+            villager.Hunger = 0;
+            villager.Thirst = 0;
+        }
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+    }
+}
+
+internal sealed class SimulationSaveMigration45To46 : ISimulationSaveMigration
+{
+    public int SourceVersion => 45;
+
+    public int TargetVersion => 46;
+
+    public void MigrateModel(SimulationSaveModel save)
+    {
+        if (save.HumanVillage.Villagers.Count == 0)
+        {
+            save.HumanVillage.Villagers = CreateVillagers(save.HumanVillage);
+        }
+    }
+
+    public void MigrateWorldState(SimulationSaveModel save, WorldMapState world)
+    {
+        var occupied = new HashSet<GridPosition>();
+        foreach (var villager in save.HumanVillage.Villagers.OrderBy(item => item.Id))
+        {
+            var current = new GridPosition(villager.X, villager.Y, villager.Z);
+            if (world.IsSurfaceTraversable(current) && occupied.Add(current))
+            {
+                continue;
+            }
+
+            var replacement = Enumerable.Range(0, world.Baseline.Height)
+                .SelectMany(y => Enumerable.Range(0, world.Baseline.Width)
+                    .Select(x => new GridPosition(x, y)))
+                .Where(position => world.IsSurfaceTraversable(position) &&
+                    !occupied.Contains(position) &&
+                    Distance(position, world.Baseline.HumanVillage) <=
+                        SimulationDefinitions.Foundation.HumanVillageActivityRadius + 4)
+                .OrderBy(position => Distance(position, current))
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X)
+                .Select(position => (GridPosition?)position)
+                .FirstOrDefault();
+            if (replacement is null)
+            {
+                throw new InvalidDataException(
+                    "The migrated human village has too few materialization positions.");
+            }
+            villager.X = replacement.Value.X;
+            villager.Y = replacement.Value.Y;
+            villager.Z = replacement.Value.Z;
+            occupied.Add(replacement.Value);
+        }
+    }
+
+    private static int Distance(GridPosition left, GridPosition right) =>
+        Math.Abs(left.X - right.X) + Math.Abs(left.Y - right.Y);
+
+    private static List<HumanVillagerSaveModel> CreateVillagers(HumanVillageSaveModel village)
+    {
+        var result = new List<HumanVillagerSaveModel>(village.Population);
+        var id = 1;
+        foreach (var cohort in village.Cohorts.OrderBy(item => item.Id))
+        {
+            var remainingGuardHealth = cohort.Role == HumanCohortRole.Guards
+                ? village.GuardHitPoints
+                : 0;
+            for (var index = 0; index < cohort.Population; index++)
+            {
+                var maximumHealth = HumanVillageState.GetMaximumHealth(
+                    cohort.Role,
+                    SimulationDefinitions.Foundation);
+                var health = cohort.Role == HumanCohortRole.Guards
+                    ? Math.Min(maximumHealth, remainingGuardHealth)
+                    : maximumHealth;
+                remainingGuardHealth = Math.Max(0, remainingGuardHealth - health);
+                result.Add(new HumanVillagerSaveModel
+                {
+                    Id = id++,
+                    Role = cohort.Role,
+                    X = cohort.X,
+                    Y = cohort.Y,
+                    Z = cohort.Z,
+                    Task = cohort.Task,
+                    SkillLevel = cohort.SkillLevel,
+                    Tools = HumanVillageState.GetIndividualTools(cohort.Role, index),
+                    Health = health,
+                    Fatigue = 0,
+                });
+            }
+        }
+        return result;
     }
 }
 
@@ -406,7 +660,8 @@ internal sealed class SimulationSaveMigration30To31 : ISimulationSaveMigration
             .Select(priority => priority.Resource)
             .ToHashSet();
         foreach (var resource in Enum.GetValues<ResourceKind>().Where(resource =>
-                     resource != ResourceKind.Any && !presentResources.Contains(resource)))
+                     resource is not (ResourceKind.Any or ResourceKind.Materials) &&
+                     !presentResources.Contains(resource)))
         {
             save.ResourcePriorities.Add(new ResourcePrioritySaveModel
             {

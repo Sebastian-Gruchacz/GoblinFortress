@@ -12,7 +12,15 @@ public sealed class PersonalSupplyTests
     {
         var engine = CreateEngine(goblinCount: 2, initialFood: 4);
 
-        engine.AdvanceTicks(2 * SimulationDefinitions.Foundation.ResupplyWorkTicks);
+        for (var tick = 0; tick < 200; tick++)
+        {
+            engine.AdvanceTicks(1);
+            if (engine.CreateSnapshot().Actors.All(actor =>
+                    actor.PersonalFood == SimulationDefinitions.Foundation.PersonalFoodCapacity))
+            {
+                break;
+            }
+        }
 
         var snapshot = engine.CreateSnapshot();
         Assert.All(snapshot.Actors, actor =>

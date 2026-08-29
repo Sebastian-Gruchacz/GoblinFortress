@@ -116,7 +116,7 @@ public sealed class FieldCampTests
     }
 
     [Fact]
-    public void RaidRequiresCampThenPreparesBeforeDepartureAndSurvivesSaveLoad()
+    public void RaidRequiresCampThenWaitsForExplicitDepartureAndSurvivesSaveLoad()
     {
         var engine = CreateEngine();
         engine.QueueCommand(SimulationCommand.AttackHumanVillage(
@@ -148,10 +148,95 @@ public sealed class FieldCampTests
 
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
         var departed = engine.CreateSnapshot();
-        Assert.True(departed.RaidPhase == GoblinRaidPhase.Marching,
+        Assert.True(departed.RaidPhase == GoblinRaidPhase.Ready,
             $"Raid phase: {departed.RaidPhase}; rally: {departed.RaidRallyPoint}; actor: {Assert.Single(departed.Actors)}");
-        Assert.True(departed.HumanVillage.GoblinAttackOrdered);
+        Assert.False(departed.HumanVillage.GoblinAttackOrdered);
+        Assert.False(departed.RaidPlan.Has(RaidDirective.AutoLaunchWhenReady));
+        engine.QueueCommand(SimulationCommand.LaunchRaid(
+            engine.CurrentTick.Next(), sequence: 4));
+        engine.AdvanceTicks(1);
+        Assert.Equal(GoblinRaidPhase.Marching, engine.CreateSnapshot().RaidPhase);
+        Assert.True(engine.CreateSnapshot().HumanVillage.GoblinAttackOrdered);
         Assert.Contains(engine.DrainEvents(), item => item.Kind == SimulationEventKind.RaidDeparted);
+    }
+
+    [Fact]
+    public void MarchingRaidCanBeRecalledAndEditedAgain()
+    {
+        var engine = CreateEngine();
+        var campPosition = FindCampPosition(engine);
+        engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
+            new SimulationTick(1), sequence: 1, campPosition));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        engine.QueueCommand(SimulationCommand.AttackHumanVillage(
+            engine.CurrentTick.Next(), sequence: 2, campPosition));
+        engine.AdvanceTicks(1);
+        for (var tick = 0; tick < 2_000 &&
+             engine.CreateSnapshot().RaidPhase != GoblinRaidPhase.Ready; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+        engine.QueueCommand(SimulationCommand.LaunchRaid(
+            engine.CurrentTick.Next(), sequence: 3));
+        engine.AdvanceTicks(1);
+        Assert.Equal(GoblinRaidPhase.Marching, engine.CreateSnapshot().RaidPhase);
+
+        engine.QueueCommand(SimulationCommand.SuspendRaidPreparation(
+            engine.CurrentTick.Next(), sequence: 4));
+        engine.AdvanceTicks(1);
+
+        var recalled = engine.CreateSnapshot();
+        Assert.Equal(GoblinRaidPhase.Suspended, recalled.RaidPhase);
+        Assert.False(recalled.HumanVillage.GoblinAttackOrdered);
+        var member = Assert.Single(recalled.RaidPartyIds);
+        engine.QueueCommand(SimulationCommand.ConfigureRaidMember(
+            engine.CurrentTick.Next(), sequence: 5, member, selected: false));
+        engine.AdvanceTicks(1);
+        Assert.Empty(engine.CreateSnapshot().RaidPartyIds);
+    }
+
+    [Fact]
+    public void IdleMarchingRaiderResumesRouteToRaidTarget()
+    {
+        var engine = CreateEngine();
+        var campPosition = FindCampPosition(engine);
+        engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
+            new SimulationTick(1), sequence: 1, campPosition));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        engine.QueueCommand(SimulationCommand.AttackHumanVillage(
+            engine.CurrentTick.Next(), sequence: 2, campPosition));
+        engine.AdvanceTicks(1);
+        for (var tick = 0; tick < 2_000 &&
+             engine.CreateSnapshot().RaidPhase != GoblinRaidPhase.Ready; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+        engine.QueueCommand(SimulationCommand.LaunchRaid(
+            engine.CurrentTick.Next(), sequence: 3));
+        engine.AdvanceTicks(1);
+
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        var actor = save["actors"]![0]!.AsObject();
+        actor["jobKind"] = (int)ActorJobKind.None;
+        actor["jobPhase"] = (int)ActorJobPhase.None;
+        actor["jobTargetX"] = 0;
+        actor["jobTargetY"] = 0;
+        actor["jobTargetZ"] = 0;
+        actor["remainingRoute"] = new JsonArray();
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        for (var tick = 0; tick < 100 &&
+             Assert.Single(engine.CreateSnapshot().Actors).Job.Kind != ActorJobKind.Move; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var marching = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(ActorJobKind.Move, marching.Job.Kind);
+        Assert.Equal(engine.CreateSnapshot().RaidPlan.Target, marching.Job.Target);
     }
 
     [Fact]
@@ -179,7 +264,7 @@ public sealed class FieldCampTests
         engine.AdvanceTicks(1);
 
         var snapshot = engine.CreateSnapshot();
-        Assert.True(snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Marching);
+        Assert.True(snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready);
         Assert.Equal([actors[1].Id, actors[2].Id], snapshot.RaidPartyIds);
         Assert.DoesNotContain(actors[0].Id, snapshot.RaidPartyIds);
 
@@ -241,6 +326,12 @@ public sealed class FieldCampTests
             executeAt, sequence: 4, campPosition));
         engine.AdvanceTicks(1);
 
+        Assert.Equal(GoblinRaidPhase.Preparing, engine.CreateSnapshot().RaidPhase);
+        engine.QueueCommand(SimulationCommand.ConfigureRaidTarget(
+            engine.CurrentTick.Next(), sequence: 5, target, radius: 5));
+        engine.AdvanceTicks(1);
+        Assert.Equal(5, engine.CreateSnapshot().RaidPlan.TargetRadius);
+
         for (var tick = 0; tick < 2_000 &&
              engine.CreateSnapshot().RaidPhase != GoblinRaidPhase.Ready; tick++)
         {
@@ -251,13 +342,27 @@ public sealed class FieldCampTests
         Assert.Equal(GoblinRaidPhase.Ready, ready.RaidPhase);
         Assert.False(ready.HumanVillage.GoblinAttackOrdered);
         Assert.Equal(target, ready.RaidPlan.Target);
-        Assert.Equal(4, ready.RaidPlan.TargetRadius);
+        Assert.Equal(5, ready.RaidPlan.TargetRadius);
         Assert.False(ready.RaidPlan.Has(RaidDirective.AutoLaunchWhenReady));
+
+        engine.QueueCommand(SimulationCommand.ConfigureRaidTarget(
+            engine.CurrentTick.Next(), sequence: 6, target, radius: 7));
+        engine.AdvanceTicks(1);
+        var retargeted = engine.CreateSnapshot();
+        Assert.Equal(7, retargeted.RaidPlan.TargetRadius);
+        Assert.NotEqual(GoblinRaidPhase.Marching, retargeted.RaidPhase);
+        Assert.False(retargeted.HumanVillage.GoblinAttackOrdered);
+        for (var tick = 0; tick < 2_000 &&
+             engine.CreateSnapshot().RaidPhase != GoblinRaidPhase.Ready; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+        Assert.Equal(GoblinRaidPhase.Ready, engine.CreateSnapshot().RaidPhase);
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
 
         restored.QueueCommand(SimulationCommand.LaunchRaid(
-            restored.CurrentTick.Next(), sequence: 5));
+            restored.CurrentTick.Next(), sequence: 7));
         restored.AdvanceTicks(1);
         Assert.Equal(GoblinRaidPhase.Marching, restored.CreateSnapshot().RaidPhase);
         Assert.True(restored.CreateSnapshot().HumanVillage.GoblinAttackOrdered);

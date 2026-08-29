@@ -149,6 +149,8 @@ public partial class Main : Node
         Walkway,
         WoodStorage,
         StoneStorage,
+        EquipmentStorage,
+        MaterialsStorage,
         FieldCamp,
         WoodenWall,
         StoneWall,
@@ -280,6 +282,12 @@ public partial class Main : Node
         CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Stone,
             "Skład kamienia i urobku\nKoszt: 2 drewna",
             () => SelectBuildMode((long)BuildMode.StoneStorage));
+        CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Cargo,
+            "Skład sprzętu\nKoszt: 2 drewna • wspólna pojemność 32",
+            () => SelectBuildMode((long)BuildMode.EquipmentStorage));
+        CreateItemTileButton(_buildMenuGrid, _buildMenu, ItemIcon.Reeds,
+            "Skład materiałów\nKoszt: 2 drewna • skóry, kości i sitowie",
+            () => SelectBuildMode((long)BuildMode.MaterialsStorage));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.Walkway,
             "Pomost\nKoszt: 1 drewno za segment", () => SelectBuildMode((long)BuildMode.Walkway));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
@@ -543,9 +551,10 @@ public partial class Main : Node
 
         if (changed && _presentationRefreshElapsed >= PresentationRefreshIntervalSeconds)
         {
-            HandleEvents(_engine.DrainEvents());
+            var events = _engine.DrainEvents();
             var snapshot = _engine.CreatePresentationSnapshot();
             _latestSnapshot = snapshot;
+            HandleEvents(events, snapshot);
             if (_use3DView)
             {
                 _worldView3D.Refresh(snapshot);
@@ -1219,8 +1228,8 @@ public partial class Main : Node
     private void IssueAreaUnitOrder(Vector2 screenPosition)
     {
         var center = ScreenToVisibleCell(screenPosition);
-        var snapshot = _engine.CreateSnapshot();
-        if (!snapshot.GetVisibility(center, _engine.Map.Width).IsDiscovered())
+        var snapshot = _latestSnapshot;
+        if (!_engine.Visibility.Get(center).IsDiscovered())
         {
             _inspector.Text = "Obszar rozkazu musi leżeć na rozpoznanym terenie.";
             return;
@@ -1250,8 +1259,8 @@ public partial class Main : Node
     private void AddPatrolPoint(Vector2 screenPosition, bool keepAdding)
     {
         var point = ScreenToVisibleCell(screenPosition);
-        var snapshot = _engine.CreateSnapshot();
-        if (!snapshot.GetVisibility(point, _engine.Map.Width).IsDiscovered() ||
+        var snapshot = _latestSnapshot;
+        if (!_engine.Visibility.Get(point).IsDiscovered() ||
             !_engine.World.IsTerrainReachable(point))
         {
             _inspector.Text = "Punkt patrolu musi być odkryty i dostępny.";
@@ -1307,8 +1316,7 @@ public partial class Main : Node
     private bool TryIssuePassageMove(Vector2 screenPosition)
     {
         var clicked = ScreenToVisibleCell(screenPosition);
-        var snapshot = _engine.CreateSnapshot();
-        if (!snapshot.GetVisibility(clicked, _engine.Map.Width).IsDiscovered() ||
+        if (!_engine.Visibility.Get(clicked).IsDiscovered() ||
             !_engine.World.CreateVerticalPassageSnapshot().Any(passage =>
                 passage.Upper == clicked || passage.Lower == clicked))
         {
@@ -1592,6 +1600,8 @@ public partial class Main : Node
             BuildMode.FoodStorage => "Budowa składu żywności: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
             BuildMode.WoodStorage => "Budowa składu drewna: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
             BuildMode.StoneStorage => "Budowa składu kamienia: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
+            BuildMode.EquipmentStorage => "Budowa składu sprzętu: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
+            BuildMode.MaterialsStorage => "Budowa składu materiałów: wskaż pole LPM • koszt 2 drewna • Esc anuluje",
             BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • Esc anuluje",
             BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu",
             BuildMode.GoblinHut => $"Chata 3×3: wskaż lewy górny narożnik • koszt 8 drewna • " +
@@ -1649,13 +1659,16 @@ public partial class Main : Node
             return;
         }
 
-        if (_buildMode is BuildMode.FoodStorage or BuildMode.WoodStorage or BuildMode.StoneStorage)
+        if (_buildMode is BuildMode.FoodStorage or BuildMode.WoodStorage or
+            BuildMode.StoneStorage or BuildMode.EquipmentStorage or BuildMode.MaterialsStorage)
         {
             var resource = _buildMode switch
             {
                 BuildMode.FoodStorage => ResourceKind.Food,
                 BuildMode.WoodStorage => ResourceKind.Wood,
                 BuildMode.StoneStorage => ResourceKind.Stone,
+                BuildMode.EquipmentStorage => ResourceKind.Equipment,
+                BuildMode.MaterialsStorage => ResourceKind.Materials,
                 _ => throw new InvalidOperationException(),
             };
             CreateStorage(
@@ -1668,8 +1681,7 @@ public partial class Main : Node
         if (_buildMode is BuildMode.WoodenDoorFrame or BuildMode.StoneDoorFrame or
             BuildMode.WoodenDoor or BuildMode.WallTorch or BuildMode.PrimitiveWorkshop)
         {
-            var snapshot = _engine.CreateSnapshot();
-            if (!snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered())
+            if (!_engine.Visibility.Get(cell).IsDiscovered())
             {
                 _inspector.Text = "Konstrukcja musi stanąć na odkrytym polu.";
                 CancelBuildMode(clearInspector: false);
@@ -1709,10 +1721,9 @@ public partial class Main : Node
         if (_buildMode == BuildMode.FieldCamp)
         {
             var cells = GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 });
-            var snapshot = _engine.CreateSnapshot();
             if (cells.Any(item =>
                     !IsBuildableLayerCell(item) ||
-                    !snapshot.GetVisibility(item, _engine.Map.Width).IsDiscovered()))
+                    !_engine.Visibility.Get(item).IsDiscovered()))
             {
                 _inspector.Text = "Całe obozowisko musi mieścić się na odkrytej, dostępnej warstwie.";
                 CancelBuildMode(clearInspector: false);
@@ -1753,9 +1764,8 @@ public partial class Main : Node
         }
 
         var cells = SimulationCommand.GetLinearCells(_linearBuildStart, end);
-        var snapshot = _engine.CreateSnapshot();
         if (cells.Any(cell =>
-                !snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered()))
+                !_engine.Visibility.Get(cell).IsDiscovered()))
         {
             _inspector.Text = "Cała liniowa konstrukcja musi przebiegać przez odkryty teren.";
             CancelBuildMode(clearInspector: false);
@@ -2084,8 +2094,7 @@ public partial class Main : Node
     private void FinishRaidTargetSelection(Vector2 screenPosition)
     {
         var target = ScreenToVisibleCell(screenPosition);
-        var snapshot = _engine.CreateSnapshot();
-        if (!snapshot.GetVisibility(target, _engine.Map.Width).IsDiscovered())
+        if (!_engine.Visibility.Get(target).IsDiscovered())
         {
             _inspector.Text = "Cel najazdu musi leżeć na wcześniej rozpoznanym terenie.";
             return;
@@ -2157,11 +2166,10 @@ public partial class Main : Node
 
     private void CreateStorage(GridPosition cell, ResourceKind resource)
     {
-        var snapshot = _engine.CreateSnapshot();
         var terrainAvailable = cell.Z == 0
             ? _engine.World.IsSurfaceTraversable(cell)
             : _engine.World.IsTerrainTraversable(cell);
-        var discovered = snapshot.GetVisibility(cell, _engine.Map.Width).IsDiscovered();
+        var discovered = _engine.Visibility.Get(cell).IsDiscovered();
         if (!discovered)
         {
             _inspector.Text = $"{cell} • skład można zaplanować dopiero na odkrytym polu.";
@@ -2186,16 +2194,26 @@ public partial class Main : Node
                 _engine.CurrentTick.Next(), _commandSequence++, cell),
             ResourceKind.Stone => SimulationCommand.BuildStoneStorage(
                 _engine.CurrentTick.Next(), _commandSequence++, cell),
+            ResourceKind.Equipment => SimulationCommand.BuildEquipmentStorage(
+                _engine.CurrentTick.Next(), _commandSequence++, cell),
+            ResourceKind.Materials => SimulationCommand.BuildMaterialsStorage(
+                _engine.CurrentTick.Next(), _commandSequence++, cell),
             _ => throw new ArgumentOutOfRangeException(nameof(resource)),
         };
         _engine.QueueCommand(command);
-        var capacity = resource == ResourceKind.Food
-            ? _engine.Definitions.Storage.SmallFoodCapacity
-            : 64;
+        var capacity = resource switch
+        {
+            ResourceKind.Food => _engine.Definitions.Storage.SmallFoodCapacity,
+            ResourceKind.Equipment => 32,
+            ResourceKind.Materials => 64,
+            _ => 64,
+        };
         _inspector.Text = $"{cell} • wyznaczono plac pod skład {DescribeResource(resource)} 0/{capacity} • blueprint żąda 2 drewna";
     }
 
-    private void HandleEvents(IReadOnlyList<SimulationEvent> events)
+    private void HandleEvents(
+        IReadOnlyList<SimulationEvent> events,
+        SimulationSnapshot snapshot)
     {
         var workEvent = events.LastOrDefault(item =>
             item.Kind is SimulationEventKind.WorkDesignationCreated or
@@ -2240,12 +2258,12 @@ public partial class Main : Node
             var configuredId = workEvent.Kind == SimulationEventKind.ResourcePriorityConfigured
                 ? _selectedStorageId
                 : workEvent.Target;
-            var configured = _engine.CreateSnapshot().StorageZones
+            var configured = snapshot.StorageZones
                 .FirstOrDefault(zone => zone.Id == configuredId);
             if (configured.Id != EntityId.None && configured.Id == _selectedStorageId)
             {
                 _storageSettingsDirty = false;
-                UpdateStorageDetails(configured);
+                UpdateStorageDetails(configured, snapshot);
             }
         }
 
@@ -2254,11 +2272,11 @@ public partial class Main : Node
                 SimulationEventKind.ItemPickedUp or SimulationEventKind.ItemStored or
                 SimulationEventKind.ItemDropped))
         {
-            var selectedStorage = _engine.CreateSnapshot().StorageZones
+            var selectedStorage = snapshot.StorageZones
                 .FirstOrDefault(zone => zone.Id == _selectedStorageId);
             if (selectedStorage.Id != EntityId.None)
             {
-                UpdateStorageDetails(selectedStorage);
+                UpdateStorageDetails(selectedStorage, snapshot);
             }
         }
 
@@ -2277,7 +2295,7 @@ public partial class Main : Node
                  SimulationEventKind.ConstructionMaterialDelivered or
                  SimulationEventKind.ConstructionPriorityConfigured)
         {
-            var site = _engine.CreateSnapshot().ConstructionSites
+            var site = snapshot.ConstructionSites
                 .FirstOrDefault(item => item.Id == constructionEvent.Target);
             if (site is not null)
             {
@@ -2286,7 +2304,6 @@ public partial class Main : Node
         }
         else if (constructionEvent.Kind == SimulationEventKind.ConstructionCompleted)
         {
-            var snapshot = _engine.CreateSnapshot();
             var zone = snapshot.StorageZones
                 .FirstOrDefault(item => item.Id == constructionEvent.Target);
             var material = constructionEvent.Construction is ConstructionKind.StoneWall or
@@ -2307,7 +2324,7 @@ public partial class Main : Node
                 SimulationEventKind.ConstructionPriorityConfigured or
                 SimulationEventKind.ConstructionCompleted)
         {
-            var selectedConstruction = _engine.CreateSnapshot().ConstructionSites
+            var selectedConstruction = snapshot.ConstructionSites
                 .FirstOrDefault(site => site.Id == _selectedConstructionId);
             if (selectedConstruction is null)
             {
@@ -2478,8 +2495,8 @@ public partial class Main : Node
         var actors = snapshot.Actors.Where(actor => actor.Position == cell).ToArray();
         var buds = snapshot.GoblinBuds.Where(bud => bud.Position == cell).ToArray();
         var animals = snapshot.Animals.Where(animal => animal.Position == cell).ToArray();
-        var humanCohorts = snapshot.HumanVillage.Cohorts
-            .Where(cohort => cohort.Population > 0 && cohort.Position == cell)
+        var humanVillagers = snapshot.HumanVillage.Villagers
+            .Where(villager => villager.Health > 0 && villager.Position == cell)
             .ToArray();
         var humanFields = snapshot.HumanVillage.Fields.Where(field => field.Position == cell).ToArray();
         var groundStacks = snapshot.ItemStacks.Where(stack =>
@@ -2541,13 +2558,13 @@ public partial class Main : Node
             (objects.Any(item => item.Kind == WorldObjectKind.GoblinFieldCamp)
                 ? " • PPM: menu obozu"
                 : string.Empty) +
-            (humanCohorts.Length == 0
+            (humanVillagers.Length == 0
                 ? string.Empty
-                : $" • ludzie: {string.Join(", ", humanCohorts.Select(DescribeCohort))}") +
+                : $" • ludzie: {string.Join(", ", humanVillagers.Select(DescribeVillager))}") +
             (humanFields.Length == 0
                 ? string.Empty
                 : $" • pole: {string.Join(", ", humanFields.Select(field => $"{DescribeField(field.Phase)} {field.GrowthDays}/120 dni"))}") +
-            (!humanCohorts.Any(cohort => cohort.Role == HumanCohortRole.Guards)
+            (!humanVillagers.Any(villager => villager.Role == HumanCohortRole.Guards)
                 ? string.Empty
                 : $" • alarm {snapshot.HumanVillage.Hostility}/100, siła straży " +
                   $"{snapshot.HumanVillage.GuardHitPoints}/{snapshot.HumanVillage.MaximumGuardHitPoints}") +
@@ -2664,6 +2681,8 @@ public partial class Main : Node
         ResourceKind.Bone => "kości",
         ResourceKind.Hide => "skór",
         ResourceKind.Vegetation => "roślinności",
+        ResourceKind.Equipment => "sprzętu",
+        ResourceKind.Materials => "materiałów",
         _ => "towarów",
     };
 
@@ -2675,6 +2694,7 @@ public partial class Main : Node
         CraftingRecipeKind.StoneClub => "kamienna maczuga",
         CraftingRecipeKind.HideClothes => "skórzany ubiór",
         CraftingRecipeKind.ReedClothes => "sitowiowy ubiór",
+        CraftingRecipeKind.PrimitiveWaterskin => "prymitywny bukłak",
         _ => recipe.ToString(),
     };
 
@@ -2689,6 +2709,13 @@ public partial class Main : Node
         ResourceVariant.Sandstone => "piaskowiec",
         ResourceVariant.Granite => "granit",
         ResourceVariant.IronOre => "ruda żelaza",
+        ResourceVariant.EquipmentPrimitiveSling => "prymitywna proca",
+        ResourceVariant.EquipmentBoneKnife => "kościany nóż",
+        ResourceVariant.EquipmentFightingStick => "kij bojowy",
+        ResourceVariant.EquipmentStoneClub => "kamienna maczuga",
+        ResourceVariant.EquipmentHideClothes => "skórzany ubiór",
+        ResourceVariant.EquipmentReedClothes => "sitowiowy ubiór",
+        ResourceVariant.EquipmentPrimitiveWaterskin => "prymitywny bukłak",
         _ => "towar",
     };
 
@@ -2717,6 +2744,20 @@ public partial class Main : Node
             _ => "nieznani",
         }} ×{cohort.Population} • {DescribeHumanTask(cohort.Task)} • um. {cohort.SkillLevel} • {cohort.Tools}";
 
+    private static string DescribeVillager(HumanVillagerSnapshot villager) =>
+        $"{villager.Name} ({villager.Role switch
+        {
+            HumanCohortRole.Farmers => "rolnik",
+            HumanCohortRole.Workers => "robotnik",
+            HumanCohortRole.Guards => "strażnik",
+            _ => "nieznany",
+        }}) • {DescribeHumanTask(villager.Task)} • zdrowie " +
+        $"{villager.Health}/{villager.MaximumHealth} • zmęczenie " +
+        $"{villager.Fatigue}/{villager.MaximumFatigue} • głód " +
+        $"{villager.Hunger}/{villager.MaximumNeed} • pragnienie " +
+        $"{villager.Thirst}/{villager.MaximumNeed} • praca " +
+        $"{villager.WorkProgress} • {villager.Tools}";
+
     private static string DescribeHumanTask(HumanCohortTask task) => task switch
     {
         HumanCohortTask.WorkFields => "pracują na polach",
@@ -2724,6 +2765,7 @@ public partial class Main : Node
         HumanCohortTask.ClearLand => "karczują pod pola",
         HumanCohortTask.GatherBerries => "szukają jagód",
         HumanCohortTask.BuildStorehouse => "budują spichlerz",
+        HumanCohortTask.CraftGoods => "pracują w stodole",
         HumanCohortTask.Guard => "strzegą wsi",
         HumanCohortTask.Flee => "uciekają",
         _ => "trzymają się wsi",
@@ -2799,6 +2841,10 @@ public partial class Main : Node
             job.Phase == ActorJobPhase.Traveling => $"idzie po kamienie do rzucania → {job.Target}",
         ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningAmmo =>
             $"pakuje kamienie ×{job.ReservedQuantity} ({job.RemainingWorkTicks})",
+        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningEquipment &&
+            job.Phase == ActorJobPhase.Traveling => $"idzie po sprzęt → {job.Target}",
+        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningEquipment =>
+            $"pobiera sprzęt ({job.RemainingWorkTicks})",
         ActorJobKind.ClearVegetation when job.Phase == ActorJobPhase.Traveling =>
             $"idzie wykarczować krzak → {job.Target}",
         ActorJobKind.ClearVegetation => $"karczuje krzak ({job.RemainingWorkTicks})",
@@ -2832,7 +2878,7 @@ public partial class Main : Node
             $"{DescribeResource(material.Resource)} {material.DeliveredQuantity}/{material.RequiredQuantity}"));
         var workDone = site.TotalWorkTicks - site.RemainingWorkTicks;
         var readiness = DescribeConstructionReadiness(
-            _engine.InspectConstructionReadiness(site.Id));
+            _engine.InspectConstructionReadiness(site.Id, evaluateReachability: false));
         return $"plac budowy {DescribeConstruction(site.Kind)} • " +
             $"priorytet: {DescribeStoragePriority(site.Priority)} • materiały: {materials} • " +
             $"praca {workDone}/{site.TotalWorkTicks} • {readiness}";
@@ -2868,6 +2914,8 @@ public partial class Main : Node
         ConstructionKind.FoodStorage => "składu żywności",
         ConstructionKind.WoodStorage => "składu drewna",
         ConstructionKind.StoneStorage => "składu kamienia",
+        ConstructionKind.EquipmentStorage => "składu sprzętu",
+        ConstructionKind.MaterialsStorage => "składu materiałów",
         ConstructionKind.WoodenWalkway => "pomostu",
         ConstructionKind.GoblinFieldCamp => "obozu wypadowego",
         ConstructionKind.GoblinHut => "chaty goblinów",
@@ -3420,6 +3468,13 @@ public partial class Main : Node
     private void UpdateStorageDetails(StorageZoneSnapshot zone)
     {
         var snapshot = _engine.CreateSnapshot();
+        UpdateStorageDetails(zone, snapshot);
+    }
+
+    private void UpdateStorageDetails(
+        StorageZoneSnapshot zone,
+        SimulationSnapshot snapshot)
+    {
         var delivery = _engine.InspectStorageDelivery(zone.Id);
         var contents = snapshot.ItemStacks
             .Where(stack =>
@@ -3439,9 +3494,12 @@ public partial class Main : Node
         var sourceDescription = sourceZone.Id == EntityId.None
             ? "teren i nadwyżki dowolnych składów"
             : $"skład {sourceZone.Id} przy {sourceZone.Position}";
-        var globalPriority = snapshot.ResourcePriorities
-            .Single(priority => priority.Resource == zone.AcceptedResource)
-            .Priority;
+        var hasGlobalResourcePriority = zone.AcceptedResource != ResourceKind.Materials;
+        var globalPriority = hasGlobalResourcePriority
+            ? snapshot.ResourcePriorities
+                .Single(priority => priority.Resource == zone.AcceptedResource)
+                .Priority
+            : StoragePriority.Normal;
         var mineralFilterDescription = zone.AcceptedResource == ResourceKind.Stone
             ? $"Przyjmowany urobek: {DescribeMineralFilter(zone.MineralFilter)}.\n"
             : string.Empty;
@@ -3461,8 +3519,10 @@ public partial class Main : Node
             $"Transport: {haulerDescription}.\n" +
             $"Źródło: {sourceDescription}.\n" +
             $"Priorytet lokalny: {DescribeStoragePriority(zone.Priority)}.\n" +
-            $"Priorytet {DescribeResource(zone.AcceptedResource)} w plemieniu: " +
-            $"{DescribeStoragePriority(globalPriority)}.";
+            (hasGlobalResourcePriority
+                ? $"Priorytet {DescribeResource(zone.AcceptedResource)} w plemieniu: " +
+                  $"{DescribeStoragePriority(globalPriority)}."
+                : "Priorytety materiałów są ustalane osobno dla każdego zasobu.");
         if (_storageSettingsDirty)
         {
             return;
@@ -3487,6 +3547,7 @@ public partial class Main : Node
             _storageTarget.Editable = zone.DesiredQuantity > 0;
             _storagePriority.Select((int)zone.Priority);
             _resourcePriority.Select((int)globalPriority);
+            _resourcePriority.Disabled = !hasGlobalResourcePriority;
 
             _storageHauler.Clear();
             _storageHaulerActorIds.Clear();
@@ -3622,11 +3683,14 @@ public partial class Main : Node
             _commandSequence++,
             zone.Id,
             priority));
-        _engine.QueueCommand(SimulationCommand.ConfigureResourcePriority(
-            executeAt,
-            _commandSequence++,
-            zone.AcceptedResource,
-            globalPriority));
+        if (zone.AcceptedResource != ResourceKind.Materials)
+        {
+            _engine.QueueCommand(SimulationCommand.ConfigureResourcePriority(
+                executeAt,
+                _commandSequence++,
+                zone.AcceptedResource,
+                globalPriority));
+        }
         if (zone.AcceptedResource == ResourceKind.Stone)
         {
             _engine.QueueCommand(SimulationCommand.ConfigureStorageMineralFilter(
@@ -4292,6 +4356,10 @@ public partial class Main : Node
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.ReedClothes,
             ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowiowy ubiór",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 3));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.PrimitiveWaterskin,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.PrimitiveWaterskin),
+            "Prymitywny bukłak",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.RagClothes), "Skóra", 1));
         var close = new Button
         {
             Text = "Zamknij",
@@ -4548,7 +4616,9 @@ public partial class Main : Node
             AddPlannerRow(
                 $"Budowa {DescribeConstruction(site.Kind)} • {site.Anchor} • " +
                 $"{DescribeStoragePriority(site.Priority)} • " +
-                DescribeConstructionReadiness(_engine.InspectConstructionReadiness(site.Id)),
+                DescribeConstructionReadiness(_engine.InspectConstructionReadiness(
+                    site.Id,
+                    evaluateReachability: false)),
                 site.Priority,
                 value => SetConstructionPriority(site.Id, value),
                 isSuspended: false,
@@ -4831,23 +4901,20 @@ public partial class Main : Node
         _worldContextMenu.AddItem("Edytuj najazd…", (int)WorldContextAction.EditRaid);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.EditRaid),
-            snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready or
-                GoblinRaidPhase.Marching);
+            snapshot.RaidPhase == GoblinRaidPhase.Marching);
         _worldContextMenu.AddItem(
             snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready
                 ? "Wstrzymaj przygotowania"
+                : snapshot.RaidPhase == GoblinRaidPhase.Marching
+                    ? "Odwołaj najazd"
                 : "Przygotuj najazd",
             (int)WorldContextAction.ToggleRaidPreparation);
-        _worldContextMenu.SetItemDisabled(
-            _worldContextMenu.GetItemIndex((int)WorldContextAction.ToggleRaidPreparation),
-            snapshot.RaidPhase == GoblinRaidPhase.Marching);
         _worldContextMenu.AddItem(
             $"Wybierz cel… (promień {snapshot.RaidPlan.TargetRadius})",
             (int)WorldContextAction.SelectRaidTarget);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.SelectRaidTarget),
-            snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready or
-                GoblinRaidPhase.Marching);
+            snapshot.RaidPhase == GoblinRaidPhase.Marching);
         if (snapshot.RaidPhase == GoblinRaidPhase.Ready)
         {
             _worldContextMenu.AddItem("ATAK!", (int)WorldContextAction.LaunchRaid);
@@ -4919,14 +4986,16 @@ public partial class Main : Node
             case WorldContextAction.ToggleRaidPreparation:
                 var executeAt = _engine.CurrentTick.Next();
                 var suspendPreparation = snapshot.RaidPhase is GoblinRaidPhase.Preparing or
-                    GoblinRaidPhase.Ready;
+                    GoblinRaidPhase.Ready or GoblinRaidPhase.Marching;
                 _engine.QueueCommand(suspendPreparation
                     ? SimulationCommand.SuspendRaidPreparation(executeAt, _commandSequence++)
                     : SimulationCommand.AttackHumanVillage(
                         executeAt,
                         _commandSequence++,
                         camp.Anchor));
-                _inspector.Text = suspendPreparation
+                _inspector.Text = snapshot.RaidPhase == GoblinRaidPhase.Marching
+                    ? "Zlecono odwołanie trwającego najazdu."
+                    : suspendPreparation
                     ? "Zlecono wstrzymanie przygotowań do najazdu."
                     : $"Zlecono przygotowanie najazdu w obozie {camp.Anchor}.";
                 if (_speed == 0)
@@ -5124,8 +5193,7 @@ public partial class Main : Node
         {
             child.QueueFree();
         }
-        var selectionLocked = snapshot.RaidPhase is not (GoblinRaidPhase.None or
-                GoblinRaidPhase.Suspended) ||
+        var selectionLocked = snapshot.RaidPhase == GoblinRaidPhase.Marching ||
             snapshot.HumanVillage.GoblinAttackOrdered;
         _raidEngagement.Disabled = selectionLocked;
         foreach (var check in _raidDirectiveChecks.Values)
@@ -5202,8 +5270,11 @@ public partial class Main : Node
             "\nPrzygotowanie: automatyczne, zależne od celu i doktryny najazdu." +
             (hasCamp ? string.Empty : "\nBrak ukończonego obozowiska z drogą do wsi.") +
             blockers;
-        _raidStartButton.Disabled = snapshot.RaidPhase is not (GoblinRaidPhase.None or
-                GoblinRaidPhase.Suspended) ||
+        _raidStartButton.Text = snapshot.RaidPhase is GoblinRaidPhase.Preparing or
+            GoblinRaidPhase.Ready
+                ? "Zapisz zmiany"
+                : "Zapisz plan";
+        _raidStartButton.Disabled = snapshot.RaidPhase == GoblinRaidPhase.Marching ||
             snapshot.HumanVillage.GoblinAttackOrdered || !hasCamp || _raidDraftIds.Count == 0;
     }
 
@@ -5264,8 +5335,7 @@ public partial class Main : Node
     private void StartSelectedRaid()
     {
         var snapshot = _engine.CreateSnapshot();
-        if (_raidDraftIds.Count == 0 || snapshot.RaidPhase is not (GoblinRaidPhase.None or
-                GoblinRaidPhase.Suspended) ||
+        if (_raidDraftIds.Count == 0 || snapshot.RaidPhase == GoblinRaidPhase.Marching ||
             snapshot.HumanVillage.GoblinAttackOrdered)
         {
             return;
@@ -5452,7 +5522,7 @@ public partial class Main : Node
         build.TooltipText = _visibleLevel switch
         {
             0 => "Budowanie",
-            < 0 => "Budowanie pod ziemią • składy, drewniane ściany i drzwi",
+            < 0 => "Budowanie pod ziemią • składy, pomosty, ściany i drzwi",
             _ => $"Budowanie na warstwie z={_visibleLevel}",
         };
         work.TooltipText = _visibleLevel switch

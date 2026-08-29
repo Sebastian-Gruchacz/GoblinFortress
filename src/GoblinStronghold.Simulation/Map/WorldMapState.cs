@@ -41,11 +41,14 @@ public readonly record struct WorldChangeEvent(
 
 public sealed class WorldMapState
 {
+    private static readonly SpatialOccupancyChannel[] OccupancyChannels =
+        Enum.GetValues<SpatialOccupancyChannel>();
     private readonly SortedDictionary<int, PlantPatchState> _plantPatches;
     private readonly SortedDictionary<WorldObjectId, WorldObjectSnapshot> _worldObjects;
     private readonly Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> _occupancy;
     private readonly HashSet<GridPosition> _excavatedCaveCells;
     private readonly HashSet<VerticalPassage> _excavatedVerticalPassages;
+    private readonly Dictionary<GridPosition, GridPosition> _verticalPassageDestinations;
 
     private WorldMapState(
         GeneratedMap baseline,
@@ -63,6 +66,8 @@ public sealed class WorldMapState
         _occupancy = occupancy;
         _excavatedCaveCells = excavatedCaveCells?.ToHashSet() ?? [];
         _excavatedVerticalPassages = excavatedVerticalPassages?.ToHashSet() ?? [];
+        _verticalPassageDestinations = BuildVerticalPassageIndex(
+            Baseline.VerticalPassages.Concat(_excavatedVerticalPassages));
     }
 
     public GeneratedMap Baseline { get; }
@@ -239,6 +244,43 @@ public sealed class WorldMapState
         new ReadOnlyCollection<PlantPatchSnapshot>(
             _plantPatches.Values.Select(patch => patch.ToSnapshot()).ToArray());
 
+    public GridPosition? FindNearestHarvestablePlantPosition(
+        GridPosition origin,
+        GridPosition center,
+        int radius,
+        PlantKind kind)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(radius);
+        GridPosition? best = null;
+        var bestDistance = int.MaxValue;
+        for (var y = Math.Max(0, center.Y - radius);
+             y <= Math.Min(Baseline.Height - 1, center.Y + radius);
+             y++)
+        {
+            for (var x = Math.Max(0, center.X - radius);
+                 x <= Math.Min(Baseline.Width - 1, center.X + radius);
+                 x++)
+            {
+                var position = new GridPosition(x, y, center.Z);
+                if (Math.Abs(x - center.X) + Math.Abs(y - center.Y) > radius ||
+                    !_plantPatches.TryGetValue(GetIndex(Baseline, position), out var patch) ||
+                    patch.Kind != kind || patch.Biomass <= 0)
+                {
+                    continue;
+                }
+
+                var distance = Math.Abs(x - origin.X) + Math.Abs(y - origin.Y) +
+                    Math.Abs(position.Z - origin.Z);
+                if (distance < bestDistance)
+                {
+                    best = position;
+                    bestDistance = distance;
+                }
+            }
+        }
+        return best;
+    }
+
     public IReadOnlyList<WorldObjectSnapshot> CreateWorldObjectSnapshot() =>
         new ReadOnlyCollection<WorldObjectSnapshot>(_worldObjects.Values.ToArray());
 
@@ -250,9 +292,10 @@ public sealed class WorldMapState
 
     public IReadOnlyList<WorldObjectSnapshot> GetWorldObjectsAt(GridPosition position)
     {
-        var ids = _occupancy
-            .Where(item => item.Key.Position == position)
-            .Select(item => item.Value.ObjectId)
+        var ids = OccupancyChannels
+            .Select(channel => _occupancy.GetValueOrDefault(
+                new SpatialOccupancyKey(position, channel)).ObjectId)
+            .Where(id => id != default)
             .Distinct()
             .Order()
             .ToArray();
@@ -318,7 +361,9 @@ public sealed class WorldMapState
     }
 
     public bool IsTerrainReachable(GridPosition position) =>
-        Baseline.IsTerrainSurfacePosition(position)
+        HasWalkway(position)
+            ? IsMaterialSurfaceReachable(position)
+            : Baseline.IsTerrainSurfacePosition(position)
             ? IsMaterialSurfaceReachable(position)
             : position.Z < 0 && IsSubterraneanReachable(position);
 
@@ -332,13 +377,16 @@ public sealed class WorldMapState
             return false;
         }
 
-        var hasWalkway = TryGetOccupancyClaim(
+        var hasWalkway = HasWalkway(position);
+        return (geometry.IsOccupiable || hasWalkway) && IsSpatiallyReachable(position);
+    }
+
+    private bool HasWalkway(GridPosition position) =>
+        TryGetOccupancyClaim(
             position,
             SpatialOccupancyChannel.Surface,
             out var surfaceClaim) &&
-            surfaceClaim.PartKind == WorldObjectPartKind.Walkway;
-        return (geometry.IsOccupiable || hasWalkway) && IsSpatiallyReachable(position);
-    }
+        surfaceClaim.PartKind == WorldObjectPartKind.Walkway;
 
     private bool IsSpatiallyReachable(GridPosition position)
     {
@@ -419,6 +467,15 @@ public sealed class WorldMapState
         var isMaterialSurface = Baseline.IsTerrainSurfacePosition(position);
         foreach (var adjacent in GetCardinalWorldNeighbors(position))
         {
+            if (HasWalkway(adjacent))
+            {
+                if (canTraverse(adjacent))
+                {
+                    yield return adjacent;
+                }
+                continue;
+            }
+
             if (!isMaterialSurface)
             {
                 if (canTraverse(adjacent))
@@ -436,29 +493,10 @@ public sealed class WorldMapState
             }
         }
 
-        foreach (var passage in Baseline.VerticalPassages)
+        if (_verticalPassageDestinations.TryGetValue(position, out var passageDestination) &&
+            canTraverse(passageDestination))
         {
-            var neighbor = passage.Upper == position
-                ? passage.Lower
-                : passage.Lower == position
-                    ? passage.Upper
-                    : (GridPosition?)null;
-            if (neighbor.HasValue && canTraverse(neighbor.Value))
-            {
-                yield return neighbor.Value;
-            }
-        }
-        foreach (var passage in _excavatedVerticalPassages)
-        {
-            var neighbor = passage.Upper == position
-                ? passage.Lower
-                : passage.Lower == position
-                    ? passage.Upper
-                    : (GridPosition?)null;
-            if (neighbor.HasValue && canTraverse(neighbor.Value))
-            {
-                yield return neighbor.Value;
-            }
+            yield return passageDestination;
         }
     }
 
@@ -472,8 +510,17 @@ public sealed class WorldMapState
         GridPosition start,
         GridPosition destination,
         bool canOpenDoors = false,
-        Func<GridPosition, GridPosition, bool>? canUseEdge = null)
+        Func<GridPosition, GridPosition, bool>? canUseEdge = null) =>
+        FindTerrainPath(start, destination, canOpenDoors, canUseEdge, out _);
+
+    internal IReadOnlyList<GridPosition>? FindTerrainPath(
+        GridPosition start,
+        GridPosition destination,
+        bool canOpenDoors,
+        Func<GridPosition, GridPosition, bool>? canUseEdge,
+        out int expandedNodes)
     {
+        expandedNodes = 0;
         Func<GridPosition, bool> canTraverse = canOpenDoors
             ? IsTerrainReachable
             : IsTerrainTraversable;
@@ -482,12 +529,22 @@ public sealed class WorldMapState
             return null;
         }
 
-        var visited = new HashSet<GridPosition> { start };
+        var visited = new HashSet<GridPosition>();
         var predecessors = new Dictionary<GridPosition, GridPosition>();
-        var queue = new Queue<GridPosition>();
-        queue.Enqueue(start);
-        while (queue.TryDequeue(out var current))
+        var distances = new Dictionary<GridPosition, int> { [start] = 0 };
+        var queue = new PriorityQueue<
+            GridPosition,
+            (int EstimatedTotal, int Heuristic, long Sequence)>();
+        var sequence = 0L;
+        var startHeuristic = EstimateTerrainDistance(start, destination);
+        queue.Enqueue(start, (startHeuristic, startHeuristic, sequence++));
+        while (queue.TryDequeue(out var current, out _))
         {
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+            expandedNodes++;
             if (current == destination)
             {
                 var route = new List<GridPosition>();
@@ -503,10 +560,21 @@ public sealed class WorldMapState
             foreach (var neighbor in GetTerrainNeighbors(current, canOpenDoors))
             {
                 if ((canUseEdge is null || canUseEdge(current, neighbor)) &&
-                    visited.Add(neighbor))
+                    !visited.Contains(neighbor))
                 {
+                    var distance = checked(distances[current] + 1);
+                    if (distances.TryGetValue(neighbor, out var knownDistance) &&
+                        knownDistance <= distance)
+                    {
+                        continue;
+                    }
+
+                    distances[neighbor] = distance;
                     predecessors[neighbor] = current;
-                    queue.Enqueue(neighbor);
+                    var heuristic = EstimateTerrainDistance(neighbor, destination);
+                    queue.Enqueue(
+                        neighbor,
+                        (checked(distance + heuristic), heuristic, sequence++));
                 }
             }
         }
@@ -514,19 +582,105 @@ public sealed class WorldMapState
         return null;
     }
 
+    internal IReadOnlyList<GridPosition>? FindPathToNearestTerrainPosition(
+        GridPosition start,
+        IReadOnlySet<GridPosition> destinations,
+        bool canOpenDoors,
+        Func<GridPosition, GridPosition, bool>? canUseEdge,
+        out int expandedNodes)
+    {
+        ArgumentNullException.ThrowIfNull(destinations);
+        expandedNodes = 0;
+        Func<GridPosition, bool> canTraverse = canOpenDoors
+            ? IsTerrainReachable
+            : IsTerrainTraversable;
+        var reachableDestinations = destinations.Where(canTraverse).ToHashSet();
+        if (!IsTerrainTraversable(start) || reachableDestinations.Count == 0)
+        {
+            return null;
+        }
+
+        var visited = new HashSet<GridPosition>();
+        var predecessors = new Dictionary<GridPosition, GridPosition>();
+        var distances = new Dictionary<GridPosition, int> { [start] = 0 };
+        var queue = new PriorityQueue<
+            GridPosition,
+            (int EstimatedTotal, int Heuristic, long Sequence)>();
+        var sequence = 0L;
+        var startHeuristic = EstimateTerrainDistance(start, reachableDestinations);
+        queue.Enqueue(start, (startHeuristic, startHeuristic, sequence++));
+        while (queue.TryDequeue(out var current, out _))
+        {
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+            expandedNodes++;
+            if (reachableDestinations.Contains(current))
+            {
+                var route = new List<GridPosition>();
+                while (current != start)
+                {
+                    route.Add(current);
+                    current = predecessors[current];
+                }
+                route.Reverse();
+                return route;
+            }
+
+            foreach (var neighbor in GetTerrainNeighbors(current, canOpenDoors))
+            {
+                if ((canUseEdge is null || canUseEdge(current, neighbor)) &&
+                    !visited.Contains(neighbor))
+                {
+                    var distance = checked(distances[current] + 1);
+                    if (distances.TryGetValue(neighbor, out var knownDistance) &&
+                        knownDistance <= distance)
+                    {
+                        continue;
+                    }
+
+                    distances[neighbor] = distance;
+                    predecessors[neighbor] = current;
+                    var heuristic = EstimateTerrainDistance(neighbor, reachableDestinations);
+                    queue.Enqueue(
+                        neighbor,
+                        (checked(distance + heuristic), heuristic, sequence++));
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static int EstimateTerrainDistance(
+        GridPosition position,
+        GridPosition destination)
+    {
+        var horizontal = Math.Abs(position.X - destination.X) +
+            Math.Abs(position.Y - destination.Y);
+        var vertical = Math.Abs(position.Z - destination.Z);
+        return Math.Max(horizontal, vertical);
+    }
+
+    private static int EstimateTerrainDistance(
+        GridPosition position,
+        IReadOnlySet<GridPosition> destinations) =>
+        destinations.Min(destination => EstimateTerrainDistance(position, destination));
+
     public bool CanBuildWalkway(IReadOnlyList<GridPosition> positions)
     {
         ArgumentNullException.ThrowIfNull(positions);
-        return positions.Count > 0 && positions.All(position =>
-            Baseline.IsColumnWithin(position) &&
-            position.Z >= Baseline.MinimumWorldLevel &&
-            position.Z <= Baseline.MaximumWorldLevel &&
-            !_occupancy.ContainsKey(new SpatialOccupancyKey(
-                position,
-                SpatialOccupancyChannel.Surface)) &&
-            !_occupancy.ContainsKey(new SpatialOccupancyKey(
-                position,
-                SpatialOccupancyChannel.Solid)));
+        return positions.Count > 0 &&
+            positions.Distinct().Count() == positions.Count &&
+            positions.All(position =>
+                Baseline.IsColumnWithin(position) &&
+                position.Z >= Baseline.MinimumWorldLevel &&
+                position.Z <= Baseline.MaximumWorldLevel &&
+                Baseline.TryGetInitialGeometry(position, out var geometry) &&
+                !geometry.IsSolid &&
+                !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Surface, out _) &&
+                !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _));
     }
 
     internal WorldChangeEvent BuildWalkway(
@@ -1018,7 +1172,10 @@ public sealed class WorldMapState
         var footprint = GetFieldCampFootprint(anchor);
         return footprint.All(position =>
             IsTerrainTraversable(position) &&
-            !_occupancy.Keys.Any(key => key.Position == position));
+            !_occupancy.Keys.Any(key => key.Position == position) &&
+            (anchor.Z != 0 || !_occupancy.ContainsKey(new(
+                position with { Z = position.Z + 1 },
+                SpatialOccupancyChannel.Overhead))));
     }
 
     internal WorldChangeEvent BuildGoblinFieldCamp(GridPosition anchor, SimulationTick tick)
@@ -1068,7 +1225,10 @@ public sealed class WorldMapState
         var footprint = GetSquareFootprint(anchor, 3);
         return footprint.All(position =>
             IsTerrainTraversable(position) &&
-            !_occupancy.Keys.Any(key => key.Position == position));
+            !_occupancy.Keys.Any(key => key.Position == position) &&
+            (anchor.Z != 0 || !_occupancy.ContainsKey(new(
+                position with { Z = position.Z + 1 },
+                SpatialOccupancyChannel.Overhead))));
     }
 
     internal WorldChangeEvent BuildGoblinHut(GridPosition anchor, SimulationTick tick)
@@ -1169,6 +1329,18 @@ public sealed class WorldMapState
         SimulationTick tick,
         out WorldChangeEvent change)
     {
+        var anchor = FindHumanStorehousePlacement(
+            settlementCenter, maximumDistance, reservedPositions);
+        return anchor is { } placement && TryBuildHumanStorehouseAt(
+            placement, settlementCenter, maximumDistance, reservedPositions, tick, out change) ||
+            SetNoWorldChange(out change);
+    }
+
+    internal GridPosition? FindHumanStorehousePlacement(
+        GridPosition settlementCenter,
+        int maximumDistance,
+        IReadOnlySet<GridPosition> reservedPositions)
+    {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumDistance);
         ArgumentNullException.ThrowIfNull(reservedPositions);
         const int width = 3;
@@ -1186,76 +1358,111 @@ public sealed class WorldMapState
             }
         }
 
-        foreach (var anchor in candidates
+        return candidates
                      .OrderBy(item => Distance(new GridPosition(item.X + 1, item.Y + 1), settlementCenter))
                      .ThenBy(item => item.Y)
-                     .ThenBy(item => item.X))
+                     .ThenBy(item => item.X)
+                     .Select(anchor => CanBuildHumanStorehouseAt(
+                         anchor, settlementCenter, maximumDistance, reservedPositions)
+                         ? (GridPosition?)anchor
+                         : null)
+                     .FirstOrDefault(anchor => anchor is not null);
+    }
+
+    internal bool TryBuildHumanStorehouseAt(
+        GridPosition anchor,
+        GridPosition settlementCenter,
+        int maximumDistance,
+        IReadOnlySet<GridPosition> reservedPositions,
+        SimulationTick tick,
+        out WorldChangeEvent change)
+    {
+        if (!CanBuildHumanStorehouseAt(
+                anchor, settlementCenter, maximumDistance, reservedPositions))
         {
-            var door = new GridPosition(1, 2);
-            var doorPosition = anchor with
-            {
-                X = anchor.X + door.X,
-                Y = anchor.Y + door.Y,
-            };
-            var anchorLevel = Baseline.GetCell(anchor).SurfaceLevel;
-            var footprint = Enumerable.Range(0, height)
-                .SelectMany(y => Enumerable.Range(0, width)
-                    .Select(x => new GridPosition(anchor.X + x, anchor.Y + y)))
-                .ToArray();
-            if (footprint.Any(position =>
-                    reservedPositions.Contains(position) ||
-                    !Baseline.GetCell(position).IsTraversable ||
-                    Baseline.GetCell(position).SurfaceLevel != anchorLevel ||
-                    _occupancy.Keys.Any(key => key.Position.X == position.X && key.Position.Y == position.Y)))
-            {
-                continue;
-            }
-            if (!HasSurfacePath(settlementCenter, doorPosition))
-            {
-                continue;
-            }
-
-            var id = new WorldObjectId(_worldObjects.Count == 0
-                ? 1UL
-                : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
-            var parts = new List<WorldObjectPartSnapshot>();
-            for (var y = 0; y < height; y++)
-            {
-                for (var x = 0; x < width; x++)
-                {
-                    var relative = new GridPosition(x, y);
-                    parts.Add(new(relative, SpatialOccupancyChannel.Surface, WorldObjectPartKind.Floor));
-                    parts.Add(new(relative with { Z = 1 }, SpatialOccupancyChannel.Overhead, WorldObjectPartKind.Roof));
-                    if (x == 0 || y == 0 || x == width - 1 || y == height - 1)
-                    {
-                        parts.Add(new(relative, SpatialOccupancyChannel.Solid,
-                            relative == door ? WorldObjectPartKind.Door : WorldObjectPartKind.Wall));
-                    }
-                }
-            }
-
-            var worldObject = new WorldObjectSnapshot(
-                id,
-                WorldObjectKind.HumanStorehouse,
-                WorldObjectOwner.HumanVillage,
-                anchor,
-                CardinalOrientation.South,
-                parts);
-            _worldObjects.Add(id, worldObject);
-            foreach (var (position, part) in worldObject.GetAbsoluteParts())
-            {
-                _occupancy.Add(
-                    new SpatialOccupancyKey(position, part.Channel),
-                    new SpatialOccupancyClaim(id, part.Kind));
-            }
-            foreach (var position in footprint)
-            {
-                _plantPatches.Remove(GetIndex(Baseline, position));
-            }
-            change = CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, footprint.Length);
-            return true;
+            change = default;
+            return false;
         }
 
+        const int width = 3;
+        const int height = 3;
+        var footprint = GetSquareFootprint(anchor, width);
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var parts = new List<WorldObjectPartSnapshot>();
+        var door = new GridPosition(1, 2);
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var relative = new GridPosition(x, y);
+                parts.Add(new(relative, SpatialOccupancyChannel.Surface, WorldObjectPartKind.Floor));
+                parts.Add(new(relative with { Z = 1 }, SpatialOccupancyChannel.Overhead, WorldObjectPartKind.Roof));
+                if (x == 0 || y == 0 || x == width - 1 || y == height - 1)
+                {
+                    parts.Add(new(relative, SpatialOccupancyChannel.Solid,
+                        relative == door ? WorldObjectPartKind.Door : WorldObjectPartKind.Wall));
+                }
+            }
+        }
+
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.HumanStorehouse,
+            WorldObjectOwner.HumanVillage,
+            anchor,
+            CardinalOrientation.South,
+            parts);
+        _worldObjects.Add(id, worldObject);
+        foreach (var (position, part) in worldObject.GetAbsoluteParts())
+        {
+            _occupancy.Add(
+                new SpatialOccupancyKey(position, part.Channel),
+                new SpatialOccupancyClaim(id, part.Kind));
+        }
+        foreach (var position in footprint)
+        {
+            _plantPatches.Remove(GetIndex(Baseline, position));
+        }
+        change = CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, footprint.Count);
+        return true;
+    }
+
+    internal bool CanBuildHumanStorehouseAt(
+        GridPosition anchor,
+        GridPosition settlementCenter,
+        int maximumDistance,
+        IReadOnlySet<GridPosition> reservedPositions)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumDistance);
+        ArgumentNullException.ThrowIfNull(reservedPositions);
+        const int size = 3;
+        if (anchor.X < 0 || anchor.Y < 0 ||
+            anchor.X > Baseline.Width - size || anchor.Y > Baseline.Height - size ||
+            Distance(new GridPosition(anchor.X + 1, anchor.Y + 1), settlementCenter) >
+                maximumDistance)
+        {
+            return false;
+        }
+        var anchorLevel = Baseline.GetCell(anchor).SurfaceLevel;
+        var footprint = GetSquareFootprint(anchor, size);
+        if (footprint.Any(position =>
+                reservedPositions.Contains(position) ||
+                !Baseline.GetCell(position).IsTraversable ||
+                Baseline.GetCell(position).SurfaceLevel != anchorLevel ||
+                _occupancy.Keys.Any(key =>
+                    key.Position.X == position.X && key.Position.Y == position.Y)))
+        {
+            return false;
+        }
+        return HasSurfacePath(
+            settlementCenter,
+            new GridPosition(anchor.X + 1, anchor.Y + 2, anchor.Z));
+    }
+
+    private static bool SetNoWorldChange(out WorldChangeEvent change)
+    {
         change = default;
         return false;
     }
@@ -1630,17 +1837,41 @@ public sealed class WorldMapState
             rock = Baseline.GetCaveCell(lower).Rock;
         }
 
-        _excavatedVerticalPassages.Add(new VerticalPassage(
+        var passage = new VerticalPassage(
             upper,
             lower,
-            VerticalPassageKind.ExcavatedRamp));
+            VerticalPassageKind.ExcavatedRamp);
+        _excavatedVerticalPassages.Add(passage);
+        IndexVerticalPassage(_verticalPassageDestinations, passage);
         change = CreateChange(tick, WorldChangeKind.RampExcavated, origin, carveDown ? -1 : 1);
         return true;
     }
 
     private bool HasVerticalPassageAt(GridPosition position) =>
-        Baseline.VerticalPassages.Concat(_excavatedVerticalPassages)
-            .Any(passage => passage.Upper == position || passage.Lower == position);
+        _verticalPassageDestinations.ContainsKey(position);
+
+    private static Dictionary<GridPosition, GridPosition> BuildVerticalPassageIndex(
+        IEnumerable<VerticalPassage> passages)
+    {
+        var destinations = new Dictionary<GridPosition, GridPosition>();
+        foreach (var passage in passages)
+        {
+            IndexVerticalPassage(destinations, passage);
+        }
+
+        return destinations;
+    }
+
+    private static void IndexVerticalPassage(
+        Dictionary<GridPosition, GridPosition> destinations,
+        VerticalPassage passage)
+    {
+        if (!destinations.TryAdd(passage.Upper, passage.Lower) ||
+            !destinations.TryAdd(passage.Lower, passage.Upper))
+        {
+            throw new InvalidDataException("Vertical passages must not overlap.");
+        }
+    }
 
     internal IReadOnlyList<WorldChangeEvent> GrowPlants(
         SimulationTick tick,

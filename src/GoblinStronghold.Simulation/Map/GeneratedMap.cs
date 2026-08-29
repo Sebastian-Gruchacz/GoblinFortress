@@ -8,6 +8,7 @@ public sealed class GeneratedMap
     private readonly MapCell[] _cells;
     private readonly CaveCell[] _caveCells;
     private readonly VerticalPassage[] _verticalPassages;
+    private readonly Dictionary<GridPosition, GridPosition> _verticalPassageDestinations;
     private readonly string _fingerprint;
     private readonly int _minimumTerrainLevel;
     private readonly int _maximumTerrainLevel;
@@ -30,6 +31,7 @@ public sealed class GeneratedMap
         _cells = cells;
         _caveCells = caveCells ?? [];
         _verticalPassages = verticalPassages ?? [];
+        _verticalPassageDestinations = BuildVerticalPassageIndex(_verticalPassages);
         _minimumTerrainLevel = _cells.Min(cell => Math.Min(cell.FloorLevel, cell.SurfaceLevel));
         _maximumTerrainLevel = _cells.Max(cell => cell.SurfaceLevel);
         GoblinSpawn = goblinSpawn;
@@ -427,17 +429,27 @@ public sealed class GeneratedMap
             }
         }
 
-        foreach (var passage in _verticalPassages)
+        if (_verticalPassageDestinations.TryGetValue(position, out var passageDestination) &&
+            IsTerrainTraversable(passageDestination))
         {
-            if (passage.Upper == position)
+            yield return passageDestination;
+        }
+    }
+
+    private static Dictionary<GridPosition, GridPosition> BuildVerticalPassageIndex(
+        IEnumerable<VerticalPassage> passages)
+    {
+        var destinations = new Dictionary<GridPosition, GridPosition>();
+        foreach (var passage in passages)
+        {
+            if (!destinations.TryAdd(passage.Upper, passage.Lower) ||
+                !destinations.TryAdd(passage.Lower, passage.Upper))
             {
-                yield return passage.Lower;
-            }
-            else if (passage.Lower == position)
-            {
-                yield return passage.Upper;
+                throw new InvalidDataException("Vertical passages must not overlap.");
             }
         }
+
+        return destinations;
     }
 
     public IReadOnlyList<GridPosition>? FindTerrainPath(

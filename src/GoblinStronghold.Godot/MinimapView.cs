@@ -115,11 +115,12 @@ public partial class MinimapView : Control
             DrawCircle(ToMinimap(actor.Position, tileSize), 2f, new Color("8dff65"));
         }
 
-        foreach (var cohort in _snapshot.HumanVillage.Cohorts.Where(cohort =>
-                     cohort.Population > 0 &&
-                     _snapshot.GetVisibility(cohort.Position, _engine.Map.Width) != CellVisibility.Unknown))
+        foreach (var villager in _snapshot.HumanVillage.Villagers.Where(villager =>
+                     villager.Health > 0 &&
+                     _snapshot.GetVisibility(villager.Position, _engine.Map.Width) !=
+                         CellVisibility.Unknown))
         {
-            DrawCircle(ToMinimap(cohort.Position, tileSize), 2f, new Color("f0c96d"));
+            DrawCircle(ToMinimap(villager.Position, tileSize), 1.4f, new Color("f0c96d"));
         }
 
         var cameraRect = new Rect2(

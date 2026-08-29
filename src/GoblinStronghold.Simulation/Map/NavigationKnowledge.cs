@@ -97,6 +97,8 @@ public sealed class NavigationKnowledgeState
 
     public int Count => _beliefs.Count;
 
+    public ulong Version { get; private set; }
+
     public bool HasBlockedBeliefs => _blockedCount > 0;
 
     public NavigationBelief Observe(
@@ -165,6 +167,17 @@ public sealed class NavigationKnowledgeState
     public bool AllowsTraversal(
         GridPosition from,
         GridPosition to,
+        SimulationTick currentTick,
+        long currentDurationTicks,
+        long agingDurationTicks) =>
+        !_beliefs.TryGetValue(NavigationEdge.Between(from, to), out var belief) ||
+        belief.Status != NavigationBeliefStatus.Blocked ||
+        belief.GetFreshness(currentTick, currentDurationTicks, agingDurationTicks) ==
+            NavigationBeliefFreshness.Stale;
+
+    public bool AllowsTraversal(
+        GridPosition from,
+        GridPosition to,
         NavigationKnowledgeState fallback)
     {
         ArgumentNullException.ThrowIfNull(fallback);
@@ -172,6 +185,30 @@ public sealed class NavigationKnowledgeState
         return _beliefs.TryGetValue(edge, out var personal)
             ? personal.Status != NavigationBeliefStatus.Blocked
             : fallback.AllowsTraversal(from, to);
+    }
+
+    public bool AllowsTraversal(
+        GridPosition from,
+        GridPosition to,
+        NavigationKnowledgeState fallback,
+        SimulationTick currentTick,
+        long currentDurationTicks,
+        long agingDurationTicks)
+    {
+        ArgumentNullException.ThrowIfNull(fallback);
+        var edge = NavigationEdge.Between(from, to);
+        if (_beliefs.TryGetValue(edge, out var personal))
+        {
+            return personal.Status != NavigationBeliefStatus.Blocked ||
+                personal.GetFreshness(currentTick, currentDurationTicks, agingDurationTicks) ==
+                    NavigationBeliefFreshness.Stale;
+        }
+        return fallback.AllowsTraversal(
+            from,
+            to,
+            currentTick,
+            currentDurationTicks,
+            agingDurationTicks);
     }
 
     public IReadOnlyList<NavigationBelief> CreateSnapshot() =>
@@ -192,12 +229,20 @@ public sealed class NavigationKnowledgeState
             return false;
         }
 
+        var wasBlocked = _beliefs.TryGetValue(candidate.Edge, out var previous) &&
+            previous.Status == NavigationBeliefStatus.Blocked;
+        var changedTraversalPolicy = wasBlocked !=
+            (candidate.Status == NavigationBeliefStatus.Blocked);
         if (_beliefs.TryGetValue(candidate.Edge, out var replaced) &&
             replaced.Status == NavigationBeliefStatus.Blocked)
         {
             _blockedCount--;
         }
         _beliefs[candidate.Edge] = candidate;
+        if (changedTraversalPolicy)
+        {
+            Version = checked(Version + 1);
+        }
         if (candidate.Status == NavigationBeliefStatus.Blocked)
         {
             _blockedCount++;

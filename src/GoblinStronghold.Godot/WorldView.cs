@@ -1764,12 +1764,13 @@ public partial class WorldView : Node2D
             return;
         }
 
-        foreach (var cohort in _snapshot.HumanVillage.Cohorts.Where(cohort =>
-                     cohort.Population > 0 &&
-                     _snapshot.GetVisibility(cohort.Position, _engine.Map.Width) == CellVisibility.Visible))
+        foreach (var villager in _snapshot.HumanVillage.Villagers.Where(villager =>
+                     villager.Health > 0 &&
+                     _snapshot.GetVisibility(villager.Position, _engine.Map.Width) ==
+                         CellVisibility.Visible))
         {
-            var center = CellCenter(cohort.Position);
-            var color = cohort.Role switch
+            var center = CellCenter(villager.Position);
+            var color = villager.Role switch
             {
                 HumanCohortRole.Farmers => new Color("d7b54b"),
                 HumanCohortRole.Workers => new Color("6ea3c7"),
@@ -1777,32 +1778,23 @@ public partial class WorldView : Node2D
                 HumanCohortRole.Guards => new Color("b9c2c7"),
                 _ => Colors.Magenta,
             };
-            if (cohort.Role == HumanCohortRole.Guards && _snapshot.HumanVillage.Hostility > 0)
+            if (villager.Role == HumanCohortRole.Guards && _snapshot.HumanVillage.Hostility > 0)
             {
                 DrawArc(center, 9f, 0, Mathf.Tau, 24, new Color(0.95f, 0.2f, 0.14f, 0.86f), 2f);
             }
 
             DrawCircle(center + new Vector2(0, 2), 4.5f, color.Darkened(0.18f));
             DrawCircle(center + new Vector2(0, -4), 3.2f, color);
-            if (cohort.Role == HumanCohortRole.Guards)
+            if (villager.Role == HumanCohortRole.Guards)
             {
                 DrawLine(center + new Vector2(-4, -7), center + new Vector2(4, -7), new Color("704a3a"), 1.5f);
             }
 
-            for (var index = 0; index < cohort.Population; index++)
-            {
-                var angle = Mathf.Tau * index / cohort.Population;
-                DrawCircle(
-                    center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * 7f,
-                    1.15f,
-                    color.Lightened(0.2f));
-            }
-
-            var toolIcon = cohort.Role switch
+            var toolIcon = villager.Role switch
             {
                 HumanCohortRole.Farmers => ItemIcon.WoodenHoe,
                 HumanCohortRole.Guards => ItemIcon.WoodenSpear,
-                HumanCohortRole.Workers when cohort.Task == HumanCohortTask.DrawWater =>
+                HumanCohortRole.Workers when villager.Tools.HasFlag(HumanTool.WoodenBucket) =>
                     ItemIcon.WoodenBucket,
                 HumanCohortRole.Workers => ItemIcon.WoodenAxe,
                 _ => ItemIcon.Unknown,
@@ -1838,11 +1830,12 @@ public partial class WorldView : Node2D
             new Rect2(Vector2.Zero, WorldSize),
             new Color(0.025f, 0.055f, 0.12f, darkness));
 
-        foreach (var cohort in _snapshot.HumanVillage.Cohorts.Where(cohort =>
-                     cohort.Population > 0 &&
-                     _snapshot.GetVisibility(cohort.Position, _engine.Map.Width) == CellVisibility.Visible))
+        foreach (var villager in _snapshot.HumanVillage.Villagers.Where(villager =>
+                     villager.Health > 0 &&
+                     _snapshot.GetVisibility(villager.Position, _engine.Map.Width) ==
+                         CellVisibility.Visible))
         {
-            var center = CellCenter(cohort.Position);
+            var center = CellCenter(villager.Position);
             DrawCircle(center, TileSize * 1.7f, new Color(1f, 0.63f, 0.18f, darkness * 0.16f));
             DrawCircle(center + new Vector2(5f, -5f), 1.8f, new Color(1f, 0.78f, 0.3f, 0.9f));
         }

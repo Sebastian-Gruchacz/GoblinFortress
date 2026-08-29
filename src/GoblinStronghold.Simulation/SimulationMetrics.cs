@@ -39,3 +39,11 @@ public readonly record struct ActorJobUpdateProfile(
     TimeSpan IdlePlanning,
     TimeSpan ActiveJobs,
     TimeSpan Finalization);
+
+public readonly record struct ActorPlanningAttemptProfile(
+    EntityId ActorId,
+    string Category,
+    TimeSpan Duration,
+    long PathRequests,
+    long PathSearches,
+    bool Assigned);

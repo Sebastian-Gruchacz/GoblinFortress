@@ -14,6 +14,8 @@ public enum ResourceKind : byte
     Coal = 7,
     Ore = 8,
     Hide = 9,
+    Equipment = 10,
+    Materials = 11,
 }
 
 public enum FoodKind : byte
@@ -39,6 +41,13 @@ public enum ResourceVariant : byte
     Sandstone = 7,
     Granite = 8,
     IronOre = 9,
+    EquipmentPrimitiveSling = 10,
+    EquipmentBoneKnife = 11,
+    EquipmentFightingStick = 12,
+    EquipmentStoneClub = 13,
+    EquipmentHideClothes = 14,
+    EquipmentReedClothes = 15,
+    EquipmentPrimitiveWaterskin = 16,
 }
 
 public enum ItemLocationKind : byte

@@ -62,6 +62,8 @@ public sealed record VisionSettings(
 public sealed record ActorPlanningSettings(
     int QueueCapacity,
     int BackgroundPlanningIntervalTicks,
+    int MaximumBurstPlannersPerTick,
+    int MaximumPathExpansionsPerSlice,
     int MaximumNeedPriority,
     int BackgroundJobCommitment,
     int OrdinaryJobCommitment,
@@ -99,6 +101,36 @@ public sealed record GoblinAgingSettings(
     int TerminalHealthPermille,
     int InitialMinimumAgeYears,
     int InitialMaximumAgeYearsExclusive);
+
+public sealed record HumanVillageNeedSettings(
+    int MaximumNeed,
+    int DailyHungerIncrease,
+    int DailyThirstIncrease,
+    int MealRelief,
+    int DrinkRelief,
+    int MaximumFatigue,
+    int RestThreshold,
+    int WorkFatiguePerMove,
+    int DayRestRecoveryPerMove,
+    int NightRestRecoveryPerMove,
+    int HungerDamageDivisor,
+    int ThirstDamageDivisor);
+
+public sealed record HumanVillageEconomySettings(
+    int CropGrowthDays,
+    int FieldYield,
+    int MinimumFieldCount,
+    int BaseFoodCapacity,
+    int StorehouseCapacity,
+    int StorehouseWoodCost,
+    int WaterWorkPerUnit,
+    int FieldWorkPerStage,
+    int TreeFellingWork,
+    int TreeSearchRadius,
+    int GoodsWorkPerUnit,
+    int GoodsWoodCost,
+    int GoodsPopulationDivisor,
+    int StorehouseWork);
 
 public sealed class SimulationDefinitions
 {
@@ -159,11 +191,41 @@ public sealed class SimulationDefinitions
         actorPlanning: new(
             QueueCapacity: 4,
             BackgroundPlanningIntervalTicks: 20,
+            MaximumBurstPlannersPerTick: 2,
+            MaximumPathExpansionsPerSlice: 512,
             MaximumNeedPriority: 100,
             BackgroundJobCommitment: 20,
             OrdinaryJobCommitment: 40,
             OrderedJobCommitment: 70,
-            InterruptHysteresis: 5));
+            InterruptHysteresis: 5),
+        humanVillageNeeds: new(
+            MaximumNeed: 1_000,
+            DailyHungerIncrease: 100,
+            DailyThirstIncrease: 340,
+            MealRelief: 500,
+            DrinkRelief: 700,
+            MaximumFatigue: 1_000,
+            RestThreshold: 750,
+            WorkFatiguePerMove: 2,
+            DayRestRecoveryPerMove: 4,
+            NightRestRecoveryPerMove: 5,
+            HungerDamageDivisor: 10,
+            ThirstDamageDivisor: 3),
+        humanVillageEconomy: new(
+            CropGrowthDays: 20,
+            FieldYield: 180,
+            MinimumFieldCount: 4,
+            BaseFoodCapacity: 240,
+            StorehouseCapacity: 240,
+            StorehouseWoodCost: 24,
+            WaterWorkPerUnit: 180,
+            FieldWorkPerStage: 1_080,
+            TreeFellingWork: 480,
+            TreeSearchRadius: 8,
+            GoodsWorkPerUnit: 360,
+            GoodsWoodCost: 2,
+            GoodsPopulationDivisor: 3,
+            StorehouseWork: 720));
 
     public const int FieldCampCapacity = 5;
     public const int GoblinHutCapacity = 9;
@@ -222,7 +284,9 @@ public sealed class SimulationDefinitions
         int medicinalRootsHealing = 500,
         int? goblinNightVisionRadius = null,
         int goblinStructureVisionRadius = 0,
-        ActorPlanningSettings? actorPlanning = null)
+        ActorPlanningSettings? actorPlanning = null,
+        HumanVillageNeedSettings? humanVillageNeeds = null,
+        HumanVillageEconomySettings? humanVillageEconomy = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(clock);
@@ -290,6 +354,8 @@ public sealed class SimulationDefinitions
         actorPlanning ??= new(
             QueueCapacity: 4,
             BackgroundPlanningIntervalTicks: 20,
+            MaximumBurstPlannersPerTick: 2,
+            MaximumPathExpansionsPerSlice: 512,
             MaximumNeedPriority: 100,
             BackgroundJobCommitment: 20,
             OrdinaryJobCommitment: 40,
@@ -298,6 +364,10 @@ public sealed class SimulationDefinitions
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(actorPlanning.QueueCapacity);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
             actorPlanning.BackgroundPlanningIntervalTicks);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
+            actorPlanning.MaximumBurstPlannersPerTick);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
+            actorPlanning.MaximumPathExpansionsPerSlice);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(actorPlanning.MaximumNeedPriority);
         ArgumentOutOfRangeException.ThrowIfNegative(actorPlanning.BackgroundJobCommitment);
         ArgumentOutOfRangeException.ThrowIfNegative(actorPlanning.OrdinaryJobCommitment);
@@ -317,6 +387,73 @@ public sealed class SimulationDefinitions
                 "Maximum need priority must be able to interrupt ordered work.",
                 nameof(actorPlanning));
         }
+        humanVillageNeeds ??= new(
+            MaximumNeed: 1_000,
+            DailyHungerIncrease: 100,
+            DailyThirstIncrease: 340,
+            MealRelief: 500,
+            DrinkRelief: 700,
+            MaximumFatigue: 1_000,
+            RestThreshold: 750,
+            WorkFatiguePerMove: 2,
+            DayRestRecoveryPerMove: 4,
+            NightRestRecoveryPerMove: 5,
+            HungerDamageDivisor: 10,
+            ThirstDamageDivisor: 3);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageNeeds.MaximumNeed);
+        ArgumentOutOfRangeException.ThrowIfNegative(humanVillageNeeds.DailyHungerIncrease);
+        ArgumentOutOfRangeException.ThrowIfNegative(humanVillageNeeds.DailyThirstIncrease);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageNeeds.MealRelief);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            humanVillageNeeds.MealRelief,
+            humanVillageNeeds.MaximumNeed);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageNeeds.DrinkRelief);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            humanVillageNeeds.DrinkRelief,
+            humanVillageNeeds.MaximumNeed);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageNeeds.MaximumFatigue);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageNeeds.RestThreshold);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            humanVillageNeeds.RestThreshold,
+            humanVillageNeeds.MaximumFatigue);
+        ArgumentOutOfRangeException.ThrowIfNegative(humanVillageNeeds.WorkFatiguePerMove);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
+            humanVillageNeeds.DayRestRecoveryPerMove);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
+            humanVillageNeeds.NightRestRecoveryPerMove);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
+            humanVillageNeeds.HungerDamageDivisor);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
+            humanVillageNeeds.ThirstDamageDivisor);
+        humanVillageEconomy ??= new(
+            CropGrowthDays: 20,
+            FieldYield: 180,
+            MinimumFieldCount: 4,
+            BaseFoodCapacity: 240,
+            StorehouseCapacity: 240,
+            StorehouseWoodCost: 24,
+            WaterWorkPerUnit: 180,
+            FieldWorkPerStage: 1_080,
+            TreeFellingWork: 480,
+            TreeSearchRadius: 8,
+            GoodsWorkPerUnit: 360,
+            GoodsWoodCost: 2,
+            GoodsPopulationDivisor: 3,
+            StorehouseWork: 720);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.CropGrowthDays);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.FieldYield);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.MinimumFieldCount);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.BaseFoodCapacity);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.StorehouseCapacity);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.StorehouseWoodCost);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.WaterWorkPerUnit);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.FieldWorkPerStage);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.TreeFellingWork);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.TreeSearchRadius);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.GoodsWorkPerUnit);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.GoodsWoodCost);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.GoodsPopulationDivisor);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(humanVillageEconomy.StorehouseWork);
 
         Id = id;
         Clock = clock;
@@ -413,6 +550,8 @@ public sealed class SimulationDefinitions
             TerminalHealthPermille: 150,
             InitialMinimumAgeYears: 1,
             InitialMaximumAgeYearsExclusive: 5);
+        HumanVillageNeeds = humanVillageNeeds;
+        HumanVillageEconomy = humanVillageEconomy;
     }
 
     public string Id { get; }
@@ -438,6 +577,10 @@ public sealed class SimulationDefinitions
     public GoblinPrimitiveEquipmentSettings PrimitiveEquipment { get; }
 
     public GoblinAgingSettings Aging { get; }
+
+    public HumanVillageNeedSettings HumanVillageNeeds { get; }
+
+    public HumanVillageEconomySettings HumanVillageEconomy { get; }
 
     public int MaximumHunger { get; }
 

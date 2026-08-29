@@ -69,6 +69,7 @@ internal static class ItemIcons
         ResourceKind.Ore => ItemIcon.Stone,
         ResourceKind.Bone => ItemIcon.Bone,
         ResourceKind.Hide => ItemIcon.RagClothes,
+        ResourceKind.Equipment => ItemIcon.Cargo,
         _ => ItemIcon.Unknown,
     };
 

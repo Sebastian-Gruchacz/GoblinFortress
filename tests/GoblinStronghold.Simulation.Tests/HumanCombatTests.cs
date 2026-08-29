@@ -20,12 +20,20 @@ public sealed class HumanCombatTests
         Assert.InRange(snapshot.HumanVillage.LastIntruderSeenTick, 0, snapshot.Tick.Value);
         Assert.True(snapshot.HumanVillage.GuardHitPoints < snapshot.HumanVillage.MaximumGuardHitPoints);
         Assert.Contains(events, item => item.Kind == SimulationEventKind.HumanVillageAlerted);
-        Assert.Contains(events, item => item.Kind == SimulationEventKind.HumanGuardHitGoblin);
-        Assert.Contains(events, item => item.Kind == SimulationEventKind.GoblinHitHumanGuard);
+        Assert.Contains(events, item =>
+            item.Kind == SimulationEventKind.HumanGuardHitGoblin &&
+            (item.Subject.Value & 0x8000000000000000UL) != 0);
+        Assert.Contains(events, item =>
+            item.Kind == SimulationEventKind.GoblinHitHumanGuard &&
+            (item.Target.Value & 0x8000000000000000UL) != 0);
+        Assert.Equal(
+            snapshot.HumanVillage.GuardHitPoints,
+            snapshot.HumanVillage.Villagers.Where(villager =>
+                villager.Role == HumanCohortRole.Guards).Sum(villager => villager.Health));
     }
 
     [Fact]
-    public void ExplicitRaidOrderStagesAndSendsTribe()
+    public void ExplicitRaidOrderStagesAndSendsProvisionedParty()
     {
         var engine = CreateEncounterEngine(orderRaid: true);
 
@@ -33,14 +41,19 @@ public sealed class HumanCombatTests
 
         var snapshot = engine.CreateSnapshot();
         var events = engine.DrainEvents();
-        Assert.False(snapshot.HumanVillage.GoblinAttackOrdered);
-        Assert.Equal(GoblinRaidPhase.None, snapshot.RaidPhase);
+        Assert.True(snapshot.HumanVillage.GoblinAttackOrdered);
+        Assert.Equal(GoblinRaidPhase.Marching, snapshot.RaidPhase);
         Assert.Equal(100, snapshot.HumanVillage.Hostility);
-        Assert.Equal(0, snapshot.HumanVillage.GuardHitPoints);
+        Assert.InRange(
+            snapshot.HumanVillage.GuardHitPoints,
+            1,
+            snapshot.HumanVillage.MaximumGuardHitPoints - 1);
         var departure = Assert.Single(events,
             item => item.Kind == SimulationEventKind.RaidDeparted);
         Assert.Equal(SimulationDefinitions.FieldCampCapacity, departure.Amount);
-        Assert.Contains(events, item => item.Kind == SimulationEventKind.RaidVictory);
+        Assert.Contains(events, item =>
+            item.Kind == SimulationEventKind.GoblinHitHumanGuard &&
+            item.Target != EntityId.None);
     }
 
     [Fact]
@@ -61,6 +74,13 @@ public sealed class HumanCombatTests
             .Single(model => model["role"]!.GetValue<int>() == (int)HumanCohortRole.Guards);
         var guardPopulation = guard["population"]!.GetValue<int>();
         guard["population"] = 0;
+        foreach (var villager in save["humanVillage"]!["villagers"]!.AsArray()
+                     .Select(node => node!.AsObject())
+                     .Where(model => model["role"]!.GetValue<int>() ==
+                         (int)HumanCohortRole.Guards))
+        {
+            villager["health"] = 0;
+        }
         save["humanVillage"]!["guardHitPoints"] = 0;
         save["humanVillage"]!["population"] =
             save["humanVillage"]!["population"]!.GetValue<int>() - guardPopulation;
@@ -126,8 +146,9 @@ public sealed class HumanCombatTests
             map,
             initialGoblinCount: 1,
             initialFoodStock: 0);
-        var guard = engine.CreateSnapshot().HumanVillage.Cohorts.Single(cohort =>
-            cohort.Role == HumanCohortRole.Guards);
+        var guards = engine.CreateSnapshot().HumanVillage.Villagers.Where(villager =>
+            villager.Role == HumanCohortRole.Guards && villager.Health > 0).ToArray();
+        var guard = guards[0];
         var firingPosition = Enumerable.Range(0, map.Height)
             .SelectMany(y => Enumerable.Range(0, map.Width)
                 .Select(x => new GridPosition(x, y)))
@@ -147,6 +168,11 @@ public sealed class HumanCombatTests
         actor["personalStoneAmmo"] = 1;
         engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
         var guardHealth = engine.CreateSnapshot().HumanVillage.GuardHitPoints;
+        var expectedTarget = guards
+            .OrderBy(candidate => Math.Abs(candidate.Position.X - firingPosition.X) +
+                Math.Abs(candidate.Position.Y - firingPosition.Y))
+            .ThenBy(candidate => candidate.Id)
+            .First();
 
         for (var index = 0; index < 200 &&
              engine.CreateSnapshot().Actors[0].PersonalStoneAmmo > 0; index++)
@@ -157,10 +183,19 @@ public sealed class HumanCombatTests
         var snapshot = engine.CreateSnapshot();
         Assert.Equal(0, snapshot.Actors[0].PersonalStoneAmmo);
         Assert.True(snapshot.HumanVillage.GuardHitPoints < guardHealth);
+        Assert.True(snapshot.HumanVillage.Villagers.Single(villager =>
+            villager.Id == expectedTarget.Id).Health < expectedTarget.Health);
+        Assert.All(snapshot.HumanVillage.Villagers.Where(villager =>
+                villager.Role == HumanCohortRole.Guards && villager.Id != expectedTarget.Id),
+            untouched => Assert.Equal(
+                guards.Single(before => before.Id == untouched.Id).Health,
+                untouched.Health));
         Assert.Contains(snapshot.BloodStains, stain =>
-            stain.Position == guard.Position && stain.Volume > 0);
+            stain.Position == expectedTarget.Position && stain.Volume > 0);
         Assert.Contains(engine.DrainEvents(), simulationEvent =>
-            simulationEvent.Kind == SimulationEventKind.GoblinHitHumanGuard);
+            simulationEvent.Kind == SimulationEventKind.GoblinHitHumanGuard &&
+            simulationEvent.Target.Value ==
+                (0x8000000000000000UL | (uint)expectedTarget.Id));
     }
 
     private static void AdvanceUntilAlerted(SimulationEngine engine, int maximumTicks)
@@ -199,12 +234,16 @@ public sealed class HumanCombatTests
         }
         if (orderRaid)
         {
+            var stagingTarget = new GridPosition(
+                (map.GoblinSpawn.X + (2 * map.HumanVillage.X)) / 3,
+                (map.GoblinSpawn.Y + (2 * map.HumanVillage.Y)) / 3,
+                map.GoblinSpawn.Z);
             var camp = Enumerable.Range(0, map.Height)
                 .SelectMany(y => Enumerable.Range(0, map.Width)
                     .Select(x => new GridPosition(x, y)))
                 .Where(engine.World.CanBuildGoblinFieldCamp)
-                .OrderBy(position => Math.Abs(position.X - map.GoblinSpawn.X) +
-                    Math.Abs(position.Y - map.GoblinSpawn.Y))
+                .OrderBy(position => Math.Abs(position.X - stagingTarget.X) +
+                    Math.Abs(position.Y - stagingTarget.Y))
                 .ThenBy(position => position.Y)
                 .ThenBy(position => position.X)
                 .First();
@@ -216,8 +255,14 @@ public sealed class HumanCombatTests
         if (orderRaid)
         {
             SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+            var executeAt = engine.CurrentTick.Next();
+            engine.QueueCommand(SimulationCommand.ConfigureRaidDirectives(
+                executeAt,
+                sequence: 999,
+                SimulationEngine.DefaultRaidDirectives |
+                    RaidDirective.AutoLaunchWhenReady));
             engine.QueueCommand(SimulationCommand.AttackHumanVillage(
-                engine.CurrentTick.Next(), sequence: 999));
+                executeAt, sequence: 1_000));
             engine.AdvanceTicks(1);
             return engine;
         }

@@ -104,6 +104,7 @@ public enum ActorJobStage : byte
     ProvisioningFood = 3,
     ProvisioningWater = 4,
     ProvisioningAmmo = 5,
+    ProvisioningEquipment = 6,
 }
 
 public enum ActorJobPhase : byte
@@ -296,6 +297,7 @@ public enum HumanCohortTask : byte
     BuildStorehouse = 5,
     Guard = 6,
     Flee = 7,
+    CraftGoods = 8,
 }
 
 [Flags]
@@ -320,7 +322,8 @@ public readonly record struct HumanFieldSnapshot(
     int Id,
     GridPosition Position,
     HumanFieldPhase Phase,
-    int GrowthDays);
+    int GrowthDays,
+    int WorkProgress);
 
 public readonly record struct HumanCohortSnapshot(
     int Id,
@@ -330,6 +333,23 @@ public readonly record struct HumanCohortSnapshot(
     HumanCohortTask Task,
     int SkillLevel,
     HumanTool Tools);
+
+public readonly record struct HumanVillagerSnapshot(
+    int Id,
+    string Name,
+    HumanCohortRole Role,
+    GridPosition Position,
+    HumanCohortTask Task,
+    int SkillLevel,
+    HumanTool Tools,
+    int Health,
+    int MaximumHealth,
+    int Fatigue,
+    int MaximumFatigue,
+    int Hunger,
+    int Thirst,
+    int MaximumNeed,
+    int WorkProgress);
 
 public sealed class HumanVillageSnapshot
 {
@@ -348,7 +368,13 @@ public sealed class HumanVillageSnapshot
         long lastIntruderSeenTick,
         int guardHitPoints,
         int maximumGuardHitPoints,
+        GridPosition? treeFellingTarget,
+        int treeFellingProgress,
+        int goodsWorkProgress,
+        GridPosition? storehouseSite,
+        int storehouseWorkProgress,
         HumanCohortSnapshot[] cohorts,
+        HumanVillagerSnapshot[] villagers,
         HumanFieldSnapshot[] fields)
     {
         Anchor = anchor;
@@ -365,7 +391,13 @@ public sealed class HumanVillageSnapshot
         LastIntruderSeenTick = lastIntruderSeenTick;
         GuardHitPoints = guardHitPoints;
         MaximumGuardHitPoints = maximumGuardHitPoints;
+        TreeFellingTarget = treeFellingTarget;
+        TreeFellingProgress = treeFellingProgress;
+        GoodsWorkProgress = goodsWorkProgress;
+        StorehouseSite = storehouseSite;
+        StorehouseWorkProgress = storehouseWorkProgress;
         Cohorts = new ReadOnlyCollection<HumanCohortSnapshot>(cohorts);
+        Villagers = new ReadOnlyCollection<HumanVillagerSnapshot>(villagers);
         Fields = new ReadOnlyCollection<HumanFieldSnapshot>(fields);
     }
 
@@ -397,7 +429,19 @@ public sealed class HumanVillageSnapshot
 
     public int MaximumGuardHitPoints { get; }
 
+    public GridPosition? TreeFellingTarget { get; }
+
+    public int TreeFellingProgress { get; }
+
+    public int GoodsWorkProgress { get; }
+
+    public GridPosition? StorehouseSite { get; }
+
+    public int StorehouseWorkProgress { get; }
+
     public IReadOnlyList<HumanCohortSnapshot> Cohorts { get; }
+
+    public IReadOnlyList<HumanVillagerSnapshot> Villagers { get; }
 
     public IReadOnlyList<HumanFieldSnapshot> Fields { get; }
 }

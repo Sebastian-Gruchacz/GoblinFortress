@@ -9,6 +9,79 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class WorldMapStateTests
 {
     [Fact]
+    public void ElevatedWalkwayBridgesUnsupportedOpenCell()
+    {
+        SimulationEngine? engine = null;
+        (GridPosition Left, GridPosition Gap, GridPosition Right)? crossing = null;
+        for (ulong seedValue = 1; seedValue <= 64 && crossing is null; seedValue++)
+        {
+            var seed = new WorldSeed(seedValue);
+            var candidateEngine = SimulationEngine.Create(
+                seed,
+                SimulationDefinitions.Foundation,
+                SwampMapGenerator.Generate(seed, 64, 64),
+                initialGoblinCount: 1,
+                initialFoodStock: 8,
+                initialWoodStock: 4);
+            var actor = Assert.Single(candidateEngine.CreateSnapshot().Actors);
+            for (var z = candidateEngine.Map.MinimumWorldLevel;
+                 z <= candidateEngine.Map.MaximumWorldLevel && crossing is null;
+                 z++)
+            {
+                for (var y = 1; y < candidateEngine.Map.Height - 1 && crossing is null; y++)
+                {
+                    for (var x = 1; x < candidateEngine.Map.Width - 1; x++)
+                    {
+                        var gap = new GridPosition(x, y, z);
+                        if (!candidateEngine.Map.TryGetInitialGeometry(gap, out var geometry) ||
+                            geometry.IsSolid || geometry.IsSupported ||
+                            geometry.Fluid != CellFluidKind.None ||
+                            !candidateEngine.World.CanBuildWalkway([gap]))
+                        {
+                            continue;
+                        }
+
+                        foreach (var pair in new[]
+                                 {
+                                     (Left: gap with { X = x - 1 },
+                                      Right: gap with { X = x + 1 }),
+                                     (Left: gap with { Y = y - 1 },
+                                      Right: gap with { Y = y + 1 }),
+                                 })
+                        {
+                            if (candidateEngine.World.IsTerrainTraversable(pair.Left) &&
+                                candidateEngine.World.IsTerrainTraversable(pair.Right) &&
+                                candidateEngine.Navigation.FindPath(actor.Position, pair.Left) is not null)
+                            {
+                                engine = candidateEngine;
+                                crossing = (pair.Left, gap, pair.Right);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        var bridge = crossing ?? throw new InvalidOperationException(
+            "The deterministic generator sample did not contain a reachable ravine crossing.");
+        var bridgeEngine = engine ?? throw new InvalidOperationException(
+            "The crossing has no owning simulation.");
+        Assert.False(bridgeEngine.World.IsTerrainTraversable(bridge.Gap));
+        bridgeEngine.QueueCommand(SimulationCommand.BuildWalkway(
+            bridgeEngine.CurrentTick.Next(),
+            bridgeEngine.NextAvailableCommandSequence,
+            bridge.Gap,
+            bridge.Gap));
+        bridgeEngine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(bridgeEngine);
+
+        Assert.True(bridgeEngine.World.IsTerrainTraversable(bridge.Gap));
+        Assert.True(bridgeEngine.World.CanTraverseTerrainEdge(bridge.Left, bridge.Gap));
+        Assert.True(bridgeEngine.World.CanTraverseTerrainEdge(bridge.Gap, bridge.Right));
+    }
+
+    [Fact]
     public void DeepRiverVolumeOverridesLegacyCaveRockAfterSaveLoad()
     {
         var seed = new WorldSeed(456);
@@ -371,6 +444,190 @@ public sealed class WorldMapStateTests
         var beforeDrain = engine.ComputeStateHash();
         Assert.NotEmpty(engine.DrainWorldChanges());
         Assert.Equal(beforeDrain, engine.ComputeStateHash());
+    }
+
+    [Fact]
+    public void MultiGoalNavigationFindsTheNearestShelterWithOneSearch()
+    {
+        var engine = CreateEngine();
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        var destinations = engine.World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(item => item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door)
+            .Select(item => item.Position)
+            .Where(engine.World.IsTerrainTraversable)
+            .ToHashSet();
+        var expectedLength = destinations
+            .Select(destination => engine.World.FindTerrainPath(
+                actor.Position,
+                destination,
+                canOpenDoors: true)?.Count)
+            .Where(length => length.HasValue)
+            .Min();
+        var before = engine.Navigation.GetMetrics();
+
+        var route = engine.Navigation.FindPathToNearest(actor.Position, destinations);
+
+        var after = engine.Navigation.GetMetrics();
+        Assert.NotNull(route);
+        Assert.Equal(expectedLength, route.Count);
+        Assert.Contains(route.Count == 0 ? actor.Position : route[^1], destinations);
+        Assert.Equal(before.Searches + 1, after.Searches);
+        Assert.True(after.ExpandedNodes > before.ExpandedNodes);
+    }
+
+    [Fact]
+    public void NearestHarvestablePlantQueryMatchesSnapshotOrderingWithoutMaterializingTheMap()
+    {
+        var engine = CreateEngine();
+        var origin = Assert.Single(engine.CreateSnapshot().Actors).Position;
+        var center = engine.Map.HumanVillage;
+        const int radius = 12;
+        var expected = engine.World.CreatePlantSnapshot()
+            .Where(patch => patch.Kind == PlantKind.BerryBush && patch.Biomass > 0)
+            .Where(patch => Math.Abs(patch.Position.X - center.X) +
+                Math.Abs(patch.Position.Y - center.Y) +
+                Math.Abs(patch.Position.Z - center.Z) <= radius)
+            .OrderBy(patch => Math.Abs(patch.Position.X - origin.X) +
+                Math.Abs(patch.Position.Y - origin.Y) +
+                Math.Abs(patch.Position.Z - origin.Z))
+            .ThenBy(patch => patch.Position.Y)
+            .ThenBy(patch => patch.Position.X)
+            .Select(patch => (GridPosition?)patch.Position)
+            .FirstOrDefault();
+
+        var actual = engine.World.FindNearestHarvestablePlantPosition(
+            origin,
+            center,
+            radius,
+            PlantKind.BerryBush);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void BudgetedNavigationResumesOneDeterministicSearchAcrossRequests()
+    {
+        var engine = CreateEngine();
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        var candidate =
+            (from y in Enumerable.Range(0, engine.Map.Height)
+             from x in Enumerable.Range(0, engine.Map.Width)
+             let position = engine.Map.GetTerrainSurfacePosition(new GridPosition(x, y))
+             where engine.World.IsTerrainTraversable(position)
+             orderby Math.Abs(position.X - actor.Position.X) +
+                 Math.Abs(position.Y - actor.Position.Y) descending
+             let route = engine.World.FindTerrainPath(
+                 actor.Position,
+                 position,
+                 canOpenDoors: true)
+             where route is { Count: > 4 }
+             select new { Position = position, Route = route }).First();
+        var before = engine.Navigation.GetMetrics();
+
+        var request = engine.Navigation.RequestPath(
+            actor.Position,
+            candidate.Position,
+            maximumExpandedNodes: 1);
+
+        Assert.Equal(NavigationPathRequestStatus.Pending, request.Status);
+        Assert.Equal(1, engine.Navigation.GetMetrics().PendingSearches);
+        for (var slice = 0; slice < engine.Map.CellCount * engine.Map.LevelCount * 2 &&
+             request.Status == NavigationPathRequestStatus.Pending; slice++)
+        {
+            request = engine.Navigation.RequestPath(
+                actor.Position,
+                candidate.Position,
+                maximumExpandedNodes: 1);
+        }
+
+        var after = engine.Navigation.GetMetrics();
+        Assert.Equal(NavigationPathRequestStatus.Complete, request.Status);
+        Assert.Equal(candidate.Route, request.Path);
+        Assert.Equal(before.Searches + 1, after.Searches);
+        Assert.Equal(0, after.PendingSearches);
+        Assert.True(after.ExpandedNodes > before.ExpandedNodes + 1);
+    }
+
+    [Fact]
+    public void BudgetedNavigationToNearestResumesOneSearchAndCachesItsRoute()
+    {
+        var engine = CreateEngine();
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        var candidates =
+            (from y in Enumerable.Range(0, engine.Map.Height)
+             from x in Enumerable.Range(0, engine.Map.Width)
+             let position = engine.Map.GetTerrainSurfacePosition(new GridPosition(x, y))
+             where engine.World.IsTerrainTraversable(position)
+             let distance = Math.Abs(position.X - actor.Position.X) +
+                 Math.Abs(position.Y - actor.Position.Y)
+             where distance > 8
+             orderby distance descending, position.Y, position.X
+             select position)
+            .Take(8)
+            .ToHashSet();
+        Assert.NotEmpty(candidates);
+        var expected = engine.Navigation.FindPathToNearest(actor.Position, candidates);
+        Assert.NotNull(expected);
+        Assert.True(expected.Count > 4);
+        var before = engine.Navigation.GetMetrics();
+
+        var request = engine.Navigation.RequestPathToNearest(
+            actor.Position,
+            candidates,
+            maximumExpandedNodes: 1);
+
+        Assert.Equal(NavigationPathRequestStatus.Pending, request.Status);
+        Assert.Equal(1, engine.Navigation.GetMetrics().PendingSearches);
+        for (var slice = 0; slice < engine.Map.CellCount * engine.Map.LevelCount * 2 &&
+             request.Status == NavigationPathRequestStatus.Pending; slice++)
+        {
+            request = engine.Navigation.RequestPathToNearest(
+                actor.Position,
+                candidates,
+                maximumExpandedNodes: 1);
+        }
+
+        var after = engine.Navigation.GetMetrics();
+        Assert.Equal(NavigationPathRequestStatus.Complete, request.Status);
+        Assert.Equal(expected.Count, request.Path!.Count);
+        Assert.Contains(request.Path!.Count == 0 ? actor.Position : request.Path[^1], candidates);
+        Assert.Equal(before.Searches + 1, after.Searches);
+        Assert.Equal(0, after.PendingSearches);
+        Assert.True(after.ExpandedNodes > before.ExpandedNodes + 1);
+
+        var cached = engine.Navigation.RequestPathToNearest(
+            actor.Position,
+            candidates,
+            maximumExpandedNodes: 1);
+        var cachedMetrics = engine.Navigation.GetMetrics();
+        Assert.Equal(NavigationPathRequestStatus.Complete, cached.Status);
+        Assert.Equal(request.Path, cached.Path);
+        Assert.Equal(after.Searches, cachedMetrics.Searches);
+        Assert.Equal(after.CacheHits + 1, cachedMetrics.CacheHits);
+    }
+
+    [Fact]
+    public void RoofedGoblinBuildingsRejectTreeCrownSpaceAboveTheirFootprint()
+    {
+        var engine = CreateEngine();
+        var crownCells = engine.World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.Tree)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(part => part.Part.Kind == WorldObjectPartKind.TreeCrown &&
+                part.Position.Z == 1)
+            .Select(part => part.Position)
+            .ToHashSet();
+        var anchor = crownCells
+            .Select(crown => new GridPosition(crown.X, crown.Y, 0))
+            .First(candidate =>
+                Enumerable.Range(0, 2).SelectMany(y => Enumerable.Range(0, 2)
+                        .Select(x => new GridPosition(candidate.X + x, candidate.Y + y, 0)))
+                    .All(position => engine.World.IsTerrainTraversable(position) &&
+                        engine.World.GetWorldObjectsAt(position).Count == 0));
+
+        Assert.False(engine.World.CanBuildGoblinFieldCamp(anchor));
     }
 
     private static SimulationEngine CreateEngine() => SimulationEngine.Create(

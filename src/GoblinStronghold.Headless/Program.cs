@@ -288,15 +288,80 @@ static int RunStartupProfile(string? savePath)
         $"Authoritative snapshot avg/max: {authoritativeTimes.Average():F1}/" +
         $"{authoritativeTimes.Max():F1} ms");
 
-    var tickTimes = new double[100];
+    var constructionEngine = SimulationEngine.Load(
+        engine.Save(),
+        definitions,
+        SimulationDebugSettings.ForCurrentBuild);
+    var constructionSnapshot = constructionEngine.CreatePresentationSnapshot();
+    var occupiedConstructionCells = constructionSnapshot.WorldObjects
+        .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+        .Select(part => part.Position)
+        .Concat(constructionSnapshot.StorageZones.Select(zone => zone.Position))
+        .Concat(constructionSnapshot.ConstructionSites.SelectMany(site => site.Footprint))
+        .ToHashSet();
+    GridPosition? constructionPosition =
+        (from y in Enumerable.Range(0, constructionEngine.Map.Height)
+         from x in Enumerable.Range(0, constructionEngine.Map.Width)
+         let position = new GridPosition(x, y, 0)
+         where constructionSnapshot.GetVisibility(position, constructionEngine.Map.Width) !=
+                   CellVisibility.Unknown &&
+               constructionEngine.World.IsSurfaceTraversable(position) &&
+               !occupiedConstructionCells.Contains(position)
+         select (GridPosition?)position).FirstOrDefault();
+    if (constructionPosition is { } buildPosition)
+    {
+        constructionEngine.AdvanceTicks(1);
+        var queueConstruction = Stopwatch.StartNew();
+        constructionEngine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            constructionEngine.CurrentTick.Next(),
+            constructionEngine.NextAvailableCommandSequence,
+            buildPosition));
+        queueConstruction.Stop();
+        var executeConstruction = Stopwatch.StartNew();
+        constructionEngine.AdvanceTicks(1);
+        executeConstruction.Stop();
+        var constructionStages = constructionEngine.GetMetrics().LastTickBreakdown;
+        Console.WriteLine(
+            $"Construction command queue/execute: " +
+            $"{queueConstruction.Elapsed.TotalMilliseconds:F2}/" +
+            $"{executeConstruction.Elapsed.TotalMilliseconds:F2} ms • " +
+            $"commands {constructionStages.Commands.TotalMilliseconds:F2}, " +
+            $"jobs {constructionStages.ActorJobs.TotalMilliseconds:F2}");
+
+        var warmedConstructionEngine = SimulationEngine.Load(
+            engine.Save(),
+            definitions,
+            SimulationDebugSettings.ForCurrentBuild);
+        warmedConstructionEngine.AdvanceTicks(1);
+        var warmedQueueConstruction = Stopwatch.StartNew();
+        warmedConstructionEngine.QueueCommand(SimulationCommand.BuildFoodStorage(
+            warmedConstructionEngine.CurrentTick.Next(),
+            warmedConstructionEngine.NextAvailableCommandSequence,
+            buildPosition));
+        warmedQueueConstruction.Stop();
+        var warmedExecuteConstruction = Stopwatch.StartNew();
+        warmedConstructionEngine.AdvanceTicks(1);
+        warmedExecuteConstruction.Stop();
+        var warmedConstructionStages = warmedConstructionEngine.GetMetrics().LastTickBreakdown;
+        Console.WriteLine(
+            $"Construction after warmup queue/execute: " +
+            $"{warmedQueueConstruction.Elapsed.TotalMilliseconds:F2}/" +
+            $"{warmedExecuteConstruction.Elapsed.TotalMilliseconds:F2} ms • " +
+            $"commands {warmedConstructionStages.Commands.TotalMilliseconds:F2}, " +
+            $"jobs {warmedConstructionStages.ActorJobs.TotalMilliseconds:F2}");
+    }
+
+    var tickTimes = new double[240];
     for (var index = 0; index < tickTimes.Length; index++)
     {
+        var navigationBefore = engine.GetMetrics().Navigation;
         var tick = Stopwatch.StartNew();
         engine.AdvanceTicks(1);
         tickTimes[index] = tick.Elapsed.TotalMilliseconds;
         if (index < 20 || tickTimes[index] >= 10)
         {
             var stages = engine.GetMetrics().LastTickBreakdown;
+            var navigationAfter = engine.GetMetrics().Navigation;
             var jobs = engine.GetLastActorJobUpdateProfile();
             Console.WriteLine(
                 $"Tick {engine.CurrentTick.Value}: {tickTimes[index]:F1} ms • " +
@@ -308,7 +373,21 @@ static int RunStartupProfile(string? savePath)
                 $"visibility {stages.Visibility.TotalMilliseconds:F1}, " +
                 $"humans {stages.HumanVillage.TotalMilliseconds:F1}, " +
                 $"animals {stages.Animals.TotalMilliseconds:F1}, " +
-                $"actors {stages.Actors.TotalMilliseconds:F1}");
+                $"actors {stages.Actors.TotalMilliseconds:F1} • " +
+                $"paths {navigationAfter.Requests - navigationBefore.Requests} req, " +
+                $"{navigationAfter.Searches - navigationBefore.Searches} searches, " +
+                $"{navigationAfter.CacheHits - navigationBefore.CacheHits} hits, " +
+                $"{navigationAfter.ExpandedNodes - navigationBefore.ExpandedNodes:N0} expanded, " +
+                $"{navigationAfter.PendingSearches:N0} pending");
+            foreach (var attempt in engine.GetLastActorPlanningAttempts()
+                         .OrderByDescending(attempt => attempt.Duration))
+            {
+                Console.WriteLine(
+                    $"  actor {attempt.ActorId.Value} {attempt.Category}: " +
+                    $"{attempt.Duration.TotalMilliseconds:F1} ms, " +
+                    $"{attempt.PathRequests} req, {attempt.PathSearches} searches, " +
+                    $"assigned={attempt.Assigned}");
+            }
         }
     }
 
@@ -316,5 +395,11 @@ static int RunStartupProfile(string? savePath)
     Console.WriteLine(
         $"Ticks avg/p95/max: {tickTimes.Average():F2}/" +
         $"{ordered[(int)(ordered.Length * 0.95)]:F2}/{tickTimes.Max():F2} ms");
+    var warmedTickTimes = tickTimes.Skip(20).ToArray();
+    var warmedOrdered = warmedTickTimes.Order().ToArray();
+    Console.WriteLine(
+        $"Ticks after warmup avg/p95/max: {warmedTickTimes.Average():F2}/" +
+        $"{warmedOrdered[(int)(warmedOrdered.Length * 0.95)]:F2}/" +
+        $"{warmedTickTimes.Max():F2} ms");
     return 0;
 }

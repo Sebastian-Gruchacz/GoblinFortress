@@ -165,6 +165,11 @@ internal static class CraftingRecipeCatalog
         (ResourceKind.Reeds, 3),
     ];
 
+    private static readonly (ResourceKind Resource, int Quantity)[] PrimitiveWaterskinMaterials =
+    [
+        (ResourceKind.Hide, 1),
+    ];
+
     public static IReadOnlyList<(ResourceKind Resource, int Quantity)> GetMaterials(
         CraftingRecipeKind recipe) => recipe switch
     {
@@ -174,6 +179,7 @@ internal static class CraftingRecipeCatalog
         CraftingRecipeKind.StoneClub => StoneClubMaterials,
         CraftingRecipeKind.HideClothes => HideClothesMaterials,
         CraftingRecipeKind.ReedClothes => ReedClothesMaterials,
+        CraftingRecipeKind.PrimitiveWaterskin => PrimitiveWaterskinMaterials,
         _ => throw new ArgumentOutOfRangeException(nameof(recipe), recipe, null),
     };
 
@@ -191,6 +197,7 @@ internal static class CraftingRecipeCatalog
         CraftingRecipeKind.StoneClub => 70,
         CraftingRecipeKind.HideClothes => 100,
         CraftingRecipeKind.ReedClothes => 80,
+        CraftingRecipeKind.PrimitiveWaterskin => 65,
         _ => throw new ArgumentOutOfRangeException(nameof(recipe), recipe, null),
     };
 }

@@ -18,8 +18,7 @@ public sealed partial class SimulationEngine
         RaidDirective.AttackGuards |
         RaidDirective.LootEquipment |
         RaidDirective.LootSupplies |
-        RaidDirective.LootFood |
-        RaidDirective.AutoLaunchWhenReady;
+        RaidDirective.LootFood;
 
     private static readonly JsonSerializerOptions SaveOptions = new()
     {
@@ -57,6 +56,7 @@ public sealed partial class SimulationEngine
     private long _eventsPublished;
     private long _actorUpdates;
     private long _lastCommandExecutionTick = -1;
+    private long _lastConstructionCommandExecutionTick = -1;
     private long _lastTickStopwatchTicks;
     private long _totalTickStopwatchTicks;
     private long[] _lastTickStageStopwatchTicks = new long[10];
@@ -683,7 +683,9 @@ public sealed partial class SimulationEngine
                 matchingSourceCount);
     }
 
-    public ConstructionReadinessDiagnostic InspectConstructionReadiness(EntityId siteId)
+    public ConstructionReadinessDiagnostic InspectConstructionReadiness(
+        EntityId siteId,
+        bool evaluateReachability = true)
     {
         if (!_constructionSites.TryGetValue(siteId, out var site))
         {
@@ -740,6 +742,14 @@ public sealed partial class SimulationEngine
                     matchingSourceCount: matchingSources.Length);
             }
 
+            if (!evaluateReachability)
+            {
+                return CreateDiagnostic(
+                    ConstructionReadinessState.WaitingForSupplier,
+                    availableQuantity: availableQuantity,
+                    matchingSourceCount: matchingSources.Length);
+            }
+
             var hasReachablePlan = availableSources.Any(source =>
                 suppliers.Any(actor =>
                     FindActorPath(actor, source.Stack.Location.Position) is not null &&
@@ -769,6 +779,11 @@ public sealed partial class SimulationEngine
         if (capableBuilders.Length == 0)
         {
             return CreateDiagnostic(ConstructionReadinessState.NoCapableBuilder);
+        }
+
+        if (!evaluateReachability)
+        {
+            return CreateDiagnostic(ConstructionReadinessState.WaitingForBuilder);
         }
 
         var hasReachableBuilder = capableBuilders.Any(actor =>
@@ -1158,6 +1173,19 @@ public sealed partial class SimulationEngine
         Append(canonical, humanVillage.LastIntruderSeenTick);
         Append(canonical, humanVillage.GuardHitPoints);
         Append(canonical, humanVillage.MaximumGuardHitPoints);
+        Append(canonical, humanVillage.TreeFellingTarget is null ? 0 : 1);
+        if (humanVillage.TreeFellingTarget is { } treeFellingTarget)
+        {
+            Append(canonical, treeFellingTarget);
+        }
+        Append(canonical, humanVillage.TreeFellingProgress);
+        Append(canonical, humanVillage.GoodsWorkProgress);
+        Append(canonical, humanVillage.StorehouseSite is null ? 0 : 1);
+        if (humanVillage.StorehouseSite is { } storehouseSite)
+        {
+            Append(canonical, storehouseSite);
+        }
+        Append(canonical, humanVillage.StorehouseWorkProgress);
         Append(canonical, humanVillage.Cohorts.Count);
         foreach (var cohort in humanVillage.Cohorts)
         {
@@ -1169,6 +1197,24 @@ public sealed partial class SimulationEngine
             Append(canonical, cohort.SkillLevel);
             Append(canonical, (int)cohort.Tools);
         }
+        Append(canonical, humanVillage.Villagers.Count);
+        foreach (var villager in humanVillage.Villagers)
+        {
+            Append(canonical, villager.Id);
+            Append(canonical, (int)villager.Role);
+            Append(canonical, villager.Position);
+            Append(canonical, (int)villager.Task);
+            Append(canonical, villager.SkillLevel);
+            Append(canonical, (int)villager.Tools);
+            Append(canonical, villager.Health);
+            Append(canonical, villager.MaximumHealth);
+            Append(canonical, villager.Fatigue);
+            Append(canonical, villager.MaximumFatigue);
+            Append(canonical, villager.Hunger);
+            Append(canonical, villager.Thirst);
+            Append(canonical, villager.MaximumNeed);
+            Append(canonical, villager.WorkProgress);
+        }
         Append(canonical, humanVillage.Fields.Count);
         foreach (var field in humanVillage.Fields)
         {
@@ -1176,6 +1222,7 @@ public sealed partial class SimulationEngine
             Append(canonical, field.Position);
             Append(canonical, (int)field.Phase);
             Append(canonical, field.GrowthDays);
+            Append(canonical, field.WorkProgress);
         }
 
         var visibility = Visibility.CreateSnapshot();
@@ -2364,14 +2411,27 @@ public sealed partial class SimulationEngine
 
     private bool TryExecuteSuspendRaidPreparation()
     {
-        if (_raidPhase is not (GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready))
+        if (_raidPhase is not (GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready or
+            GoblinRaidPhase.Marching))
         {
             return false;
         }
 
+        var wasMarching = _raidPhase == GoblinRaidPhase.Marching;
+        if (wasMarching)
+        {
+            _humanVillage.EndGoblinAttack();
+        }
         _raidPhase = GoblinRaidPhase.Suspended;
         foreach (var actor in GetRaidParty())
         {
+            if (wasMarching && actor.JobKind == ActorJobKind.Move &&
+                actor.JobTarget == _raidTarget)
+            {
+                actor.ClearJob();
+                actor.ClearSuspendedJob();
+                continue;
+            }
             if (actor.CarriedStackId == EntityId.None)
             {
                 actor.ClearJob();
@@ -2418,7 +2478,7 @@ public sealed partial class SimulationEngine
 
     private bool TryExecuteConfigureRaidTarget(SimulationCommand command)
     {
-        if (_raidPhase is not (GoblinRaidPhase.None or GoblinRaidPhase.Suspended) ||
+        if (_raidPhase == GoblinRaidPhase.Marching ||
             !IsAddressableMapPosition(command.Position) ||
             command.Amount is < MinimumRaidTargetRadius or > MaximumRaidTargetRadius)
         {
@@ -2427,25 +2487,27 @@ public sealed partial class SimulationEngine
 
         _raidTarget = command.Position;
         _raidTargetRadius = command.Amount;
+        InvalidateReadyRaidPlan();
         return true;
     }
 
     private bool TryExecuteConfigureRaidDirectives(SimulationCommand command)
     {
         var directives = (RaidDirective)command.Amount;
-        if (_raidPhase is not (GoblinRaidPhase.None or GoblinRaidPhase.Suspended) ||
+        if (_raidPhase == GoblinRaidPhase.Marching ||
             !AreValidRaidDirectives(directives))
         {
             return false;
         }
 
         _raidDirectives = directives;
+        InvalidateReadyRaidPlan();
         return true;
     }
 
     private bool TryExecuteConfigureRaidMember(SimulationCommand command)
     {
-        if (_raidPhase is not (GoblinRaidPhase.None or GoblinRaidPhase.Suspended) ||
+        if (_raidPhase == GoblinRaidPhase.Marching ||
             !_actors.TryGetValue(command.Subject, out var actor) ||
             actor.Health <= 0 ||
             IsJuvenile(actor))
@@ -2456,6 +2518,7 @@ public sealed partial class SimulationEngine
         if (command.Amount == 0)
         {
             _raidPartyIds.Remove(actor.Id);
+            InvalidateReadyRaidPlan();
             return true;
         }
         if (_raidPartyIds.Contains(actor.Id))
@@ -2468,7 +2531,16 @@ public sealed partial class SimulationEngine
         }
 
         _raidPartyIds.Add(actor.Id);
+        InvalidateReadyRaidPlan();
         return true;
+    }
+
+    private void InvalidateReadyRaidPlan()
+    {
+        if (_raidPhase == GoblinRaidPhase.Ready)
+        {
+            _raidPhase = GoblinRaidPhase.Preparing;
+        }
     }
 
     private void ValidateLoadedRaidState()
@@ -3033,6 +3105,7 @@ public sealed partial class SimulationEngine
             AddConstructionSite(command.Construction, command.Position, command.EndPosition);
         }
 
+        _lastConstructionCommandExecutionTick = CurrentTick.Value;
         return true;
     }
 
@@ -3087,7 +3160,8 @@ public sealed partial class SimulationEngine
         return kind switch
         {
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
-                ConstructionKind.StoneStorage =>
+                ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
+                ConstructionKind.MaterialsStorage =>
                 anchor.Z == 0
                     ? World.IsSurfaceTraversable(anchor)
                     : World.IsTerrainTraversable(anchor),
@@ -3147,16 +3221,24 @@ public sealed partial class SimulationEngine
             case ConstructionKind.FoodStorage:
             case ConstructionKind.WoodStorage:
             case ConstructionKind.StoneStorage:
+            case ConstructionKind.EquipmentStorage:
+            case ConstructionKind.MaterialsStorage:
                 var acceptedResource = site.Kind switch
                 {
                     ConstructionKind.FoodStorage => ResourceKind.Food,
                     ConstructionKind.WoodStorage => ResourceKind.Wood,
                     ConstructionKind.StoneStorage => ResourceKind.Stone,
+                    ConstructionKind.EquipmentStorage => ResourceKind.Equipment,
+                    ConstructionKind.MaterialsStorage => ResourceKind.Materials,
                     _ => throw new InvalidOperationException(),
                 };
-                var capacity = acceptedResource == ResourceKind.Food
-                    ? Definitions.Storage.SmallFoodCapacity
-                    : 64;
+                var capacity = acceptedResource switch
+                {
+                    ResourceKind.Food => Definitions.Storage.SmallFoodCapacity,
+                    ResourceKind.Equipment => 32,
+                    ResourceKind.Materials => 64,
+                    _ => 64,
+                };
                 completedTarget = AllocateStorageZone(
                     site.Anchor,
                     acceptedResource,
@@ -3804,14 +3886,15 @@ public sealed partial class SimulationEngine
                 }
 
                 if ((command.Construction is ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
-                        ConstructionKind.StoneStorage) &&
+                        ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
+                        ConstructionKind.MaterialsStorage) &&
                     (command.Position != command.EndPosition || command.Amount != 2))
                 {
                     throw new ArgumentException("Food storage construction is invalid.", nameof(command));
                 }
 
                 if (command.Construction == ConstructionKind.WoodenWalkway &&
-                    (command.Amount != 1 || command.Position.Z != 0 || command.EndPosition.Z != 0))
+                    (command.Amount != 1 || command.Position.Z != command.EndPosition.Z))
                 {
                     throw new ArgumentException("Walkway construction is invalid.", nameof(command));
                 }
@@ -4755,6 +4838,8 @@ public sealed partial class SimulationEngine
         ResourceKind.Stone => variant is ResourceVariant.Sandstone or ResourceVariant.Granite ||
             (allowLegacyDefault && variant == ResourceVariant.None),
         ResourceKind.Ore => variant == ResourceVariant.IronOre,
+        ResourceKind.Equipment => variant is >= ResourceVariant.EquipmentPrimitiveSling and
+            <= ResourceVariant.EquipmentPrimitiveWaterskin,
         _ => variant == ResourceVariant.None,
     };
 
@@ -4861,7 +4946,11 @@ public sealed partial class SimulationEngine
     private static bool ZoneCategoryAccepts(StorageZoneState zone, ResourceKind resource) =>
         zone.AcceptedResource is ResourceKind.Any ||
         zone.AcceptedResource == resource ||
+        (zone.AcceptedResource == ResourceKind.Materials && IsBasicCraftingMaterial(resource)) ||
         (zone.AcceptedResource == ResourceKind.Stone && IsMineralResource(resource));
+
+    private static bool IsBasicCraftingMaterial(ResourceKind resource) =>
+        resource is ResourceKind.Reeds or ResourceKind.Bone or ResourceKind.Hide;
 
     private static bool ZoneAccepts(StorageZoneState zone, ItemStackState stack)
     {
@@ -4900,7 +4989,7 @@ public sealed partial class SimulationEngine
         source.AcceptedResource == destination.AcceptedResource;
 
     private static bool IsStorableResource(ResourceKind resource) =>
-        Enum.IsDefined(resource) && resource != ResourceKind.Any;
+        Enum.IsDefined(resource) && resource is not (ResourceKind.Any or ResourceKind.Materials);
 
     private static bool IsStorageFilterResource(ResourceKind resource) =>
         Enum.IsDefined(resource);

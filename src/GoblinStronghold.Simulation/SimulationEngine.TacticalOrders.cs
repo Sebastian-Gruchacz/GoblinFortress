@@ -30,9 +30,14 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanAttackAreaOrder(ActorState actor)
     {
-        var guards = _humanVillage.GetGuardSnapshot();
-        if (guards.Population <= 0 ||
-            Distance(guards.Position, actor.TacticalCenter) > actor.TacticalRadius)
+        var guard = _humanVillage.GetLivingGuardSnapshots()
+            .Where(candidate =>
+                candidate.Task == HumanCohortTask.Guard &&
+                Distance(candidate.Position, actor.TacticalCenter) <= actor.TacticalRadius)
+            .OrderBy(candidate => Distance(candidate.Position, actor.Position))
+            .ThenBy(candidate => candidate.Id)
+            .FirstOrDefault();
+        if (guard.Id == 0)
         {
             CompleteTacticalOrderAndReturn(actor);
             return true;
@@ -43,35 +48,33 @@ public sealed partial class SimulationEngine
                 ? Definitions.RangedCombat.SlingRange
                 : Definitions.RangedCombat.ThrownStoneRange
             : 1;
-        if (Distance(actor.Position, guards.Position) <= attackRange)
+        if (Distance(actor.Position, guard.Position) <= attackRange)
         {
             return true;
         }
 
-        var destination = World.GetCardinalWorldNeighbors(guards.Position)
+        var destinations = World.GetCardinalWorldNeighbors(guard.Position)
             .Where(World.IsTerrainTraversable)
-            .Select(position => new
-            {
-                Position = position,
-                Route = FindActorPath(actor, position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Position.Y)
-            .ThenBy(candidate => candidate.Position.X)
-            .FirstOrDefault();
-        if (destination is null)
+            .ToHashSet();
+        var request = RequestActorPathToNearest(actor, destinations);
+        if (request.Status == NavigationPathRequestStatus.Pending)
+        {
+            return true;
+        }
+        if (request.Status == NavigationPathRequestStatus.Unreachable ||
+            request.Path is not { } route)
         {
             CompleteTacticalOrderAndReturn(actor);
             return true;
         }
 
-        return BeginTacticalMove(actor, destination.Position, destination.Route!);
+        var destination = route.Count == 0 ? actor.Position : route[^1];
+        return BeginTacticalMove(actor, destination, route);
     }
 
     private bool TryPlanHuntAreaOrder(ActorState actor)
     {
-        var best = _animals.Values
+        var candidates = _animals.Values
             .Where(animal =>
                 Distance(animal.Position, actor.TacticalCenter) <= actor.TacticalRadius)
             .SelectMany(animal => GetHuntApproachPositions(actor, animal)
@@ -79,35 +82,42 @@ public sealed partial class SimulationEngine
                 {
                     Animal = animal,
                     Position = position,
-                    Route = FindActorPath(actor, position),
                 }))
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Animal.Id)
-            .FirstOrDefault();
-        if (best is null)
+            .ToArray();
+        var destinations = candidates.Select(candidate => candidate.Position).ToHashSet();
+        var route = FindActorPathToNearest(actor, destinations);
+        if (route is null)
         {
             CompleteTacticalOrderAndReturn(actor);
             return true;
         }
 
+        var destination = route.Count == 0 ? actor.Position : route[^1];
+        var best = candidates
+            .Where(candidate => candidate.Position == destination)
+            .OrderBy(candidate => candidate.Animal.Id)
+            .First();
         actor.TacticalTargetEntityId = new EntityId(best.Animal.Id);
         actor.JobKind = ActorJobKind.HuntAnimal;
         actor.SourceStackId = EntityId.None;
-        actor.JobTarget = best.Position;
-        BeginJobLeg(actor, best.Route!, GetHuntWorkTicks());
+        actor.JobTarget = destination;
+        BeginJobLeg(actor, route, GetHuntWorkTicks());
         return true;
     }
 
     private bool TryBeginTacticalMove(ActorState actor, GridPosition destination)
     {
-        var route = FindActorPath(actor, destination);
-        if (route is null)
+        var request = RequestActorPath(actor, destination);
+        if (request.Status == NavigationPathRequestStatus.Pending)
+        {
+            return true;
+        }
+        if (request.Status == NavigationPathRequestStatus.Unreachable)
         {
             actor.ClearTacticalOrder();
             return false;
         }
-        return BeginTacticalMove(actor, destination, route);
+        return BeginTacticalMove(actor, destination, request.Path!);
     }
 
     private bool BeginTacticalMove(
@@ -130,16 +140,7 @@ public sealed partial class SimulationEngine
     private void CompleteTacticalOrderAndReturn(ActorState actor)
     {
         actor.ClearTacticalOrder();
-        var destination = FindTacticalReturnPosition(actor);
-        var route = FindActorPath(actor, destination);
-        if (route is { Count: > 0 })
-        {
-            BeginTacticalMove(actor, destination, route);
-        }
-    }
-
-    private GridPosition FindTacticalReturnPosition(ActorState actor) =>
-        World.CreateWorldObjectSnapshot()
+        var destinations = World.CreateWorldObjectSnapshot()
             .Where(worldObject =>
                 worldObject.Owner == WorldObjectOwner.GoblinTribe &&
                 worldObject.Kind is WorldObjectKind.GoblinHut or
@@ -147,13 +148,14 @@ public sealed partial class SimulationEngine
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(part => part.Part.Kind == WorldObjectPartKind.Floor &&
                 World.IsTerrainTraversable(part.Position))
-            .Select(part => new
-            {
-                part.Position,
-                Route = FindActorPath(actor, part.Position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .Select(candidate => candidate.Position)
-            .FirstOrDefault(Map.GoblinSpawn);
+            .Select(part => part.Position)
+            .ToHashSet();
+        var route = FindActorPathToNearest(actor, destinations) ??
+            FindActorPath(actor, Map.GoblinSpawn);
+        if (route is { Count: > 0 })
+        {
+            var destination = route[^1];
+            BeginTacticalMove(actor, destination, route);
+        }
+    }
 }

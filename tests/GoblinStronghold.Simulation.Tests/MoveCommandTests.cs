@@ -400,7 +400,14 @@ public sealed class MoveCommandTests
             stack.Id == dropEvent.Target &&
             stack.Location == ItemLocation.OnGround(actor.Position));
 
-        engine.AdvanceTicks(1);
+        for (var tick = 0; tick < 100; tick++)
+        {
+            engine.AdvanceTicks(1);
+            if (Assert.Single(engine.CreateSnapshot().Actors).Job.Kind == ActorJobKind.MineRock)
+            {
+                break;
+            }
+        }
 
         actor = Assert.Single(engine.CreateSnapshot().Actors);
         Assert.Equal(ActorJobKind.MineRock, actor.Job.Kind);

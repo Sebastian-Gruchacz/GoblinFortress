@@ -12,8 +12,17 @@ public sealed class ActorJobTests
         var engine = CreateEngine(goblinCount: 4);
         var spawn = engine.Map.GoblinSpawn;
 
-        engine.AdvanceTicks(1);
-        var planned = engine.CreateSnapshot().Actors;
+        IReadOnlyList<ActorSnapshot> planned = [];
+        for (var tick = 0; tick < 100; tick++)
+        {
+            engine.AdvanceTicks(1);
+            planned = engine.CreateSnapshot().Actors;
+            if (planned.Count(actor => actor.Job.Kind == ActorJobKind.Forage) == 3 &&
+                planned.Count(actor => actor.Job.Kind == ActorJobKind.Explore) == 1)
+            {
+                break;
+            }
+        }
 
         Assert.Single(planned, actor => actor.Job.Kind == ActorJobKind.Explore);
         var foragers = planned.Where(actor => actor.Job.Kind == ActorJobKind.Forage).ToArray();

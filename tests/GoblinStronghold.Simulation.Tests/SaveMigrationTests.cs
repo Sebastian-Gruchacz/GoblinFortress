@@ -8,6 +8,44 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class SaveMigrationTests
 {
     [Fact]
+    public void VersionFiftyThreeDisablesLegacyDefaultAutomaticRaidLaunch()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 53;
+        save["raidDirectives"] = (int)(SimulationEngine.DefaultRaidDirectives |
+            RaidDirective.AutoLaunchWhenReady);
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        var migrated = JsonNode.Parse(restored.Save())!.AsObject();
+
+        Assert.Equal(54, migrated["formatVersion"]!.GetValue<int>());
+        Assert.False(restored.CreateSnapshot().RaidPlan.Has(
+            RaidDirective.AutoLaunchWhenReady));
+    }
+
+    [Fact]
+    public void VersionFiftyTwoAddsEquipmentResourcePriority()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 52;
+        var priorities = save["resourcePriorities"]!.AsArray();
+        priorities.Remove(priorities.Single(priority =>
+            priority!["resource"]!.GetValue<int>() == (int)ResourceKind.Equipment));
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        var migrated = JsonNode.Parse(restored.Save())!.AsObject();
+
+        Assert.Equal(54, migrated["formatVersion"]!.GetValue<int>());
+        Assert.Contains(migrated["resourcePriorities"]!.AsArray(), priority =>
+            priority!["resource"]!.GetValue<int>() == (int)ResourceKind.Equipment &&
+            priority["priority"]!.GetValue<int>() == (int)StoragePriority.Normal);
+    }
+
+    [Fact]
     public void VersionThirtyAddsMissingResourcePrioritiesAndMigratesToCurrentVersion()
     {
         var engine = CreateEngine();
@@ -23,7 +61,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
         var migrated = JsonNode.Parse(restored.Save())!.AsObject();
 
-        Assert.Equal(45, migrated["formatVersion"]!.GetValue<int>());
+        Assert.Equal(54, migrated["formatVersion"]!.GetValue<int>());
         Assert.Contains(migrated["resourcePriorities"]!.AsArray(), priority =>
             priority!["resource"]!.GetValue<int>() == (int)ResourceKind.Hide &&
             priority["priority"]!.GetValue<int>() == (int)StoragePriority.Normal);
@@ -56,7 +94,7 @@ public sealed class SaveMigrationTests
         Assert.NotEqual(blockedPosition, restoredActor.Position);
         Assert.True(restored.World.IsTerrainTraversable(restoredActor.Position));
         Assert.Equal(ActorJobKind.None, restoredActor.Job.Kind);
-        Assert.Equal(45, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -71,7 +109,7 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
 
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
-        Assert.Equal(45, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -90,7 +128,7 @@ public sealed class SaveMigrationTests
             animal.Kind == AnimalKind.MarshHare);
 
         Assert.Equal(restoredHare.MaximumFatigue, restoredHare.Fatigue);
-        Assert.Equal(45, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -108,6 +146,146 @@ public sealed class SaveMigrationTests
         Assert.Equal(
             PersonalEquipment.RagClothes | PersonalEquipment.PrimitiveWaterskin,
             Assert.Single(restored.CreateSnapshot().Actors).Equipment);
+    }
+
+    [Fact]
+    public void VersionFortyFiveMaterializesSavedHumanCohortsAsVillagers()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 45;
+        save["humanVillage"]!.AsObject().Remove("villagers");
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        var village = restored.CreateSnapshot().HumanVillage;
+
+        Assert.Equal(village.Population, village.Villagers.Count(villager =>
+            villager.Health > 0));
+        Assert.Equal(
+            village.Villagers.Count,
+            village.Villagers.Select(villager => villager.Position).Distinct().Count());
+        Assert.Equal(
+            village.Cohorts.Single(cohort => cohort.Role == HumanCohortRole.Guards).Population,
+            village.Villagers.Count(villager =>
+                villager.Role == HumanCohortRole.Guards && villager.Health > 0));
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VersionFortySixInitializesIndividualHumanNeeds()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 46;
+        foreach (var villager in save["humanVillage"]!["villagers"]!.AsArray())
+        {
+            villager!.AsObject().Remove("hunger");
+            villager.AsObject().Remove("thirst");
+        }
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.All(restored.CreateSnapshot().HumanVillage.Villagers, villager =>
+        {
+            Assert.Equal(0, villager.Hunger);
+            Assert.Equal(0, villager.Thirst);
+        });
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VersionFortySevenInitializesHumanWorkProgress()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 47;
+        foreach (var villager in save["humanVillage"]!["villagers"]!.AsArray())
+        {
+            villager!.AsObject().Remove("workProgress");
+        }
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.All(restored.CreateSnapshot().HumanVillage.Villagers,
+            villager => Assert.Equal(0, villager.WorkProgress));
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VersionFortyEightInitializesHumanFieldWorkProgress()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 48;
+        foreach (var field in save["humanVillage"]!["fields"]!.AsArray())
+        {
+            field!.AsObject().Remove("workProgress");
+        }
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.All(restored.CreateSnapshot().HumanVillage.Fields,
+            field => Assert.Equal(0, field.WorkProgress));
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VersionFortyNineInitializesHumanTreeFellingPlan()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 49;
+        var village = save["humanVillage"]!.AsObject();
+        village.Remove("treeFellingX");
+        village.Remove("treeFellingY");
+        village.Remove("treeFellingZ");
+        village.Remove("treeFellingProgress");
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Null(restored.CreateSnapshot().HumanVillage.TreeFellingTarget);
+        Assert.Equal(0, restored.CreateSnapshot().HumanVillage.TreeFellingProgress);
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VersionFiftyInitializesHumanGoodsWorkProgress()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 50;
+        save["humanVillage"]!.AsObject().Remove("goodsWorkProgress");
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Equal(0, restored.CreateSnapshot().HumanVillage.GoodsWorkProgress);
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void VersionFiftyOneInitializesHumanStorehouseWork()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = 51;
+        var village = save["humanVillage"]!.AsObject();
+        village.Remove("storehouseSiteX");
+        village.Remove("storehouseSiteY");
+        village.Remove("storehouseSiteZ");
+        village.Remove("storehouseWorkProgress");
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Null(restored.CreateSnapshot().HumanVillage.StorehouseSite);
+        Assert.Equal(0, restored.CreateSnapshot().HumanVillage.StorehouseWorkProgress);
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -139,20 +317,20 @@ public sealed class SaveMigrationTests
             SimulationDefinitions.Foundation);
 
         Assert.Equal(10, restored.CreateSnapshot().PopulationTarget);
-        Assert.Equal(45, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+        Assert.Equal(54, JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
     public void SaveFromNewerFormatIsRejectedClearly()
     {
         var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
-        save["formatVersion"] = 46;
+        save["formatVersion"] = 55;
 
         var exception = Assert.Throws<InvalidDataException>(() => SimulationEngine.Load(
             save.ToJsonString(),
             SimulationDefinitions.Foundation));
 
-        Assert.Contains("newer than supported version 45", exception.Message);
+        Assert.Contains("newer than supported version 54", exception.Message);
     }
 
     private static SimulationEngine CreateEngine() => SimulationEngine.Create(

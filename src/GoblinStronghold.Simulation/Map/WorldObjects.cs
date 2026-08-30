@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.Simulation.Map;
 
@@ -30,6 +31,10 @@ public enum WorldObjectKind : byte
     StoneDoorFrame = 15,
     WallTorch = 16,
     PrimitiveWorkshop = 17,
+    BasaltWalkway = 18,
+    Bloomery = 19,
+    SmeltingFurnace = 20,
+    CrucibleFurnace = 21,
 }
 
 public enum WorldObjectOwner : byte
@@ -74,6 +79,10 @@ public enum WorldObjectPartKind : byte
     Boulder = 14,
     WallTorch = 15,
     PrimitiveWorkshop = 16,
+    FelledTreeRemains = 17,
+    Bloomery = 18,
+    SmeltingFurnace = 19,
+    CrucibleFurnace = 20,
 }
 
 public readonly record struct WorldObjectPartSnapshot(
@@ -89,7 +98,8 @@ public sealed class WorldObjectSnapshot
         WorldObjectOwner owner,
         GridPosition anchor,
         CardinalOrientation orientation,
-        IEnumerable<WorldObjectPartSnapshot> parts)
+        IEnumerable<WorldObjectPartSnapshot> parts,
+        ResourceVariant materialVariant = ResourceVariant.None)
     {
         ArgumentNullException.ThrowIfNull(parts);
 
@@ -98,6 +108,7 @@ public sealed class WorldObjectSnapshot
         Owner = owner;
         Anchor = anchor;
         Orientation = orientation;
+        MaterialVariant = materialVariant;
         Parts = new ReadOnlyCollection<WorldObjectPartSnapshot>(parts.ToArray());
     }
 
@@ -110,6 +121,8 @@ public sealed class WorldObjectSnapshot
     public GridPosition Anchor { get; }
 
     public CardinalOrientation Orientation { get; }
+
+    public ResourceVariant MaterialVariant { get; }
 
     public IReadOnlyList<WorldObjectPartSnapshot> Parts { get; }
 

@@ -7,4 +7,28 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Content\crafting-recipes.json"
+                      LogicalName="GoblinStronghold.Simulation.Content.crafting-recipes.json" />
+    <EmbeddedResource Include="Content\materials.json"
+                      LogicalName="GoblinStronghold.Simulation.Content.materials.json" />
+    <EmbeddedResource Include="Content\workshops.json"
+                      LogicalName="GoblinStronghold.Simulation.Content.workshops.json" />
+    <EmbeddedResource Include="Localization\en\interface.json"
+                      LogicalName="GoblinStronghold.Simulation.Localization.en.interface.json" />
+    <EmbeddedResource Include="Localization\en\materials.json"
+                      LogicalName="GoblinStronghold.Simulation.Localization.en.materials.json" />
+    <EmbeddedResource Include="Localization\en\recipes.json"
+                      LogicalName="GoblinStronghold.Simulation.Localization.en.recipes.json" />
+    <EmbeddedResource Include="Localization\en\workshops.json"
+                      LogicalName="GoblinStronghold.Simulation.Localization.en.workshops.json" />
+    <EmbeddedResource Include="Localization\pl\interface.json"
+                      LogicalName="GoblinStronghold.Simulation.Localization.pl.interface.json" />
+    <EmbeddedResource Include="Localization\pl\materials.json"
+                      LogicalName="GoblinStronghold.Simulation.Localization.pl.materials.json" />
+    <EmbeddedResource Include="Localization\pl\recipes.json"
+                      LogicalName="GoblinStronghold.Simulation.Localization.pl.recipes.json" />
+    <EmbeddedResource Include="Localization\pl\workshops.json"
+                      LogicalName="GoblinStronghold.Simulation.Localization.pl.workshops.json" />
+  </ItemGroup>
 </Project>

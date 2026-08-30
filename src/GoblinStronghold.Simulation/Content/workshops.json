@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "workshops": [
+    {
+      "id": "primitive-workshop",
+      "kind": "PrimitiveWorkshop",
+      "level": 1,
+      "workSpeedPercent": 100,
+      "maximumRecipeLevel": 1,
+      "constructionRequirements": [
+        { "quantity": 4, "allowedMaterialTypes": ["Wood", "PlantFiber"], "minimumStrength": 15, "minimumDurability": 20 }
+      ],
+      "availableRecipes": ["PrimitiveSling", "BoneKnife", "FightingStick", "StoneClub", "HideClothes", "ReedClothes", "PrimitiveWaterskin", "ReinforcedPickaxe", "WoodenBucket", "WoodenBarrel"],
+      "servedMaterialTypes": ["Wood", "Stone", "PlantFiber", "Bone", "Hide"],
+      "servedMaterialIds": []
+    },
+    {
+      "id": "bloomery",
+      "kind": "Bloomery",
+      "level": 1,
+      "workSpeedPercent": 80,
+      "maximumRecipeLevel": 1,
+      "constructionRequirements": [
+        { "quantity": 12, "allowedMaterialTypes": ["Stone"], "minimumStrength": 35, "minimumDurability": 35 }
+      ],
+      "availableRecipes": ["SmeltIronBar"],
+      "servedMaterialTypes": ["Metal"],
+      "servedMaterialIds": ["iron-bar"]
+    },
+    {
+      "id": "smelting-furnace",
+      "kind": "SmeltingFurnace",
+      "level": 1,
+      "workSpeedPercent": 100,
+      "maximumRecipeLevel": 1,
+      "constructionRequirements": [
+        { "quantity": 16, "allowedMaterialTypes": ["Stone"], "minimumStrength": 45, "minimumDurability": 45 }
+      ],
+      "availableRecipes": ["SmeltCopperBar"],
+      "servedMaterialTypes": ["Metal"],
+      "servedMaterialIds": ["copper-bar"]
+    },
+    {
+      "id": "crucible-furnace",
+      "kind": "CrucibleFurnace",
+      "level": 2,
+      "workSpeedPercent": 90,
+      "maximumRecipeLevel": 2,
+      "constructionRequirements": [
+        { "quantity": 20, "allowedMaterialTypes": ["Stone"], "minimumStrength": 60, "minimumDurability": 65 }
+      ],
+      "availableRecipes": ["SmeltSilverBar", "SmeltGoldBar"],
+      "servedMaterialTypes": ["Metal"],
+      "servedMaterialIds": ["silver-bar", "gold-bar"]
+    }
+  ]
+}

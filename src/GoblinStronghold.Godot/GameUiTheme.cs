@@ -5,6 +5,8 @@ namespace GoblinStronghold.GodotClient;
 internal static class GameUiTheme
 {
     internal const int WindowTitleHeight = 36;
+    private const int WindowCloseIconSize = 18;
+    private const int WindowCloseRightMargin = 4;
 
     internal static readonly Color Background = new("241b14");
     internal static readonly Color RaisedBackground = new("35271c");
@@ -38,6 +40,14 @@ internal static class GameUiTheme
         theme.SetColor("font_separator_color", "PopupMenu", MutedText);
         theme.SetColor("title_color", "Window", Background);
         theme.SetConstant("title_height", "Window", WindowTitleHeight);
+        theme.SetConstant(
+            "close_h_offset",
+            "Window",
+            WindowCloseIconSize + WindowCloseRightMargin);
+        theme.SetConstant(
+            "close_v_offset",
+            "Window",
+            (WindowTitleHeight + WindowCloseIconSize) / 2);
         theme.SetIcon("close", "Window", CreateWindowCloseIcon(Background));
         theme.SetIcon("close_pressed", "Window", CreateWindowCloseIcon(RaisedBackground));
 
@@ -106,7 +116,7 @@ internal static class GameUiTheme
     {
         var htmlColor = color.ToHtml(includeAlpha: false);
         var svg = $"""
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+            <svg xmlns="http://www.w3.org/2000/svg" width="{WindowCloseIconSize}" height="{WindowCloseIconSize}" viewBox="0 0 18 18">
               <path d="M4 4 L14 14 M14 4 L4 14" fill="none" stroke="#{htmlColor}" stroke-width="2.5" stroke-linecap="round"/>
             </svg>
             """;

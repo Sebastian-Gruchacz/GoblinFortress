@@ -5,6 +5,137 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
+    private bool TryPlanCorpseDirective(ActorState actor)
+    {
+        if (actor.CarriedCorpseId != EntityId.None)
+        {
+            if (!_corpses.TryGetValue(actor.CarriedCorpseId, out var carried) ||
+                (carried.Directives & (CorpseDirective.RecoverToCamp |
+                    CorpseDirective.RecoverAndBudAtCamp)) == 0)
+            {
+                actor.CarriedCorpseId = EntityId.None;
+                return false;
+            }
+
+            var camp = FindNearestReachableFieldCamp(actor);
+            return camp is not null && BeginRaidCorpseRecoveryTravel(
+                actor,
+                camp.Value,
+                ActorJobStage.Delivering);
+        }
+
+        foreach (var corpse in _corpses.Values)
+        {
+            if (corpse.Contents.Count == 0)
+            {
+                corpse.Directives &= ~CorpseDirective.LootContents;
+            }
+            if (corpse.EdiblePortions == 0)
+            {
+                corpse.Directives &= ~CorpseDirective.Consume;
+            }
+        }
+
+        var reservedCorpseIds = _actors.Values
+            .Where(candidate => candidate.CarriedCorpseId != EntityId.None ||
+                candidate.JobKind is ActorJobKind.LootRaid or
+                    ActorJobKind.RecoverRaidCorpse or ActorJobKind.ConsumeRaidCorpse)
+            .Select(candidate => candidate.CarriedCorpseId != EntityId.None
+                ? candidate.CarriedCorpseId
+                : candidate.SourceStackId)
+            .Where(id => id != EntityId.None)
+            .ToHashSet();
+        var ordered = _corpses.Values
+            .Where(corpse => corpse.Directives != CorpseDirective.None &&
+                !reservedCorpseIds.Contains(corpse.Id))
+            .Select(corpse => new
+            {
+                Corpse = corpse,
+                Route = FindActorPath(actor, corpse.Position),
+            })
+            .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .ThenBy(candidate => candidate.Corpse.Id)
+            .FirstOrDefault();
+        if (ordered is null)
+        {
+            return false;
+        }
+
+        var target = ordered.Corpse;
+        actor.SourceStackId = target.Id;
+        if (target.Directives.HasFlag(CorpseDirective.LootContents))
+        {
+            return BeginRaidLootTravel(actor, target.Position, ActorJobStage.Collecting);
+        }
+        if (target.Directives.HasFlag(CorpseDirective.Consume))
+        {
+            return BeginCorpseConsumptionTravel(actor, target);
+        }
+
+        var handling = target.Directives & CorpseHandlingDirectives;
+        if (handling == CorpseDirective.None)
+        {
+            actor.ClearJob();
+            return false;
+        }
+        if (handling != CorpseDirective.BudInPlace &&
+            FindNearestReachableFieldCamp(actor) is null)
+        {
+            actor.ClearJob();
+            return false;
+        }
+        return BeginRaidCorpseRecoveryTravel(
+            actor,
+            target.Position,
+            ActorJobStage.Collecting);
+    }
+
+    private bool BeginCorpseConsumptionTravel(ActorState actor, CorpseState corpse)
+    {
+        actor.JobKind = ActorJobKind.ConsumeRaidCorpse;
+        actor.JobStage = ActorJobStage.Collecting;
+        actor.JobTarget = corpse.Position;
+        if (actor.Position == corpse.Position)
+        {
+            actor.JobPhase = ActorJobPhase.Working;
+            actor.RemainingWorkTicks = Definitions.EatWorkTicks;
+            return true;
+        }
+
+        var request = RequestActorPath(actor, corpse.Position);
+        if (request.Status == NavigationPathRequestStatus.Pending)
+        {
+            actor.ClearJob();
+            return true;
+        }
+        if (request.Path is not { Count: > 0 } route)
+        {
+            actor.ClearJob();
+            return false;
+        }
+        actor.JobPhase = ActorJobPhase.Traveling;
+        actor.RemainingRoute.AddRange(route);
+        return true;
+    }
+
+    private GridPosition? FindNearestReachableFieldCamp(ActorState actor) =>
+        World.EnumerateWorldObjects()
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+                worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+                World.IsTerrainTraversable(worldObject.Anchor))
+            .Select(worldObject => new
+            {
+                worldObject.Anchor,
+                Route = FindActorPath(actor, worldObject.Anchor),
+            })
+            .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .ThenBy(candidate => candidate.Anchor.Y)
+            .ThenBy(candidate => candidate.Anchor.X)
+            .Select(candidate => (GridPosition?)candidate.Anchor)
+            .FirstOrDefault();
+
     private bool TryPlanRaidLoot(ActorState actor)
     {
         if (actor.CarriedCorpseId != EntityId.None)
@@ -118,9 +249,13 @@ public sealed partial class SimulationEngine
 
     private void UpdateRaidCorpseConsumptionJob(ActorState actor)
     {
-        if (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id) ||
-            !_corpses.TryGetValue(actor.SourceStackId, out var corpse) ||
-            corpse.Kind != CorpseKind.Human || corpse.EdiblePortions <= 0 ||
+        var isGenericOrder = _corpses.TryGetValue(actor.SourceStackId, out var corpse) &&
+            corpse.Directives.HasFlag(CorpseDirective.Consume);
+        if ((!isGenericOrder &&
+                (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id))) ||
+            corpse is null ||
+            (!isGenericOrder && corpse.Kind != CorpseKind.Human) ||
+            corpse.EdiblePortions <= 0 ||
             corpse.Position != actor.JobTarget)
         {
             actor.ClearJob();
@@ -143,6 +278,10 @@ public sealed partial class SimulationEngine
         }
 
         corpse.EdiblePortions--;
+        if (corpse.EdiblePortions == 0)
+        {
+            corpse.Directives &= ~CorpseDirective.Consume;
+        }
         ApplyFoodEffects(actor, FoodKind.RawMeat);
         Publish(SimulationEventKind.CorpseConsumed, actor.Id, corpse.Id, 1);
         actor.ClearJob();
@@ -242,7 +381,13 @@ public sealed partial class SimulationEngine
 
     private void UpdateRaidCorpseRecoveryJob(ActorState actor)
     {
-        if (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id))
+        var orderedCorpseId = actor.CarriedCorpseId != EntityId.None
+            ? actor.CarriedCorpseId
+            : actor.SourceStackId;
+        var isGenericOrder = _corpses.TryGetValue(orderedCorpseId, out var orderedCorpse) &&
+            (orderedCorpse.Directives & CorpseHandlingDirectives) != 0;
+        if (!isGenericOrder &&
+            (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id)))
         {
             actor.ClearJob();
             return;
@@ -266,13 +411,20 @@ public sealed partial class SimulationEngine
         if (actor.JobStage == ActorJobStage.Collecting)
         {
             if (!_corpses.TryGetValue(actor.SourceStackId, out var corpse) ||
-                corpse.Kind != CorpseKind.Human || corpse.Position != actor.Position ||
-                corpse.Contents.Any(IsRaidLootAllowed))
+                corpse.Position != actor.Position ||
+                (!isGenericOrder &&
+                    (corpse.Kind != CorpseKind.Human || corpse.Contents.Any(IsRaidLootAllowed))))
             {
                 actor.ClearJob();
                 return;
             }
-            if (GetRaidCorpseHandlingMode() == RaidCorpseHandlingMode.BudInPlace)
+            if (isGenericOrder &&
+                corpse.Directives.HasFlag(CorpseDirective.BudInPlace))
+            {
+                TryCreateGoblinBudFromCorpse(corpse.Id, actor.Id, actor.Position);
+            }
+            else if (!isGenericOrder &&
+                GetRaidCorpseHandlingMode() == RaidCorpseHandlingMode.BudInPlace)
             {
                 TryCreateGoblinBudFromCorpse(corpse.Id, actor.Id, actor.Position);
             }
@@ -285,7 +437,18 @@ public sealed partial class SimulationEngine
         {
             var corpseId = actor.CarriedCorpseId;
             actor.CarriedCorpseId = EntityId.None;
-            if (GetRaidCorpseHandlingMode() == RaidCorpseHandlingMode.RecoverAndBudAtCamp)
+            if (isGenericOrder && orderedCorpse is not null)
+            {
+                if (orderedCorpse.Directives.HasFlag(CorpseDirective.RecoverAndBudAtCamp))
+                {
+                    TryCreateGoblinBudFromCorpse(corpseId, actor.Id, actor.Position);
+                }
+                else
+                {
+                    orderedCorpse.Directives &= ~CorpseHandlingDirectives;
+                }
+            }
+            else if (GetRaidCorpseHandlingMode() == RaidCorpseHandlingMode.RecoverAndBudAtCamp)
             {
                 TryCreateGoblinBudFromCorpse(corpseId, actor.Id, actor.Position);
             }
@@ -326,7 +489,11 @@ public sealed partial class SimulationEngine
 
     private void UpdateRaidLootJob(ActorState actor)
     {
-        if (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id))
+        var isGenericOrder = actor.SourceStackId != EntityId.None &&
+            _corpses.TryGetValue(actor.SourceStackId, out var orderedCorpse) &&
+            orderedCorpse.Directives.HasFlag(CorpseDirective.LootContents);
+        if (!isGenericOrder &&
+            (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id)))
         {
             actor.ClearJob();
             return;
@@ -349,7 +516,14 @@ public sealed partial class SimulationEngine
         {
             if (actor.SourceStackId != EntityId.None)
             {
-                CollectRaidCorpseLoot(actor);
+                if (isGenericOrder)
+                {
+                    CollectOrderedCorpseLoot(actor);
+                }
+                else
+                {
+                    CollectRaidCorpseLoot(actor);
+                }
             }
             else
             {
@@ -383,6 +557,31 @@ public sealed partial class SimulationEngine
         if (corpse.Contents[index].Quantity == 0)
         {
             corpse.Contents.RemoveAt(index);
+        }
+        GiveRaidLootToActor(actor, loot, quantity);
+        actor.SourceStackId = EntityId.None;
+        actor.ClearJob();
+    }
+
+    private void CollectOrderedCorpseLoot(ActorState actor)
+    {
+        if (!_corpses.TryGetValue(actor.SourceStackId, out var corpse) ||
+            corpse.Position != actor.Position || corpse.Contents.Count == 0)
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        var loot = corpse.Contents[0];
+        var quantity = GetRaidLootQuantity(loot);
+        corpse.Contents[0] = loot with { Quantity = loot.Quantity - quantity };
+        if (corpse.Contents[0].Quantity == 0)
+        {
+            corpse.Contents.RemoveAt(0);
+        }
+        if (corpse.Contents.Count == 0)
+        {
+            corpse.Directives &= ~CorpseDirective.LootContents;
         }
         GiveRaidLootToActor(actor, loot, quantity);
         actor.SourceStackId = EntityId.None;

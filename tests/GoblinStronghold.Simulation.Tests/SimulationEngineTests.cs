@@ -173,6 +173,10 @@ public sealed class SimulationEngineTests
             Assert.True(first.Map.IsTerrainSurfacePosition(stack.Location.Position));
             Assert.True(first.Map.GetColumnCell(stack.Location.Position).Terrain is
                 TerrainKind.SolidGround or TerrainKind.Mud);
+            Assert.Equal(
+                TerrainRampDirection.None,
+                first.Map.GetColumnCell(stack.Location.Position).RampDirection);
+            Assert.True(first.World.IsTerrainTraversable(stack.Location.Position));
         });
         Assert.Contains(brushwood, stack =>
             Math.Abs(stack.Location.Position.X - first.Map.GoblinSpawn.X) +
@@ -1171,8 +1175,10 @@ public sealed class SimulationEngineTests
 
     }
 
-    [Fact]
-    public void WalkwayBlueprintPreservesItsNonSurfaceLevel()
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1)]
+    public void WalkwayBlueprintPreservesItsNonSurfaceLevel(int level)
     {
         var seed = new WorldSeed(0x425249444745UL);
         var map = SwampMapGenerator.Generate(seed, 64, 64);
@@ -1185,7 +1191,7 @@ public sealed class SimulationEngineTests
             initialWoodStock: 4);
         var crossing = Enumerable.Range(0, map.Height)
             .SelectMany(y => Enumerable.Range(0, map.Width)
-                .Select(x => new GridPosition(x, y, -1)))
+                .Select(x => new GridPosition(x, y, level)))
             .Select(position => new
             {
                 Start = position,
@@ -1204,7 +1210,7 @@ public sealed class SimulationEngineTests
 
         var sites = engine.CreateSnapshot().ConstructionSites;
         Assert.Equal(2, sites.Count);
-        Assert.All(sites, site => Assert.Equal(-1, site.Anchor.Z));
+        Assert.All(sites, site => Assert.Equal(level, site.Anchor.Z));
         var savedSites = JsonNode.Parse(engine.Save())!["constructionSites"]!.AsArray();
         Assert.Equal(2, savedSites.Count);
         Assert.NotEqual(0UL, savedSites[0]!["orderId"]!.GetValue<ulong>());
@@ -1214,6 +1220,80 @@ public sealed class SimulationEngineTests
         Assert.Equal(0, savedSites[0]!["sequenceIndex"]!.GetValue<int>());
         Assert.Equal(1, savedSites[1]!["sequenceIndex"]!.GetValue<int>());
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void CompletedElevatedWalkwayAndItsWorldChangeSurviveSaveLoad()
+    {
+        var seed = new WorldSeed(0x454C455641544544UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 8,
+            initialWoodStock: 4);
+        var elevated = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, 1)))
+            .First(position => engine.World.CanBuildWalkway([position]));
+        var change = engine.World.BuildWalkway([elevated], engine.CurrentTick);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["undeliveredWorldChanges"]!.AsArray().Add(new JsonObject
+        {
+            ["version"] = change.Version,
+            ["tick"] = change.Tick.Value,
+            ["kind"] = (int)change.Kind,
+            ["x"] = change.Position.X,
+            ["y"] = change.Position.Y,
+            ["z"] = change.Position.Z,
+            ["amount"] = change.Amount,
+        });
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.True(restored.World.IsTerrainTraversable(elevated));
+        Assert.Contains(restored.World.GetWorldObjectsAt(elevated), item =>
+            item.Kind == WorldObjectKind.WoodenWalkway);
+        var restoredChange = Assert.Single(restored.DrainWorldChanges());
+        Assert.Equal(elevated, restoredChange.Position);
+        Assert.Equal(WorldChangeKind.StructureBuilt, restoredChange.Kind);
+    }
+
+    [Fact]
+    public void ElevatedHillMiningDesignationSurvivesSaveLoad()
+    {
+        var seed = new WorldSeed(0x48494C4C4D494E45UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 8,
+            initialWoodStock: 4);
+        var rock = Enumerable.Range(1, map.MaximumWorldLevel)
+            .SelectMany(z => Enumerable.Range(0, map.Height)
+                .SelectMany(y => Enumerable.Range(0, map.Width)
+                    .Select(x => new GridPosition(x, y, z))))
+            .First(map.IsHillMassPosition);
+        engine.QueueCommand(SimulationCommand.DesignateRockMining(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            rock,
+            rock));
+        engine.AdvanceTicks(1);
+        Assert.Contains(engine.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.MineRock && designation.Target == rock);
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+
+        Assert.Contains(restored.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.MineRock && designation.Target == rock);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
 
@@ -1404,11 +1484,20 @@ public sealed class SimulationEngineTests
             SwampMapGenerator.CurrentVersion,
             save["mapGeneratorVersion"]?.GetValue<int>());
 
-        save["mapGeneratorVersion"] = SwampMapGenerator.CurrentVersion + 1;
-
-        var exception = Assert.Throws<InvalidDataException>(() =>
-            SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation));
-        Assert.Contains("map generator version", exception.Message, StringComparison.OrdinalIgnoreCase);
+        foreach (var incompatibleVersion in new[]
+                 {
+                     SwampMapGenerator.CurrentVersion - 1,
+                     SwampMapGenerator.CurrentVersion + 1,
+                 })
+        {
+            save["mapGeneratorVersion"] = incompatibleVersion;
+            var exception = Assert.Throws<InvalidDataException>(() =>
+                SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation));
+            Assert.Contains(
+                "map generator version",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     [Fact]

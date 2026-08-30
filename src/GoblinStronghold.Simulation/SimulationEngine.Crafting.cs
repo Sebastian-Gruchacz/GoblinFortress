@@ -5,10 +5,13 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
-    private Dictionary<(EntityId OrderId, ResourceKind Resource), int>
+    private Dictionary<(
+        EntityId OrderId,
+        ResourceKind Resource,
+        ResourceVariant Variant), int>
         CreateCraftingReservations()
     {
-        var reservations = new Dictionary<(EntityId, ResourceKind), int>();
+        var reservations = new Dictionary<(EntityId, ResourceKind, ResourceVariant), int>();
         foreach (var actor in _actors.Values.Where(actor =>
                      actor.JobKind == ActorJobKind.SupplyCrafting))
         {
@@ -21,12 +24,17 @@ public sealed partial class SimulationEngine
             {
                 _itemStacks.TryGetValue(actor.CarriedStackId, out stack);
             }
-            if (stack is null)
+            if (stack is null ||
+                !_craftingOrders.TryGetValue(actor.DestinationZoneId, out var order) ||
+                CraftingRecipeCatalog.FindMaterial(
+                    order.Recipe,
+                    stack.Resource,
+                    stack.Variant) is not { } requirement)
             {
                 continue;
             }
 
-            var key = (actor.DestinationZoneId, stack.Resource);
+            var key = (actor.DestinationZoneId, requirement.Resource, requirement.Variant);
             reservations[key] = checked(
                 reservations.GetValueOrDefault(key) + actor.ReservedQuantity);
         }
@@ -36,17 +44,18 @@ public sealed partial class SimulationEngine
     private bool TryPlanCraftingSupply(
         ActorState actor,
         Dictionary<EntityId, int> sourceReservations,
-        Dictionary<(EntityId OrderId, ResourceKind Resource), int> craftingReservations)
+        Dictionary<(EntityId OrderId, ResourceKind Resource, ResourceVariant Variant), int>
+            craftingReservations)
     {
         var candidates = (
                 from order in _craftingOrders.Values
-                from material in CraftingRecipeCatalog.GetMaterials(order.Recipe)
-                let key = (order.Id, material.Resource)
-                let missing = order.GetMissing(material.Resource) -
+                from material in CraftingRecipeCatalog.Get(order.Recipe).Materials
+                let key = (order.Id, material.Resource, material.Variant)
+                let missing = order.GetMissing(material) -
                     craftingReservations.GetValueOrDefault(key)
                 where missing > 0
                 from source in _itemStacks.Values
-                where source.Resource == material.Resource &&
+                where material.Matches(source.Resource, source.Variant) &&
                     source.Location.Kind == ItemLocationKind.StorageZone
                 let available = source.Quantity - sourceReservations.GetValueOrDefault(source.Id)
                 where available > 0
@@ -57,6 +66,7 @@ public sealed partial class SimulationEngine
                 select new
                 {
                     Order = order,
+                    Requirement = material,
                     Source = source,
                     Quantity = Math.Min(available, missing),
                 })
@@ -86,7 +96,10 @@ public sealed partial class SimulationEngine
             sourceReservations[candidate.Source.Id] = checked(
                 sourceReservations.GetValueOrDefault(candidate.Source.Id) +
                 actor.ReservedQuantity);
-            var reservationKey = (candidate.Order.Id, candidate.Source.Resource);
+            var reservationKey = (
+                candidate.Order.Id,
+                candidate.Requirement.Resource,
+                candidate.Requirement.Variant);
             craftingReservations[reservationKey] = checked(
                 craftingReservations.GetValueOrDefault(reservationKey) +
                 actor.ReservedQuantity);
@@ -98,7 +111,8 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanCarriedCraftingDelivery(
         ActorState actor,
-        Dictionary<(EntityId OrderId, ResourceKind Resource), int> craftingReservations)
+        Dictionary<(EntityId OrderId, ResourceKind Resource, ResourceVariant Variant), int>
+            craftingReservations)
     {
         if (!_itemStacks.TryGetValue(actor.CarriedStackId, out var carried))
         {
@@ -106,9 +120,21 @@ public sealed partial class SimulationEngine
         }
 
         var candidates = _craftingOrders.Values
-            .Where(order => order.GetMissing(carried.Resource) -
-                craftingReservations.GetValueOrDefault((order.Id, carried.Resource)) >=
-                    carried.Quantity)
+            .Select(order => new
+            {
+                Order = order,
+                Requirement = CraftingRecipeCatalog.FindMaterial(
+                    order.Recipe,
+                    carried.Resource,
+                    carried.Variant),
+            })
+            .Where(candidate => candidate.Requirement is not null &&
+                candidate.Order.GetMissing(candidate.Requirement) -
+                    craftingReservations.GetValueOrDefault((
+                        candidate.Order.Id,
+                        candidate.Requirement.Resource,
+                        candidate.Requirement.Variant)) >= carried.Quantity)
+            .Select(candidate => candidate.Order)
             .OrderBy(order => ManhattanDistance(actor.Position, order.Workshop))
             .ThenBy(order => order.Id)
             .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
@@ -132,7 +158,11 @@ public sealed partial class SimulationEngine
             actor.ReservedQuantity = carried.Quantity;
             actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
             BeginJobLeg(actor, route, Definitions.HaulHandlingTicks);
-            var key = (order.Id, carried.Resource);
+            var requirement = CraftingRecipeCatalog.FindMaterial(
+                order.Recipe,
+                carried.Resource,
+                carried.Variant)!;
+            var key = (order.Id, requirement.Resource, requirement.Variant);
             craftingReservations[key] = checked(
                 craftingReservations.GetValueOrDefault(key) + carried.Quantity);
             return true;
@@ -184,7 +214,7 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        if (order.GetMissing(material.Resource) < actor.ReservedQuantity)
+        if (order.GetMissing(material.Resource, material.Variant) < actor.ReservedQuantity)
         {
             if (actor.JobStage == ActorJobStage.Delivering)
             {
@@ -266,9 +296,10 @@ public sealed partial class SimulationEngine
         var carried = _itemStacks[actor.CarriedStackId];
         var delivered = carried.Quantity;
         var resource = carried.Resource;
+        var variant = carried.Variant;
         RemoveItemStack(carried.Id);
         actor.CarriedStackId = EntityId.None;
-        order.Deliver(resource, delivered);
+        order.Deliver(resource, variant, delivered);
         GainHaulingExperience(actor, Math.Max(1, delivered * 2));
         Publish(SimulationEventKind.CraftingMaterialDelivered, actor.Id, order.Id, delivered);
         actor.ClearJob();
@@ -312,7 +343,9 @@ public sealed partial class SimulationEngine
     {
         if (!_craftingOrders.TryGetValue(actor.DestinationZoneId, out var order) ||
             !order.HasAllMaterials ||
-            !World.HasPrimitiveWorkshop(order.Workshop))
+            !World.HasWorkshop(
+                order.Workshop,
+                CraftingRecipeCatalog.Get(order.Recipe).Workshop))
         {
             actor.ClearJob();
             return;
@@ -334,42 +367,17 @@ public sealed partial class SimulationEngine
             return;
         }
 
+        var output = CraftingRecipeCatalog.Get(order.Recipe).Output;
         AllocateItemStack(
-            ResourceKind.Equipment,
-            quantity: 1,
+            output.Resource,
+            output.Quantity,
             ItemLocation.OnGround(actor.Position),
-            variant: GetCraftedEquipmentVariant(order.Recipe));
+            variant: output.Variant);
         _craftingOrders.Remove(order.Id);
         GainBuildingExperience(actor, 16);
         Publish(SimulationEventKind.CraftingCompleted, actor.Id, order.Id, (int)order.Recipe);
         actor.ClearJob();
     }
-
-    private static PersonalEquipment GetCraftedEquipment(CraftingRecipeKind recipe) => recipe switch
-    {
-        CraftingRecipeKind.PrimitiveSling => PersonalEquipment.PrimitiveSling,
-        CraftingRecipeKind.BoneKnife => PersonalEquipment.BoneKnife,
-        CraftingRecipeKind.FightingStick => PersonalEquipment.FightingStick,
-        CraftingRecipeKind.StoneClub => PersonalEquipment.StoneClub,
-        CraftingRecipeKind.HideClothes => PersonalEquipment.HideClothes,
-        CraftingRecipeKind.ReedClothes => PersonalEquipment.ReedClothes,
-        CraftingRecipeKind.PrimitiveWaterskin => PersonalEquipment.PrimitiveWaterskin,
-        _ => throw new ArgumentOutOfRangeException(nameof(recipe), recipe, null),
-    };
-
-    private static ResourceVariant GetCraftedEquipmentVariant(CraftingRecipeKind recipe) =>
-        recipe switch
-        {
-            CraftingRecipeKind.PrimitiveSling => ResourceVariant.EquipmentPrimitiveSling,
-            CraftingRecipeKind.BoneKnife => ResourceVariant.EquipmentBoneKnife,
-            CraftingRecipeKind.FightingStick => ResourceVariant.EquipmentFightingStick,
-            CraftingRecipeKind.StoneClub => ResourceVariant.EquipmentStoneClub,
-            CraftingRecipeKind.HideClothes => ResourceVariant.EquipmentHideClothes,
-            CraftingRecipeKind.ReedClothes => ResourceVariant.EquipmentReedClothes,
-            CraftingRecipeKind.PrimitiveWaterskin =>
-                ResourceVariant.EquipmentPrimitiveWaterskin,
-            _ => throw new ArgumentOutOfRangeException(nameof(recipe), recipe, null),
-        };
 
     private static PersonalEquipment GetEquipmentForVariant(ResourceVariant variant) =>
         variant switch
@@ -382,6 +390,9 @@ public sealed partial class SimulationEngine
             ResourceVariant.EquipmentReedClothes => PersonalEquipment.ReedClothes,
             ResourceVariant.EquipmentPrimitiveWaterskin =>
                 PersonalEquipment.PrimitiveWaterskin,
+            ResourceVariant.EquipmentReinforcedPickaxe =>
+                PersonalEquipment.ReinforcedPickaxe,
+            ResourceVariant.EquipmentWoodenBucket => PersonalEquipment.WoodenBucket,
             _ => PersonalEquipment.None,
         };
 
@@ -407,7 +418,7 @@ public sealed partial class SimulationEngine
             ? actor.SourceStackId
             : actor.CarriedStackId;
         if (!_itemStacks.TryGetValue(stackId, out var stack) ||
-            order.GetMissing(stack.Resource) < actor.ReservedQuantity)
+            order.GetMissing(stack.Resource, stack.Variant) < actor.ReservedQuantity)
         {
             throw new InvalidDataException("The save contains invalid crafting material demand.");
         }
@@ -419,7 +430,10 @@ public sealed partial class SimulationEngine
             actor.SourceStackId != EntityId.None || actor.CarriedStackId != EntityId.None ||
             actor.ReservedQuantity != 0 ||
             !_craftingOrders.TryGetValue(actor.DestinationZoneId, out var order) ||
-            !order.HasAllMaterials)
+            !order.HasAllMaterials ||
+            !World.HasWorkshop(
+                order.Workshop,
+                CraftingRecipeCatalog.Get(order.Recipe).Workshop))
         {
             throw new InvalidDataException("The save contains an invalid crafting job.");
         }

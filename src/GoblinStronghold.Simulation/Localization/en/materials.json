@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "locale": "en",
+  "section": "materials",
+  "subsections": {
+    "names": {
+      "oak-wood": "oak wood",
+      "chestnut-wood": "chestnut wood",
+      "birch-wood": "birch wood",
+      "walnut-wood": "walnut wood",
+      "apple-wood": "apple wood",
+      "pine-wood": "pine wood",
+      "reeds": "reeds",
+      "bone": "bone",
+      "hide": "hide",
+      "sandstone": "sandstone",
+      "granite": "granite",
+      "basalt": "basalt",
+      "obsidian": "obsidian",
+      "coal": "coal",
+      "iron-ore": "iron ore",
+      "copper-ore": "copper ore",
+      "silver-ore": "silver ore",
+      "gold-ore": "gold ore",
+      "ruby": "ruby",
+      "emerald": "emerald",
+      "diamond": "diamond",
+      "iron-bar": "iron bar",
+      "copper-bar": "copper bar",
+      "silver-bar": "silver bar",
+      "gold-bar": "gold bar"
+    }
+  }
+}

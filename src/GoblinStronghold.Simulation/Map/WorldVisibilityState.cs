@@ -17,13 +17,15 @@ public static class CellVisibilityExtensions
 
 public sealed class WorldVisibilityState
 {
-    private readonly CellVisibility[] _cells;
+    private CellVisibility[] _cells;
     private readonly List<int> _visibleIndices;
+    private int _materializedNegativeLevelCount;
 
     private WorldVisibilityState(GeneratedMap map, CellVisibility[] cells)
     {
         Map = map;
         _cells = cells;
+        _materializedNegativeLevelCount = map.MaterializedNegativeLevelCount;
         _visibleIndices = Enumerable.Range(0, cells.Length)
             .Where(index => cells[index] == CellVisibility.Visible)
             .ToList();
@@ -31,7 +33,14 @@ public sealed class WorldVisibilityState
 
     public GeneratedMap Map { get; }
 
-    public int DiscoveredCellCount => _cells.Count(state => state != CellVisibility.Unknown);
+    public int DiscoveredCellCount
+    {
+        get
+        {
+            EnsureLayerCapacity();
+            return _cells.Count(state => state != CellVisibility.Unknown);
+        }
+    }
 
     internal static WorldVisibilityState Create(GeneratedMap map)
     {
@@ -44,7 +53,8 @@ public sealed class WorldVisibilityState
 
     internal static WorldVisibilityState Restore(
         GeneratedMap map,
-        IEnumerable<CellVisibility> visibility)
+        IEnumerable<CellVisibility> visibility,
+        int? savedNegativeLevelCount = null)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(visibility);
@@ -54,10 +64,14 @@ public sealed class WorldVisibilityState
             (map.CaveLevelCount + map.MaterializedPositiveLevelCount + 1));
         var expectedLength = checked(map.CellCount *
             (map.MaterializedNegativeLevelCount + map.MaterializedPositiveLevelCount + 1));
+        var savedExpectedLength = savedNegativeLevelCount is null
+            ? expectedLength
+            : checked(map.CellCount *
+                (savedNegativeLevelCount.Value + map.MaterializedPositiveLevelCount + 1));
         if (cells.Any(state => !Enum.IsDefined(state)) ||
             cells.Length != map.CellCount && cells.Length != legacyLength &&
             cells.Length != previousExpectedLength &&
-            cells.Length != expectedLength)
+            cells.Length != expectedLength && cells.Length != savedExpectedLength)
         {
             throw new InvalidDataException("The save contains invalid fog-of-war state.");
         }
@@ -67,7 +81,8 @@ public sealed class WorldVisibilityState
             cells = ExpandLayers(
                 cells,
                 map.CellCount,
-                Math.Min(map.CaveLevelCount, (cells.Length / map.CellCount) - 1),
+                savedNegativeLevelCount ??
+                    Math.Min(map.CaveLevelCount, (cells.Length / map.CellCount) - 1),
                 map.MaterializedNegativeLevelCount,
                 map.MaterializedPositiveLevelCount);
         }
@@ -87,6 +102,7 @@ public sealed class WorldVisibilityState
 
     public bool TryGet(GridPosition position, out CellVisibility visibility)
     {
+        EnsureLayerCapacity();
         if (!IsVisibilityPosition(position))
         {
             visibility = default;
@@ -97,8 +113,11 @@ public sealed class WorldVisibilityState
         return true;
     }
 
-    public IReadOnlyList<CellVisibility> CreateSnapshot() =>
-        new ReadOnlyCollection<CellVisibility>((CellVisibility[])_cells.Clone());
+    public IReadOnlyList<CellVisibility> CreateSnapshot()
+    {
+        EnsureLayerCapacity();
+        return new ReadOnlyCollection<CellVisibility>((CellVisibility[])_cells.Clone());
+    }
 
     internal void Reveal(IEnumerable<GridPosition> observers, int radius)
     {
@@ -112,6 +131,7 @@ public sealed class WorldVisibilityState
         Func<GridPosition, bool>? isSolidHillRock = null)
     {
         ArgumentNullException.ThrowIfNull(observers);
+        EnsureLayerCapacity();
         var observerArray = observers.ToArray();
         if (observerArray.Any(observer => observer.Radius <= 0))
         {
@@ -154,6 +174,26 @@ public sealed class WorldVisibilityState
         Map.IsWithin(position) || Map.IsCavePosition(position) ||
         Map.IsHillMassPosition(position) ||
         Map.IsTerrainSurfacePosition(position);
+
+    private void EnsureLayerCapacity()
+    {
+        var targetNegativeLevelCount = Map.MaterializedNegativeLevelCount;
+        if (_materializedNegativeLevelCount == targetNegativeLevelCount)
+        {
+            return;
+        }
+
+        _cells = ExpandLayers(
+            _cells,
+            Map.CellCount,
+            _materializedNegativeLevelCount,
+            targetNegativeLevelCount,
+            Map.MaterializedPositiveLevelCount);
+        _materializedNegativeLevelCount = targetNegativeLevelCount;
+        _visibleIndices.Clear();
+        _visibleIndices.AddRange(Enumerable.Range(0, _cells.Length)
+            .Where(index => _cells[index] == CellVisibility.Visible));
+    }
 
     private int GetIndex(GridPosition position) => checked(
         ((position.Z <= 0 ? -position.Z : Map.MaterializedNegativeLevelCount + position.Z) * Map.CellCount) +

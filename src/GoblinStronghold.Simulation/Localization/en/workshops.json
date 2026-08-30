@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "locale": "en",
+  "section": "workshops",
+  "subsections": {
+    "names": {
+      "primitive-workshop": "primitive workshop",
+      "bloomery": "bloomery",
+      "smelting-furnace": "smelting furnace",
+      "crucible-furnace": "crucible furnace"
+    }
+  }
+}

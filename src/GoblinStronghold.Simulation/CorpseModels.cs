@@ -10,6 +10,17 @@ public enum CorpseKind : byte
     Human = 2,
 }
 
+[Flags]
+public enum CorpseDirective : byte
+{
+    None = 0,
+    LootContents = 1 << 0,
+    Consume = 1 << 1,
+    RecoverToCamp = 1 << 2,
+    RecoverAndBudAtCamp = 1 << 3,
+    BudInPlace = 1 << 4,
+}
+
 public readonly record struct CorpseItemSnapshot(
     ResourceKind Resource,
     FoodKind FoodKind,
@@ -33,6 +44,7 @@ public sealed class CorpseSnapshot
         SimulationTick createdAt,
         int containedWater,
         int ediblePortions,
+        CorpseDirective directives,
         GoblinInheritanceImprint inheritanceImprint,
         IEnumerable<CorpseItemSnapshot> contents)
     {
@@ -43,6 +55,7 @@ public sealed class CorpseSnapshot
         CreatedAt = createdAt;
         ContainedWater = containedWater;
         EdiblePortions = ediblePortions;
+        Directives = directives;
         InheritanceImprint = inheritanceImprint;
         Contents = new ReadOnlyCollection<CorpseItemSnapshot>(contents.ToArray());
     }
@@ -60,6 +73,8 @@ public sealed class CorpseSnapshot
     public int ContainedWater { get; }
 
     public int EdiblePortions { get; }
+
+    public CorpseDirective Directives { get; }
 
     public GoblinInheritanceImprint InheritanceImprint { get; }
 
@@ -93,6 +108,8 @@ internal sealed class CorpseState(
 
     public int EdiblePortions { get; set; } = ediblePortions;
 
+    public CorpseDirective Directives { get; set; }
+
     public GoblinInheritanceImprint InheritanceImprint { get; } = inheritanceImprint;
 
     public List<CorpseItemSnapshot> Contents { get; } = contents.ToList();
@@ -105,6 +122,7 @@ internal sealed class CorpseState(
         CreatedAt,
         ContainedWater,
         EdiblePortions,
+        Directives,
         InheritanceImprint,
         Contents);
 }

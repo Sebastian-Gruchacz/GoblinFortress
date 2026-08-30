@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "locale": "en",
+  "section": "recipes",
+  "subsections": {
+    "names": {
+      "PrimitiveSling": "primitive sling",
+      "BoneKnife": "bone knife",
+      "FightingStick": "fighting stick",
+      "StoneClub": "stone club",
+      "HideClothes": "hide clothing",
+      "ReedClothes": "reed clothing",
+      "PrimitiveWaterskin": "primitive waterskin",
+      "ReinforcedPickaxe": "reinforced pickaxe",
+      "WoodenBucket": "wooden bucket",
+      "WoodenBarrel": "wooden barrel",
+      "SmeltIronBar": "smelt iron bar",
+      "SmeltCopperBar": "smelt copper bar",
+      "SmeltSilverBar": "smelt silver bar",
+      "SmeltGoldBar": "smelt gold bar"
+    }
+  }
+}

@@ -24,7 +24,7 @@ internal static class CaveSprites
         var row = rock switch
         {
             RockKind.Sandstone => 0,
-            RockKind.Granite => 1,
+            RockKind.Granite or RockKind.Basalt or RockKind.Obsidian => 1,
             _ => throw new ArgumentOutOfRangeException(nameof(rock), rock, null),
         };
         var left = 0;
@@ -38,6 +38,8 @@ internal static class CaveSprites
     {
         RockKind.Sandstone => new Color(0.055f, 0.041f, 0.03f, 0.64f),
         RockKind.Granite => new Color(0.025f, 0.03f, 0.037f, 0.52f),
+        RockKind.Basalt => new Color(0.018f, 0.015f, 0.017f, 0.72f),
+        RockKind.Obsidian => new Color(0.035f, 0.012f, 0.045f, 0.68f),
         _ => throw new ArgumentOutOfRangeException(nameof(rock), rock, null),
     };
 
@@ -51,7 +53,7 @@ internal static class CaveSprites
         var row = rock switch
         {
             RockKind.Sandstone => 0,
-            RockKind.Granite => 1,
+            RockKind.Granite or RockKind.Basalt or RockKind.Obsidian => 1,
             _ => throw new ArgumentOutOfRangeException(nameof(rock), rock, null),
         };
         var left = openNeighborMask * atlas.GetWidth() / WallColumns;
@@ -77,7 +79,7 @@ internal static class CaveSprites
         var row = rock switch
         {
             RockKind.Sandstone => 0,
-            RockKind.Granite => 1,
+            RockKind.Granite or RockKind.Basalt or RockKind.Obsidian => 1,
             _ => throw new ArgumentOutOfRangeException(nameof(rock), rock, null),
         };
         var column = WallMaskCount + cornerIndex;

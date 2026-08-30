@@ -1,6 +1,7 @@
 using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.GodotClient;
 
@@ -516,13 +517,30 @@ public partial class WorldView3D : Node3D
                     new Vector3(CellSize * 0.74f, 0.5f, CellSize * 0.74f), color);
                 break;
             case WorldObjectPartKind.TreeTrunk:
-            case WorldObjectPartKind.TreeStump:
                 AddBox(surface, center + Vector3.Up * (LevelHeight * 0.48f),
                     new Vector3(0.34f, LevelHeight * 0.96f, 0.34f), color);
+                break;
+            case WorldObjectPartKind.TreeStump:
+                AddBox(surface, center + Vector3.Up * 0.13f,
+                    new Vector3(0.46f, 0.26f, 0.46f), color);
+                break;
+            case WorldObjectPartKind.FelledTreeRemains:
+                AddBox(surface, center + new Vector3(0f, 0.12f, 0f),
+                    new Vector3(CellSize * 0.9f, 0.24f, 0.3f), color);
                 break;
             case WorldObjectPartKind.TreeCrown:
                 AddCrossedCard(surface, center + Vector3.Up * (LevelHeight * 0.45f),
                     new Vector2(CellSize * 1.55f, LevelHeight * 1.7f), color);
+                break;
+            case WorldObjectPartKind.PrimitiveWorkshop:
+                AddBox(surface, center + Vector3.Up * 0.2f,
+                    new Vector3(CellSize * 0.82f, 0.4f, CellSize * 0.58f), color);
+                break;
+            case WorldObjectPartKind.Bloomery:
+            case WorldObjectPartKind.SmeltingFurnace:
+            case WorldObjectPartKind.CrucibleFurnace:
+                AddBox(surface, center + Vector3.Up * (LevelHeight * 0.32f),
+                    new Vector3(CellSize * 0.78f, LevelHeight * 0.64f, CellSize * 0.78f), color);
                 break;
         }
     }
@@ -628,16 +646,30 @@ public partial class WorldView3D : Node3D
         _ => Colors.Magenta,
     };
 
-    private static Color StructureColor(WorldObjectSnapshot worldObject, WorldObjectPartKind partKind) =>
+    private Color StructureColor(WorldObjectSnapshot worldObject, WorldObjectPartKind partKind) =>
         partKind switch
         {
-            WorldObjectPartKind.TreeTrunk or WorldObjectPartKind.TreeStump => new Color("72502e"),
-            WorldObjectPartKind.TreeCrown => new Color("39753d"),
+            WorldObjectPartKind.TreeTrunk or WorldObjectPartKind.TreeStump or
+                WorldObjectPartKind.FelledTreeRemains => TreePartSprites.GetWoodColor(
+                    WoodMaterialPolicy.VariantFor(
+                        _engine.WorldSeed,
+                        _engine.Map.Width,
+                        worldObject.Anchor)),
+            _ when worldObject.MaterialVariant != ResourceVariant.None =>
+                MaterialPaletteColors.For(worldObject.MaterialVariant).Midtone,
+            WorldObjectPartKind.TreeCrown => TreeCrownSprites.GetCrownColor(
+                WoodMaterialPolicy.VariantFor(
+                    _engine.WorldSeed,
+                    _engine.Map.Width,
+                    worldObject.Anchor)),
             WorldObjectPartKind.Walkway => new Color("ad7b41"),
             WorldObjectPartKind.WellRim or WorldObjectPartKind.WellShaft => new Color("777b70"),
             WorldObjectPartKind.Door => new Color("6f4324"),
             WorldObjectPartKind.ClosedDoorLeaf or WorldObjectPartKind.OpenDoorLeaf or
                 WorldObjectPartKind.AutomaticallyOpenedDoorLeaf => new Color("89562e"),
+            WorldObjectPartKind.Bloomery => new Color("766753"),
+            WorldObjectPartKind.SmeltingFurnace => new Color("59606a"),
+            WorldObjectPartKind.CrucibleFurnace => new Color("49434f"),
             _ when worldObject.Owner == WorldObjectOwner.GoblinTribe => new Color("78633c"),
             _ => new Color("a48052"),
         };

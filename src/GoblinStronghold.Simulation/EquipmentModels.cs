@@ -102,6 +102,8 @@ public static class EquipmentCatalog
             ResourceVariant.EquipmentWoodenAxe, 3),
         new(PersonalEquipment.PrimitivePickaxe, EquipmentSlot.MainHand,
             ResourceVariant.EquipmentPrimitivePickaxe, 4),
+        new(PersonalEquipment.ReinforcedPickaxe, EquipmentSlot.MainHand,
+            ResourceVariant.EquipmentReinforcedPickaxe, 5),
         new(PersonalEquipment.FightingStick, EquipmentSlot.MainHand,
             ResourceVariant.EquipmentFightingStick, 2),
         new(PersonalEquipment.StoneClub, EquipmentSlot.MainHand,
@@ -110,6 +112,8 @@ public static class EquipmentCatalog
             ResourceVariant.EquipmentPrimitiveSling, 1),
         new(PersonalEquipment.PrimitiveWaterskin, EquipmentSlot.Waterskin,
             ResourceVariant.EquipmentPrimitiveWaterskin, 1),
+        new(PersonalEquipment.WoodenBucket, EquipmentSlot.MainHand,
+            ResourceVariant.EquipmentWoodenBucket, 2),
     ];
 
     public static IReadOnlyList<EquipmentItemDefinition> GetDefinitions(

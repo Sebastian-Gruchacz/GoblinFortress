@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "locale": "pl",
+  "section": "recipes",
+  "subsections": {
+    "names": {
+      "PrimitiveSling": "prymitywna proca",
+      "BoneKnife": "kościany nóż",
+      "FightingStick": "kij bojowy",
+      "StoneClub": "kamienna maczuga",
+      "HideClothes": "skórzany ubiór",
+      "ReedClothes": "sitowiowy ubiór",
+      "PrimitiveWaterskin": "prymitywny bukłak",
+      "ReinforcedPickaxe": "wzmocniony kilof",
+      "WoodenBucket": "drewniane wiadro",
+      "WoodenBarrel": "drewniana beczka",
+      "SmeltIronBar": "wytop sztabki żelaza",
+      "SmeltCopperBar": "wytop sztabki miedzi",
+      "SmeltSilverBar": "wytop sztabki srebra",
+      "SmeltGoldBar": "wytop sztabki złota"
+    }
+  }
+}

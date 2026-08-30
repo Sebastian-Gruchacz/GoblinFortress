@@ -48,6 +48,11 @@ public sealed class AnimalEcologyTests
 
         Assert.Contains(initial, animal => animal.Kind == AnimalKind.MarshHare);
         Assert.Contains(initial, animal => animal.Kind == AnimalKind.SwampBoar);
+        Assert.All(initial, animal =>
+        {
+            Assert.True(first.Map.TryGetInitialGeometry(animal.Position, out var geometry));
+            Assert.NotEqual(CellSupportKind.NaturalRamp, geometry.Support);
+        });
         var hare = initial.First(animal => animal.Kind == AnimalKind.MarshHare);
         var boar = initial.First(animal => animal.Kind == AnimalKind.SwampBoar);
         Assert.True(hare.MaximumHealth < boar.MaximumHealth);
@@ -214,7 +219,7 @@ public sealed class AnimalEcologyTests
         Assert.All(spiders, spider =>
         {
             Assert.True(spider.Position.Z < 0);
-            Assert.True(map.GetCaveCell(spider.Position).IsOpen);
+            Assert.True(engine.World.IsTerrainTraversable(spider.Position));
         });
 
         var deepSpider = spiders.First(animal => animal.Position.Z == -2);
@@ -292,8 +297,17 @@ public sealed class AnimalEcologyTests
             initialFoodStock: 20);
         var hare = engine.CreateSnapshot().Animals.First(animal =>
             animal.Kind == AnimalKind.MarshHare);
-        var approach = engine.Map.GetCardinalNeighbors(hare.Position)
-            .First(position => engine.World.IsSurfaceTraversable(position));
+        var approach = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => engine.Map.GetTerrainSurfacePosition(new GridPosition(x, y))))
+            .Where(position =>
+                position != hare.Position &&
+                engine.World.IsTerrainTraversable(position))
+            .OrderBy(position =>
+                Math.Abs(position.X - hare.Position.X) +
+                Math.Abs(position.Y - hare.Position.Y) +
+                Math.Abs(position.Z - hare.Position.Z))
+            .First();
         var save = JsonNode.Parse(engine.Save())!.AsObject();
         save["actors"]![0]!["x"] = approach.X;
         save["actors"]![0]!["y"] = approach.Y;

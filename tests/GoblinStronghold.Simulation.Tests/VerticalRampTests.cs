@@ -7,6 +7,65 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class VerticalRampTests
 {
     [Fact]
+    public void RampCanBeCarvedBelowTheFormerLevelMinusTwoBoundary()
+    {
+        var seed = new WorldSeed(0x4445455052414D50UL);
+        var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 30);
+        Assert.Equal(-2, map.DeepestCaveLevel);
+        var upper =
+            (from y in Enumerable.Range(0, map.Height)
+             from x in Enumerable.Range(0, map.Width)
+             let candidate = new GridPosition(x, y, -2)
+             where engine.World.CanCarveRampDown(candidate)
+             select candidate).First();
+        var lower = upper with { Z = -3 };
+
+        Assert.True(engine.World.TryCarveVerticalRamp(
+            upper,
+            carveDown: true,
+            SimulationTick.Zero,
+            out _,
+            out _));
+
+        Assert.Contains(lower, engine.World.ExcavatedCaveCells);
+        Assert.NotNull(engine.Navigation.FindPath(upper, lower));
+        Assert.Equal(-3, map.DeepestCaveLevel);
+
+        var secondUpper = new[]
+            {
+                lower with { X = lower.X - 1 },
+                lower with { X = lower.X + 1 },
+                lower with { Y = lower.Y - 1 },
+                lower with { Y = lower.Y + 1 },
+            }
+            .First(engine.World.CanExcavateRock);
+        Assert.True(engine.World.TryExcavateRock(
+            secondUpper,
+            SimulationTick.Zero,
+            out _,
+            out _,
+            out _));
+        Assert.True(engine.World.CanCarveRampDown(secondUpper));
+        Assert.True(engine.World.TryCarveVerticalRamp(
+            secondUpper,
+            carveDown: true,
+            SimulationTick.Zero,
+            out _,
+            out _));
+        Assert.Equal(-4, map.DeepestCaveLevel);
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(-4, restored.Map.DeepestCaveLevel);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
     public void GoblinCarvesRampDownAndTheNewRouteSurvivesSaveLoad()
     {
         var seed = new WorldSeed(0x52414D50444F574EUL);

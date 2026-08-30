@@ -2,7 +2,8 @@ namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
-    public const int CurrentVersion = 12;
+    public const int CurrentVersion = 14;
+    public const int MinimumInitialCaveLevelCount = 2;
     public const int DefaultDimension = 96;
     public const int MinimumDimension = 16;
     public const int MaximumDimension = 2_048;
@@ -589,7 +590,9 @@ public static class SwampMapGenerator
         GridPosition humanVillage,
         int generatorVersion)
     {
-        const int depthLevels = 2;
+        var depthLevels = generatorVersion >= 13
+            ? Math.Max(MinimumInitialCaveLevelCount, -surfaceCells.Min(cell => cell.FloorLevel))
+            : 2;
         var cellCount = checked(width * height);
         var caveCells = new CaveCell[checked(cellCount * depthLevels)];
         for (var levelIndex = 0; levelIndex < depthLevels; levelIndex++)
@@ -598,16 +601,15 @@ public static class SwampMapGenerator
             {
                 for (var x = 0; x < width; x++)
                 {
-                    var noise = FractalValueNoise(
-                        seed,
-                        x / (double)(width - 1),
-                        y / (double)(height - 1),
-                        sampleKey: checked(28_000UL + (ulong)levelIndex));
-                    var rock = noise + (levelIndex * 0.12d) >= 0.57d
-                        ? RockKind.Granite
-                        : RockKind.Sandstone;
                     caveCells[(levelIndex * cellCount) + (y * width) + x] =
-                        new CaveCell(rock, CaveCellKind.SolidRock);
+                        GenerateSolidCaveCell(
+                            seed,
+                            width,
+                            height,
+                            x,
+                            y,
+                            levelIndex,
+                            generatorVersion);
                 }
             }
         }
@@ -727,12 +729,15 @@ public static class SwampMapGenerator
         SetCaveKind(caveCells, width, height, deepStart, CaveCellKind.Ramp);
         if (generatorVersion >= 8)
         {
-            AssignMineralDeposits(
-                caveCells,
-                seed,
-                width,
-                height,
-                generatorVersion);
+            if (generatorVersion < 13)
+            {
+                AssignMineralDeposits(
+                    caveCells,
+                    seed,
+                    width,
+                    height,
+                    generatorVersion);
+            }
             if (generatorVersion >= 10)
             {
                 EnsureExposedMineralDeposit(
@@ -755,6 +760,136 @@ public static class SwampMapGenerator
                 new VerticalPassage(entrance, firstRoom, VerticalPassageKind.CaveMouth),
                 new VerticalPassage(descent, deepStart, VerticalPassageKind.NaturalRamp),
             ]);
+    }
+
+    internal static CaveCell GenerateSolidCaveCell(
+        WorldSeed seed,
+        int width,
+        int height,
+        int x,
+        int y,
+        int levelIndex,
+        int generatorVersion)
+    {
+        var normalizedX = x / (double)(width - 1);
+        var normalizedY = y / (double)(height - 1);
+        var rockNoise = FractalValueNoise(
+            seed,
+            normalizedX,
+            normalizedY,
+            sampleKey: checked(28_000UL + (ulong)levelIndex));
+        var depth = levelIndex + 1;
+        var rock = generatorVersion >= 14
+            ? SelectDeepRock(rockNoise, depth)
+            : rockNoise + (levelIndex * 0.12d) >= 0.57d
+                ? RockKind.Granite
+                : RockKind.Sandstone;
+        if (generatorVersion < 13)
+        {
+            return new CaveCell(rock, CaveCellKind.SolidRock);
+        }
+
+        if (generatorVersion >= 14 && depth >= 12 &&
+            IsLavaCell(seed, normalizedX, normalizedY, depth))
+        {
+            return new CaveCell(
+                rock,
+                CaveCellKind.Floor,
+                MineralDepositKind.None,
+                CellFluidKind.Lava);
+        }
+
+        if (generatorVersion >= 14)
+        {
+            return new CaveCell(
+                rock,
+                CaveCellKind.SolidRock,
+                SelectDeepDeposit(seed, normalizedX, normalizedY, depth));
+        }
+        var coalThreshold = levelIndex == 0 ? 0.68d : 0.62d;
+        var ironThreshold = levelIndex == 0
+            ? 0.76d
+            : Math.Max(0.56d, 0.68d - (levelIndex * 0.015d));
+        var coalNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 29_100UL);
+        var ironNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 29_200UL);
+        var deposit = ironNoise >= ironThreshold && ironNoise - ironThreshold >=
+            coalNoise - coalThreshold
+            ? MineralDepositKind.IronOre
+            : coalNoise >= coalThreshold
+                ? MineralDepositKind.Coal
+                : MineralDepositKind.None;
+        return new CaveCell(rock, CaveCellKind.SolidRock, deposit);
+    }
+
+    private static RockKind SelectDeepRock(double noise, int depth) => depth switch
+    {
+        >= 16 => noise >= 0.48d ? RockKind.Obsidian : RockKind.Basalt,
+        >= 12 => noise >= 0.3d ? RockKind.Basalt : RockKind.Granite,
+        >= 8 when noise >= 0.76d => RockKind.Basalt,
+        _ => noise + (Math.Min(depth - 1, 4) * 0.08d) >= 0.57d
+            ? RockKind.Granite
+            : RockKind.Sandstone,
+    };
+
+    private static bool IsLavaCell(
+        WorldSeed seed,
+        double x,
+        double y,
+        int depth)
+    {
+        var lakeNoise = FractalValueNoise(
+            seed,
+            x + (depth * 0.013d),
+            y - (depth * 0.009d),
+            sampleKey: 30_100UL);
+        var streamNoise = FractalValueNoise(
+            seed,
+            x * 0.72d,
+            y * 0.72d,
+            sampleKey: 30_200UL);
+        var lakeThreshold = depth >= 16 ? 0.67d : 0.84d;
+        var streamHalfWidth = depth >= 16 ? 0.055d : 0.014d;
+        return lakeNoise >= lakeThreshold || Math.Abs(streamNoise - 0.5d) <= streamHalfWidth;
+    }
+
+    private static MineralDepositKind SelectDeepDeposit(
+        WorldSeed seed,
+        double x,
+        double y,
+        int depth)
+    {
+        var gemNoise = FractalValueNoise(seed, x, y, sampleKey: 30_900UL);
+        if (depth >= 18 && gemNoise >= 0.76d)
+        {
+            return MineralDepositKind.Diamond;
+        }
+        if (depth >= 16 && gemNoise >= 0.70d)
+        {
+            return gemNoise >= 0.73d ? MineralDepositKind.Emerald : MineralDepositKind.Ruby;
+        }
+
+        var preciousNoise = FractalValueNoise(seed, x, y, sampleKey: 30_800UL);
+        if (depth >= 14 && preciousNoise >= 0.70d)
+        {
+            return MineralDepositKind.GoldOre;
+        }
+        if (depth >= 10 && preciousNoise >= 0.64d)
+        {
+            return MineralDepositKind.SilverOre;
+        }
+        if (depth >= 6 && preciousNoise >= 0.58d)
+        {
+            return MineralDepositKind.CopperOre;
+        }
+
+        var coalNoise = FractalValueNoise(seed, x, y, sampleKey: 29_100UL);
+        var ironNoise = FractalValueNoise(seed, x, y, sampleKey: 29_200UL);
+        var ironThreshold = Math.Max(0.54d, 0.7d - (depth * 0.012d));
+        return ironNoise >= ironThreshold && ironNoise - ironThreshold >= coalNoise - 0.62d
+            ? MineralDepositKind.IronOre
+            : coalNoise >= 0.62d
+                ? MineralDepositKind.Coal
+                : MineralDepositKind.None;
     }
 
     private static void AssignMineralDeposits(
@@ -1104,7 +1239,12 @@ public static class SwampMapGenerator
         }
 
         var index = checked((((-position.Z) - 1) * width * height) + (position.Y * width) + position.X);
-        cells[index] = cells[index] with { Kind = kind };
+        cells[index] = cells[index] with
+        {
+            Kind = kind,
+            Deposit = MineralDepositKind.None,
+            Fluid = CellFluidKind.None,
+        };
     }
 
     private static int Distance(GridPosition left, GridPosition right) =>

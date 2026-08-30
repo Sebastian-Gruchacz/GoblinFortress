@@ -17,6 +17,9 @@ public sealed partial class SimulationEngine
     private const int SpiderMaximumFatigue = 18;
     private const int SpiderMovementFatigue = 1;
     private const int SpiderRestRecovery = 3;
+    private const int DeepCrawlerMaximumHealth = 900;
+    private const int MagmaWyrmMaximumHealth = 2_400;
+    private const int DeepPredatorMaximumFatigue = 30;
 
     private void CreateInitialAnimals()
     {
@@ -42,6 +45,10 @@ public sealed partial class SimulationEngine
             .SelectMany(y => Enumerable.Range(0, Map.Width)
                 .Select(x => new GridPosition(x, y, level)))
             .Where(position => IsAnimalHabitat(kind, position) &&
+                Map.TryGetInitialGeometry(position, out var geometry) &&
+                geometry.Support != CellSupportKind.NaturalRamp &&
+                !_actors.Values.Any(actor => actor.Health > 0 && actor.Position == position) &&
+                !_animals.Values.Any(animal => animal.Health > 0 && animal.Position == position) &&
                 (level < 0 ||
                  Distance(position, Map.GoblinSpawn) > 10 &&
                  Distance(position, Map.HumanVillage) > 7))
@@ -66,8 +73,33 @@ public sealed partial class SimulationEngine
         }
     }
 
+    private void EnsureDeepPredators()
+    {
+        for (var depth = 12; depth <= Map.CaveLevelCount; depth++)
+        {
+            var level = -depth;
+            if (depth >= 16 && !_animals.Values.Any(animal =>
+                    animal.Kind == AnimalKind.MagmaWyrm && animal.Position.Z == level))
+            {
+                CreateInitialAnimals(AnimalKind.MagmaWyrm, count: 1, level);
+            }
+
+            var crawlerTarget = depth >= 16 ? 2 : 1;
+            var crawlers = _animals.Values.Count(animal =>
+                animal.Kind == AnimalKind.DeepCrawler && animal.Position.Z == level);
+            if (crawlers < crawlerTarget)
+            {
+                CreateInitialAnimals(
+                    AnimalKind.DeepCrawler,
+                    crawlerTarget - crawlers,
+                    level);
+            }
+        }
+    }
+
     private void UpdateAnimals()
     {
+        EnsureDeepPredators();
         foreach (var animal in _animals.Values.ToArray())
         {
             if (CurrentTick.Value % AnimalUpdateIntervalTicks !=
@@ -145,14 +177,13 @@ public sealed partial class SimulationEngine
             .ToArray();
 
         if ((animal.Kind == AnimalKind.SwampBoar && nearbyActors.Length == 1) ||
-            (animal.Kind == AnimalKind.CaveSpider && nearbyActors.Length > 0))
+            (animal.Kind is AnimalKind.CaveSpider or AnimalKind.DeepCrawler or
+                AnimalKind.MagmaWyrm && nearbyActors.Length > 0))
         {
             var target = nearbyActors[0];
             if (target.Distance <= 1)
             {
-                var damage = animal.Kind == AnimalKind.CaveSpider
-                    ? 45 + (Math.Abs(animal.Position.Z) * 25)
-                    : 90;
+                var damage = AnimalCombatPolicy.GetAttackDamage(animal.Kind, animal.Position);
                 ApplyTraumaDamage(target.Actor, damage);
                 animal.Activity = AnimalActivity.Threatening;
                 Publish(SimulationEventKind.AnimalHitGoblin, EntityId.None, target.Actor.Id, damage);
@@ -250,7 +281,8 @@ public sealed partial class SimulationEngine
 
     private IEnumerable<GridPosition> GetAnimalTraversableNeighbors(
         AnimalKind kind,
-        GridPosition position) => kind == AnimalKind.CaveSpider
+        GridPosition position) => kind is AnimalKind.CaveSpider or AnimalKind.DeepCrawler or
+            AnimalKind.MagmaWyrm
         ? World.GetTerrainNeighbors(position).Where(candidate => IsAnimalHabitat(kind, candidate))
         : Map.GetCardinalNeighbors(position).Where(candidate =>
             IsAnimalHabitat(kind, candidate) &&
@@ -274,10 +306,16 @@ public sealed partial class SimulationEngine
         {
             return false;
         }
-        if (kind == AnimalKind.CaveSpider)
+        if (kind is AnimalKind.CaveSpider or AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm)
         {
-            return position.Z < 0 && Map.IsCavePosition(position) &&
-                Map.GetCaveCell(position).IsOpen && World.IsTerrainTraversable(position);
+            var inhabitsDepth = kind switch
+            {
+                AnimalKind.DeepCrawler => position.Z <= -12,
+                AnimalKind.MagmaWyrm => position.Z <= -16,
+                _ => position.Z < 0,
+            };
+            return inhabitsDepth && Map.IsCavePosition(position) &&
+                World.IsTerrainTraversable(position);
         }
         if (position.Z != 0)
         {
@@ -357,6 +395,8 @@ public sealed partial class SimulationEngine
         AnimalKind.MarshHare => HareMaximumHealth,
         AnimalKind.SwampBoar => BoarMaximumHealth,
         AnimalKind.CaveSpider => SpiderMaximumHealth,
+        AnimalKind.DeepCrawler => DeepCrawlerMaximumHealth,
+        AnimalKind.MagmaWyrm => MagmaWyrmMaximumHealth,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -365,6 +405,7 @@ public sealed partial class SimulationEngine
         AnimalKind.MarshHare => HareMaximumFatigue,
         AnimalKind.SwampBoar => BoarMaximumFatigue,
         AnimalKind.CaveSpider => SpiderMaximumFatigue,
+        AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm => DeepPredatorMaximumFatigue,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -373,6 +414,7 @@ public sealed partial class SimulationEngine
         AnimalKind.MarshHare => HareMovementFatigue,
         AnimalKind.SwampBoar => BoarMovementFatigue,
         AnimalKind.CaveSpider => SpiderMovementFatigue,
+        AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm => SpiderMovementFatigue,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -381,6 +423,7 @@ public sealed partial class SimulationEngine
         AnimalKind.MarshHare => HareRestRecovery,
         AnimalKind.SwampBoar => BoarRestRecovery,
         AnimalKind.CaveSpider => SpiderRestRecovery,
+        AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm => SpiderRestRecovery,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 

@@ -178,6 +178,9 @@ public sealed partial class SimulationEngine
                 model.CreatedAtTick > CurrentTick.Value || model.ContainedWater < 0 ||
                 ediblePortions < 0 ||
                 ediblePortions > GetInitialCorpseEdiblePortions(model.Kind) ||
+                !AreValidCorpseDirectives(model.Directives) ||
+                (model.Kind != CorpseKind.Human &&
+                    (model.Directives & CorpseBuddingDirectives) != 0) ||
                 !HasOnlyKnownFlags(model.InheritableSkills, GoblinSkill.Building) ||
                 !HasOnlyKnownFlags(model.InheritableTraits, GoblinTrait.Fastidious) ||
                 model.InheritableForagingExperience < 0 ||
@@ -221,7 +224,30 @@ public sealed partial class SimulationEngine
                     item.Variant,
                     item.Quantity,
                     item.UnitWeight))));
+            _corpses[id].Directives = model.Directives;
         }
+    }
+
+    private const CorpseDirective CorpseHandlingDirectives =
+        CorpseDirective.RecoverToCamp |
+        CorpseDirective.RecoverAndBudAtCamp |
+        CorpseDirective.BudInPlace;
+
+    private const CorpseDirective CorpseBuddingDirectives =
+        CorpseDirective.RecoverAndBudAtCamp |
+        CorpseDirective.BudInPlace;
+
+    private static bool AreValidCorpseDirectives(CorpseDirective directives)
+    {
+        const CorpseDirective known = CorpseDirective.LootContents |
+            CorpseDirective.Consume |
+            CorpseHandlingDirectives;
+        var handling = directives & CorpseHandlingDirectives;
+        return (directives & ~known) == 0 && handling is
+            CorpseDirective.None or
+            CorpseDirective.RecoverToCamp or
+            CorpseDirective.RecoverAndBudAtCamp or
+            CorpseDirective.BudInPlace;
     }
 
     private static int GetInitialCorpseEdiblePortions(CorpseKind kind) => kind switch

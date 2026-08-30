@@ -5,12 +5,13 @@ using System.Text;
 using System.Text.Json;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Workshops;
 
 namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
-    private const int SaveFormatVersion = SimulationSaveMigrationManager.CurrentVersion;
+    private const int SaveFormatVersion = SimulationSaveFormat.CurrentVersion;
     public const int MinimumRaidTargetRadius = 3;
     public const int MaximumRaidTargetRadius = 10;
     public const int DefaultRaidTargetRadius = 6;
@@ -47,6 +48,7 @@ public sealed partial class SimulationEngine
     private GoblinRaidPhase _raidPhase;
     private GridPosition _raidRallyPoint;
     private readonly SortedSet<EntityId> _raidPartyIds = [];
+    private bool _raidRosterConfigured;
     private GridPosition _raidTarget;
     private int _raidTargetRadius = DefaultRaidTargetRadius;
     private RaidDirective _raidDirectives = DefaultRaidDirectives;
@@ -259,8 +261,7 @@ public sealed partial class SimulationEngine
         ArgumentException.ThrowIfNullOrWhiteSpace(saveJson);
         ArgumentNullException.ThrowIfNull(definitions);
 
-        var loadPlan = SimulationSaveMigrationManager.Prepare(saveJson, SaveOptions);
-        var save = loadPlan.Save;
+        var save = SimulationSaveReader.ReadExact(saveJson, SaveOptions);
 
         ValidateSaveHeader(save, definitions);
 
@@ -284,6 +285,8 @@ public sealed partial class SimulationEngine
             throw new InvalidDataException(
                 "The saved map fingerprint does not match the current deterministic generator.");
         }
+
+        var savedNegativeLevelCount = map.MaterializedNegativeLevelCount;
 
         var engine = new SimulationEngine(
             worldSeed,
@@ -314,6 +317,8 @@ public sealed partial class SimulationEngine
                 throw new InvalidDataException("The save contains duplicate raid-party members.");
             }
         }
+        engine._raidRosterConfigured = save.RaidRosterConfigured ||
+            engine._raidPartyIds.Count > 0;
 
         engine.World = WorldMapState.Restore(
             map,
@@ -332,7 +337,8 @@ public sealed partial class SimulationEngine
                 model.Parts.Select(part => new WorldObjectPartSnapshot(
                     new GridPosition(part.RelativeX, part.RelativeY, part.RelativeZ),
                     part.Channel,
-                    part.Kind)))),
+                    part.Kind)),
+                model.MaterialVariant)),
             save.ExcavatedCaveCells.Select(model =>
                 new GridPosition(model.X, model.Y, model.Z)),
             save.ExcavatedTerrainRamps.Select(model =>
@@ -342,9 +348,11 @@ public sealed partial class SimulationEngine
                 new GridPosition(model.LowerX, model.LowerY, model.LowerZ),
                 model.Kind)));
         engine.Navigation = new NavigationPathService(engine.World);
-        loadPlan.MigrateWorldState(engine.World);
         engine.LoadBloodStains(save.BloodStains);
-        engine.Visibility = WorldVisibilityState.Restore(map, save.Visibility);
+        engine.Visibility = WorldVisibilityState.Restore(
+            map,
+            save.Visibility,
+            savedNegativeLevelCount);
         engine._humanVillage = HumanVillageState.Restore(
             engine.World,
             save.HumanVillage,
@@ -576,6 +584,7 @@ public sealed partial class SimulationEngine
             _raidPhase,
             _raidRallyPoint,
             _raidPartyIds.ToArray(),
+            _raidRosterConfigured,
             _raidTarget,
             _raidTargetRadius,
             _raidDirectives,
@@ -614,6 +623,52 @@ public sealed partial class SimulationEngine
                 StorageDeliveryState.InTransit,
                 requested,
                 inTransitQuantity: inTransit);
+        }
+
+        if (zone.AcceptedResource == ResourceKind.Water &&
+            zone.SourceStorageZoneId == EntityId.None)
+        {
+            var naturalWaterHaulers = _actors.Values
+                .Where(actor => IsHaulerAllowedForZone(actor, zone))
+                .ToArray();
+            if (naturalWaterHaulers.Length == 0)
+            {
+                return CreateDiagnostic(StorageDeliveryState.NoAvailableHauler, requested);
+            }
+
+            var bucketHaulers = naturalWaterHaulers
+                .Where(actor => actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))
+                .ToArray();
+            if (bucketHaulers.Length == 0)
+            {
+                return CreateDiagnostic(StorageDeliveryState.NoAvailableTool, requested);
+            }
+
+            var hasReachableNaturalWaterPlan = bucketHaulers.Any(actor =>
+            {
+                var route = FindNearestShallowWaterPath(actor.Position);
+                var source = route is null
+                    ? (GridPosition?)null
+                    : route.Count == 0 ? actor.Position : route[^1];
+                return source is { } position &&
+                    FindActorPathFrom(actor, position, zone.Position) is not null;
+            });
+            if (!hasReachableNaturalWaterPlan)
+            {
+                return CreateDiagnostic(StorageDeliveryState.NoReachableSource, requested);
+            }
+
+            if (zone.AssignedHaulerId != EntityId.None &&
+                _actors[zone.AssignedHaulerId].JobKind != ActorJobKind.None)
+            {
+                return CreateDiagnostic(StorageDeliveryState.AssignedHaulerBusy, requested);
+            }
+
+            return CreateDiagnostic(
+                StorageDeliveryState.WaitingForHauler,
+                requested,
+                availableQuantity: requested,
+                matchingSourceCount: 1);
         }
 
         var sourceReservations = CreateHaulReservations(sourceReservations: true);
@@ -669,6 +724,20 @@ public sealed partial class SimulationEngine
                 requested,
                 availableQuantity: availableQuantity,
                 matchingSourceCount: matchingSources.Length);
+        }
+        if (zone.AcceptedResource == ResourceKind.Water)
+        {
+            allowedHaulers = allowedHaulers
+                .Where(actor => actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))
+                .ToArray();
+            if (allowedHaulers.Length == 0)
+            {
+                return CreateDiagnostic(
+                    StorageDeliveryState.NoAvailableTool,
+                    requested,
+                    availableQuantity: availableQuantity,
+                    matchingSourceCount: matchingSources.Length);
+            }
         }
 
         var hasReachablePlan = storableSources.Any(candidate =>
@@ -746,7 +815,7 @@ public sealed partial class SimulationEngine
             var sourceReservations = CreateHaulReservations(sourceReservations: true);
             var matchingSources = _itemStacks.Values
                 .Where(stack =>
-                    stack.Resource == site.RequiredResource &&
+                    StackMatchesConstructionMaterial(site, stack) &&
                     stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone)
                 .Select(stack => new
                 {
@@ -957,6 +1026,7 @@ public sealed partial class SimulationEngine
                 CreatedAtTick = corpse.CreatedAt.Value,
                 ContainedWater = corpse.ContainedWater,
                 EdiblePortions = corpse.EdiblePortions,
+                Directives = corpse.Directives,
                 InheritableSkills = corpse.InheritanceImprint.KnownSkills,
                 InheritableTraits = corpse.InheritanceImprint.KnownTraits,
                 InheritableForagingExperience = corpse.InheritanceImprint.Experience.Foraging,
@@ -980,6 +1050,7 @@ public sealed partial class SimulationEngine
             RaidRallyY = _raidRallyPoint.Y,
             RaidRallyZ = _raidRallyPoint.Z,
             RaidPartyIds = _raidPartyIds.Select(id => id.Value).ToList(),
+            RaidRosterConfigured = _raidRosterConfigured,
             RaidTargetX = _raidTarget.X,
             RaidTargetY = _raidTarget.Y,
             RaidTargetZ = _raidTarget.Z,
@@ -1004,6 +1075,7 @@ public sealed partial class SimulationEngine
                     AnchorY = worldObject.Anchor.Y,
                     AnchorZ = worldObject.Anchor.Z,
                     Orientation = worldObject.Orientation,
+                    MaterialVariant = worldObject.MaterialVariant,
                     Parts = worldObject.Parts.Select(part => new WorldObjectPartSaveModel
                     {
                         RelativeX = part.RelativePosition.X,
@@ -1082,8 +1154,10 @@ public sealed partial class SimulationEngine
                     EndY = site.End.Y,
                     EndZ = site.End.Z,
                     RequiredResource = site.RequiredResource,
+                    RequiredVariant = site.RequiredVariant,
                     RequiredWood = site.RequiredQuantity,
                     DeliveredWood = site.DeliveredQuantity,
+                    DeliveredVariant = site.DeliveredVariant,
                     RemainingWorkTicks = site.RemainingWorkTicks,
                     TotalWorkTicks = site.TotalWorkTicks,
                     RequiredSkills = site.Capabilities.RequiredSkills,
@@ -1101,11 +1175,13 @@ public sealed partial class SimulationEngine
                     WorkshopX = order.Workshop.X,
                     WorkshopY = order.Workshop.Y,
                     WorkshopZ = order.Workshop.Z,
-                    DeliveredHide = order.DeliveredHide,
-                    DeliveredBone = order.DeliveredBone,
-                    DeliveredWood = order.DeliveredWood,
-                    DeliveredStone = order.DeliveredStone,
-                    DeliveredReeds = order.DeliveredReeds,
+                    DeliveredMaterials = order.DeliveredMaterials.Select(material =>
+                        new CraftingDeliveredMaterialSaveModel
+                        {
+                            Resource = material.Resource,
+                            Variant = material.Variant,
+                            Quantity = material.Quantity,
+                        }).ToList(),
                     RemainingWorkTicks = order.RemainingWorkTicks,
                 }).ToList(),
             WorkDesignations = _workDesignations.Values.Select(designation =>
@@ -1154,6 +1230,7 @@ public sealed partial class SimulationEngine
         Append(canonical, _raidTarget);
         Append(canonical, _raidTargetRadius);
         Append(canonical, (int)_raidDirectives);
+        Append(canonical, _raidRosterConfigured ? 1 : 0);
         Append(canonical, _raidPartyIds.Count);
         foreach (var actorId in _raidPartyIds)
         {
@@ -1222,6 +1299,7 @@ public sealed partial class SimulationEngine
             Append(canonical, corpse.CreatedAt.Value);
             Append(canonical, corpse.ContainedWater);
             Append(canonical, corpse.EdiblePortions);
+            Append(canonical, (int)corpse.Directives);
             Append(canonical, (int)corpse.InheritanceImprint.KnownSkills);
             Append(canonical, (int)corpse.InheritanceImprint.KnownTraits);
             Append(canonical, corpse.InheritanceImprint.Experience.Foraging);
@@ -1264,6 +1342,7 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)worldObject.Owner);
             Append(canonical, worldObject.Anchor);
             Append(canonical, (int)worldObject.Orientation);
+            Append(canonical, (int)worldObject.MaterialVariant);
             Append(canonical, worldObject.Parts.Count);
             foreach (var part in worldObject.Parts)
             {
@@ -1322,6 +1401,7 @@ public sealed partial class SimulationEngine
         Append(canonical, humanVillage.Anchor);
         Append(canonical, humanVillage.Population);
         Append(canonical, humanVillage.FoodStock);
+        Append(canonical, humanVillage.GrainStock);
         Append(canonical, humanVillage.WoodStock);
         Append(canonical, humanVillage.GoodsStock);
         Append(canonical, humanVillage.WaterStock);
@@ -1521,8 +1601,10 @@ public sealed partial class SimulationEngine
             Append(canonical, site.Anchor);
             Append(canonical, site.End);
             Append(canonical, (int)site.RequiredResource);
+            Append(canonical, (int)site.RequiredVariant);
             Append(canonical, site.RequiredQuantity);
             Append(canonical, site.DeliveredQuantity);
+            Append(canonical, (int)site.DeliveredVariant);
             Append(canonical, site.RemainingWorkTicks);
             Append(canonical, site.TotalWorkTicks);
             Append(canonical, (int)site.Capabilities.RequiredSkills);
@@ -1539,11 +1621,13 @@ public sealed partial class SimulationEngine
             Append(canonical, order.Id.Value);
             Append(canonical, (int)order.Recipe);
             Append(canonical, order.Workshop);
-            Append(canonical, order.DeliveredHide);
-            Append(canonical, order.DeliveredBone);
-            Append(canonical, order.DeliveredWood);
-            Append(canonical, order.DeliveredStone);
-            Append(canonical, order.DeliveredReeds);
+            Append(canonical, order.DeliveredMaterials.Count);
+            foreach (var material in order.DeliveredMaterials)
+            {
+                Append(canonical, (int)material.Resource);
+                Append(canonical, (int)material.Variant);
+                Append(canonical, material.Quantity);
+            }
             Append(canonical, order.RemainingWorkTicks);
         }
 
@@ -1590,10 +1674,11 @@ public sealed partial class SimulationEngine
                 $"'{definitions.Clock.Climate.Id}' was supplied.");
         }
 
-        if (!SwampMapGenerator.SupportsVersion(save.MapGeneratorVersion))
+        if (save.MapGeneratorVersion != SwampMapGenerator.CurrentVersion)
         {
             throw new InvalidDataException(
-                $"Unsupported map generator version {save.MapGeneratorVersion}.");
+                $"Obsolete or incompatible map generator version " +
+                $"{save.MapGeneratorVersion}; expected {SwampMapGenerator.CurrentVersion}.");
         }
 
         if (save.CurrentTick < 0 || save.NextEntityId == 0 || save.NextEventSequence == 0)
@@ -1645,7 +1730,7 @@ public sealed partial class SimulationEngine
                 string.IsNullOrWhiteSpace(actorModel.Name) ||
                 !HasOnlyKnownFlags(actorModel.KnownSkills, GoblinSkill.Building) ||
                 !HasOnlyKnownFlags(actorModel.KnownTraits, GoblinTrait.Fastidious) ||
-                !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.ReedClothes) ||
+                !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.WoodenBucket) ||
                 actorModel.ForagingExperience < 0 ||
                 actorModel.HaulingExperience < 0 ||
                 actorModel.BuildingExperience < 0 ||
@@ -1918,7 +2003,7 @@ public sealed partial class SimulationEngine
                 orderId == EntityId.None ||
                 !Enum.IsDefined(model.Kind) ||
                 !Enum.IsDefined(priority) ||
-                (!Map.IsWithin(target) && !Map.IsCavePosition(target)) ||
+                !IsAddressableMapPosition(target) ||
                 (model.Kind is WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds or
                     WorkDesignationKind.UprootBerryBush or WorkDesignationKind.FellTree or
                     WorkDesignationKind.QuarryBoulder or WorkDesignationKind.MineRock or
@@ -1950,19 +2035,33 @@ public sealed partial class SimulationEngine
             var anchor = new GridPosition(model.AnchorX, model.AnchorY, model.AnchorZ);
             var end = new GridPosition(model.EndX, model.EndY, model.EndZ);
             var requiredResource = model.RequiredResource ?? ResourceKind.Wood;
+            var requiredVariant = model.RequiredVariant ?? ResourceVariant.None;
             if (id == EntityId.None ||
                 !Enum.IsDefined(model.Kind) ||
-                requiredResource is not (ResourceKind.Wood or ResourceKind.Stone) ||
+                requiredResource is not (ResourceKind.Wood or ResourceKind.Stone or
+                    ResourceKind.Equipment) ||
                 !IsPotentialConstructionPosition(anchor) ||
                 !IsPotentialConstructionPosition(end) ||
                 model.RequiredWood <= 0 ||
                 model.DeliveredWood < 0 || model.DeliveredWood > model.RequiredWood ||
+                model.DeliveredWood == 0 &&
+                    model.DeliveredVariant != ResourceVariant.None ||
+                model.DeliveredWood > 0 &&
+                    ConstructionBlueprintCatalog.RetainsMaterialIdentity(model.Kind) &&
+                    (!Enum.IsDefined(model.DeliveredVariant) ||
+                     !IsValidResourceVariant(
+                         requiredResource,
+                         model.DeliveredVariant,
+                         allowLegacyDefault: false)) ||
+                model.DeliveredWood > 0 &&
+                    !ConstructionBlueprintCatalog.RetainsMaterialIdentity(model.Kind) &&
+                    model.DeliveredVariant != ResourceVariant.None ||
                 model.TotalWorkTicks <= 0 ||
                 model.RemainingWorkTicks <= 0 ||
                 model.RemainingWorkTicks > model.TotalWorkTicks ||
                 !HasOnlyKnownFlags(model.RequiredSkills, GoblinSkill.Building) ||
                 model.MinimumBuildingLevel < 0 ||
-                !HasOnlyKnownFlags(model.RequiredEquipment, PersonalEquipment.PrimitivePickaxe))
+                !HasOnlyKnownFlags(model.RequiredEquipment, PersonalEquipment.WoodenBucket))
             {
                 throw new InvalidDataException("The save contains an invalid construction site.");
             }
@@ -1971,6 +2070,7 @@ public sealed partial class SimulationEngine
             var priority = model.Priority ?? StoragePriority.Normal;
             var orderId = model.OrderId == 0 ? id : new EntityId(model.OrderId);
             if (expected.RequiredResource != requiredResource ||
+                expected.RequiredVariant != requiredVariant ||
                 expected.RequiredQuantity != model.RequiredWood ||
                 expected.TotalWorkTicks != model.TotalWorkTicks ||
                 !Enum.IsDefined(priority) ||
@@ -1988,15 +2088,27 @@ public sealed partial class SimulationEngine
                 anchor,
                 end,
                 requiredResource,
+                requiredVariant,
                 model.RequiredWood,
                 model.DeliveredWood,
+                model.DeliveredVariant,
                 model.RemainingWorkTicks,
                 model.TotalWorkTicks,
                 expected.Capabilities,
                 priority,
                 orderId,
                 model.SequenceIndex);
-            if (!CanPlaceConstruction(site.Kind, site.Anchor, site.GetFootprint()) ||
+            if (ConstructionBlueprintCatalog.RetainsMaterialIdentity(site.Kind) &&
+                    site.DeliveredQuantity > 0 &&
+                    site.DeliveredVariant == ResourceVariant.None ||
+                !ConstructionBlueprintCatalog.RetainsMaterialIdentity(site.Kind) &&
+                    site.DeliveredVariant != ResourceVariant.None ||
+                site.DeliveredQuantity > 0 &&
+                    !ConstructionMaterialMatches(
+                        site,
+                        site.RequiredResource,
+                        site.DeliveredVariant) ||
+                !CanPlaceConstruction(site.Kind, site.Anchor, site.GetFootprint()) ||
                 _constructionSites.Values.Any(other =>
                     other.GetFootprint().Intersect(site.GetFootprint()).Any()) ||
                 !_constructionSites.TryAdd(id, site))
@@ -2015,14 +2127,17 @@ public sealed partial class SimulationEngine
                 model.WorkshopX,
                 model.WorkshopY,
                 model.WorkshopZ);
+            var deliveredMaterials = model.DeliveredMaterials.Select(material =>
+                new CraftingDeliveredMaterialState(
+                    material.Resource,
+                    material.Variant,
+                    material.Quantity)).ToArray();
             if (id == EntityId.None ||
                 !Enum.IsDefined(model.Recipe) ||
-                !World.HasPrimitiveWorkshop(workshop) ||
-                !HasValidCraftingDelivery(model.Recipe, ResourceKind.Hide, model.DeliveredHide) ||
-                !HasValidCraftingDelivery(model.Recipe, ResourceKind.Bone, model.DeliveredBone) ||
-                !HasValidCraftingDelivery(model.Recipe, ResourceKind.Wood, model.DeliveredWood) ||
-                !HasValidCraftingDelivery(model.Recipe, ResourceKind.Stone, model.DeliveredStone) ||
-                !HasValidCraftingDelivery(model.Recipe, ResourceKind.Reeds, model.DeliveredReeds) ||
+                !World.HasWorkshop(
+                    workshop,
+                    CraftingRecipeCatalog.Get(model.Recipe).Workshop) ||
+                !HasValidCraftingDeliveries(model.Recipe, deliveredMaterials) ||
                 model.RemainingWorkTicks <= 0 ||
                 model.RemainingWorkTicks > CraftingRecipeCatalog.GetWorkTicks(model.Recipe) ||
                 !_craftingOrders.TryAdd(
@@ -2031,11 +2146,7 @@ public sealed partial class SimulationEngine
                         id,
                         model.Recipe,
                         workshop,
-                        model.DeliveredHide,
-                        model.DeliveredBone,
-                        model.DeliveredWood,
-                        model.DeliveredStone,
-                        model.DeliveredReeds,
+                        deliveredMaterials,
                         model.RemainingWorkTicks)))
             {
                 throw new InvalidDataException("The save contains an invalid crafting order.");
@@ -2043,12 +2154,34 @@ public sealed partial class SimulationEngine
         }
     }
 
-    private static bool HasValidCraftingDelivery(
+    private static bool HasValidCraftingDeliveries(
         CraftingRecipeKind recipe,
-        ResourceKind resource,
-        int quantity) =>
-        quantity >= 0 &&
-        quantity <= CraftingRecipeCatalog.GetRequiredQuantity(recipe, resource);
+        IReadOnlyList<CraftingDeliveredMaterialState> deliveredMaterials)
+    {
+        if (deliveredMaterials.Any(material =>
+                !Enum.IsDefined(material.Resource) ||
+                !Enum.IsDefined(material.Variant) ||
+                !IsValidResourceVariant(
+                    material.Resource,
+                    material.Variant,
+                    allowLegacyDefault: true) ||
+                material.Quantity <= 0 ||
+                CraftingRecipeCatalog.FindMaterial(
+                    recipe,
+                    material.Resource,
+                    material.Variant) is null) ||
+            deliveredMaterials.Select(material => (material.Resource, material.Variant))
+                .Distinct().Count() != deliveredMaterials.Count)
+        {
+            return false;
+        }
+
+        return CraftingRecipeCatalog.Get(recipe).Materials.All(requirement =>
+            deliveredMaterials.Where(material => requirement.Matches(
+                    material.Resource,
+                    material.Variant))
+                .Sum(material => material.Quantity) <= requirement.Quantity);
+    }
 
     private void LoadItemStacks(IEnumerable<ItemStackSaveModel> stackModels)
     {
@@ -2057,6 +2190,11 @@ public sealed partial class SimulationEngine
             var id = new EntityId(stackModel.Id);
             var position = new GridPosition(stackModel.X, stackModel.Y, stackModel.Z);
             var owner = new EntityId(stackModel.OwnerId);
+            if (stackModel.LocationKind == ItemLocationKind.Ground &&
+                World.TryResolveGroundItemPosition(position, out var resolvedPosition))
+            {
+                position = resolvedPosition;
+            }
             var location = stackModel.LocationKind switch
             {
                 ItemLocationKind.Ground => ItemLocation.OnGround(position),
@@ -2138,9 +2276,14 @@ public sealed partial class SimulationEngine
             switch (stack.Location.Kind)
             {
                 case ItemLocationKind.Ground:
-                    if (!World.IsTerrainTraversable(stack.Location.Position))
+                    if (!World.TryResolveGroundItemPosition(
+                            stack.Location.Position,
+                            out var resolvedPosition) ||
+                        resolvedPosition != stack.Location.Position)
                     {
-                        throw new InvalidDataException("A ground stack has an invalid position.");
+                        throw new InvalidDataException(
+                            $"Ground stack {stack.Id} ({stack.Resource}/{stack.Variant}) has " +
+                            $"an invalid position {stack.Location.Position}.");
                     }
 
                     break;
@@ -2295,7 +2438,7 @@ public sealed partial class SimulationEngine
                 change.Tick.Value < 0 ||
                 change.Tick.Value > CurrentTick.Value ||
                 !Enum.IsDefined(change.Kind) ||
-                (!Map.IsWithin(change.Position) && !Map.IsCavePosition(change.Position)) ||
+                !IsAddressableMapPosition(change.Position) ||
                 (change.Kind == WorldChangeKind.DoorToggled
                     ? change.Amount is not (0 or 1)
                     : change.Amount == 0) ||
@@ -2419,6 +2562,8 @@ public sealed partial class SimulationEngine
                 (animal.Position, animal.Kind switch
                 {
                     AnimalKind.SwampBoar or AnimalKind.CaveSpider => 3,
+                    AnimalKind.DeepCrawler => 4,
+                    AnimalKind.MagmaWyrm => 5,
                     _ => 2,
                 })));
         }
@@ -2491,6 +2636,8 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.LaunchRaid => TryExecuteLaunchRaid(),
         SimulationCommandKind.ConfigureRaidTarget => TryExecuteConfigureRaidTarget(command),
         SimulationCommandKind.ConfigureRaidDirectives => TryExecuteConfigureRaidDirectives(command),
+        SimulationCommandKind.ConfigureCorpseDirectives =>
+            TryExecuteConfigureCorpseDirectives(command),
         SimulationCommandKind.OrderPatrol => TryExecuteOrderPatrol(command),
         SimulationCommandKind.OrderAttackArea => TryExecuteAreaOrder(
             command, ActorTacticalOrderKind.AttackArea),
@@ -2506,7 +2653,15 @@ public sealed partial class SimulationEngine
     private bool TryExecuteQueueCraftingOrder(SimulationCommand command)
     {
         var recipe = (CraftingRecipeKind)command.Amount;
-        if (!Enum.IsDefined(recipe) || !World.HasPrimitiveWorkshop(command.Position))
+        if (!Enum.IsDefined(recipe))
+        {
+            return false;
+        }
+
+        var recipeDefinition = CraftingRecipeCatalog.Get(recipe);
+        var workshop = WorkshopCatalog.Get(recipeDefinition.Workshop);
+        if (!workshop.SupportsRecipe(recipe, CraftingRecipeCatalog.GetRecipeLevel(recipe)) ||
+            !World.HasWorkshop(command.Position, recipeDefinition.Workshop))
         {
             return false;
         }
@@ -2516,11 +2671,7 @@ public sealed partial class SimulationEngine
             id,
             recipe,
             command.Position,
-            deliveredHide: 0,
-            deliveredBone: 0,
-            deliveredWood: 0,
-            deliveredStone: 0,
-            deliveredReeds: 0,
+            deliveredMaterials: [],
             CraftingRecipeCatalog.GetWorkTicks(recipe));
         _craftingOrders.Add(id, order);
         Publish(SimulationEventKind.CraftingOrdered, EntityId.None, id, command.Amount);
@@ -2563,7 +2714,7 @@ public sealed partial class SimulationEngine
 
         _raidPartyIds.RemoveWhere(id =>
             !_actors.TryGetValue(id, out var actor) || actor.Health <= 0 || IsJuvenile(actor));
-        if (_raidPartyIds.Count == 0)
+        if (_raidPartyIds.Count == 0 && !_raidRosterConfigured)
         {
             foreach (var actor in _actors.Values
                          .Where(actor => actor.Health > 0 && !IsJuvenile(actor))
@@ -2577,6 +2728,7 @@ public sealed partial class SimulationEngine
         {
             return false;
         }
+        _raidRosterConfigured = true;
 
         var rally = World.CreateWorldObjectSnapshot()
             .Where(item =>
@@ -2709,6 +2861,21 @@ public sealed partial class SimulationEngine
         return true;
     }
 
+    private bool TryExecuteConfigureCorpseDirectives(SimulationCommand command)
+    {
+        var directives = (CorpseDirective)command.Amount;
+        if (!_corpses.TryGetValue(command.Target, out var corpse) ||
+            !AreValidCorpseDirectives(directives) ||
+            (corpse.Kind != CorpseKind.Human &&
+                (directives & CorpseBuddingDirectives) != 0))
+        {
+            return false;
+        }
+
+        corpse.Directives = directives;
+        return true;
+    }
+
     private bool TryExecuteConfigureRaidMember(SimulationCommand command)
     {
         if (_raidPhase == GoblinRaidPhase.Marching ||
@@ -2719,9 +2886,23 @@ public sealed partial class SimulationEngine
             return false;
         }
 
+        _raidRosterConfigured = true;
         if (command.Amount == 0)
         {
             _raidPartyIds.Remove(actor.Id);
+            if (_raidPartyIds.Count == 0 && _raidPhase is GoblinRaidPhase.Preparing or
+                    GoblinRaidPhase.Ready or GoblinRaidPhase.Suspended)
+            {
+                var previousRallyPoint = _raidRallyPoint;
+                _raidPhase = GoblinRaidPhase.None;
+                _raidRallyPoint = default;
+                foreach (var candidate in _actors.Values.Where(candidate =>
+                             candidate.JobKind == ActorJobKind.Move &&
+                             candidate.JobTarget == previousRallyPoint))
+                {
+                    candidate.ClearJob();
+                }
+            }
             InvalidateReadyRaidPlan();
             return true;
         }
@@ -2807,6 +2988,7 @@ public sealed partial class SimulationEngine
         {
             _raidPartyIds.Add(actor.Id);
         }
+        _raidRosterConfigured = _raidPartyIds.Count > 0;
     }
 
     private void ValidateLoadedRaidParty()
@@ -3331,6 +3513,7 @@ public sealed partial class SimulationEngine
         }
 
         if (command.Construction is ConstructionKind.WoodenWalkway or
+            ConstructionKind.BasaltWalkway or
             ConstructionKind.WoodenWall or ConstructionKind.StoneWall)
         {
             var orderId = AllocateEntityId();
@@ -3372,7 +3555,8 @@ public sealed partial class SimulationEngine
         GridPosition anchor,
         GridPosition end) => kind switch
     {
-        ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall or
+        ConstructionKind.WoodenWalkway or ConstructionKind.BasaltWalkway or
+            ConstructionKind.WoodenWall or
             ConstructionKind.StoneWall =>
             SimulationCommand.GetLinearCells(anchor, end),
         ConstructionKind.GoblinFieldCamp =>
@@ -3404,11 +3588,12 @@ public sealed partial class SimulationEngine
         {
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
                 ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
-                ConstructionKind.MaterialsStorage =>
+                ConstructionKind.MaterialsStorage or ConstructionKind.WaterBarrel =>
                 anchor.Z == 0
                     ? World.IsSurfaceTraversable(anchor)
                     : World.IsTerrainTraversable(anchor),
             ConstructionKind.WoodenWalkway => World.CanBuildWalkway(footprint),
+            ConstructionKind.BasaltWalkway => World.CanBuildBasaltWalkway(footprint),
             ConstructionKind.GoblinFieldCamp => World.CanBuildGoblinFieldCamp(anchor),
             ConstructionKind.GoblinHut => World.CanBuildGoblinHut(anchor),
             ConstructionKind.WoodenWall => World.CanBuildWoodenWalls(footprint),
@@ -3417,7 +3602,9 @@ public sealed partial class SimulationEngine
             ConstructionKind.StoneDoorFrame => World.CanBuildStoneDoorFrame(anchor),
             ConstructionKind.WoodenDoor => World.CanBuildWoodenDoor(anchor),
             ConstructionKind.WallTorch => World.CanBuildWallTorch(anchor),
-            ConstructionKind.PrimitiveWorkshop => World.CanBuildPrimitiveWorkshop(anchor),
+            ConstructionKind.PrimitiveWorkshop or ConstructionKind.Bloomery or
+                ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace =>
+                World.CanBuildWorkshop(anchor),
             _ => false,
         };
     }
@@ -3446,7 +3633,9 @@ public sealed partial class SimulationEngine
         }
 
         if (site.Kind is ConstructionKind.WoodenWall or ConstructionKind.StoneWall or
-                ConstructionKind.PrimitiveWorkshop or ConstructionKind.GoblinHut &&
+                ConstructionKind.PrimitiveWorkshop or ConstructionKind.Bloomery or
+                ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace or
+                ConstructionKind.GoblinHut &&
             _actors.Values.Any(actor => site.GetFootprint().Contains(actor.Position)))
         {
             return false;
@@ -3466,6 +3655,7 @@ public sealed partial class SimulationEngine
             case ConstructionKind.StoneStorage:
             case ConstructionKind.EquipmentStorage:
             case ConstructionKind.MaterialsStorage:
+            case ConstructionKind.WaterBarrel:
                 var acceptedResource = site.Kind switch
                 {
                     ConstructionKind.FoodStorage => ResourceKind.Food,
@@ -3473,6 +3663,7 @@ public sealed partial class SimulationEngine
                     ConstructionKind.StoneStorage => ResourceKind.Stone,
                     ConstructionKind.EquipmentStorage => ResourceKind.Equipment,
                     ConstructionKind.MaterialsStorage => ResourceKind.Materials,
+                    ConstructionKind.WaterBarrel => ResourceKind.Water,
                     _ => throw new InvalidOperationException(),
                 };
                 var capacity = acceptedResource switch
@@ -3480,6 +3671,7 @@ public sealed partial class SimulationEngine
                     ResourceKind.Food => Definitions.Storage.SmallFoodCapacity,
                     ResourceKind.Equipment => 32,
                     ResourceKind.Materials => 64,
+                    ResourceKind.Water => 32,
                     _ => 64,
                 };
                 completedTarget = AllocateStorageZone(
@@ -3490,12 +3682,27 @@ public sealed partial class SimulationEngine
                 break;
             case ConstructionKind.WoodenWalkway:
                 var cells = site.GetFootprint();
-                _undeliveredWorldChanges.Add(World.BuildWalkway(cells, CurrentTick));
+                _undeliveredWorldChanges.Add(World.BuildWalkway(
+                    cells,
+                    CurrentTick,
+                    site.DeliveredVariant));
                 completedTarget = EntityId.None;
                 experience = Math.Max(5, cells.Count * 3);
                 break;
+            case ConstructionKind.BasaltWalkway:
+                var basaltCells = site.GetFootprint();
+                _undeliveredWorldChanges.Add(World.BuildBasaltWalkway(
+                    basaltCells,
+                    CurrentTick,
+                    site.DeliveredVariant));
+                completedTarget = EntityId.None;
+                experience = Math.Max(10, basaltCells.Count * 6);
+                break;
             case ConstructionKind.GoblinFieldCamp:
-                _undeliveredWorldChanges.Add(World.BuildGoblinFieldCamp(site.Anchor, CurrentTick));
+                _undeliveredWorldChanges.Add(World.BuildGoblinFieldCamp(
+                    site.Anchor,
+                    CurrentTick,
+                    site.DeliveredVariant));
                 const int campProvisionCapacity = 48;
                 var campProvisionTarget = Math.Min(
                     campProvisionCapacity,
@@ -3508,7 +3715,10 @@ public sealed partial class SimulationEngine
                 experience = 25;
                 break;
             case ConstructionKind.GoblinHut:
-                _undeliveredWorldChanges.Add(World.BuildGoblinHut(site.Anchor, CurrentTick));
+                _undeliveredWorldChanges.Add(World.BuildGoblinHut(
+                    site.Anchor,
+                    CurrentTick,
+                    site.DeliveredVariant));
                 var shelterCapacity = CreateTribeNeedsSnapshot().ShelterCapacity;
                 if (_populationTarget < shelterCapacity)
                 {
@@ -3526,7 +3736,10 @@ public sealed partial class SimulationEngine
                 break;
             case ConstructionKind.WoodenWall:
                 var wallCells = site.GetFootprint();
-                _undeliveredWorldChanges.Add(World.BuildWoodenWalls(wallCells, CurrentTick));
+                _undeliveredWorldChanges.Add(World.BuildWoodenWalls(
+                    wallCells,
+                    CurrentTick,
+                    site.DeliveredVariant));
                 completedTarget = EntityId.None;
                 experience = Math.Max(8, wallCells.Count * 12);
                 break;
@@ -3534,39 +3747,62 @@ public sealed partial class SimulationEngine
                 var stoneWallCells = site.GetFootprint();
                 _undeliveredWorldChanges.Add(World.BuildStoneWalls(
                     stoneWallCells,
-                    CurrentTick));
+                    CurrentTick,
+                    site.DeliveredVariant));
                 completedTarget = EntityId.None;
                 experience = Math.Max(12, stoneWallCells.Count * 16);
                 break;
             case ConstructionKind.WoodenDoorFrame:
                 _undeliveredWorldChanges.Add(World.BuildWoodenDoorFrame(
                     site.Anchor,
-                    CurrentTick));
+                    CurrentTick,
+                    site.DeliveredVariant));
                 completedTarget = EntityId.None;
                 experience = 8;
                 break;
             case ConstructionKind.StoneDoorFrame:
                 _undeliveredWorldChanges.Add(World.BuildStoneDoorFrame(
                     site.Anchor,
-                    CurrentTick));
+                    CurrentTick,
+                    site.DeliveredVariant));
                 completedTarget = EntityId.None;
                 experience = 12;
                 break;
             case ConstructionKind.WoodenDoor:
-                _undeliveredWorldChanges.Add(World.BuildWoodenDoor(site.Anchor, CurrentTick));
+                _undeliveredWorldChanges.Add(World.BuildWoodenDoor(
+                    site.Anchor,
+                    CurrentTick,
+                    site.DeliveredVariant));
                 completedTarget = EntityId.None;
                 experience = 8;
                 break;
             case ConstructionKind.WallTorch:
-                _undeliveredWorldChanges.Add(World.BuildWallTorch(site.Anchor, CurrentTick));
+                _undeliveredWorldChanges.Add(World.BuildWallTorch(
+                    site.Anchor,
+                    CurrentTick,
+                    site.DeliveredVariant));
                 completedTarget = EntityId.None;
                 experience = 5;
                 break;
             case ConstructionKind.PrimitiveWorkshop:
+            case ConstructionKind.Bloomery:
+            case ConstructionKind.SmeltingFurnace:
+            case ConstructionKind.CrucibleFurnace:
+                _ = ConstructionBlueprintCatalog.TryGetWorkshopKind(
+                    site.Kind,
+                    out var workshopKind);
                 _undeliveredWorldChanges.Add(
-                    World.BuildPrimitiveWorkshop(site.Anchor, CurrentTick));
+                    World.BuildWorkshop(
+                        site.Anchor,
+                        workshopKind,
+                        site.DeliveredVariant,
+                        CurrentTick));
                 completedTarget = EntityId.None;
-                experience = 18;
+                experience = WorkshopCatalog.Get(workshopKind).Level switch
+                {
+                    1 => 24,
+                    _ => 36,
+                };
                 break;
             default:
                 throw new InvalidOperationException("Unsupported construction blueprint.");
@@ -4090,8 +4326,7 @@ public sealed partial class SimulationEngine
                 break;
             case SimulationCommandKind.Move:
                 ValidateActor(command.Subject, command);
-                if (!Map.IsTerrainSurfacePosition(command.Position) &&
-                    !Map.IsCavePosition(command.Position))
+                if (!IsAddressableMapPosition(command.Position))
                 {
                     throw new ArgumentException("Move destination is outside the map.", nameof(command));
                 }
@@ -4099,10 +4334,16 @@ public sealed partial class SimulationEngine
                 break;
             case SimulationCommandKind.Build:
                 if (!Enum.IsDefined(command.Construction) ||
-                    command.Resource != (command.Construction is ConstructionKind.StoneWall or
-                        ConstructionKind.StoneDoorFrame
-                        ? ResourceKind.Stone
-                        : ResourceKind.Wood) ||
+                    command.Resource != (command.Construction switch
+                    {
+                        ConstructionKind.BasaltWalkway or ConstructionKind.StoneWall or
+                            ConstructionKind.StoneDoorFrame or ConstructionKind.Bloomery or
+                            ConstructionKind.SmeltingFurnace or
+                            ConstructionKind.CrucibleFurnace =>
+                            ResourceKind.Stone,
+                        ConstructionKind.WaterBarrel => ResourceKind.Equipment,
+                        _ => ResourceKind.Wood,
+                    }) ||
                     !IsPotentialConstructionPosition(command.Position) ||
                     !IsPotentialConstructionPosition(command.EndPosition))
                 {
@@ -4117,7 +4358,14 @@ public sealed partial class SimulationEngine
                     throw new ArgumentException("Food storage construction is invalid.", nameof(command));
                 }
 
-                if (command.Construction == ConstructionKind.WoodenWalkway &&
+                if (command.Construction == ConstructionKind.WaterBarrel &&
+                    (command.Position != command.EndPosition || command.Amount != 1))
+                {
+                    throw new ArgumentException("Water-barrel placement is invalid.", nameof(command));
+                }
+
+                if ((command.Construction is ConstructionKind.WoodenWalkway or
+                        ConstructionKind.BasaltWalkway) &&
                     (command.Amount != 1 || command.Position.Z != command.EndPosition.Z))
                 {
                     throw new ArgumentException("Walkway construction is invalid.", nameof(command));
@@ -4189,11 +4437,16 @@ public sealed partial class SimulationEngine
                     throw new ArgumentException("Wall-torch construction is invalid.", nameof(command));
                 }
 
-                if (command.Construction == ConstructionKind.PrimitiveWorkshop &&
+                if (ConstructionBlueprintCatalog.TryGetWorkshopKind(
+                        command.Construction,
+                        out var workshopKind) &&
                     (command.Position != command.EndPosition ||
-                     command.Amount != 4))
+                     command.Amount != WorkshopCatalog.Get(workshopKind)
+                         .ConstructionRequirements.Sum(item => item.Quantity)))
                 {
-                    throw new ArgumentException("Primitive-workshop construction is invalid.", nameof(command));
+                    throw new ArgumentException(
+                        "Workshop construction is invalid.",
+                        nameof(command));
                 }
 
                 break;
@@ -4383,6 +4636,18 @@ public sealed partial class SimulationEngine
                     !AreValidRaidDirectives((RaidDirective)command.Amount))
                 {
                     throw new ArgumentException("Raid-directive command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.ConfigureCorpseDirectives:
+                if (command.Subject != EntityId.None ||
+                    !_corpses.TryGetValue(command.Target, out var corpse) ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    !AreValidCorpseDirectives((CorpseDirective)command.Amount) ||
+                    (corpse.Kind != CorpseKind.Human &&
+                        ((CorpseDirective)command.Amount & CorpseBuddingDirectives) != 0))
+                {
+                    throw new ArgumentException("Corpse-directive command is invalid.", nameof(command));
                 }
                 break;
             case SimulationCommandKind.OrderPatrol:
@@ -4700,6 +4965,7 @@ public sealed partial class SimulationEngine
                 var cell = Map.GetCell(column);
                 if (cell.Terrain is not (TerrainKind.SolidGround or TerrainKind.Mud) ||
                     cell.Fertility < 45 ||
+                    cell.RampDirection != TerrainRampDirection.None ||
                     !World.IsTerrainTraversable(position))
                 {
                     continue;
@@ -4752,6 +5018,7 @@ public sealed partial class SimulationEngine
             .Select(Map.GetTerrainSurfacePosition)
             .Where(position =>
                 Map.GetColumnCell(position).Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
+                Map.GetColumnCell(position).RampDirection == TerrainRampDirection.None &&
                 World.IsTerrainTraversable(position))
             .OrderBy(position => ManhattanDistance(position, Map.GoblinSpawn))
             .ThenBy(position => position.Y)
@@ -4774,6 +5041,7 @@ public sealed partial class SimulationEngine
                 var position = Map.GetTerrainSurfacePosition(column);
                 var cell = Map.GetCell(column);
                 if (cell.Terrain is not (TerrainKind.SolidGround or TerrainKind.Mud) ||
+                    cell.RampDirection != TerrainRampDirection.None ||
                     !World.IsTerrainTraversable(position))
                 {
                     continue;
@@ -4821,7 +5089,9 @@ public sealed partial class SimulationEngine
             .SelectMany(y => Enumerable.Range(0, Map.Width)
                 .Select(x => new GridPosition(x, y)))
             .Select(Map.GetTerrainSurfacePosition)
-            .Where(World.IsTerrainTraversable)
+            .Where(position =>
+                Map.GetColumnCell(position).RampDirection == TerrainRampDirection.None &&
+                World.IsTerrainTraversable(position))
             .OrderBy(position => ManhattanDistance(position, Map.GoblinSpawn))
             .ThenBy(position => position.Y)
             .ThenBy(position => position.X)
@@ -4866,9 +5136,7 @@ public sealed partial class SimulationEngine
         IsAddressableMapPosition(second);
 
     private bool IsAddressableMapPosition(GridPosition position) =>
-        Map.IsColumnWithin(position) &&
-        position.Z >= Map.MinimumWorldLevel &&
-        position.Z <= Map.MaximumWorldLevel;
+        Map.IsWorldPosition(position);
 
     private static (GridPosition Minimum, GridPosition Maximum) NormalizeArea(
         GridPosition first,
@@ -5020,7 +5288,9 @@ public sealed partial class SimulationEngine
     }
 
     private static StorageRequirement GetStorageRequirement(ItemStackState stack) =>
-        StorageRequirement.SolidGoods;
+        stack.Resource == ResourceKind.Water
+            ? StorageRequirement.SealedLiquid
+            : StorageRequirement.SolidGoods;
 
     private static StorageTypeKey GetStorageTypeKey(ItemStackState stack) =>
         new(stack.Resource, stack.FoodKind, stack.Variant);
@@ -5028,7 +5298,14 @@ public sealed partial class SimulationEngine
     private StorageSlotPolicy CreateDefaultStorageSlotPolicy(
         ResourceKind acceptedResource,
         int capacity) =>
-        acceptedResource == ResourceKind.Food && capacity == Definitions.Storage.SmallFoodCapacity
+        acceptedResource == ResourceKind.Water
+            ? new(
+                SlotCount: 1,
+                StackCapacity: capacity,
+                SeparatesItemTypes: false,
+                StorageCapability.SealedLiquids)
+            : acceptedResource == ResourceKind.Food &&
+                capacity == Definitions.Storage.SmallFoodCapacity
             ? new(
                 Definitions.Storage.SmallFoodTypeSlots,
                 Definitions.Storage.SmallStackCapacity,
@@ -5059,11 +5336,19 @@ public sealed partial class SimulationEngine
     {
         ResourceKind.Wood => variant is >= ResourceVariant.OakWood and <= ResourceVariant.PineWood ||
             (allowLegacyDefault && variant == ResourceVariant.None),
-        ResourceKind.Stone => variant is ResourceVariant.Sandstone or ResourceVariant.Granite ||
+        ResourceKind.Stone => variant is ResourceVariant.Sandstone or ResourceVariant.Granite or
+                ResourceVariant.Basalt or ResourceVariant.Obsidian ||
             (allowLegacyDefault && variant == ResourceVariant.None),
-        ResourceKind.Ore => variant == ResourceVariant.IronOre,
+        ResourceKind.Ore => variant is ResourceVariant.IronOre or ResourceVariant.CopperOre or
+            ResourceVariant.SilverOre or ResourceVariant.GoldOre,
         ResourceKind.Equipment => variant is >= ResourceVariant.EquipmentPrimitiveSling and
-            <= ResourceVariant.EquipmentWoodenSpear,
+                <= ResourceVariant.EquipmentWoodenSpear or
+            ResourceVariant.EquipmentReinforcedPickaxe or
+            ResourceVariant.EquipmentWoodenBarrel,
+        ResourceKind.Materials => variant is ResourceVariant.None or ResourceVariant.Ruby or
+            ResourceVariant.Emerald or ResourceVariant.Diamond or ResourceVariant.IronBar or
+            ResourceVariant.CopperBar or ResourceVariant.SilverBar or ResourceVariant.GoldBar,
+        ResourceKind.Water => variant == ResourceVariant.None,
         _ => variant == ResourceVariant.None,
     };
 
@@ -5076,38 +5361,11 @@ public sealed partial class SimulationEngine
         _ => variant,
     };
 
-    private ResourceVariant WoodVariantFor(GridPosition position)
-    {
-        ResourceVariant[] variants =
-        [
-            ResourceVariant.OakWood,
-            ResourceVariant.ChestnutWood,
-            ResourceVariant.BirchWood,
-            ResourceVariant.WalnutWood,
-            ResourceVariant.AppleWood,
-            ResourceVariant.PineWood,
-        ];
-        return variants[DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.Brushwood,
-            PositionSubject(position),
-            SimulationTick.Zero,
-            sampleKey: 0x574F4F4454595045UL ^ (ulong)(uint)position.Z,
-            minimumInclusive: 0,
-            maximumExclusive: variants.Length)];
-    }
+    private ResourceVariant WoodVariantFor(GridPosition position) =>
+        WoodMaterialPolicy.VariantFor(WorldSeed, Map.Width, position);
 
     private ResourceVariant StoneVariantFor(GridPosition position) =>
-        DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.Stone,
-            PositionSubject(position),
-            SimulationTick.Zero,
-            sampleKey: 0x53544F4E54595045UL ^ (ulong)(uint)position.Z,
-            minimumInclusive: 0,
-            maximumExclusive: 2) == 0
-            ? ResourceVariant.Sandstone
-            : ResourceVariant.Granite;
+        StoneMaterialPolicy.VariantFor(WorldSeed, Map.Width, position);
 
     private EntityId PositionSubject(GridPosition position) => new(
         checked((ulong)(position.Y * Map.Width + position.X) + 1));
@@ -5176,6 +5434,45 @@ public sealed partial class SimulationEngine
     private static bool IsBasicCraftingMaterial(ResourceKind resource) =>
         resource is ResourceKind.Reeds or ResourceKind.Bone or ResourceKind.Hide;
 
+    private static bool StackMatchesConstructionMaterial(
+        ConstructionSiteState site,
+        ItemStackState stack) =>
+        ConstructionMaterialMatches(site, stack.Resource, stack.Variant);
+
+    private static bool ConstructionMaterialMatches(
+        ConstructionSiteState site,
+        ResourceKind resource,
+        ResourceVariant variant)
+    {
+        if (resource != site.RequiredResource ||
+            site.RequiredVariant != ResourceVariant.None &&
+            variant != site.RequiredVariant ||
+            ConstructionBlueprintCatalog.RetainsMaterialIdentity(site.Kind) &&
+                site.DeliveredQuantity > 0 && variant != site.DeliveredVariant)
+        {
+            return false;
+        }
+
+        if (!ConstructionBlueprintCatalog.TryGetWorkshopKind(site.Kind, out var workshopKind))
+        {
+            return true;
+        }
+
+        MaterialDefinition material;
+        try
+        {
+            material = MaterialCatalog.Get(resource, variant);
+        }
+        catch (KeyNotFoundException)
+        {
+            return false;
+        }
+        return WorkshopCatalog.Get(workshopKind).ConstructionRequirements.Any(requirement =>
+            requirement.AllowedMaterialTypes.Contains(material.MaterialType) &&
+            material.Strength >= requirement.MinimumStrength &&
+            material.Durability >= requirement.MinimumDurability);
+    }
+
     private static bool ZoneAccepts(StorageZoneState zone, ItemStackState stack)
     {
         if (!ZoneCategoryAccepts(zone, stack.Resource) ||
@@ -5190,8 +5487,13 @@ public sealed partial class SimulationEngine
                 MineralStorageFilter.Sandstone,
             ResourceKind.Stone when stack.Variant == ResourceVariant.Granite =>
                 MineralStorageFilter.Granite,
+            ResourceKind.Stone when stack.Variant is ResourceVariant.Basalt or
+                ResourceVariant.Obsidian => MineralStorageFilter.Granite,
             ResourceKind.Coal => MineralStorageFilter.Coal,
             ResourceKind.Ore when stack.Variant == ResourceVariant.IronOre =>
+                MineralStorageFilter.IronOre,
+            ResourceKind.Ore when stack.Variant is ResourceVariant.CopperOre or
+                ResourceVariant.SilverOre or ResourceVariant.GoldOre =>
                 MineralStorageFilter.IronOre,
             _ => MineralStorageFilter.None,
         };
@@ -5213,7 +5515,7 @@ public sealed partial class SimulationEngine
         source.AcceptedResource == destination.AcceptedResource;
 
     private static bool IsStorableResource(ResourceKind resource) =>
-        Enum.IsDefined(resource) && resource is not (ResourceKind.Any or ResourceKind.Materials);
+        Enum.IsDefined(resource) && resource != ResourceKind.Any;
 
     private static bool IsStorageFilterResource(ResourceKind resource) =>
         Enum.IsDefined(resource);

@@ -274,6 +274,48 @@ public sealed class FieldCampTests
     }
 
     [Fact]
+    public void ExplicitlyEmptyRaidRosterSurvivesSaveLoadAndDoesNotAutoFill()
+    {
+        var engine = CreateEngine();
+        var campPosition = FindCampPosition(engine);
+        engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
+            new SimulationTick(1), sequence: 1, campPosition));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        engine.QueueCommand(SimulationCommand.AttackHumanVillage(
+            engine.CurrentTick.Next(), sequence: 2, campPosition));
+        engine.AdvanceTicks(1);
+        var preparing = engine.CreateSnapshot();
+        Assert.True(preparing.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready);
+        var actor = Assert.Single(preparing.Actors);
+        Assert.Equal(actor.Id, Assert.Single(preparing.RaidPartyIds));
+        var executeAt = engine.CurrentTick.Next();
+        engine.QueueCommand(SimulationCommand.ConfigureRaidMember(
+            executeAt, sequence: 3, actor.Id, selected: false));
+        engine.QueueCommand(SimulationCommand.ConfigureRaidDirectives(
+            executeAt,
+            sequence: 4,
+            RaidDirective.AttackGuards | RaidDirective.LootFood));
+        engine.AdvanceTicks(1);
+
+        var configured = engine.CreateSnapshot();
+        Assert.True(configured.RaidRosterConfigured);
+        Assert.Empty(configured.RaidPartyIds);
+        Assert.True(configured.RaidPlan.Has(RaidDirective.LootFood));
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.True(restored.CreateSnapshot().RaidRosterConfigured);
+        Assert.Empty(restored.CreateSnapshot().RaidPartyIds);
+
+        restored.QueueCommand(SimulationCommand.AttackHumanVillage(
+            restored.CurrentTick.Next(), sequence: 5, campPosition));
+        restored.AdvanceTicks(1);
+
+        Assert.Equal(GoblinRaidPhase.None, restored.CreateSnapshot().RaidPhase);
+        Assert.Empty(restored.CreateSnapshot().RaidPartyIds);
+    }
+
+    [Fact]
     public void RaidCanUseExplicitFieldCampAsRallyPoint()
     {
         var engine = SimulationEngine.Create(

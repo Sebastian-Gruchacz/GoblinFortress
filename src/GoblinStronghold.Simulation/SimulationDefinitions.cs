@@ -120,6 +120,7 @@ public sealed record AnimalEcologySettings(
         AnimalKind.MarshHare => MarshHare,
         AnimalKind.SwampBoar => SwampBoar,
         AnimalKind.CaveSpider => CaveSpider,
+        AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm => CaveSpider,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 }

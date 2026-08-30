@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "locale": "pl",
+  "section": "interface",
+  "subsections": {
+    "language": {
+      "en": "angielski",
+      "pl": "polski"
+    },
+    "crafting": {
+      "work": "praca",
+      "queued": "Zlecono"
+    }
+  }
+}

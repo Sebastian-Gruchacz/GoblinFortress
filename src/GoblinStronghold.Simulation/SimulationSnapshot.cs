@@ -82,6 +82,8 @@ public enum AnimalKind : byte
     MarshHare = 1,
     SwampBoar = 2,
     CaveSpider = 3,
+    DeepCrawler = 4,
+    MagmaWyrm = 5,
 }
 
 public enum AnimalActivity : byte
@@ -230,6 +232,8 @@ public enum PersonalEquipment : ushort
     StoneClub = 1 << 7,
     HideClothes = 1 << 8,
     ReedClothes = 1 << 9,
+    ReinforcedPickaxe = 1 << 10,
+    WoodenBucket = 1 << 11,
 }
 
 public sealed class PersonalFoodContentsSnapshot : IReadOnlyList<FoodKind>,
@@ -382,6 +386,7 @@ public sealed class HumanVillageSnapshot
         GridPosition anchor,
         int population,
         int foodStock,
+        int grainStock,
         int woodStock,
         int goodsStock,
         int waterStock,
@@ -405,6 +410,7 @@ public sealed class HumanVillageSnapshot
         Anchor = anchor;
         Population = population;
         FoodStock = foodStock;
+        GrainStock = grainStock;
         WoodStock = woodStock;
         GoodsStock = goodsStock;
         WaterStock = waterStock;
@@ -431,6 +437,8 @@ public sealed class HumanVillageSnapshot
     public int Population { get; }
 
     public int FoodStock { get; }
+
+    public int GrainStock { get; }
 
     public int WoodStock { get; }
 
@@ -511,6 +519,7 @@ public sealed class SimulationSnapshot
         GoblinRaidPhase raidPhase,
         GridPosition raidRallyPoint,
         EntityId[] raidPartyIds,
+        bool raidRosterConfigured,
         GridPosition raidTarget,
         int raidTargetRadius,
         RaidDirective raidDirectives,
@@ -552,6 +561,7 @@ public sealed class SimulationSnapshot
         RaidPhase = raidPhase;
         RaidRallyPoint = raidRallyPoint;
         RaidPartyIds = new ReadOnlyCollection<EntityId>(raidPartyIds);
+        RaidRosterConfigured = raidRosterConfigured;
         RaidPlan = new RaidPlanSnapshot(
             raidRallyPoint,
             raidTarget,
@@ -617,6 +627,8 @@ public sealed class SimulationSnapshot
     public GridPosition RaidRallyPoint { get; }
 
     public IReadOnlyList<EntityId> RaidPartyIds { get; }
+
+    public bool RaidRosterConfigured { get; }
 
     public RaidPlanSnapshot RaidPlan { get; }
 

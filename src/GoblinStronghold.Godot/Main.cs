@@ -1,7 +1,9 @@
 using Godot;
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Localization;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Workshops;
 using System.Text;
 
 namespace GoblinStronghold.GodotClient;
@@ -63,10 +65,12 @@ public partial class Main : Node
     private Window _raidWindow = null!;
     private Label _raidSummary = null!;
     private VBoxContainer _raidRows = null!;
+    private Button _raidAutoAssignButton = null!;
     private Button _raidStartButton = null!;
     private OptionButton _raidEngagement = null!;
     private OptionButton _raidCorpseHandling = null!;
     private readonly Dictionary<RaidDirective, CheckButton> _raidDirectiveChecks = [];
+    private readonly Dictionary<EntityId, CheckButton> _raidMemberChecks = [];
     private readonly HashSet<EntityId> _raidDraftIds = [];
     private bool _updatingRaidSelection;
     private GridPosition? _raidDraftRallyPoint;
@@ -126,6 +130,7 @@ public partial class Main : Node
     private Window _workshopDetails = null!;
     private Label _workshopSummary = null!;
     private GridPosition? _selectedWorkshop;
+    private readonly Dictionary<CraftingRecipeKind, Control> _workshopRecipeRows = [];
     private GameSaveStore _saveStore = null!;
     private SimulationTick _nextAutosaveTick;
     private double _autosaveElapsedRealSeconds;
@@ -133,6 +138,11 @@ public partial class Main : Node
     private Button _resumeGameButton = null!;
     private Button _newGameButton = null!;
     private Button _loadMenuButton = null!;
+    private Button _chooseSaveButton = null!;
+    private Window _recoveryWindow = null!;
+    private AcceptDialog _loadFailureDialog = null!;
+    private VBoxContainer _recoveryRows = null!;
+    private Label _recoverySummary = null!;
     private Window _optionsWindow = null!;
     private VBoxContainer _shortcutRows = null!;
     private ShortcutSettings _shortcutSettings = null!;
@@ -159,10 +169,12 @@ public partial class Main : Node
         None,
         FoodStorage,
         Walkway,
+        BasaltWalkway,
         WoodStorage,
         StoneStorage,
         EquipmentStorage,
         MaterialsStorage,
+        WaterBarrel,
         FieldCamp,
         WoodenWall,
         StoneWall,
@@ -171,6 +183,9 @@ public partial class Main : Node
         WoodenDoor,
         WallTorch,
         PrimitiveWorkshop,
+        Bloomery,
+        SmeltingFurnace,
+        CrucibleFurnace,
         GoblinHut,
     }
 
@@ -218,16 +233,19 @@ public partial class Main : Node
         LaunchRaid = 4,
         SelectCampOccupants = 5,
         OpenCampStorage = 6,
-        LootRaidCorpses = 100,
-        ConsumeRaidCorpses = 101,
-        RecoverRaidCorpses = 102,
-        RecoverAndBudRaidCorpses = 103,
-        BudRaidCorpsesInPlace = 104,
+        LootCorpse = 100,
+        ConsumeCorpse = 101,
+        RecoverCorpse = 102,
+        RecoverAndBudCorpse = 103,
+        BudCorpseInPlace = 104,
+        ClearCorpseDirectives = 105,
     }
 
     public override void _Ready()
     {
-        _saveStore = new GameSaveStore(ProjectSettings.GlobalizePath("user://saves"));
+        _saveStore = new GameSaveStore(
+            ProjectSettings.GlobalizePath("user://saves"),
+            SimulationSaveFormat.CurrentVersion);
         _shortcutSettings = new ShortcutSettings(
             ProjectSettings.GlobalizePath("user://settings/shortcuts.json"));
         _gameUiTheme = GameUiTheme.Create();
@@ -253,6 +271,8 @@ public partial class Main : Node
         _resumeGameButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Resume");
         _newGameButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/NewGame");
         _loadMenuButton = GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/LoadGame");
+        _chooseSaveButton = GetNode<Button>(
+            "Interface/MainMenu/Center/Panel/Margin/Controls/ChooseSave");
         var titleSplash = GetNode<Label>("Interface/MainMenu/Center/Panel/Margin/Controls/Subtitle");
         titleSplash.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         titleSplash.Text = TitleSplashCatalog.Pick("Plemię pamięta to, co zdoła pożreć.");
@@ -314,9 +334,17 @@ public partial class Main : Node
             "Skład materiałów\nKoszt: 2 drewna • skóry, kości i sitowie",
             () => SelectBuildMode((long)BuildMode.MaterialsStorage),
             GameShortcutId.BuildMaterialsStorage);
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.WoodenBucket),
+            "Beczka na wodę\nWymaga gotowej beczki z warsztatu • pojemność 32",
+            () => SelectBuildMode((long)BuildMode.WaterBarrel));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.Walkway,
             "Pomost\nKoszt: 1 drewno za segment", () => SelectBuildMode((long)BuildMode.Walkway),
             GameShortcutId.BuildWalkway);
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateUiItemCompositeIcon(UiIcon.Walkway, ItemIcon.Stone),
+            "Bazaltowy pomost\nKoszt: 1 bazalt za segment • odporny na lawę • wymaga budowania 2 i kilofa",
+            () => SelectBuildMode((long)BuildMode.BasaltWalkway));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.FieldCamp,
             "Obozowisko wypadowe\nKoszt: 6 drewna", () => SelectBuildMode((long)BuildMode.FieldCamp),
             GameShortcutId.BuildFieldCamp);
@@ -348,6 +376,18 @@ public partial class Main : Node
             "Prymitywny warsztat\nKoszt: 4 drewna",
             () => SelectBuildMode((long)BuildMode.PrimitiveWorkshop),
             GameShortcutId.BuildPrimitiveWorkshop);
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateFurnaceIcon(WorkshopKind.Bloomery),
+            "Dymarka\nKoszt: 12 odpowiednich kamieni • żelazo",
+            () => SelectBuildMode((long)BuildMode.Bloomery));
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateFurnaceIcon(WorkshopKind.SmeltingFurnace),
+            "Piec hutniczy\nKoszt: 16 mocnych kamieni • miedź",
+            () => SelectBuildMode((long)BuildMode.SmeltingFurnace));
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateFurnaceIcon(WorkshopKind.CrucibleFurnace),
+            "Piec tyglowy\nKoszt: 20 trwałych kamieni • srebro i złoto",
+            () => SelectBuildMode((long)BuildMode.CrucibleFurnace));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherFood,
             "Zbierz żywność\nJagody, grzyby, korzonki i ryby",
             () => SelectWorkMode((long)WorkMode.GatherFood),
@@ -570,6 +610,7 @@ public partial class Main : Node
         CreateWorldContextMenu();
         CreateUnitOrderMenu();
         CreateOptionsWindow();
+        CreateRecoveryWindow();
         ApplyGameThemeToWindows();
         UpdateSpeedButtons();
         ShowMainMenu();
@@ -955,8 +996,11 @@ public partial class Main : Node
 
         try
         {
-            _saveStore.SaveQuick(_engine.Save());
-            _inspector.Text = $"Gra zapisana • tick {_engine.CurrentTick.Value:N0} • quicksave.json";
+            var receipt = _saveStore.SaveQuick(_engine.Save());
+            _inspector.Text = $"Gra zapisana i zweryfikowana • " +
+                $"tick {_engine.CurrentTick.Value:N0} • {Path.GetFileName(receipt.Path)} • " +
+                $"{receipt.ByteCount:N0} B" +
+                (receipt.BackupCreated ? " • poprzedni zapis zachowany" : string.Empty);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -967,30 +1011,72 @@ public partial class Main : Node
     private void LoadGame()
     {
         string? preferredFailure = null;
-        foreach (var candidate in _saveStore.LoadPreferredFirst())
+        foreach (var candidate in _saveStore.LoadLatestProgressFirst())
         {
-            try
+            if (TryLoadGameCandidate(candidate.Path, candidate.Json, out var failure))
             {
-                var loaded = SimulationEngine.Load(
-                    candidate.Json,
-                    SimulationDefinitions.Foundation,
-                    SimulationDebugSettings.ForCurrentBuild);
-                ReplaceEngine(loaded);
-                _hasActiveSession = true;
-                CloseMainMenu();
-                _inspector.Text = $"Gra wczytana • tick {_engine.CurrentTick.Value:N0} • {Path.GetFileName(candidate.Path)}";
                 return;
             }
-            catch (Exception exception) when (exception is InvalidDataException or System.Text.Json.JsonException)
-            {
-                preferredFailure ??= $"{Path.GetFileName(candidate.Path)}: {exception.Message}";
-                // Try rotating autosave recovery points if the preferred save cannot load.
-            }
+            preferredFailure ??= $"{Path.GetFileName(candidate.Path)}: {failure}";
+            // Try rotating autosave recovery points if the preferred save cannot load.
         }
 
         _inspector.Text = preferredFailure is null
             ? "Nie znaleziono zapisu do wczytania."
             : $"Nie znaleziono zgodnego zapisu • {preferredFailure}";
+        ShowLoadFailure(_inspector.Text);
+    }
+
+    private void LoadSpecificGame(string path)
+    {
+        var candidate = _saveStore.LoadLatestProgressFirst()
+            .FirstOrDefault(item => StringComparer.OrdinalIgnoreCase.Equals(item.Path, path));
+        if (candidate.Path is null)
+        {
+            _recoverySummary.Text = "Wybrany punkt zapisu już nie istnieje.";
+            ShowLoadFailure(_recoverySummary.Text);
+            return;
+        }
+
+        if (!TryLoadGameCandidate(candidate.Path, candidate.Json, out var failure))
+        {
+            _recoverySummary.Text = $"Nie udało się wczytać {Path.GetFileName(path)}: " +
+                failure;
+            ShowLoadFailure(_recoverySummary.Text);
+        }
+    }
+
+    private bool TryLoadGameCandidate(string path, string json, out string failure)
+    {
+        try
+        {
+            var loaded = SimulationEngine.Load(
+                json,
+                SimulationDefinitions.Foundation,
+                SimulationDebugSettings.ForCurrentBuild);
+            var protectedCurrentSession = _hasActiveSession;
+            if (protectedCurrentSession)
+            {
+                _saveStore.SaveBeforeLoad(_engine.Save(), excludedPath: path);
+            }
+            ReplaceEngine(loaded);
+            _hasActiveSession = true;
+            _recoveryWindow.Hide();
+            CloseMainMenu();
+            _inspector.Text = $"Gra wczytana • tick {_engine.CurrentTick.Value:N0} • " +
+                Path.GetFileName(path) +
+                (protectedCurrentSession
+                    ? " • poprzednia sesja zachowana przed wczytaniem"
+                    : string.Empty);
+            failure = string.Empty;
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or
+            System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+        {
+            failure = exception.Message;
+            return false;
+        }
     }
 
     private void ShowMainMenu()
@@ -1008,9 +1094,154 @@ public partial class Main : Node
         }
         _workshopDetails.Hide();
         _resumeGameButton.Visible = _hasActiveSession;
-        _loadMenuButton.Disabled = !_saveStore.HasAnySave;
+        RefreshLoadMenuButton();
         _mainMenu.Show();
         (_hasActiveSession ? _resumeGameButton : _newGameButton).GrabFocus();
+    }
+
+    private void RefreshLoadMenuButton()
+    {
+        var candidates = _saveStore.InspectCandidates();
+        _loadMenuButton.Disabled = candidates.Count == 0;
+        _chooseSaveButton.Disabled = candidates.Count == 0;
+        if (candidates.Count == 0)
+        {
+            _loadMenuButton.Text = "Brak zapisów";
+            _loadMenuButton.TooltipText = "Nie znaleziono żadnego punktu zapisu.";
+            _chooseSaveButton.TooltipText = "Nie znaleziono żadnego punktu zapisu.";
+            return;
+        }
+
+        var selected = candidates[0];
+        var selectedName = Path.GetFileNameWithoutExtension(selected.Path);
+        _loadMenuButton.Text = selected.CurrentTick is { } tick
+            ? $"Wczytaj • {selectedName} • tick {tick:N0}"
+            : $"Wczytaj • {selectedName}";
+        _loadMenuButton.TooltipText = "Wybrany punkt zapisu:\n" +
+            string.Join("\n", candidates.Select((candidate, index) =>
+                $"{index + 1}. {DescribeSaveCandidate(candidate)}"));
+        _chooseSaveButton.TooltipText =
+            "Otwórz listę wszystkich ręcznych zapisów, kopii i autozapisów.";
+    }
+
+    private static string DescribeSaveCandidate(GameSaveSummary candidate)
+    {
+        var fileName = Path.GetFileName(candidate.Path);
+        var savedAt = candidate.LastWriteTimeUtc.ToLocalTime()
+            .ToString("yyyy-MM-dd HH:mm:ss");
+        if (!candidate.HasReadableHeader)
+        {
+            return $"{fileName} • nieczytelny nagłówek • {savedAt}";
+        }
+
+        return $"{fileName} • tick {candidate.CurrentTick!.Value:N0} • " +
+            $"najniżej z={candidate.LowestSavedZ!.Value} • " +
+            $"świat {candidate.WorldSeed!.Value:X16} • {savedAt}";
+    }
+
+    private void CreateRecoveryWindow()
+    {
+        _loadFailureDialog = new AcceptDialog
+        {
+            Title = "Nie udało się wczytać gry",
+            OkButtonText = "OK",
+        };
+        AddChild(_loadFailureDialog);
+
+        _recoveryWindow = new Window
+        {
+            Title = "Punkty zapisu",
+            Size = new Vector2I(760, 500),
+            MinSize = new Vector2I(560, 360),
+            Visible = false,
+        };
+        _recoveryWindow.CloseRequested += _recoveryWindow.Hide;
+        AddChild(_recoveryWindow);
+
+        var margin = new MarginContainer();
+        foreach (var side in new[] { "left", "top", "right", "bottom" })
+        {
+            margin.AddThemeConstantOverride($"margin_{side}", 14);
+        }
+        margin.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _recoveryWindow.AddChild(margin);
+
+        var content = new VBoxContainer();
+        content.AddThemeConstantOverride("separation", 10);
+        margin.AddChild(content);
+        content.AddChild(new Label
+        {
+            Text = "Wybierz dokładny punkt odzyskiwania. Pierwszy wpis jest używany " +
+                "przez zwykłe Wczytaj.",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
+        _recoverySummary = new Label
+        {
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        };
+        _recoverySummary.AddThemeColorOverride("font_color", GameUiTheme.MutedText);
+        content.AddChild(_recoverySummary);
+
+        var scroll = new ScrollContainer
+        {
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        content.AddChild(scroll);
+        _recoveryRows = new VBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        _recoveryRows.AddThemeConstantOverride("separation", 6);
+        scroll.AddChild(_recoveryRows);
+
+        var close = new Button { Text = "Zamknij" };
+        close.Pressed += _recoveryWindow.Hide;
+        content.AddChild(close);
+        _chooseSaveButton.Pressed += ShowRecoveryWindow;
+    }
+
+    private void ShowLoadFailure(string message)
+    {
+        _loadFailureDialog.DialogText = message;
+        _loadFailureDialog.PopupCentered();
+    }
+
+    private void ShowRecoveryWindow()
+    {
+        foreach (var child in _recoveryRows.GetChildren())
+        {
+            _recoveryRows.RemoveChild(child);
+            child.QueueFree();
+        }
+
+        var candidates = _saveStore.InspectCandidates();
+        _recoverySummary.Text = candidates.Count == 0
+            ? "Nie znaleziono żadnego punktu zapisu."
+            : $"Dostępne punkty: {candidates.Count}. " +
+              "Nieczytelne pliki pozostają widoczne, ale nie można ich wybrać.";
+        Button? firstEnabled = null;
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var candidate = candidates[index];
+            var button = new Button
+            {
+                Text = (index == 0 ? "Domyślny • " : string.Empty) +
+                    DescribeSaveCandidate(candidate),
+                Alignment = HorizontalAlignment.Left,
+                CustomMinimumSize = new Vector2(0, 44),
+                Disabled = !candidate.HasReadableHeader,
+                TooltipText = candidate.HasReadableHeader
+                    ? "Wczytaj dokładnie ten punkt zapisu."
+                    : "Nagłówek pliku jest uszkodzony lub niekompletny.",
+            };
+            var path = candidate.Path;
+            button.Pressed += () => LoadSpecificGame(path);
+            _recoveryRows.AddChild(button);
+            firstEnabled ??= button.Disabled ? null : button;
+        }
+
+        _recoveryWindow.PopupCentered();
+        firstEnabled?.GrabFocus();
     }
 
     private void CreateOptionsWindow()
@@ -1340,6 +1571,7 @@ public partial class Main : Node
             return;
         }
 
+        _recoveryWindow.Hide();
         _mainMenu.Hide();
         FadeOutTitleMusic();
         SetSpeed(_speedBeforeMenu);
@@ -2038,6 +2270,32 @@ public partial class Main : Node
         return CreateSvgIcon(svg, "primitive workshop");
     }
 
+    private static Texture2D CreateFurnaceIcon(WorkshopKind kind)
+    {
+        var body = kind switch
+        {
+            WorkshopKind.Bloomery => "#766753",
+            WorkshopKind.SmeltingFurnace => "#59606a",
+            WorkshopKind.CrucibleFurnace => "#49434f",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+        };
+        var chimneyHeight = kind switch
+        {
+            WorkshopKind.Bloomery => 18,
+            WorkshopKind.SmeltingFurnace => 12,
+            _ => 7,
+        };
+        var svg = $$"""
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <path d="M14 57 L18 25 Q32 16 46 25 L50 57 Z" fill="{{body}}" stroke="#211d1a" stroke-width="4"/>
+              <path d="M25 {{chimneyHeight}} L39 {{chimneyHeight}} L41 27 L23 27 Z" fill="#62584d" stroke="#211d1a" stroke-width="3"/>
+              <path d="M22 57 L24 42 Q32 34 40 42 L42 57 Z" fill="#2a211d" stroke="#17110f" stroke-width="3"/>
+              <path d="M27 53 Q32 40 37 53 Z" fill="#ff8a2b"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, kind.ToString());
+    }
+
     private static Texture2D CreateSlingIcon()
     {
         const string svg = """
@@ -2150,7 +2408,9 @@ public partial class Main : Node
             BuildMode.StoneStorage => "Budowa składu kamienia: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
             BuildMode.EquipmentStorage => "Budowa składu sprzętu: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
             BuildMode.MaterialsStorage => "Budowa składu materiałów: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
-            BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • PPM lub Esc anuluje",
+            BuildMode.WaterBarrel => "Ustaw beczkę na wodę: wskaż odkryte pole LPM • gotowa beczka zostanie przyniesiona z warsztatu lub składu • PPM lub Esc anuluje",
+            BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • drewno nie może przykrywać lawy • PPM lub Esc anuluje",
+            BuildMode.BasaltWalkway => "Budowa bazaltowego pomostu: przeciągnij LPM od początku do końca • 1 bazalt/segment • odporny na lawę • PPM lub Esc anuluje",
             BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu • PPM lub Esc anuluje",
             BuildMode.GoblinHut => $"Chata 3×3: wskaż lewy górny narożnik • koszt 8 drewna • " +
                 $"daje {SimulationDefinitions.GoblinHutCapacity} miejsc i podnosi cel populacji • PPM lub Esc anuluje",
@@ -2161,6 +2421,9 @@ public partial class Main : Node
             BuildMode.WoodenDoor => "Budowa drewnianych drzwi: wskaż gotową ościeżnicę LPM • koszt 1 drewna • po budowie kliknij skrzydło, aby je otworzyć • PPM lub Esc anuluje",
             BuildMode.WallTorch => "Budowa pochodni: wskaż odkrytą ścianę LPM • koszt 1 drewna • strona montażu wynika z wnętrza i sąsiedztwa • PPM lub Esc anuluje",
             BuildMode.PrimitiveWorkshop => "Budowa prymitywnego warsztatu: wskaż pole LPM • koszt 4 drewna • PPM lub Esc anuluje",
+            BuildMode.Bloomery => "Budowa dymarki: wskaż pole LPM • koszt 12 kamieni o sile i trwałości co najmniej 35 • wymaga budowniczego z kilofem • PPM lub Esc anuluje",
+            BuildMode.SmeltingFurnace => "Budowa pieca hutniczego: wskaż pole LPM • koszt 16 kamieni o sile i trwałości co najmniej 45 • PPM lub Esc anuluje",
+            BuildMode.CrucibleFurnace => "Budowa pieca tyglowego: wskaż pole LPM • koszt 20 kamieni o sile co najmniej 60 i trwałości 65 • wymaga budownictwa 2 • PPM lub Esc anuluje",
             _ => _inspector.Text,
         };
     }
@@ -2209,7 +2472,8 @@ public partial class Main : Node
         }
 
         if (_buildMode is BuildMode.FoodStorage or BuildMode.WoodStorage or
-            BuildMode.StoneStorage or BuildMode.EquipmentStorage or BuildMode.MaterialsStorage)
+            BuildMode.StoneStorage or BuildMode.EquipmentStorage or BuildMode.MaterialsStorage or
+            BuildMode.WaterBarrel)
         {
             var resource = _buildMode switch
             {
@@ -2218,6 +2482,7 @@ public partial class Main : Node
                 BuildMode.StoneStorage => ResourceKind.Stone,
                 BuildMode.EquipmentStorage => ResourceKind.Equipment,
                 BuildMode.MaterialsStorage => ResourceKind.Materials,
+                BuildMode.WaterBarrel => ResourceKind.Water,
                 _ => throw new InvalidOperationException(),
             };
             CreateStorage(
@@ -2228,7 +2493,8 @@ public partial class Main : Node
         }
 
         if (_buildMode is BuildMode.WoodenDoorFrame or BuildMode.StoneDoorFrame or
-            BuildMode.WoodenDoor or BuildMode.WallTorch or BuildMode.PrimitiveWorkshop)
+            BuildMode.WoodenDoor or BuildMode.WallTorch or BuildMode.PrimitiveWorkshop or
+            BuildMode.Bloomery or BuildMode.SmeltingFurnace or BuildMode.CrucibleFurnace)
         {
             if (!_engine.Visibility.Get(cell).IsDiscovered())
             {
@@ -2246,6 +2512,14 @@ public partial class Main : Node
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
                 BuildMode.PrimitiveWorkshop => SimulationCommand.BuildPrimitiveWorkshop(
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
+                BuildMode.Bloomery => SimulationCommand.BuildWorkshop(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell, WorkshopKind.Bloomery),
+                BuildMode.SmeltingFurnace => SimulationCommand.BuildWorkshop(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell,
+                    WorkshopKind.SmeltingFurnace),
+                BuildMode.CrucibleFurnace => SimulationCommand.BuildWorkshop(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell,
+                    WorkshopKind.CrucibleFurnace),
                 _ => SimulationCommand.BuildWoodenDoor(
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
             };
@@ -2260,6 +2534,11 @@ public partial class Main : Node
                     "Zlecono pochodnię ścienną • koszt 1 drewna",
                 BuildMode.PrimitiveWorkshop =>
                     "Zlecono prymitywny warsztat • koszt 4 drewna",
+                BuildMode.Bloomery => "Zlecono dymarkę • koszt 12 odpowiednich kamieni",
+                BuildMode.SmeltingFurnace =>
+                    "Zlecono piec hutniczy • koszt 16 odpowiednich kamieni",
+                BuildMode.CrucibleFurnace =>
+                    "Zlecono piec tyglowy • koszt 20 odpowiednich kamieni",
                 _ => "Zlecono zamknięte drewniane drzwi w ościeżnicy • koszt 1 drewna",
             };
             UpdateBuildPreview(screenPosition);
@@ -2312,9 +2591,14 @@ public partial class Main : Node
         var cells = SimulationCommand.GetLinearCells(_linearBuildStart, end);
         if (!IsLinearConstructionPlacementValid(cells))
         {
-            _inspector.Text = _buildMode == BuildMode.Walkway
-                ? "Pomost musi mieścić się w wolnej przestrzeni i stykać odkryte krawędzie terenu."
-                : "Cała liniowa konstrukcja musi przebiegać przez odkryty teren.";
+            _inspector.Text = _buildMode switch
+            {
+                BuildMode.Walkway when ContainsLava(cells) =>
+                    "Drewniany pomost nie może przebiegać nad lawą. Użyj pomostu bazaltowego.",
+                BuildMode.Walkway or BuildMode.BasaltWalkway =>
+                    "Pomost musi mieścić się w wolnej przestrzeni i stykać odkryte krawędzie terenu.",
+                _ => "Cała liniowa konstrukcja musi przebiegać przez odkryty teren.",
+            };
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -2324,6 +2608,8 @@ public partial class Main : Node
             BuildMode.WoodenWall => SimulationCommand.BuildWoodenWall(
                 _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
             BuildMode.StoneWall => SimulationCommand.BuildStoneWall(
+                _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
+            BuildMode.BasaltWalkway => SimulationCommand.BuildBasaltWalkway(
                 _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
             _ => SimulationCommand.BuildWalkway(
                 _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
@@ -2335,6 +2621,8 @@ public partial class Main : Node
                 $"Zlecono drewnianą ścianę: {cells.Count} segmentów • koszt {cells.Count * 2} drewna",
             BuildMode.StoneWall =>
                 $"Zlecono kamienny mur: {cells.Count} segmentów • koszt {cells.Count * 2} jednostek kamienia",
+            BuildMode.BasaltWalkway =>
+                $"Zlecono bazaltowy pomost: {cells.Count} segmentów • koszt {cells.Count} bazaltu",
             _ => $"Zlecono pomost: {cells.Count} segmentów • koszt {cells.Count} drewna",
         };
         UpdateBuildPreview(screenPosition);
@@ -2351,7 +2639,8 @@ public partial class Main : Node
 
         var cells = _buildMode switch
         {
-            BuildMode.Walkway or BuildMode.WoodenWall or BuildMode.StoneWall
+            BuildMode.Walkway or BuildMode.BasaltWalkway or BuildMode.WoodenWall or
+                BuildMode.StoneWall
                 when _isDraggingLinearBuild =>
                 SimulationCommand.GetLinearCells(_linearBuildStart, cell),
             BuildMode.FieldCamp => GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
@@ -2367,6 +2656,10 @@ public partial class Main : Node
                     $"Drewniana ściana: {cells.Count} segmentów • koszt {cells.Count * 2} drewna",
                 BuildMode.StoneWall =>
                     $"Kamienny mur: {cells.Count} segmentów • koszt {cells.Count * 2} jednostek kamienia",
+                BuildMode.BasaltWalkway =>
+                    $"Bazaltowy pomost: {cells.Count} segmentów • koszt {cells.Count} bazaltu • odporny na lawę",
+                BuildMode.Walkway when ContainsLava(cells) =>
+                    "Pomost niedostępny: lawa spali drewnianą konstrukcję.",
                 _ => $"Pomost: {cells.Count} segmentów • koszt {cells.Count} drewna",
             };
         }
@@ -2386,19 +2679,22 @@ public partial class Main : Node
     }
 
     private bool IsConstructionPreviewValid(IReadOnlyList<GridPosition> cells) =>
-        cells.Count > 0 && (_buildMode is BuildMode.Walkway or BuildMode.WoodenWall or
-            BuildMode.StoneWall
+        cells.Count > 0 && (_buildMode is BuildMode.Walkway or BuildMode.BasaltWalkway or
+            BuildMode.WoodenWall or BuildMode.StoneWall
             ? IsLinearConstructionPlacementValid(cells)
             : cells.All(IsDiscoveredConstructionCell));
 
     private bool IsLinearConstructionPlacementValid(IReadOnlyList<GridPosition> cells)
     {
-        if (_buildMode != BuildMode.Walkway)
+        if (_buildMode is not (BuildMode.Walkway or BuildMode.BasaltWalkway))
         {
             return cells.All(IsDiscoveredConstructionCell);
         }
 
-        return _engine.World.CanBuildWalkway(cells) &&
+        var canBuild = _buildMode == BuildMode.BasaltWalkway
+            ? _engine.World.CanBuildBasaltWalkway(cells)
+            : _engine.World.CanBuildWalkway(cells);
+        return canBuild &&
             IsKnownWalkwayEndpoint(cells[0]) &&
             IsKnownWalkwayEndpoint(cells[^1]);
     }
@@ -2412,6 +2708,11 @@ public partial class Main : Node
             position with { Y = position.Y + 1 },
             position with { X = position.X - 1 },
         }.Any(IsDiscoveredConstructionCell);
+
+    private bool ContainsLava(IEnumerable<GridPosition> positions) =>
+        positions.Any(position =>
+            _engine.World.TryGetFluid(position, out var fluid, out _) &&
+            fluid == CellFluidKind.Lava);
 
     private bool IsDiscoveredConstructionCell(GridPosition position) =>
         _engine.Visibility.TryGet(position, out var visibility) && visibility.IsDiscovered();
@@ -2808,6 +3109,8 @@ public partial class Main : Node
                 _engine.CurrentTick.Next(), _commandSequence++, cell),
             ResourceKind.Materials => SimulationCommand.BuildMaterialsStorage(
                 _engine.CurrentTick.Next(), _commandSequence++, cell),
+            ResourceKind.Water => SimulationCommand.PlaceWaterBarrel(
+                _engine.CurrentTick.Next(), _commandSequence++, cell),
             _ => throw new ArgumentOutOfRangeException(nameof(resource)),
         };
         _engine.QueueCommand(command);
@@ -2816,9 +3119,12 @@ public partial class Main : Node
             ResourceKind.Food => _engine.Definitions.Storage.SmallFoodCapacity,
             ResourceKind.Equipment => 32,
             ResourceKind.Materials => 64,
+            ResourceKind.Water => 32,
             _ => 64,
         };
-        _inspector.Text = $"{cell} • wyznaczono plac pod skład {DescribeResource(resource)} 0/{capacity} • blueprint żąda 2 drewna";
+        _inspector.Text = resource == ResourceKind.Water
+            ? $"{cell} • wyznaczono miejsce na beczkę 0/{capacity} • zlecenie żąda gotowej beczki z warsztatu lub składu"
+            : $"{cell} • wyznaczono plac pod skład {DescribeResource(resource)} 0/{capacity} • blueprint żąda 2 drewna";
     }
 
     private void HandleEvents(
@@ -2916,10 +3222,13 @@ public partial class Main : Node
         {
             var zone = snapshot.StorageZones
                 .FirstOrDefault(item => item.Id == constructionEvent.Target);
-            var material = constructionEvent.Construction is ConstructionKind.StoneWall or
-                ConstructionKind.StoneDoorFrame
-                ? "kamienia"
-                : "drewna";
+            var material = constructionEvent.Construction switch
+            {
+                ConstructionKind.BasaltWalkway => "bazaltu",
+                ConstructionKind.StoneWall or ConstructionKind.StoneDoorFrame => "kamienia",
+                ConstructionKind.WaterBarrel => "gotową drewnianą beczkę",
+                _ => "drewna",
+            };
             _inspector.Text = constructionEvent.Construction is not null
                 ? $"Budowa {DescribeConstruction(constructionEvent.Construction.Value)} ukończona • " +
                   $"zużyto {constructionEvent.Amount} {material}"
@@ -3022,6 +3331,7 @@ public partial class Main : Node
         if (_visibleLevel != 0)
         {
             var levelPosition = cell with { Z = _visibleLevel };
+            var displayedWorldObjects = DescribeDisplayedWorldObjectsAt(snapshot, levelPosition);
             if (_visibleLevel < 0 && _engine.Map.IsCavePosition(levelPosition))
             {
                 if (!snapshot.GetVisibility(levelPosition, _engine.Map.Width).IsDiscovered())
@@ -3035,6 +3345,15 @@ public partial class Main : Node
                 var zone = snapshot.StorageZones.FirstOrDefault(item => item.Position == levelPosition);
                 var construction = snapshot.ConstructionSites.FirstOrDefault(item =>
                     item.Footprint.Contains(levelPosition));
+                var undergroundAnimals = snapshot.GetVisibility(levelPosition, _engine.Map.Width) ==
+                        CellVisibility.Visible
+                    ? snapshot.Animals.Where(item => item.Position == levelPosition).ToArray()
+                    : [];
+                var undergroundCorpses = snapshot.Corpses
+                    .Where(item => item.Position == levelPosition).ToArray();
+                var undergroundGroundStacks = snapshot.ItemStacks.Where(stack =>
+                    stack.Location.Kind == ItemLocationKind.Ground &&
+                    stack.Location.Position == levelPosition).ToArray();
                 if (actor.Id != EntityId.None)
                 {
                     SelectOrToggleActor(actor.Id, extendActorSelection, showActorDetails);
@@ -3053,7 +3372,7 @@ public partial class Main : Node
                     ShowConstructionDetails(construction);
                     return;
                 }
-                if (_engine.World.HasPrimitiveWorkshop(levelPosition))
+                if (_engine.World.TryGetWorkshopKind(levelPosition, out _))
                 {
                     SelectActor(EntityId.None);
                     ShowWorkshopDetails(levelPosition);
@@ -3073,21 +3392,35 @@ public partial class Main : Node
                     ? "wykopany korytarz"
                     : DescribeCaveKind(caveCell.Kind);
                 _inspector.Text = $"{levelPosition} • {DescribeCaveRock(caveCell.Rock)} • " +
-                    caveKind + (excavated ? string.Empty : DescribeMineralDeposit(caveCell.Deposit)) +
-                    (passages.Length == 0 ? string.Empty : $" • {string.Join(", ", passages)}");
+                    caveKind + DescribeCaveFluid(caveCell.Fluid) +
+                    (excavated ? string.Empty : DescribeMineralDeposit(caveCell.Deposit)) +
+                    (caveCell.Kind == CaveCellKind.SolidRock
+                        ? DescribeMiningRequirement(caveCell.Rock)
+                        : string.Empty) +
+                    (passages.Length == 0 ? string.Empty : $" • {string.Join(", ", passages)}") +
+                    (displayedWorldObjects.Length == 0
+                        ? string.Empty
+                        : $" • {string.Join(", ", displayedWorldObjects)}") +
+                    (undergroundAnimals.Length == 0
+                        ? string.Empty
+                        : $" • zwierzęta: {string.Join(", ", undergroundAnimals.Select(DescribeAnimal))}") +
+                    (undergroundCorpses.Length == 0
+                        ? string.Empty
+                        : $" • zwłoki: {string.Join(", ", undergroundCorpses.Select(DescribeCorpse))}") +
+                    (undergroundGroundStacks.Length == 0
+                        ? string.Empty
+                        : $" • na ziemi: " +
+                          $"{string.Join(", ", undergroundGroundStacks.Select(DescribeStack))}");
                 return;
             }
 
-            var parts = snapshot.WorldObjects
-                .SelectMany(worldObject => worldObject.GetAbsoluteParts()
-                    .Where(part => part.Position == levelPosition)
-                    .Select(part => $"{worldObject.Kind}: {part.Part.Kind}"))
-                .ToArray();
             var mapCell = _engine.Map.GetCell(cell);
             SelectActor(EntityId.None);
             _inspector.Text = $"{levelPosition} • warstwa z={_visibleLevel}" +
                 (mapCell.FloorLevel == _visibleLevel ? " • dno terenu" : " • pusta przestrzeń") +
-                (parts.Length == 0 ? string.Empty : $" • {string.Join(", ", parts)}");
+                (displayedWorldObjects.Length == 0
+                    ? string.Empty
+                    : $" • {string.Join(", ", displayedWorldObjects)}");
             return;
         }
 
@@ -3156,7 +3489,7 @@ public partial class Main : Node
         {
             ShowConstructionDetails(constructionSites[0]);
         }
-        else if (actors.Length == 0 && _engine.World.HasPrimitiveWorkshop(cell))
+        else if (actors.Length == 0 && _engine.World.TryGetWorkshopKind(cell, out _))
         {
             ShowWorkshopDetails(cell);
         }
@@ -3167,7 +3500,9 @@ public partial class Main : Node
             (plant is null
                 ? string.Empty
                 : $" • {DescribeFoodSource(plant.Value.Kind)} {plant.Value.Biomass}/{plant.Value.Capacity}") +
-            (objects.Count == 0 ? string.Empty : $" • {string.Join(", ", objects.Select(item => item.Kind))}") +
+            (objects.Count == 0
+                ? string.Empty
+                : $" • {string.Join(", ", objects.Select(DescribeWorldObject))}") +
             (objects.Any(item => item.Kind == WorldObjectKind.GoblinFieldCamp)
                 ? " • PPM: menu obozu"
                 : string.Empty) +
@@ -3176,7 +3511,8 @@ public partial class Main : Node
                 : $" • ludzie: {string.Join(", ", humanVillagers.Select(DescribeVillager))}") +
             (humanFields.Length == 0
                 ? string.Empty
-                : $" • pole: {string.Join(", ", humanFields.Select(field => $"{DescribeField(field.Phase)} {field.GrowthDays}/120 dni"))}") +
+                : $" • pole: {string.Join(", ", humanFields.Select(field =>
+                    DescribeHumanField(field, snapshot.HumanVillage)))}") +
             (!humanVillagers.Any(villager => villager.Role == HumanCohortRole.Guards)
                 ? string.Empty
                 : $" • alarm {snapshot.HumanVillage.Hostility}/100, siła straży " +
@@ -3185,6 +3521,7 @@ public partial class Main : Node
              !objects.Any(item => item.Owner == WorldObjectOwner.HumanVillage)
                 ? string.Empty
                 : $" • wieś: {snapshot.HumanVillage.Population} osób, żywność {snapshot.HumanVillage.FoodStock}, " +
+                  $"ziarno siewne {snapshot.HumanVillage.GrainStock}, " +
                   $"woda {snapshot.HumanVillage.WaterStock}, drewno {snapshot.HumanVillage.WoodStock}, " +
                   $"pola {snapshot.HumanVillage.Fields.Count}/{snapshot.HumanVillage.PlannedFieldCount}, " +
                   $"spichlerze {snapshot.HumanVillage.StorehouseCount}") +
@@ -3233,10 +3570,110 @@ public partial class Main : Node
                 : $" • w kieszeniach: {string.Join(", ", carriedStacks.Select(DescribeStack))}");
     }
 
+    private string[] DescribeDisplayedWorldObjectsAt(
+        SimulationSnapshot snapshot,
+        GridPosition position)
+    {
+        var descriptions = new List<string>();
+        foreach (var worldObject in snapshot.WorldObjects)
+        {
+            var isNaturalSurfaceObject = worldObject.Kind is WorldObjectKind.Tree or
+                WorldObjectKind.DeadTreeStump or WorldObjectKind.Boulder;
+            var surfaceOffset = isNaturalSurfaceObject && worldObject.Anchor.Z == 0
+                ? _engine.Map.GetColumnCell(worldObject.Anchor).SurfaceLevel
+                : 0;
+            descriptions.AddRange(worldObject.GetAbsoluteParts()
+                .Where(part => part.Position.X == position.X &&
+                    part.Position.Y == position.Y &&
+                    part.Position.Z + surfaceOffset == position.Z)
+                .Select(part => DescribeWorldObjectPart(worldObject, part.Part.Kind)));
+
+            if (worldObject.Kind is WorldObjectKind.Tree or WorldObjectKind.DeadTreeStump &&
+                worldObject.Anchor.X == position.X &&
+                worldObject.Anchor.Y == position.Y &&
+                worldObject.Anchor.Z + surfaceOffset - 1 == position.Z)
+            {
+                descriptions.Add($"korzenie — {DescribeTreeSpecies(GetWoodVariant(worldObject))}");
+            }
+        }
+
+        return descriptions.Distinct().ToArray();
+    }
+
+    private string DescribeWorldObject(WorldObjectSnapshot worldObject) => worldObject.Kind switch
+    {
+        WorldObjectKind.Tree => $"drzewo — {DescribeTreeSpecies(GetWoodVariant(worldObject))}",
+        WorldObjectKind.DeadTreeStump when worldObject.Parts.Any(part =>
+            part.Kind == WorldObjectPartKind.FelledTreeRemains) =>
+            $"ścięte drzewo — {DescribeTreeSpecies(GetWoodVariant(worldObject))}; " +
+            "pniak, kłoda i gałęzie",
+        WorldObjectKind.DeadTreeStump =>
+            $"stary pniak — {DescribeTreeSpecies(GetWoodVariant(worldObject))}",
+        WorldObjectKind.Boulder => "duży głaz",
+        WorldObjectKind.PrimitiveWorkshop =>
+            $"prymitywny warsztat{DescribeWorkshopMaterial(worldObject)}",
+        WorldObjectKind.Bloomery => $"dymarka{DescribeWorkshopMaterial(worldObject)}",
+        WorldObjectKind.SmeltingFurnace =>
+            $"piec hutniczy{DescribeWorkshopMaterial(worldObject)}",
+        WorldObjectKind.CrucibleFurnace =>
+            $"piec tyglowy{DescribeWorkshopMaterial(worldObject)}",
+        _ => worldObject.Kind.ToString(),
+    };
+
+    private static string DescribeWorkshopMaterial(WorldObjectSnapshot workshop) =>
+        workshop.MaterialVariant == ResourceVariant.None
+            ? string.Empty
+            : $" • materiał: {DescribeResourceVariant(workshop.MaterialVariant)}";
+
+    private string DescribeWorldObjectPart(
+        WorldObjectSnapshot worldObject,
+        WorldObjectPartKind partKind)
+    {
+        if (worldObject.Kind is WorldObjectKind.Tree or WorldObjectKind.DeadTreeStump)
+        {
+            var species = DescribeTreeSpecies(GetWoodVariant(worldObject));
+            return partKind switch
+            {
+                WorldObjectPartKind.TreeTrunk => $"pień — {species}",
+                WorldObjectPartKind.TreeCrown => $"korona — {species}",
+                WorldObjectPartKind.TreeStump => $"pniak — {species}",
+                WorldObjectPartKind.FelledTreeRemains =>
+                    $"ścięta kłoda i gałęzie — {species}",
+                _ => $"{worldObject.Kind}: {partKind}",
+            };
+        }
+
+        return worldObject.Kind == WorldObjectKind.Boulder
+            ? "duży głaz"
+            : $"{worldObject.Kind}: {partKind}";
+    }
+
+    private ResourceVariant GetWoodVariant(WorldObjectSnapshot worldObject) =>
+        WoodMaterialPolicy.VariantFor(
+            _engine.WorldSeed,
+            _engine.Map.Width,
+            worldObject.Anchor);
+
+    private static string DescribeTreeSpecies(ResourceVariant variant) => variant switch
+    {
+        ResourceVariant.OakWood => "dąb",
+        ResourceVariant.ChestnutWood => "kasztanowiec",
+        ResourceVariant.BirchWood => "brzoza",
+        ResourceVariant.WalnutWood => "orzech",
+        ResourceVariant.AppleWood => "jabłoń",
+        ResourceVariant.PineWood => "sosna",
+        _ => "nieznany gatunek",
+    };
+
     private static string DescribeCraftingOrder(CraftingOrderSnapshot order)
     {
         var materials = string.Join(", ", order.Materials.Select(material =>
-            $"{DescribeResource(material.Resource)} " +
+            $"{(material.Variant == ResourceVariant.None
+                ? DescribeResource(material.Resource)
+                : DescribeResourceVariant(
+                    material.Resource,
+                    FoodKind.None,
+                    material.Variant))} " +
             $"{material.DeliveredQuantity}/{material.RequiredQuantity}"));
         return $"{DescribeCraftingRecipe(order.Recipe)} • {materials} • praca " +
             $"{order.TotalWorkTicks - order.RemainingWorkTicks}/" +
@@ -3275,6 +3712,8 @@ public partial class Main : Node
     {
         RockKind.Sandstone => "piaskowiec",
         RockKind.Granite => "granit",
+        RockKind.Basalt => "bazalt",
+        RockKind.Obsidian => "obsydian",
         _ => rock.ToString(),
     };
 
@@ -3284,6 +3723,13 @@ public partial class Main : Node
         CaveCellKind.Floor => "podłoga jaskini • przejście dostępne",
         CaveCellKind.Ramp => "naturalna pochylnia • przejście dostępne",
         _ => kind.ToString(),
+    };
+
+    private static string DescribeCaveFluid(CellFluidKind fluid) => fluid switch
+    {
+        CellFluidKind.Lava => " • lawa: nieprzekraczalna, drewniane pomosty niedostępne",
+        CellFluidKind.Water => " • woda",
+        _ => string.Empty,
     };
 
     private GridPosition ScreenToCell(Vector2 screenPosition)
@@ -3332,55 +3778,63 @@ public partial class Main : Node
         ResourceKind.Vegetation => "roślinności",
         ResourceKind.Equipment => "sprzętu",
         ResourceKind.Materials => "materiałów",
+        ResourceKind.Water => "wody",
         _ => "towarów",
     };
 
-    private static string DescribeCraftingRecipe(CraftingRecipeKind recipe) => recipe switch
-    {
-        CraftingRecipeKind.PrimitiveSling => "prymitywna proca",
-        CraftingRecipeKind.BoneKnife => "kościany nóż",
-        CraftingRecipeKind.FightingStick => "kij bojowy",
-        CraftingRecipeKind.StoneClub => "kamienna maczuga",
-        CraftingRecipeKind.HideClothes => "skórzany ubiór",
-        CraftingRecipeKind.ReedClothes => "sitowiowy ubiór",
-        CraftingRecipeKind.PrimitiveWaterskin => "prymitywny bukłak",
-        _ => recipe.ToString(),
-    };
+    private static string DescribeCraftingRecipe(CraftingRecipeKind recipe) =>
+        TranslationCatalog.Get("pl", "recipes", "names", recipe.ToString());
 
-    private static string DescribeResourceVariant(ResourceVariant variant) => variant switch
+    private static string DescribeResourceVariant(ResourceVariant variant)
     {
-        ResourceVariant.OakWood => "drewno dębowe",
-        ResourceVariant.ChestnutWood => "drewno kasztanowca",
-        ResourceVariant.BirchWood => "drewno brzozowe",
-        ResourceVariant.WalnutWood => "drewno orzechowe",
-        ResourceVariant.AppleWood => "drewno jabłoni",
-        ResourceVariant.PineWood => "drewno sosnowe",
-        ResourceVariant.Sandstone => "piaskowiec",
-        ResourceVariant.Granite => "granit",
-        ResourceVariant.IronOre => "ruda żelaza",
-        ResourceVariant.EquipmentPrimitiveSling => "prymitywna proca",
-        ResourceVariant.EquipmentBoneKnife => "kościany nóż",
-        ResourceVariant.EquipmentFightingStick => "kij bojowy",
-        ResourceVariant.EquipmentStoneClub => "kamienna maczuga",
-        ResourceVariant.EquipmentHideClothes => "skórzany ubiór",
-        ResourceVariant.EquipmentReedClothes => "sitowiowy ubiór",
-        ResourceVariant.EquipmentPrimitiveWaterskin => "prymitywny bukłak",
-        ResourceVariant.EquipmentRagClothes => "łachmany",
-        ResourceVariant.EquipmentWoodenAxe => "drewniana siekiera",
-        ResourceVariant.EquipmentPrimitivePickaxe => "prymitywny kilof",
-        ResourceVariant.EquipmentWoodenHoe => "drewniana motyka",
-        ResourceVariant.EquipmentHumanWoodenAxe => "ludzka drewniana siekiera",
-        ResourceVariant.EquipmentWoodenBucket => "drewniane wiadro",
-        ResourceVariant.EquipmentWoodenSpear => "drewniana włócznia",
-        _ => "towar",
-    };
+        if (MaterialCatalog.TryGet(variant, out var material))
+        {
+            return TranslationCatalog.Get("pl", "materials", "names", material.Id);
+        }
+
+        return variant switch
+        {
+            ResourceVariant.EquipmentPrimitiveSling => "prymitywna proca",
+            ResourceVariant.EquipmentBoneKnife => "kościany nóż",
+            ResourceVariant.EquipmentFightingStick => "kij bojowy",
+            ResourceVariant.EquipmentStoneClub => "kamienna maczuga",
+            ResourceVariant.EquipmentHideClothes => "skórzany ubiór",
+            ResourceVariant.EquipmentReedClothes => "sitowiowy ubiór",
+            ResourceVariant.EquipmentPrimitiveWaterskin => "prymitywny bukłak",
+            ResourceVariant.EquipmentRagClothes => "łachmany",
+            ResourceVariant.EquipmentWoodenAxe => "drewniana siekiera",
+            ResourceVariant.EquipmentPrimitivePickaxe => "prymitywny kilof",
+            ResourceVariant.EquipmentWoodenHoe => "drewniana motyka",
+            ResourceVariant.EquipmentHumanWoodenAxe => "ludzka drewniana siekiera",
+            ResourceVariant.EquipmentWoodenBucket => "drewniane wiadro",
+            ResourceVariant.EquipmentWoodenSpear => "drewniana włócznia",
+            ResourceVariant.EquipmentReinforcedPickaxe => "wzmocniony kilof",
+            ResourceVariant.EquipmentWoodenBarrel => "drewniana beczka",
+            _ => "towar",
+        };
+    }
 
     private static string DescribeMineralDeposit(MineralDepositKind deposit) => deposit switch
     {
         MineralDepositKind.Coal => " • żyła węgla",
         MineralDepositKind.IronOre => " • żyła rudy żelaza",
+        MineralDepositKind.CopperOre => " • żyła rudy miedzi",
+        MineralDepositKind.SilverOre => " • żyła srebra",
+        MineralDepositKind.GoldOre => " • żyła złota",
+        MineralDepositKind.Ruby => " • rubiny",
+        MineralDepositKind.Emerald => " • szmaragdy",
+        MineralDepositKind.Diamond => " • diamenty",
         _ => string.Empty,
     };
+
+    private static string DescribeMiningRequirement(RockKind rock)
+    {
+        var requiredLevel = MiningCapabilityPolicy.RequiredSkillLevel(rock);
+        var tool = rock == RockKind.Obsidian ? "wzmocniony kilof" : "kilof";
+        return requiredLevel > 0
+            ? $" • kopanie: {tool}, poziom budowania {requiredLevel}"
+            : $" • kopanie: {tool}";
+    }
 
     private static string DescribeStoragePriority(StoragePriority priority) => priority switch
     {
@@ -3435,6 +3889,26 @@ public partial class Main : Node
         HumanFieldPhase.Ripe => "do zbioru",
         _ => "nieznane",
     };
+
+    private string DescribeHumanField(
+        HumanFieldSnapshot field,
+        HumanVillageSnapshot village)
+    {
+        var work = $"praca {field.WorkProgress}/" +
+            _engine.Definitions.HumanVillageEconomy.FieldWorkPerStage;
+        if (field.Phase == HumanFieldPhase.Cleared)
+        {
+            var blocker = village.GrainStock <= 0
+                ? "brak ziarna siewnego"
+                : village.WaterStock < 2
+                    ? "brak wody 2 (potrzebny pracownik z wiadrem)"
+                    : "siew zużyje 1 ziarno i 2 wody";
+            return $"{DescribeField(field.Phase)} • {work} • {blocker}";
+        }
+
+        return $"{DescribeField(field.Phase)} • {work} • wzrost {field.GrowthDays}/" +
+            $"{_engine.Definitions.HumanVillageEconomy.CropGrowthDays} dni";
+    }
 
     private static string DescribeJob(ActorJobSnapshot job) => job.Kind switch
     {
@@ -3540,7 +4014,12 @@ public partial class Main : Node
     private string DescribeConstructionSite(ConstructionSiteSnapshot site)
     {
         var materials = string.Join(", ", site.Materials.Select(material =>
-            $"{DescribeResource(material.Resource)} {material.DeliveredQuantity}/{material.RequiredQuantity}"));
+            $"{(material.DeliveredQuantity > 0
+                ? DescribeResourceVariant(material.DeliveredVariant)
+                : material.Variant == ResourceVariant.None
+                ? DescribeResource(material.Resource)
+                : DescribeResourceVariant(material.Variant))} " +
+            $"{material.DeliveredQuantity}/{material.RequiredQuantity}"));
         var workDone = site.TotalWorkTicks - site.RemainingWorkTicks;
         var readiness = DescribeConstructionReadiness(
             _engine.InspectConstructionReadiness(site.Id, evaluateReachability: false));
@@ -3581,7 +4060,9 @@ public partial class Main : Node
         ConstructionKind.StoneStorage => "składu kamienia",
         ConstructionKind.EquipmentStorage => "składu sprzętu",
         ConstructionKind.MaterialsStorage => "składu materiałów",
+        ConstructionKind.WaterBarrel => "beczki na wodę",
         ConstructionKind.WoodenWalkway => "pomostu",
+        ConstructionKind.BasaltWalkway => "bazaltowego pomostu",
         ConstructionKind.GoblinFieldCamp => "obozu wypadowego",
         ConstructionKind.GoblinHut => "chaty goblinów",
         ConstructionKind.WoodenWall => "drewnianej ściany",
@@ -3591,6 +4072,9 @@ public partial class Main : Node
         ConstructionKind.WoodenDoor => "drewnianych drzwi",
         ConstructionKind.WallTorch => "pochodni ściennej",
         ConstructionKind.PrimitiveWorkshop => "prymitywnego warsztatu",
+        ConstructionKind.Bloomery => "dymarki",
+        ConstructionKind.SmeltingFurnace => "pieca hutniczego",
+        ConstructionKind.CrucibleFurnace => "pieca tyglowego",
         _ => "konstrukcji",
     };
 
@@ -3985,7 +4469,9 @@ public partial class Main : Node
             $"Wrogość wsi: {needs.HumanHostility}/100\n\n" +
             $"Zwierzęta: zające {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.MarshHare)} " +
             $"• dziki {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.SwampBoar)} " +
-            $"• pająki jaskiniowe {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.CaveSpider)}\n" +
+            $"• pająki jaskiniowe {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.CaveSpider)} " +
+            $"• głębinowce {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.DeepCrawler)} " +
+            $"• żmije magmowe {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.MagmaWyrm)}\n" +
             $"Magazyny: {snapshot.StorageZones.Count} • towary {stored:N0}\n" +
             $"Znane luźne towary: {loose:N0}\n" +
             $"Budowy: {snapshot.ConstructionSites.Count}\n" +
@@ -4033,6 +4519,8 @@ public partial class Main : Node
             AnimalKind.MarshHare => "zając bagienny",
             AnimalKind.SwampBoar => "dzik bagienny",
             AnimalKind.CaveSpider => "pająk jaskiniowy",
+            AnimalKind.DeepCrawler => "głębinowiec",
+            AnimalKind.MagmaWyrm => "żmija magmowa",
             _ => "nieznane stworzenie",
         };
         var activity = animal.Activity switch
@@ -4045,7 +4533,10 @@ public partial class Main : Node
         };
         var sex = animal.Sex == AnimalSex.Female ? "samica" : "samiec";
         var age = animal.IsAdult ? "dorosły" : "młode";
-        return $"{name} • {sex} • {age} • {activity} • zdrowie {animal.Health}";
+        var attackDamage = AnimalCombatPolicy.GetAttackDamage(animal.Kind, animal.Position);
+        var threat = attackDamage > 0 ? $" • atak {attackDamage}" : string.Empty;
+        return $"{name} • {sex} • {age} • {activity} • zdrowie " +
+            $"{animal.Health}/{animal.MaximumHealth}{threat}";
     }
 
     private void SelectActor(EntityId actorId, bool showDetails = false)
@@ -4170,7 +4661,11 @@ public partial class Main : Node
             candidate.Id == zone.SourceStorageZoneId);
         var sourceDescription = sourceZone.Id == EntityId.None
             ? "teren i nadwyżki dowolnych składów"
-            : $"skład {sourceZone.Id} przy {sourceZone.Position}";
+            : sourceZone.AcceptedResource == ResourceKind.Water
+                ? $"beczka {sourceZone.Id} przy {sourceZone.Position} " +
+                  $"({sourceZone.StoredQuantity}/{sourceZone.Capacity}, " +
+                  $"rezerwa {sourceZone.DesiredQuantity})"
+                : $"skład {sourceZone.Id} przy {sourceZone.Position}";
         var hasGlobalResourcePriority = zone.AcceptedResource != ResourceKind.Materials;
         var globalPriority = hasGlobalResourcePriority
             ? snapshot.ResourcePriorities
@@ -4180,7 +4675,9 @@ public partial class Main : Node
         var mineralFilterDescription = zone.AcceptedResource == ResourceKind.Stone
             ? $"Przyjmowany urobek: {DescribeMineralFilter(zone.MineralFilter)}.\n"
             : string.Empty;
-        _storageSummary.Text = $"Skład {DescribeResource(zone.AcceptedResource)}\n" +
+        _storageSummary.Text = (zone.AcceptedResource == ResourceKind.Water
+                ? "Beczka na wodę\n"
+                : $"Skład {DescribeResource(zone.AcceptedResource)}\n") +
             $"Stan: {zone.StoredQuantity}/{zone.Capacity}\n" +
             (zone.SeparatesItemTypes
                 ? $"Sloty rodzajowe: {zone.UsedTypeSlots}/{zone.TypeSlotCount}, " +
@@ -4248,7 +4745,11 @@ public partial class Main : Node
                              candidate.AcceptedResource == zone.AcceptedResource)
                          .OrderBy(candidate => candidate.Id))
             {
-                _storageSource.AddItem($"Skład {candidate.Id} • {candidate.Position}");
+                _storageSource.AddItem(candidate.AcceptedResource == ResourceKind.Water
+                    ? $"Beczka {candidate.Id} • {candidate.Position} • " +
+                      $"{candidate.StoredQuantity}/{candidate.Capacity} • " +
+                      $"rezerwa {candidate.DesiredQuantity}"
+                    : $"Skład {candidate.Id} • {candidate.Position}");
                 _storageSourceZoneIds.Add(candidate.Id);
             }
 
@@ -4285,6 +4786,8 @@ public partial class Main : Node
         StorageDeliveryState.NoReachableSource =>
             $"nadwyżka {delivery.AvailableSourceQuantity} szt. istnieje, ale nie ma drogi",
         StorageDeliveryState.NoAvailableHauler => "brak goblina mogącego obsłużyć dostawę",
+        StorageDeliveryState.NoAvailableTool =>
+            "brak dostępnego tragarza z drewnianym wiadrem",
         StorageDeliveryState.AssignedHaulerBusy => assignedHauler.Id == EntityId.None
             ? "przypisany tragarz jest zajęty"
             : $"{assignedHauler.Name} jest zajęty: {DescribeJob(assignedHauler.Job)}",
@@ -4665,6 +5168,11 @@ public partial class Main : Node
         {
             AddInventoryIcon(_pickaxeIcon, "Prymitywny kilof • narzędzie do rozbijania głazów");
         }
+        if (actor.Equipment.HasFlag(PersonalEquipment.ReinforcedPickaxe))
+        {
+            AddInventoryIcon(_pickaxeIcon,
+                "Wzmocniony kilof • narzędzie wymagane do obsydianu");
+        }
         if (actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling))
         {
             AddInventoryIcon(
@@ -4704,6 +5212,11 @@ public partial class Main : Node
         if (actor.Equipment.HasFlag(PersonalEquipment.PrimitiveWaterskin))
         {
             AddWaterskinIcon(actor.PersonalWater);
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))
+        {
+            AddInventoryIcon(ItemIcon.WoodenBucket,
+                "Drewniane wiadro • narzędzie do transportu wody do beczek");
         }
         if (cargo is not null)
         {
@@ -5044,6 +5557,38 @@ public partial class Main : Node
             ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.PrimitiveWaterskin),
             "Prymitywny bukłak",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.RagClothes), "Skóra", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.ReinforcedPickaxe,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone),
+            "Wzmocniony kilof",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Kamień", 3),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Bone), "Kość", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.WoodenBucket,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.WoodenBucket),
+            "Drewniane wiadro",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 1),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.WoodenBarrel,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo),
+            "Drewniana beczka",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 3),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 2));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltIronBar,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka żelaza",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda żelaza", 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Węgiel", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltCopperBar,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka miedzi",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda miedzi", 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Węgiel", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltSilverBar,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka srebra",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda srebra", 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Węgiel", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltGoldBar,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka złota",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda złota", 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Węgiel", 1));
         var close = new Button
         {
             Text = "Zamknij",
@@ -5095,6 +5640,7 @@ public partial class Main : Node
             AddWorkshopIngredient(row, ingredient.Icon, ingredient.Name, ingredient.Quantity);
         }
         recipes.AddChild(row);
+        _workshopRecipeRows.Add(recipe, row);
     }
 
     private static void AddWorkshopIngredient(
@@ -5128,7 +5674,16 @@ public partial class Main : Node
 
     private void ShowWorkshopDetails(GridPosition workshop)
     {
+        if (!_engine.World.TryGetWorkshopKind(workshop, out var workshopKind))
+        {
+            return;
+        }
         _selectedWorkshop = workshop;
+        _workshopDetails.Title = TranslationCatalog.Get(
+            "pl",
+            "workshops",
+            "names",
+            WorkshopCatalog.Get(workshopKind).Id);
         UpdateWorkshopDetails(_engine.CreateSnapshot());
         _workshopDetails.PopupCentered();
     }
@@ -5136,11 +5691,18 @@ public partial class Main : Node
     private void QueueWorkshopRecipe(CraftingRecipeKind recipe)
     {
         if (_selectedWorkshop is not { } workshop ||
-            !_engine.World.HasPrimitiveWorkshop(workshop))
+            !_engine.World.TryGetWorkshopKind(workshop, out var workshopKind))
         {
             _selectedWorkshop = null;
             _workshopDetails.Hide();
-            _inspector.Text = "Wybrany prymitywny warsztat już nie istnieje.";
+            _inspector.Text = "Wybrany warsztat już nie istnieje.";
+            return;
+        }
+
+        var definition = WorkshopCatalog.Get(workshopKind);
+        if (!definition.SupportsRecipe(recipe, CraftingRecipeCatalog.GetRecipeLevel(recipe)))
+        {
+            _inspector.Text = "Ten warsztat nie obsługuje wybranej receptury.";
             return;
         }
 
@@ -5154,11 +5716,19 @@ public partial class Main : Node
     private void UpdateWorkshopDetails(SimulationSnapshot snapshot)
     {
         if (_selectedWorkshop is not { } workshop ||
-            !_engine.World.HasPrimitiveWorkshop(workshop))
+            !_engine.World.TryGetWorkshopKind(workshop, out var workshopKind))
         {
             _selectedWorkshop = null;
             _workshopDetails.Hide();
             return;
+        }
+
+        var workshopDefinition = WorkshopCatalog.Get(workshopKind);
+        foreach (var (recipe, row) in _workshopRecipeRows)
+        {
+            row.Visible = workshopDefinition.SupportsRecipe(
+                recipe,
+                CraftingRecipeCatalog.GetRecipeLevel(recipe));
         }
 
         var orders = snapshot.CraftingOrders
@@ -5168,7 +5738,8 @@ public partial class Main : Node
         var stocks = new[]
         {
             ResourceKind.Wood, ResourceKind.Stone, ResourceKind.Reeds,
-            ResourceKind.Bone, ResourceKind.Hide,
+            ResourceKind.Bone, ResourceKind.Hide, ResourceKind.Coal,
+            ResourceKind.Ore, ResourceKind.Materials,
         }.Select(resource => $"{DescribeResource(resource)} " +
             snapshot.ItemStacks.Where(stack => stack.Resource == resource)
                 .Sum(stack => stack.Quantity));
@@ -5278,7 +5849,7 @@ public partial class Main : Node
             var active = snapshot.Actors.Count(actor => IsActorDoing(actor, kind, targets));
             var readiness = isSuspended
                 ? "wstrzymane przez gracza"
-                : DescribeWorkOrderReadiness(snapshot, kind, active);
+                : DescribeWorkOrderReadiness(snapshot, kind, active, targets);
             AddPlannerRow(
                 $"{DescribeWorkDesignation(kind)} • {targets.Length} celów • " +
                 $"zasięg {minimum}–{maximum} • {DescribeStoragePriority(priority)}" +
@@ -5470,10 +6041,11 @@ public partial class Main : Node
         _ => false,
     };
 
-    private static string DescribeWorkOrderReadiness(
+    private string DescribeWorkOrderReadiness(
         SimulationSnapshot snapshot,
         WorkDesignationKind kind,
-        int activeWorkers)
+        int activeWorkers,
+        IReadOnlyList<WorkDesignationSnapshot> targets)
     {
         if (activeWorkers > 0)
         {
@@ -5490,9 +6062,13 @@ public partial class Main : Node
         {
             return "wstrzymane: brak siekiery";
         }
-        if (kind is WorkDesignationKind.QuarryBoulder or WorkDesignationKind.MineRock or
-                WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp &&
-            living.All(actor => !actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe)))
+        if (kind is WorkDesignationKind.MineRock or WorkDesignationKind.CarveRampDown or
+            WorkDesignationKind.CarveRampUp)
+        {
+            return DescribeMiningReadiness(living, kind, targets);
+        }
+        if (kind == WorkDesignationKind.QuarryBoulder &&
+            living.All(actor => !MiningCapabilityPolicy.HasPickaxe(actor.Equipment)))
         {
             return "wstrzymane: brak kilofa";
         }
@@ -5510,6 +6086,71 @@ public partial class Main : Node
             }
         }
         return "wykonalne; oczekuje na dispatchera";
+    }
+
+    private string DescribeMiningReadiness(
+        IReadOnlyList<ActorSnapshot> living,
+        WorkDesignationKind kind,
+        IReadOnlyList<WorkDesignationSnapshot> targets)
+    {
+        var builders = living
+            .Where(actor => actor.KnownSkills.HasFlag(GoblinSkill.Building))
+            .ToArray();
+        if (builders.Length == 0)
+        {
+            return "wstrzymane: brak goblina ze znajomością budowania";
+        }
+        if (builders.All(actor => !MiningCapabilityPolicy.HasPickaxe(actor.Equipment)))
+        {
+            return "wstrzymane: brak kilofa";
+        }
+
+        var availableCells = targets
+            .Select(target => TryGetAvailableMiningCell(kind, target.Target))
+            .Where(cell => cell.HasValue)
+            .Select(cell => cell!.Value)
+            .ToArray();
+        if (availableCells.Length == 0)
+        {
+            return kind == WorkDesignationKind.MineRock
+                ? "oczekuje: front tunelu musi zostać odsłonięty"
+                : "oczekuje: miejsce pochylni nie jest teraz dostępne";
+        }
+        if (builders.Any(actor => availableCells.Any(cell =>
+                MiningCapabilityPolicy.CanMine(
+                    cell,
+                    actor.Equipment,
+                    actor.Experience.Building))))
+        {
+            return "wykonalne; oczekuje na dispatchera";
+        }
+
+        if (availableCells.All(cell => cell.Rock == RockKind.Obsidian) &&
+            builders.All(actor =>
+                !actor.Equipment.HasFlag(PersonalEquipment.ReinforcedPickaxe)))
+        {
+            return "wstrzymane: obsydian wymaga wzmocnionego kilofa";
+        }
+
+        var requiredLevel = availableCells.Min(cell =>
+            MiningCapabilityPolicy.RequiredSkillLevel(cell.Rock));
+        return $"wstrzymane: wymagany poziom budowania {requiredLevel}";
+    }
+
+    private CaveCell? TryGetAvailableMiningCell(WorkDesignationKind kind, GridPosition target)
+    {
+        if (kind == WorkDesignationKind.MineRock)
+        {
+            return _engine.World.CanExcavateRock(target) && _engine.Map.IsRockPosition(target)
+                ? _engine.Map.GetRockCell(target)
+                : null;
+        }
+
+        var carveDown = kind == WorkDesignationKind.CarveRampDown;
+        var available = carveDown
+            ? _engine.World.CanCarveRampDown(target)
+            : _engine.World.CanCarveRampUp(target);
+        return available ? _engine.World.GetRampExcavationCell(target, carveDown) : null;
     }
 
     private static string DescribeWorkDesignation(WorkDesignationKind kind) => kind switch
@@ -5693,13 +6334,10 @@ public partial class Main : Node
     {
         _contextCampAnchor = null;
         _contextCorpseId = corpse.Id;
-        var isActiveRaid = snapshot.RaidPhase is GoblinRaidPhase.Marching or
-            GoblinRaidPhase.Looting;
-        var isInRaidArea = corpse.Position.Z == snapshot.RaidPlan.Target.Z &&
-            Math.Abs(corpse.Position.X - snapshot.RaidPlan.Target.X) +
-            Math.Abs(corpse.Position.Y - snapshot.RaidPlan.Target.Y) <=
-            snapshot.RaidPlan.TargetRadius;
-        var enabled = corpse.Kind == CorpseKind.Human && isActiveRaid && isInRaidArea;
+        var hasCamp = snapshot.WorldObjects.Any(item =>
+            item.Kind == WorldObjectKind.GoblinFieldCamp &&
+            item.Owner == WorldObjectOwner.GoblinTribe);
+        var canBud = corpse.Kind == CorpseKind.Human;
 
         _worldContextMenu.Clear();
         _worldContextMenu.AddItem($"{corpse.Name} • zwłoki");
@@ -5707,33 +6345,50 @@ public partial class Main : Node
         _worldContextMenu.AddItem(
             $"Mięso: {corpse.EdiblePortions} • przedmioty: {corpse.Contents.Count}");
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
-        _worldContextMenu.AddSeparator("Los zwłok w obszarze najazdu");
+        _worldContextMenu.AddSeparator("Postępowanie ze zwłokami");
         AddCorpseContextAction(
-            "Przeszukaj wyposażenie i zapasy",
-            WorldContextAction.LootRaidCorpses,
-            enabled);
+            CorpseActionLabel("Przeszukaj wyposażenie i zapasy",
+                corpse.Directives.HasFlag(CorpseDirective.LootContents)),
+            WorldContextAction.LootCorpse,
+            corpse.Contents.Count > 0);
         AddCorpseContextAction(
-            "Pożryj zwłoki",
-            WorldContextAction.ConsumeRaidCorpses,
-            enabled);
+            CorpseActionLabel("Pożryj zwłoki",
+                corpse.Directives.HasFlag(CorpseDirective.Consume)),
+            WorldContextAction.ConsumeCorpse,
+            corpse.EdiblePortions > 0);
         AddCorpseContextAction(
-            "Zanieś do obozu",
-            WorldContextAction.RecoverRaidCorpses,
-            enabled);
+            CorpseActionLabel("Zanieś do obozu",
+                corpse.Directives.HasFlag(CorpseDirective.RecoverToCamp)),
+            WorldContextAction.RecoverCorpse,
+            hasCamp);
         AddCorpseContextAction(
-            "Zanieś i zapyl w obozie",
-            WorldContextAction.RecoverAndBudRaidCorpses,
-            enabled);
+            CorpseActionLabel("Zanieś i zapyl w obozie",
+                corpse.Directives.HasFlag(CorpseDirective.RecoverAndBudAtCamp)),
+            WorldContextAction.RecoverAndBudCorpse,
+            canBud && hasCamp);
         AddCorpseContextAction(
-            "Zapyl na miejscu",
-            WorldContextAction.BudRaidCorpsesInPlace,
-            enabled);
-        if (!enabled)
+            CorpseActionLabel("Zapyl na miejscu",
+                corpse.Directives.HasFlag(CorpseDirective.BudInPlace)),
+            WorldContextAction.BudCorpseInPlace,
+            canBud);
+        if (corpse.Directives != CorpseDirective.None)
         {
             _worldContextMenu.AddSeparator();
-            _worldContextMenu.AddItem(isActiveRaid
-                ? "Zwłoki leżą poza obszarem tego najazdu"
-                : "Brak aktywnego najazdu — rozkaz pozostaje niedostępny");
+            AddCorpseContextAction(
+                "Anuluj wszystkie rozkazy dla tych zwłok",
+                WorldContextAction.ClearCorpseDirectives,
+                enabled: true);
+        }
+        if (!canBud)
+        {
+            _worldContextMenu.AddSeparator();
+            _worldContextMenu.AddItem("Zapylanie wymaga zwłok człowieka");
+            _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
+        }
+        else if (!hasCamp)
+        {
+            _worldContextMenu.AddSeparator();
+            _worldContextMenu.AddItem("Przeniesienie wymaga obozowiska wypadowego");
             _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
         }
         _worldContextMenu.Position = new Vector2I(
@@ -5741,6 +6396,9 @@ public partial class Main : Node
             Mathf.RoundToInt(screenPosition.Y));
         _worldContextMenu.Popup();
     }
+
+    private static string CorpseActionLabel(string label, bool selected) =>
+        selected ? $"✓ {label}" : label;
 
     private void AddCorpseContextAction(
         string label,
@@ -5849,50 +6507,63 @@ public partial class Main : Node
     private void HandleCorpseContextAction(WorldContextAction action)
     {
         var snapshot = _engine.CreateSnapshot();
-        var directives = snapshot.RaidPlan.Directives;
+        var corpse = snapshot.Corpses.FirstOrDefault(item => item.Id == _contextCorpseId);
+        if (corpse is null)
+        {
+            return;
+        }
+        var directives = corpse.Directives;
         switch (action)
         {
-            case WorldContextAction.LootRaidCorpses:
-                directives |= RaidDirective.LootEquipment |
-                    RaidDirective.LootSupplies |
-                    RaidDirective.LootFood;
+            case WorldContextAction.LootCorpse:
+                directives ^= CorpseDirective.LootContents;
                 break;
-            case WorldContextAction.ConsumeRaidCorpses:
-                directives |= RaidDirective.ConsumeCorpses;
+            case WorldContextAction.ConsumeCorpse:
+                directives ^= CorpseDirective.Consume;
                 break;
-            case WorldContextAction.RecoverRaidCorpses:
+            case WorldContextAction.RecoverCorpse:
                 directives = SetCorpseHandling(
                     directives,
-                    RaidDirective.RecoverCorpses);
+                    CorpseDirective.RecoverToCamp);
                 break;
-            case WorldContextAction.RecoverAndBudRaidCorpses:
+            case WorldContextAction.RecoverAndBudCorpse:
                 directives = SetCorpseHandling(
                     directives,
-                    RaidDirective.BudCorpses);
+                    CorpseDirective.RecoverAndBudAtCamp);
                 break;
-            case WorldContextAction.BudRaidCorpsesInPlace:
+            case WorldContextAction.BudCorpseInPlace:
                 directives = SetCorpseHandling(
                     directives,
-                    RaidDirective.BudCorpsesInPlace);
+                    CorpseDirective.BudInPlace);
+                break;
+            case WorldContextAction.ClearCorpseDirectives:
+                directives = CorpseDirective.None;
                 break;
             default:
                 return;
         }
 
-        _engine.QueueCommand(SimulationCommand.ConfigureRaidDirectives(
+        _engine.QueueCommand(SimulationCommand.ConfigureCorpseDirectives(
             _engine.CurrentTick.Next(),
             _commandSequence++,
+            corpse.Id,
             directives));
-        _inspector.Text = "Zmieniono sposób traktowania zwłok po walce. " +
-            "Rozkaz obejmuje zwłoki w aktualnym obszarze najazdu.";
+        _inspector.Text = directives == CorpseDirective.None
+            ? $"Anulowano rozkazy dotyczące zwłok: {corpse.Name}."
+            : $"Zmieniono rozkazy dotyczące zwłok: {corpse.Name}.";
     }
 
-    private static RaidDirective SetCorpseHandling(
-        RaidDirective directives,
-        RaidDirective selected) =>
-        (directives & ~(RaidDirective.RecoverCorpses |
-            RaidDirective.BudCorpses |
-            RaidDirective.BudCorpsesInPlace)) | selected;
+    private static CorpseDirective SetCorpseHandling(
+        CorpseDirective directives,
+        CorpseDirective selected)
+    {
+        var handling = CorpseDirective.RecoverToCamp |
+            CorpseDirective.RecoverAndBudAtCamp |
+            CorpseDirective.BudInPlace;
+        return (directives & handling) == selected
+            ? directives & ~handling
+            : (directives & ~handling) | selected;
+    }
 
     private void SelectCampOccupants(
         SimulationSnapshot snapshot,
@@ -5997,6 +6668,14 @@ public partial class Main : Node
         };
         buttons.AddThemeConstantOverride("separation", 8);
         content.AddChild(buttons);
+        _raidAutoAssignButton = new Button
+        {
+            Text = "Dobierz automatycznie",
+            TooltipText = "Wybierz do pięciu dorosłych goblinów: najlepiej uzbrojonych, " +
+                "a następnie najzdrowszych i najbardziej wypoczętych.",
+        };
+        _raidAutoAssignButton.Pressed += AutoAssignRaidDraft;
+        buttons.AddChild(_raidAutoAssignButton);
         var cancel = new Button { Text = "Zamknij" };
         cancel.Pressed += _raidWindow.Hide;
         buttons.AddChild(cancel);
@@ -6034,14 +6713,15 @@ public partial class Main : Node
             check.ButtonPressed = snapshot.RaidPlan.Has(directive);
         }
         _raidDraftIds.Clear();
-        if (snapshot.RaidPartyIds.Count > 0)
+        if (snapshot.RaidRosterConfigured)
         {
             _raidDraftIds.UnionWith(snapshot.RaidPartyIds);
         }
         else if (_selectedActorIds.Count > 0)
         {
             _raidDraftIds.UnionWith(_selectedActorIds
-                .Where(id => snapshot.Actors.Any(actor => actor.Id == id && actor.Health > 0))
+                .Where(id => snapshot.Actors.Any(actor =>
+                    actor.Id == id && actor.Health > 0 && !actor.IsJuvenile))
                 .OrderBy(id => id)
                 .Take(SimulationDefinitions.FieldCampCapacity));
         }
@@ -6057,7 +6737,8 @@ public partial class Main : Node
                 .Select(part => part.Position)
                 .ToHashSet();
             _raidDraftIds.UnionWith(snapshot.Actors
-                .Where(actor => actor.Health > 0 && campFloor.Contains(actor.Position))
+                .Where(actor => actor.Health > 0 && !actor.IsJuvenile &&
+                    campFloor.Contains(actor.Position))
                 .OrderBy(actor => actor.Id)
                 .Take(SimulationDefinitions.FieldCampCapacity)
                 .Select(actor => actor.Id));
@@ -6065,7 +6746,7 @@ public partial class Main : Node
         else
         {
             _raidDraftIds.UnionWith(snapshot.Actors
-                .Where(actor => actor.Health > 0)
+                .Where(actor => actor.Health > 0 && !actor.IsJuvenile)
                 .OrderBy(actor => actor.Id)
                 .Take(SimulationDefinitions.FieldCampCapacity)
                 .Select(actor => actor.Id));
@@ -6075,11 +6756,13 @@ public partial class Main : Node
         {
             child.QueueFree();
         }
+        _raidMemberChecks.Clear();
         var selectionLocked = snapshot.RaidPhase is GoblinRaidPhase.Marching or
             GoblinRaidPhase.Looting or GoblinRaidPhase.Returning ||
             snapshot.HumanVillage.GoblinAttackOrdered;
         _raidEngagement.Disabled = selectionLocked;
         _raidCorpseHandling.Disabled = selectionLocked;
+        _raidAutoAssignButton.Disabled = selectionLocked;
         foreach (var check in _raidDirectiveChecks.Values)
         {
             check.Disabled = selectionLocked;
@@ -6091,18 +6774,43 @@ public partial class Main : Node
                 Text = $"{actor.Name} • zdrowie {actor.Health} • wałówka " +
                     $"{actor.PersonalFood}/{_engine.Definitions.PersonalFoodCapacity} • bukłak " +
                     $"{actor.PersonalWater}/{_engine.Definitions.PersonalWaterCapacity} • " +
-                    $"głód {actor.Hunger}, pragnienie {actor.Thirst}, zmęczenie {actor.Fatigue}",
+                    $"głód {actor.Hunger}, pragnienie {actor.Thirst}, zmęczenie {actor.Fatigue}" +
+                    (actor.IsJuvenile ? " • młodzik" : string.Empty),
                 ButtonPressed = _raidDraftIds.Contains(actor.Id),
-                Disabled = selectionLocked || actor.Health <= 0,
+                Disabled = selectionLocked || actor.Health <= 0 || actor.IsJuvenile,
                 TooltipText = DescribeJob(actor.Job),
             };
             var actorId = actor.Id;
             check.Toggled += enabled => ToggleRaidDraftMember(actorId, check, enabled);
             _raidRows.AddChild(check);
+            _raidMemberChecks.Add(actorId, check);
         }
 
         UpdateRaidWindowSummary(snapshot);
         _raidWindow.PopupCentered();
+    }
+
+    private void AutoAssignRaidDraft()
+    {
+        var snapshot = _engine.CreateSnapshot();
+        var selected = RaidAutoAssignmentPolicy.Select(
+            snapshot.Actors,
+            SimulationDefinitions.FieldCampCapacity);
+        _raidDraftIds.Clear();
+        _raidDraftIds.UnionWith(selected);
+
+        _updatingRaidSelection = true;
+        foreach (var (actorId, check) in _raidMemberChecks)
+        {
+            check.ButtonPressed = _raidDraftIds.Contains(actorId);
+        }
+        _updatingRaidSelection = false;
+
+        UpdateRaidWindowSummary(snapshot);
+        _inspector.Text = selected.Count == 0
+            ? "Nie ma dorosłych goblinów zdolnych do udziału w wyprawie."
+            : $"Automatycznie dobrano {selected.Count} najlepiej uzbrojonych i zdrowych goblinów. " +
+                "Zapisz plan, aby zatwierdzić skład.";
     }
 
     private void ToggleRaidDraftMember(EntityId actorId, CheckButton check, bool enabled)
@@ -6146,8 +6854,8 @@ public partial class Main : Node
             GoblinRaidPhase.Looting => "Walka zakończona — oddział zbiera łupy i odnosi je do obozu.",
             GoblinRaidPhase.Returning => "Łupy zabezpieczone — oddział wraca do obozu.",
             _ when _raidDraftRallyPoint is not null =>
-                $"Punkt zbiórki: obóz {_raidDraftRallyPoint.Value}. Wybierz od 1 do 5 goblinów.",
-            _ => "Wybierz od 1 do 5 goblinów. Wyruszą po zebraniu się w obozie i uzupełnieniu zapasów.",
+                $"Punkt zbiórki: obóz {_raidDraftRallyPoint.Value}. Wybierz od 0 do 5 goblinów.",
+            _ => "Wybierz od 0 do 5 goblinów. Bez przypisanych goblinów plan pozostanie wstrzymany.",
         };
         var blockers = snapshot.RaidPhase == GoblinRaidPhase.Preparing
             ? DescribeRaidBlockers(snapshot)
@@ -6162,7 +6870,7 @@ public partial class Main : Node
                 : "Zapisz plan";
         _raidStartButton.Disabled = snapshot.RaidPhase is GoblinRaidPhase.Marching or
             GoblinRaidPhase.Looting or GoblinRaidPhase.Returning ||
-            snapshot.HumanVillage.GoblinAttackOrdered || !hasCamp || _raidDraftIds.Count == 0;
+            snapshot.HumanVillage.GoblinAttackOrdered || !hasCamp;
     }
 
     private string DescribeRaidBlockers(SimulationSnapshot snapshot)
@@ -6222,7 +6930,7 @@ public partial class Main : Node
     private void StartSelectedRaid()
     {
         var snapshot = _engine.CreateSnapshot();
-        if (_raidDraftIds.Count == 0 || snapshot.RaidPhase is GoblinRaidPhase.Marching or
+        if (snapshot.RaidPhase is GoblinRaidPhase.Marching or
             GoblinRaidPhase.Looting or GoblinRaidPhase.Returning ||
             snapshot.HumanVillage.GoblinAttackOrdered)
         {
@@ -6260,8 +6968,10 @@ public partial class Main : Node
             _commandSequence++,
             directives));
         _raidWindow.Hide();
-        _inspector.Text = $"Zapisano plan najazdu dla {_raidDraftIds.Count} goblinów. " +
-            "Przygotowania uruchomisz z menu obozu.";
+        _inspector.Text = _raidDraftIds.Count == 0
+            ? "Zapisano plan najazdu bez przypisanych goblinów."
+            : $"Zapisano plan najazdu dla {_raidDraftIds.Count} goblinów. " +
+                "Przygotowania uruchomisz z menu obozu.";
     }
 
     private void SetSpeed(int speed)
@@ -6511,7 +7221,8 @@ public partial class Main : Node
         if (villageVisibility == CellVisibility.Visible)
         {
             _status.Text += $"  •  wieś {snapshot.HumanVillage.Population} osób, zapasy " +
-                $"ziarno {snapshot.HumanVillage.FoodStock}/{snapshot.HumanVillage.FoodCapacity}, " +
+                $"żywność {snapshot.HumanVillage.FoodStock}/{snapshot.HumanVillage.FoodCapacity}, " +
+                $"ziarno siewne {snapshot.HumanVillage.GrainStock}, " +
                 $"woda {snapshot.HumanVillage.WaterStock}, drewno {snapshot.HumanVillage.WoodStock}" +
                 $"  •  pola {snapshot.HumanVillage.Fields.Count}/{snapshot.HumanVillage.PlannedFieldCount}" +
                 $"  •  alarm {snapshot.HumanVillage.Hostility}/100" +

@@ -4,6 +4,10 @@ namespace GoblinStronghold.Simulation;
 
 internal sealed class HumanVillageState
 {
+    private const int InitialGrainStock = 12;
+    private const int GrainPerSowing = 1;
+    private const int GrainRecoveredAtHarvest = 2;
+
     private static readonly string[] VillagerNames =
     [
         "Aldona", "Bogdan", "Celina", "Dobromir", "Elwira", "Florian",
@@ -28,7 +32,7 @@ internal sealed class HumanVillageState
         HumanVillageEconomySettings economy,
         IReadOnlyList<GridPosition> wellAccesses,
         IReadOnlyList<GridPosition> goodsWorkshopAccesses,
-        int population, int foodStock, int woodStock, int goodsStock,
+        int population, int foodStock, int grainStock, int woodStock, int goodsStock,
         int waterStock, int storehouseCount, bool goblinAttackOrdered, int hostility,
         long lastIntruderSeenTick, int guardHitPoints, int maximumGuardHitPoints,
         GridPosition? treeFellingTarget, int treeFellingProgress,
@@ -44,6 +48,7 @@ internal sealed class HumanVillageState
         _goodsWorkshopAccesses = goodsWorkshopAccesses;
         Population = population;
         FoodStock = foodStock;
+        GrainStock = grainStock;
         WoodStock = woodStock;
         GoodsStock = goodsStock;
         WaterStock = waterStock;
@@ -66,6 +71,7 @@ internal sealed class HumanVillageState
     public GridPosition Anchor { get; }
     public int Population { get; private set; }
     public int FoodStock { get; private set; }
+    public int GrainStock { get; private set; }
     public int WoodStock { get; private set; }
     public int GoodsStock { get; private set; }
     public int WaterStock { get; private set; }
@@ -136,7 +142,7 @@ internal sealed class HumanVillageState
             definitions.HumanVillageEconomy,
             FindWellAccesses(world),
             FindStructureAccesses(world, WorldObjectKind.HumanBarn),
-            12, 48, 24, 4, 36, 0, false, 0, -1,
+            12, 48, InitialGrainStock, 24, 4, 36, 0, false, 0, -1,
             2 * definitions.HumanGuardHealth, 2 * definitions.HumanGuardHealth,
             treeFellingTarget: null, treeFellingProgress: 0, goodsWorkProgress: 0,
             storehouseSite: null, storehouseWorkProgress: 0,
@@ -152,7 +158,8 @@ internal sealed class HumanVillageState
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(model);
-        if (model.Population < 0 || model.FoodStock < 0 || model.WoodStock < 0 ||
+        if (model.Population < 0 || model.FoodStock < 0 || model.GrainStock < 0 ||
+            model.WoodStock < 0 ||
             model.GoodsStock < 0 || model.WaterStock < 0 || model.StorehouseCount < 0 ||
             model.Hostility is < 0 or > 100 || model.LastIntruderSeenTick < -1 ||
             model.LastIntruderSeenTick > currentTick.Value ||
@@ -297,7 +304,7 @@ internal sealed class HumanVillageState
             definitions.HumanVillageEconomy,
             FindWellAccesses(world),
             FindStructureAccesses(world, WorldObjectKind.HumanBarn),
-            model.Population, model.FoodStock, model.WoodStock,
+            model.Population, model.FoodStock, model.GrainStock, model.WoodStock,
             model.GoodsStock, model.WaterStock, model.StorehouseCount, model.GoblinAttackOrdered,
             model.Hostility, model.LastIntruderSeenTick, model.GuardHitPoints,
             maximumGuardHitPoints, treeFellingTarget, model.TreeFellingProgress,
@@ -370,7 +377,8 @@ internal sealed class HumanVillageState
     }
 
     public HumanVillageSnapshot CreateSnapshot() => new(
-        Anchor, Population, FoodStock, WoodStock, GoodsStock, WaterStock, PlannedFieldCount,
+        Anchor, Population, FoodStock, GrainStock, WoodStock, GoodsStock, WaterStock,
+        PlannedFieldCount,
         StorehouseCount, FoodCapacity, GoblinAttackOrdered, Hostility, LastIntruderSeenTick,
         GuardHitPoints, MaximumGuardHitPoints, _treeFellingTarget, _treeFellingProgress,
         _goodsWorkProgress,
@@ -384,6 +392,7 @@ internal sealed class HumanVillageState
     {
         Population = Population,
         FoodStock = FoodStock,
+        GrainStock = GrainStock,
         WoodStock = WoodStock,
         GoodsStock = GoodsStock,
         WaterStock = WaterStock,
@@ -594,9 +603,11 @@ internal sealed class HumanVillageState
             {
                 continue;
             }
-            if (field.Phase == HumanFieldPhase.Cleared && WaterStock >= 2)
+            if (field.Phase == HumanFieldPhase.Cleared && WaterStock >= 2 &&
+                GrainStock >= GrainPerSowing)
             {
                 WaterStock -= 2;
+                GrainStock -= GrainPerSowing;
                 field.Phase = HumanFieldPhase.Sown;
                 field.GrowthDays = 0;
                 field.WorkProgress = 0;
@@ -612,6 +623,9 @@ internal sealed class HumanVillageState
             else if (field.Phase == HumanFieldPhase.Ripe)
             {
                 FoodStock = Math.Min(FoodCapacity, FoodStock + _economy.FieldYield);
+                GrainStock = Math.Min(
+                    FoodCapacity,
+                    GrainStock + GrainRecoveredAtHarvest);
                 field.Phase = HumanFieldPhase.Cleared;
                 field.GrowthDays = 0;
                 field.WorkProgress = 0;
@@ -645,8 +659,12 @@ internal sealed class HumanVillageState
         var canDefend = GoblinAttackOrdered || guard.Population * (guard.SkillLevel + 1) >= intruders.Count * 2;
         guard.Task = intruders.Count == 0 || canDefend ? HumanCohortTask.Guard : HumanCohortTask.Flee;
         var farmers = GetCohort(HumanCohortRole.Farmers);
+        var hasPriorityFieldWork = _fields.Values.Any(field =>
+            field.Phase == HumanFieldPhase.Ripe ||
+            field.Phase == HumanFieldPhase.Cleared && WaterStock >= 2 &&
+                GrainStock >= GrainPerSowing);
         farmers.Task = intruders.Count > 0 ? HumanCohortTask.Flee :
-            FoodStock < Population * 3 && !_fields.Values.Any(item => item.Phase == HumanFieldPhase.Ripe)
+            FoodStock < Population * 3 && !hasPriorityFieldWork
                 ? HumanCohortTask.GatherBerries : HumanCohortTask.WorkFields;
         var workers = GetCohort(HumanCohortRole.Workers);
         if (WoodStock < _economy.StorehouseWoodCost)

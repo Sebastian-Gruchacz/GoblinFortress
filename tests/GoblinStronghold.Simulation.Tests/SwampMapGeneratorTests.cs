@@ -417,17 +417,23 @@ public sealed class SwampMapGeneratorTests
     }
 
     [Fact]
-    public void CurrentGeneratorCreatesConnectedTwoLevelCaves()
+    public void CurrentGeneratorCreatesOnlyRequiredInitialLevelsWithConnectedCaves()
     {
         var map = SwampMapGenerator.Generate(new WorldSeed(0x4341564553UL), 64, 64);
-        var deepestFloor = Enumerable.Range(0, map.Height)
-            .SelectMany(y => Enumerable.Range(0, map.Width)
-                .Select(x => new GridPosition(x, y, map.DeepestCaveLevel)))
-            .First(position => map.GetCaveCell(position).IsOpen);
-        var path = map.FindTerrainPath(map.CaveEntrances.Single(), deepestFloor);
+        var deepestGeneratedFloor = Enumerable.Range(1, map.CaveLevelCount)
+            .SelectMany(level => Enumerable.Range(0, map.Height)
+                .SelectMany(y => Enumerable.Range(0, map.Width)
+                    .Select(x => new GridPosition(x, y, -level))))
+            .Where(position => map.GetCaveCell(position).IsOpen)
+            .OrderBy(position => position.Z)
+            .First();
+        var path = map.FindTerrainPath(map.CaveEntrances.Single(), deepestGeneratedFloor);
 
-        Assert.Equal(2, map.CaveLevelCount);
-        Assert.Equal(-2, map.DeepestCaveLevel);
+        Assert.Equal(
+            Math.Max(SwampMapGenerator.MinimumInitialCaveLevelCount, -map.MinimumTerrainLevel),
+            map.CaveLevelCount);
+        Assert.Equal(-map.CaveLevelCount, map.DeepestCaveLevel);
+        Assert.Equal(-2, deepestGeneratedFloor.Z);
         Assert.Contains(map.VerticalPassages, passage =>
             passage.Kind == VerticalPassageKind.CaveMouth);
         Assert.Contains(map.VerticalPassages, passage =>
@@ -437,6 +443,19 @@ public sealed class SwampMapGeneratorTests
         Assert.NotNull(path);
         Assert.Contains(path, position => position.Z == -1);
         Assert.Contains(path, position => position.Z == -2);
+    }
+
+    [Fact]
+    public void VersionTwelveRetainsItsHistoricalTwoLevelFingerprint()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x4341564553UL),
+            64,
+            64,
+            generatorVersion: 12);
+
+        Assert.Equal(2, map.CaveLevelCount);
+        Assert.Equal(-2, map.DeepestCaveLevel);
     }
 
     [Fact]

@@ -6,7 +6,7 @@ namespace GoblinStronghold.Simulation.Map;
 public sealed class GeneratedMap
 {
     private readonly MapCell[] _cells;
-    private readonly CaveCell[] _caveCells;
+    private CaveCell[] _caveCells;
     private readonly VerticalPassage[] _verticalPassages;
     private readonly Dictionary<GridPosition, GridPosition> _verticalPassageDestinations;
     private readonly string _fingerprint;
@@ -89,6 +89,11 @@ public sealed class GeneratedMap
         position.X >= 0 && position.X < Width &&
         position.Y >= 0 && position.Y < Height;
 
+    public bool IsWorldPosition(GridPosition position) =>
+        IsColumnWithin(position) &&
+        position.Z >= MinimumWorldLevel &&
+        position.Z <= MaximumWorldLevel;
+
     public bool TryGetInitialGeometry(
         GridPosition position,
         out InitialCellGeometry geometry)
@@ -141,7 +146,9 @@ public sealed class GeneratedMap
                     Support: CellSupportKind.NaturalRamp),
                 _ => new InitialCellGeometry(
                     CellVolumeKind.Open,
-                    Support: CellSupportKind.NaturalFlat),
+                    Support: CellSupportKind.NaturalFlat,
+                    Fluid: cave.Fluid,
+                    FluidDepthLevels: cave.Fluid == CellFluidKind.None ? 0 : 1),
             };
             return true;
         }
@@ -275,6 +282,50 @@ public sealed class GeneratedMap
         position.X >= 0 && position.X < Width &&
         position.Y >= 0 && position.Y < Height &&
         position.Z < 0 && position.Z >= -CaveLevelCount;
+
+    internal CaveCell GetNextCaveLevelCell(GridPosition position)
+    {
+        if (!IsColumnWithin(position) || position.Z != DeepestCaveLevel - 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(position));
+        }
+        return SwampMapGenerator.GenerateSolidCaveCell(
+            Seed,
+            Width,
+            Height,
+            position.X,
+            position.Y,
+            -position.Z - 1,
+            GeneratorVersion);
+    }
+
+    internal void MaterializeCaveLevel(int level)
+    {
+        if (level != DeepestCaveLevel - 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(level));
+        }
+
+        var expanded = new CaveCell[checked(_caveCells.Length + CellCount)];
+        Array.Copy(_caveCells, expanded, _caveCells.Length);
+        var levelIndex = CaveLevelCount;
+        for (var y = 0; y < Height; y++)
+        {
+            for (var x = 0; x < Width; x++)
+            {
+                expanded[_caveCells.Length + (y * Width) + x] =
+                    SwampMapGenerator.GenerateSolidCaveCell(
+                        Seed,
+                        Width,
+                        Height,
+                        x,
+                        y,
+                        levelIndex,
+                        GeneratorVersion);
+            }
+        }
+        _caveCells = expanded;
+    }
 
     public bool IsTerrainTraversable(GridPosition position)
     {
@@ -554,13 +605,18 @@ public sealed class GeneratedMap
         }
         if (GeneratorVersion >= 6)
         {
-            Span<byte> caveBuffer = stackalloc byte[3];
+            Span<byte> caveBuffer = stackalloc byte[4];
             foreach (var caveCell in _caveCells)
             {
                 caveBuffer[0] = (byte)caveCell.Rock;
                 caveBuffer[1] = (byte)caveCell.Kind;
                 caveBuffer[2] = (byte)caveCell.Deposit;
-                hash.AppendData(GeneratorVersion >= 8 ? caveBuffer : caveBuffer[..2]);
+                caveBuffer[3] = (byte)caveCell.Fluid;
+                hash.AppendData(GeneratorVersion >= 14
+                    ? caveBuffer
+                    : GeneratorVersion >= 8
+                        ? caveBuffer[..3]
+                        : caveBuffer[..2]);
             }
             Span<byte> passageBuffer = stackalloc byte[1];
             foreach (var passage in _verticalPassages)

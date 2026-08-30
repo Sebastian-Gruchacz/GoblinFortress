@@ -1,5 +1,6 @@
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Workshops;
 
 namespace GoblinStronghold.Simulation;
 
@@ -35,6 +36,7 @@ public enum SimulationCommandKind
     OrderPatrol = 28,
     OrderAttackArea = 29,
     OrderHuntArea = 30,
+    ConfigureCorpseDirectives = 31,
 }
 
 public enum ConstructionKind : byte
@@ -54,6 +56,11 @@ public enum ConstructionKind : byte
     GoblinHut = 13,
     EquipmentStorage = 14,
     MaterialsStorage = 15,
+    WaterBarrel = 16,
+    BasaltWalkway = 17,
+    Bloomery = 18,
+    SmeltingFurnace = 19,
+    CrucibleFurnace = 20,
 }
 
 public enum CraftingRecipeKind : byte
@@ -65,6 +72,13 @@ public enum CraftingRecipeKind : byte
     HideClothes = 5,
     ReedClothes = 6,
     PrimitiveWaterskin = 7,
+    ReinforcedPickaxe = 8,
+    WoodenBucket = 9,
+    WoodenBarrel = 10,
+    SmeltIronBar = 11,
+    SmeltCopperBar = 12,
+    SmeltSilverBar = 13,
+    SmeltGoldBar = 14,
 }
 
 public readonly record struct SimulationCommand(
@@ -228,6 +242,23 @@ public readonly record struct SimulationCommand(
             ResourceKind.Wood,
             Amount: 1);
 
+    public static SimulationCommand BuildBasaltWalkway(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            ConstructionKind.BasaltWalkway,
+            ResourceKind.Stone,
+            Amount: 1);
+
     public static SimulationCommand BuildWoodStorage(
         SimulationTick executeAt,
         ulong sequence,
@@ -291,6 +322,22 @@ public readonly record struct SimulationCommand(
             ConstructionKind.MaterialsStorage,
             ResourceKind.Wood,
             Amount: 2);
+
+    public static SimulationCommand PlaceWaterBarrel(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.WaterBarrel,
+            ResourceKind.Equipment,
+            Amount: 1);
 
     public static SimulationCommand BuildGoblinFieldCamp(
         SimulationTick executeAt,
@@ -437,8 +484,31 @@ public readonly record struct SimulationCommand(
     public static SimulationCommand BuildPrimitiveWorkshop(
         SimulationTick executeAt,
         ulong sequence,
-        GridPosition position) =>
-        new(
+        GridPosition position) => BuildWorkshop(
+            executeAt,
+            sequence,
+            position,
+            WorkshopKind.PrimitiveWorkshop);
+
+    public static SimulationCommand BuildWorkshop(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position,
+        WorkshopKind workshop)
+    {
+        var definition = WorkshopCatalog.Get(workshop);
+        var construction = workshop switch
+        {
+            WorkshopKind.PrimitiveWorkshop => ConstructionKind.PrimitiveWorkshop,
+            WorkshopKind.Bloomery => ConstructionKind.Bloomery,
+            WorkshopKind.SmeltingFurnace => ConstructionKind.SmeltingFurnace,
+            WorkshopKind.CrucibleFurnace => ConstructionKind.CrucibleFurnace,
+            _ => throw new ArgumentOutOfRangeException(nameof(workshop), workshop, null),
+        };
+        var resource = workshop == WorkshopKind.PrimitiveWorkshop
+            ? ResourceKind.Wood
+            : ResourceKind.Stone;
+        return new(
             executeAt,
             sequence,
             SimulationCommandKind.Build,
@@ -446,9 +516,10 @@ public readonly record struct SimulationCommand(
             EntityId.None,
             position,
             position,
-            ConstructionKind.PrimitiveWorkshop,
-            ResourceKind.Wood,
-            Amount: 4);
+            construction,
+            resource,
+            Amount: definition.ConstructionRequirements.Sum(item => item.Quantity));
+    }
 
     public static SimulationCommand QueuePrimitiveSling(
         SimulationTick executeAt,
@@ -928,6 +999,23 @@ public readonly record struct SimulationCommand(
             SimulationCommandKind.ConfigureRaidDirectives,
             EntityId.None,
             EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: (int)directives);
+
+    public static SimulationCommand ConfigureCorpseDirectives(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId corpse,
+        CorpseDirective directives) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureCorpseDirectives,
+            EntityId.None,
+            corpse,
             default,
             default,
             default,

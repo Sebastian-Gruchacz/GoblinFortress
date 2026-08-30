@@ -185,55 +185,6 @@ public sealed class WorldMapStateTests
     };
 
     [Fact]
-    public void DeepRiverVolumeOverridesLegacyCaveRockAfterSaveLoad()
-    {
-        var seed = new WorldSeed(456);
-        var map = SwampMapGenerator.Generate(seed, 64, 64, generatorVersion: 10);
-        var water = Enumerable.Range(0, map.Height)
-            .SelectMany(y => Enumerable.Range(0, map.Width)
-                .Select(x => new GridPosition(x, y, -1)))
-            .First(position =>
-                map.TryGetInitialGeometry(position, out var geometry) &&
-                geometry.Fluid == CellFluidKind.Water);
-        var engine = SimulationEngine.Create(
-            seed,
-            SimulationDefinitions.Foundation,
-            map,
-            initialGoblinCount: 1,
-            initialFoodStock: 0);
-
-        Assert.True(engine.World.TryGetFluid(water, out var fluid, out var depthLevels));
-        Assert.Equal(CellFluidKind.Water, fluid);
-        Assert.True(depthLevels > 0);
-        Assert.False(engine.World.IsSolidCaveRock(water));
-        Assert.False(engine.World.CanExcavateRock(water));
-        Assert.False(engine.World.IsTerrainReachable(water));
-        Assert.False(engine.World.IsTerrainTraversable(water));
-
-        Assert.Equal(CaveCellKind.SolidRock, map.GetCaveCell(water).Kind);
-        var oldSave = JsonNode.Parse(engine.Save())!.AsObject();
-        oldSave["excavatedCaveCells"]!.AsArray().Add(new JsonObject
-        {
-            ["x"] = water.X,
-            ["y"] = water.Y,
-            ["z"] = water.Z,
-        });
-        var restored = SimulationEngine.Load(
-            oldSave.ToJsonString(),
-            SimulationDefinitions.Foundation);
-        Assert.True(restored.World.TryGetFluid(water, out fluid, out depthLevels));
-        Assert.Equal(CellFluidKind.Water, fluid);
-        Assert.True(depthLevels > 0);
-        Assert.Contains(water, restored.World.ExcavatedCaveCells);
-        Assert.False(restored.World.IsSolidCaveRock(water));
-        Assert.False(restored.World.IsTerrainTraversable(water));
-        var roundTripped = SimulationEngine.Load(
-            restored.Save(),
-            SimulationDefinitions.Foundation);
-        Assert.Equal(restored.ComputeStateHash(), roundTripped.ComputeStateHash());
-    }
-
-    [Fact]
     public void InitialEcologyContainsDistinctDeterministicFoodSources()
     {
         var seed = new WorldSeed(0x474F424C494EUL);
@@ -257,6 +208,18 @@ public sealed class WorldMapStateTests
         Assert.Contains(firstSources, source => source.Kind == PlantKind.EdibleRoots);
         Assert.Contains(firstSources, source => source.Kind == PlantKind.FishShoal);
         Assert.Contains(firstSources, source => source.Kind == PlantKind.ReedBed);
+        Assert.All(firstSources, source =>
+        {
+            Assert.True(first.Map.IsTerrainSurfacePosition(source.Position));
+            Assert.Equal(
+                TerrainRampDirection.None,
+                first.Map.GetColumnCell(source.Position).RampDirection);
+            Assert.Equal(source, first.World.GetPlantPatch(source.Position));
+            if (source.Position.Z != 0)
+            {
+                Assert.Null(first.World.GetPlantPatch(source.Position with { Z = 0 }));
+            }
+        });
     }
 
     [Fact]
@@ -293,13 +256,26 @@ public sealed class WorldMapStateTests
                 part => Assert.Equal(trunkParts.Length, part.RelativePosition.Z));
             Assert.True(tree.Anchor.X >= map.Width * 0.42);
             Assert.True(tree.Anchor.Y <= map.Height * 0.62);
+            Assert.False(engine.World.IsSurfaceTraversable(tree.Anchor));
+            Assert.False(engine.World.IsTerrainTraversable(
+                map.GetTerrainSurfacePosition(tree.Anchor)));
         });
         Assert.NotEmpty(stumps);
         Assert.All(stumps, stump =>
         {
             Assert.Equal(TerrainKind.Mud, map.GetCell(stump.Anchor).Terrain);
             Assert.True(stump.Anchor.X <= map.Width * 0.42 || stump.Anchor.Y >= map.Height * 0.64);
+            Assert.False(engine.World.IsSurfaceTraversable(stump.Anchor));
+            Assert.False(engine.World.IsTerrainTraversable(
+                map.GetTerrainSurfacePosition(stump.Anchor)));
         });
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Null(engine.Navigation.FindPath(
+            actor.Position,
+            map.GetTerrainSurfacePosition(trees[0].Anchor)));
+        Assert.Null(engine.Navigation.FindPath(
+            actor.Position,
+            map.GetTerrainSurfacePosition(stumps[0].Anchor)));
     }
 
     [Fact]
@@ -335,14 +311,28 @@ public sealed class WorldMapStateTests
         {
             Assert.Equal(WorldObjectOwner.Nature, boulder.Owner);
             Assert.False(first.World.IsSurfaceTraversable(boulder.Anchor));
+            Assert.False(first.World.IsTerrainTraversable(
+                map.GetTerrainSurfacePosition(boulder.Anchor)));
             Assert.Contains(boulder.Parts, part => part.Kind == WorldObjectPartKind.Boulder);
         });
+        var actor = first.CreateSnapshot().Actors[0];
+        Assert.Null(first.Navigation.FindPath(
+            actor.Position,
+            map.GetTerrainSurfacePosition(boulders[0].Anchor)));
 
         var looseStone = first.CreateSnapshot().ItemStacks
             .Where(stack => stack.Resource == ResourceKind.Stone &&
                 stack.Location.Kind == ItemLocationKind.Ground)
             .ToArray();
         Assert.NotEmpty(looseStone);
+        Assert.All(looseStone, stack =>
+        {
+            Assert.True(map.IsTerrainSurfacePosition(stack.Location.Position));
+            Assert.Equal(
+                TerrainRampDirection.None,
+                map.GetColumnCell(stack.Location.Position).RampDirection);
+            Assert.True(first.World.IsTerrainTraversable(stack.Location.Position));
+        });
         Assert.Contains(looseStone, stack =>
             Math.Abs(stack.Location.Position.X - map.GoblinSpawn.X) +
             Math.Abs(stack.Location.Position.Y - map.GoblinSpawn.Y) <=

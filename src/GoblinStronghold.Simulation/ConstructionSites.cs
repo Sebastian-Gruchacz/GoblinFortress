@@ -1,11 +1,14 @@
 using System.Collections.ObjectModel;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Workshops;
 
 namespace GoblinStronghold.Simulation;
 
 public readonly record struct ConstructionMaterialSnapshot(
     ResourceKind Resource,
+    ResourceVariant Variant,
+    ResourceVariant DeliveredVariant,
     int RequiredQuantity,
     int DeliveredQuantity)
 {
@@ -95,8 +98,10 @@ internal sealed class ConstructionSiteState(
     GridPosition anchor,
     GridPosition end,
     ResourceKind requiredResource,
+    ResourceVariant requiredVariant,
     int requiredQuantity,
     int deliveredQuantity,
+    ResourceVariant deliveredVariant,
     int remainingWorkTicks,
     int totalWorkTicks,
     ConstructionCapabilityRequirements capabilities,
@@ -114,9 +119,13 @@ internal sealed class ConstructionSiteState(
 
     public ResourceKind RequiredResource { get; } = requiredResource;
 
+    public ResourceVariant RequiredVariant { get; } = requiredVariant;
+
     public int RequiredQuantity { get; } = requiredQuantity;
 
-    public int DeliveredQuantity { get; set; } = deliveredQuantity;
+    public int DeliveredQuantity { get; private set; } = deliveredQuantity;
+
+    public ResourceVariant DeliveredVariant { get; private set; } = deliveredVariant;
 
     public int RemainingWorkTicks { get; set; } = remainingWorkTicks;
 
@@ -134,9 +143,28 @@ internal sealed class ConstructionSiteState(
 
     public bool HasAllMaterials => MissingQuantity == 0;
 
+    public void Deliver(ResourceKind resource, ResourceVariant variant, int quantity)
+    {
+        var retainsMaterialIdentity = ConstructionBlueprintCatalog.RetainsMaterialIdentity(Kind);
+        if (resource != RequiredResource || quantity <= 0 || quantity > MissingQuantity ||
+            RequiredVariant != ResourceVariant.None && variant != RequiredVariant ||
+            retainsMaterialIdentity && DeliveredQuantity > 0 && variant != DeliveredVariant)
+        {
+            throw new InvalidOperationException(
+                "The construction site cannot accept this material delivery.");
+        }
+
+        if (retainsMaterialIdentity && DeliveredQuantity == 0)
+        {
+            DeliveredVariant = variant;
+        }
+        DeliveredQuantity = checked(DeliveredQuantity + quantity);
+    }
+
     public IReadOnlyList<GridPosition> GetFootprint() => Kind switch
     {
-        ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall or
+        ConstructionKind.WoodenWalkway or ConstructionKind.BasaltWalkway or
+            ConstructionKind.WoodenWall or
             ConstructionKind.StoneWall =>
             SimulationCommand.GetLinearCells(Anchor, End),
         ConstructionKind.GoblinFieldCamp =>
@@ -162,7 +190,12 @@ internal sealed class ConstructionSiteState(
         Anchor,
         End,
         GetFootprint(),
-        [new ConstructionMaterialSnapshot(RequiredResource, RequiredQuantity, DeliveredQuantity)],
+        [new ConstructionMaterialSnapshot(
+            RequiredResource,
+            RequiredVariant,
+            DeliveredVariant,
+            RequiredQuantity,
+            DeliveredQuantity)],
         RemainingWorkTicks,
         TotalWorkTicks,
         Capabilities,
@@ -171,6 +204,11 @@ internal sealed class ConstructionSiteState(
 
 internal static class ConstructionBlueprintCatalog
 {
+    public static bool RetainsMaterialIdentity(ConstructionKind kind) => kind is not (
+        ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
+        ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
+        ConstructionKind.MaterialsStorage or ConstructionKind.WaterBarrel);
+
     public static ConstructionSiteState CreateSite(
         EntityId id,
         ConstructionKind kind,
@@ -179,20 +217,34 @@ internal static class ConstructionBlueprintCatalog
         EntityId orderId = default,
         int sequenceIndex = 0)
     {
-        var segmentCount = kind is ConstructionKind.WoodenWalkway or ConstructionKind.WoodenWall or
+        var segmentCount = kind is ConstructionKind.WoodenWalkway or
+            ConstructionKind.BasaltWalkway or ConstructionKind.WoodenWall or
             ConstructionKind.StoneWall
             ? SimulationCommand.GetLinearCells(anchor, end).Count
             : 1;
-        var requiredResource = kind is ConstructionKind.StoneWall or
-            ConstructionKind.StoneDoorFrame
-            ? ResourceKind.Stone
-            : ResourceKind.Wood;
+        var requiredResource = kind switch
+        {
+            ConstructionKind.BasaltWalkway or ConstructionKind.StoneWall or
+                ConstructionKind.StoneDoorFrame or ConstructionKind.Bloomery or
+                ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace =>
+                ResourceKind.Stone,
+            ConstructionKind.WaterBarrel => ResourceKind.Equipment,
+            _ => ResourceKind.Wood,
+        };
+        var requiredVariant = kind switch
+        {
+            ConstructionKind.WaterBarrel => ResourceVariant.EquipmentWoodenBarrel,
+            ConstructionKind.BasaltWalkway => ResourceVariant.Basalt,
+            _ => ResourceVariant.None,
+        };
         var requiredQuantity = kind switch
         {
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
                 ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
                 ConstructionKind.MaterialsStorage => 2,
+            ConstructionKind.WaterBarrel => 1,
             ConstructionKind.WoodenWalkway => segmentCount,
+            ConstructionKind.BasaltWalkway => segmentCount,
             ConstructionKind.GoblinFieldCamp => 6,
             ConstructionKind.GoblinHut => 8,
             ConstructionKind.WoodenWall => checked(segmentCount * 2),
@@ -201,7 +253,9 @@ internal static class ConstructionBlueprintCatalog
             ConstructionKind.StoneDoorFrame => 1,
             ConstructionKind.WoodenDoor => 1,
             ConstructionKind.WallTorch => 1,
-            ConstructionKind.PrimitiveWorkshop => 4,
+            ConstructionKind.PrimitiveWorkshop or ConstructionKind.Bloomery or
+                ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace =>
+                GetWorkshop(kind).ConstructionRequirements.Sum(item => item.Quantity),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
         var workTicks = kind switch
@@ -209,7 +263,9 @@ internal static class ConstructionBlueprintCatalog
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
                 ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
                 ConstructionKind.MaterialsStorage => 40,
+            ConstructionKind.WaterBarrel => 20,
             ConstructionKind.WoodenWalkway => checked(segmentCount * 25),
+            ConstructionKind.BasaltWalkway => checked(segmentCount * 45),
             ConstructionKind.GoblinFieldCamp => 120,
             ConstructionKind.GoblinHut => 180,
             ConstructionKind.WoodenWall => checked(segmentCount * 45),
@@ -219,13 +275,22 @@ internal static class ConstructionBlueprintCatalog
             ConstructionKind.WoodenDoor => 35,
             ConstructionKind.WallTorch => 20,
             ConstructionKind.PrimitiveWorkshop => 90,
+            ConstructionKind.Bloomery => 180,
+            ConstructionKind.SmeltingFurnace => 240,
+            ConstructionKind.CrucibleFurnace => 300,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
-        var capabilities = kind is ConstructionKind.StoneWall or
-            ConstructionKind.StoneDoorFrame
+        var capabilities = kind is ConstructionKind.Bloomery or
+            ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace
             ? new ConstructionCapabilityRequirements(
                 RequiredSkills: GoblinSkill.Building,
-                MinimumBuildingLevel: 0,
+                MinimumBuildingLevel: kind == ConstructionKind.CrucibleFurnace ? 2 : 1,
+                RequiredEquipment: PersonalEquipment.PrimitivePickaxe)
+            : kind is ConstructionKind.BasaltWalkway or
+            ConstructionKind.StoneWall or ConstructionKind.StoneDoorFrame
+            ? new ConstructionCapabilityRequirements(
+                RequiredSkills: GoblinSkill.Building,
+                MinimumBuildingLevel: kind == ConstructionKind.BasaltWalkway ? 2 : 0,
                 RequiredEquipment: PersonalEquipment.PrimitivePickaxe)
             : new ConstructionCapabilityRequirements(
                 RequiredSkills: GoblinSkill.None,
@@ -237,8 +302,10 @@ internal static class ConstructionBlueprintCatalog
             anchor,
             end,
             requiredResource,
+            requiredVariant,
             requiredQuantity,
             deliveredQuantity: 0,
+            deliveredVariant: ResourceVariant.None,
             remainingWorkTicks: workTicks,
             totalWorkTicks: workTicks,
             capabilities,
@@ -246,4 +313,29 @@ internal static class ConstructionBlueprintCatalog
             orderId == EntityId.None ? id : orderId,
             sequenceIndex);
     }
+
+    public static bool TryGetWorkshopKind(
+        ConstructionKind construction,
+        out WorkshopKind workshop)
+    {
+        workshop = construction switch
+        {
+            ConstructionKind.PrimitiveWorkshop => WorkshopKind.PrimitiveWorkshop,
+            ConstructionKind.Bloomery => WorkshopKind.Bloomery,
+            ConstructionKind.SmeltingFurnace => WorkshopKind.SmeltingFurnace,
+            ConstructionKind.CrucibleFurnace => WorkshopKind.CrucibleFurnace,
+            _ => default,
+        };
+        return construction is ConstructionKind.PrimitiveWorkshop or
+            ConstructionKind.Bloomery or ConstructionKind.SmeltingFurnace or
+            ConstructionKind.CrucibleFurnace;
+    }
+
+    public static WorkshopDefinition GetWorkshop(ConstructionKind construction) =>
+        TryGetWorkshopKind(construction, out var workshop)
+            ? WorkshopCatalog.Get(workshop)
+            : throw new ArgumentOutOfRangeException(
+                nameof(construction),
+                construction,
+                "Construction is not a workshop.");
 }

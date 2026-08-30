@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "locale": "pl",
+  "section": "materials",
+  "subsections": {
+    "names": {
+      "oak-wood": "drewno dębowe",
+      "chestnut-wood": "drewno kasztanowca",
+      "birch-wood": "drewno brzozowe",
+      "walnut-wood": "drewno orzechowe",
+      "apple-wood": "drewno jabłoni",
+      "pine-wood": "drewno sosnowe",
+      "reeds": "sitowie",
+      "bone": "kość",
+      "hide": "skóra",
+      "sandstone": "piaskowiec",
+      "granite": "granit",
+      "basalt": "bazalt",
+      "obsidian": "obsydian",
+      "coal": "węgiel",
+      "iron-ore": "ruda żelaza",
+      "copper-ore": "ruda miedzi",
+      "silver-ore": "ruda srebra",
+      "gold-ore": "ruda złota",
+      "ruby": "rubin",
+      "emerald": "szmaragd",
+      "diamond": "diament",
+      "iron-bar": "sztaba żelaza",
+      "copper-bar": "sztaba miedzi",
+      "silver-bar": "sztaba srebra",
+      "gold-bar": "sztaba złota"
+    }
+  }
+}

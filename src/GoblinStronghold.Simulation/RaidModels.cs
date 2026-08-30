@@ -93,3 +93,48 @@ public static class RaidPreparationPolicy
                 directives.HasFlag(RaidDirective.BudCorpses));
     }
 }
+
+public static class RaidAutoAssignmentPolicy
+{
+    public static IReadOnlyList<EntityId> Select(
+        IEnumerable<ActorSnapshot> actors,
+        int capacity)
+    {
+        ArgumentNullException.ThrowIfNull(actors);
+        ArgumentOutOfRangeException.ThrowIfNegative(capacity);
+
+        return actors
+            .Where(actor => actor.Health > 0 && !actor.IsJuvenile)
+            .OrderByDescending(GetArmamentScore)
+            .ThenByDescending(actor => actor.Health * 1_000 /
+                Math.Max(1, actor.EffectiveMaximumHealth))
+            .ThenBy(actor => actor.BleedingTicksRemaining)
+            .ThenBy(actor => actor.Hunger + actor.Thirst + actor.Fatigue)
+            .ThenBy(actor => actor.Id)
+            .Take(capacity)
+            .Select(actor => actor.Id)
+            .ToArray();
+    }
+
+    private static int GetArmamentScore(ActorSnapshot actor)
+    {
+        var score = 0;
+        if (actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling))
+        {
+            score += actor.PersonalStoneAmmo > 0 ? 8 : 1;
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.StoneClub))
+        {
+            score += 4;
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.FightingStick))
+        {
+            score += 3;
+        }
+        if (actor.Equipment.HasFlag(PersonalEquipment.BoneKnife))
+        {
+            score += 2;
+        }
+        return score;
+    }
+}

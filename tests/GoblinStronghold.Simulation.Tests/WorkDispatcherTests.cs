@@ -242,13 +242,33 @@ public sealed class WorkDispatcherTests
         restored.AdvanceTicks(2_000);
 
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
-        Assert.Contains(engine.World.GetWorldObjectsAt(tree.Tree.Anchor),
+        var felledTree = Assert.Single(engine.World.GetWorldObjectsAt(tree.Tree.Anchor),
             worldObject => worldObject.Kind == WorldObjectKind.DeadTreeStump);
+        Assert.Contains(felledTree.Parts,
+            part => part.Kind == WorldObjectPartKind.TreeStump);
+        Assert.Contains(felledTree.Parts,
+            part => part.Kind == WorldObjectPartKind.FelledTreeRemains &&
+                part.Channel == SpatialOccupancyChannel.Overhead);
+        var felledStateRestored = SimulationEngine.Load(
+            engine.Save(),
+            SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), felledStateRestored.ComputeStateHash());
+        Assert.Contains(
+            Assert.Single(felledStateRestored.World.GetWorldObjectsAt(tree.Tree.Anchor),
+                worldObject => worldObject.Kind == WorldObjectKind.DeadTreeStump).Parts,
+            part => part.Kind == WorldObjectPartKind.FelledTreeRemains);
         Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations,
             item => item.Kind == WorkDesignationKind.FellTree);
         Assert.Equal(trunkSections * 16, engine.CreateSnapshot().ItemStacks
             .Where(stack => stack.Resource == ResourceKind.Wood)
             .Sum(stack => stack.Quantity));
+        var expectedWoodVariant = WoodMaterialPolicy.VariantFor(
+            engine.WorldSeed,
+            engine.Map.Width,
+            tree.Tree.Anchor);
+        Assert.All(
+            engine.CreateSnapshot().ItemStacks.Where(stack => stack.Resource == ResourceKind.Wood),
+            stack => Assert.Equal(expectedWoodVariant, stack.Variant));
         Assert.Contains(engine.DrainWorldChanges(), change =>
             change.Kind == WorldChangeKind.TreeFelled &&
             change.Position == tree.Tree.Anchor);

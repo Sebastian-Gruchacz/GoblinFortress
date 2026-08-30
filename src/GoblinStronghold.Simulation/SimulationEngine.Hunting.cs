@@ -115,6 +115,8 @@ public sealed partial class SimulationEngine
             {
                 AnimalKind.MarshHare => 120,
                 AnimalKind.CaveSpider => 80,
+                AnimalKind.DeepCrawler => 55,
+                AnimalKind.MagmaWyrm => 35,
                 _ => 110,
             };
         if (usesStone)
@@ -135,6 +137,8 @@ public sealed partial class SimulationEngine
             AnimalKind.MarshHare => (Meat: 3, Hide: 1, Bone: 1, Experience: 12),
             AnimalKind.SwampBoar => (Meat: 10, Hide: 3, Bone: 4, Experience: 30),
             AnimalKind.CaveSpider => (Meat: 0, Hide: 0, Bone: 0, Experience: 25),
+            AnimalKind.DeepCrawler => (Meat: 0, Hide: 3, Bone: 4, Experience: 120),
+            AnimalKind.MagmaWyrm => (Meat: 0, Hide: 8, Bone: 10, Experience: 300),
             _ => throw new ArgumentOutOfRangeException(),
         };
         if (harvest.Meat > 0)

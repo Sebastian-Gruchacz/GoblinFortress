@@ -457,6 +457,16 @@ theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled"
 theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
 text = "Wczytaj ostatni zapis"
 
+[node name="ChooseSave" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
+text = "Wybierz punkt zapisu…"
+
 [node name="Options" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2

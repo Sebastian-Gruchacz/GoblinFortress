@@ -45,6 +45,9 @@ public sealed class HumanVillageTests
         Assert.Equal(village.Population, village.Cohorts.Sum(cohort => cohort.Population));
         Assert.Equal(village.Population, village.Villagers.Count);
         Assert.Equal(village.Population, village.Villagers.Count(villager => villager.Health > 0));
+        Assert.Equal(12, village.GrainStock);
+        Assert.Equal(3, village.Villagers.Count(villager =>
+            villager.Tools.HasFlag(HumanTool.WoodenBucket)));
         Assert.Equal(village.Villagers.Count, village.Villagers.Select(villager =>
             villager.Position).Distinct().Count());
         Assert.All(village.Villagers, villager =>
@@ -131,6 +134,45 @@ public sealed class HumanVillageTests
         Assert.Equal(HumanCohortTask.WorkFields, advancedFarmer.Task);
         Assert.Equal(1, advanced.GrowthDays);
         Assert.Equal(0, advanced.WorkProgress);
+    }
+
+    [Fact]
+    public void FarmerConsumesStoredSeedGrainWhenSowingClearedField()
+    {
+        var source = CreateEngine();
+        var snapshot = source.CreateSnapshot();
+        var farmer = snapshot.HumanVillage.Villagers.First(villager =>
+            villager.Tools.HasFlag(HumanTool.WoodenHoe));
+        var field = snapshot.HumanVillage.Fields[(farmer.Id - 1) %
+            snapshot.HumanVillage.Fields.Count];
+        var save = JsonNode.Parse(source.Save())!.AsObject();
+        save["currentTick"] = 19;
+        var village = save["humanVillage"]!.AsObject();
+        var savedFarmer = village["villagers"]!.AsArray().Single(item =>
+            item!["id"]!.GetValue<int>() == farmer.Id)!.AsObject();
+        savedFarmer["x"] = field.Position.X;
+        savedFarmer["y"] = field.Position.Y;
+        savedFarmer["z"] = field.Position.Z;
+        var savedField = village["fields"]!.AsArray().Single(item =>
+            item!["id"]!.GetValue<int>() == field.Id)!.AsObject();
+        savedField["phase"] = (int)HumanFieldPhase.Cleared;
+        savedField["growthDays"] = 0;
+        savedField["workProgress"] =
+            source.Definitions.HumanVillageEconomy.FieldWorkPerStage -
+            farmer.SkillLevel - 1;
+        var engine = SimulationEngine.Load(save.ToJsonString(), source.Definitions);
+
+        engine.AdvanceTicks(1);
+        engine = JumpToNextDayBoundary(engine);
+        var beforeDawn = engine.CreateSnapshot().HumanVillage;
+        engine.AdvanceTicks(1);
+
+        var afterDawn = engine.CreateSnapshot().HumanVillage;
+        var sown = afterDawn.Fields.Single(item => item.Id == field.Id);
+        Assert.Equal(HumanFieldPhase.Sown, sown.Phase);
+        Assert.Equal(beforeDawn.GrainStock - 1, afterDawn.GrainStock);
+        Assert.Equal(beforeDawn.WaterStock - 2, afterDawn.WaterStock);
+        Assert.Equal(0, sown.WorkProgress);
     }
 
     [Fact]

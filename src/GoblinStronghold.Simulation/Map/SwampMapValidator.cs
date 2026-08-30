@@ -108,9 +108,16 @@ public static class SwampMapValidator
 
     private static void ValidateCaves(GeneratedMap map, List<string> errors)
     {
-        if (map.CaveLevelCount != 2 || map.CaveEntrances.Count == 0)
+        var expectedLevelCount = map.GeneratorVersion >= 13
+            ? Math.Max(
+                SwampMapGenerator.MinimumInitialCaveLevelCount,
+                -map.MinimumTerrainLevel)
+            : 2;
+        if (map.CaveLevelCount != expectedLevelCount || map.CaveEntrances.Count == 0)
         {
-            errors.Add("Current maps must contain two underground levels and a cave entrance.");
+            errors.Add(
+                $"Maps from generator version {map.GeneratorVersion} must contain " +
+                $"{expectedLevelCount} underground levels and a cave entrance.");
             return;
         }
 
@@ -127,7 +134,7 @@ public static class SwampMapValidator
             }
         }
 
-        GridPosition? deepestFloor = null;
+        GridPosition? deepestGeneratedFloor = null;
         for (var z = -1; z >= map.DeepestCaveLevel; z--)
         {
             for (var y = 0; y < map.Height; y++)
@@ -138,23 +145,27 @@ public static class SwampMapValidator
                     var cell = map.GetCaveCell(position);
                     if (!Enum.IsDefined(cell.Rock) ||
                         !Enum.IsDefined(cell.Kind) ||
-                        !Enum.IsDefined(cell.Deposit))
+                        !Enum.IsDefined(cell.Deposit) ||
+                        !Enum.IsDefined(cell.Fluid) ||
+                        (cell.Fluid != CellFluidKind.None && !cell.IsOpen))
                     {
                         errors.Add("Cave cells must use known rock materials and spatial kinds.");
                         return;
                     }
 
-                    if (z == map.DeepestCaveLevel && cell.IsOpen)
+                    if (cell.IsOpen &&
+                        (deepestGeneratedFloor is null || z < deepestGeneratedFloor.Value.Z))
                     {
-                        deepestFloor ??= position;
+                        deepestGeneratedFloor = position;
                     }
                 }
             }
         }
 
-        if (deepestFloor is null || map.FindTerrainPath(map.CaveEntrances[0], deepestFloor.Value) is null)
+        if (deepestGeneratedFloor is null ||
+            map.FindTerrainPath(map.CaveEntrances[0], deepestGeneratedFloor.Value) is null)
         {
-            errors.Add("The cave entrance must connect to the deepest generated cave level.");
+            errors.Add("The cave entrance must connect to the deepest initially open cave level.");
         }
     }
 

@@ -19,5 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\GoblinStronghold.Simulation\GoblinStronghold.Simulation.csproj" />
+    <Compile Include="..\..\src\GoblinStronghold.Godot\GameSaveStore.cs"
+             Link="GodotClient\GameSaveStore.cs" />
   </ItemGroup>
 </Project>

@@ -209,6 +209,7 @@ internal static class GeneratedSettlementStructureGenerator
                     x <= map.Width * 0.42d || y >= map.Height * 0.64d;
                 if (!inSwampRegion || reservedCells.Contains(position) ||
                     map.GetCell(position).Terrain != TerrainKind.Mud ||
+                    map.GetCell(position).RampDirection != TerrainRampDirection.None ||
                     SamplePercent(map, position, sampleKey: 31_002) >= 5)
                 {
                     continue;

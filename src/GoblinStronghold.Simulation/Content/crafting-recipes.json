@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "recipes": [
+    {
+      "id": "primitive-sling",
+      "kind": "PrimitiveSling",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 80,
+      "materials": [{ "resource": "Hide", "quantity": 1 }, { "resource": "Bone", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentPrimitiveSling", "quantity": 1 }
+    },
+    {
+      "id": "bone-knife",
+      "kind": "BoneKnife",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 55,
+      "materials": [{ "resource": "Bone", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentBoneKnife", "quantity": 1 }
+    },
+    {
+      "id": "fighting-stick",
+      "kind": "FightingStick",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 45,
+      "materials": [{ "resource": "Wood", "quantity": 3 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentFightingStick", "quantity": 1 }
+    },
+    {
+      "id": "stone-club",
+      "kind": "StoneClub",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 70,
+      "materials": [{ "resource": "Wood", "quantity": 1 }, { "resource": "Stone", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentStoneClub", "quantity": 1 }
+    },
+    {
+      "id": "hide-clothes",
+      "kind": "HideClothes",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 100,
+      "materials": [{ "resource": "Hide", "quantity": 2 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentHideClothes", "quantity": 1 }
+    },
+    {
+      "id": "reed-clothes",
+      "kind": "ReedClothes",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 80,
+      "materials": [{ "resource": "Reeds", "quantity": 3 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentReedClothes", "quantity": 1 }
+    },
+    {
+      "id": "primitive-waterskin",
+      "kind": "PrimitiveWaterskin",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 65,
+      "materials": [{ "resource": "Hide", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentPrimitiveWaterskin", "quantity": 1 }
+    },
+    {
+      "id": "reinforced-pickaxe",
+      "kind": "ReinforcedPickaxe",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 180,
+      "materials": [{ "resource": "Wood", "quantity": 2 }, { "resource": "Stone", "quantity": 3 }, { "resource": "Bone", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentReinforcedPickaxe", "quantity": 1 }
+    },
+    {
+      "id": "wooden-bucket",
+      "kind": "WoodenBucket",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 70,
+      "materials": [{ "resource": "Wood", "quantity": 1 }, { "resource": "Reeds", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentWoodenBucket", "quantity": 1 }
+    },
+    {
+      "id": "wooden-barrel",
+      "kind": "WoodenBarrel",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 140,
+      "materials": [{ "resource": "Wood", "quantity": 3 }, { "resource": "Reeds", "quantity": 2 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentWoodenBarrel", "quantity": 1 }
+    },
+    {
+      "id": "smelt-iron-bar",
+      "kind": "SmeltIronBar",
+      "workshop": "Bloomery",
+      "level": 1,
+      "baseWorkTicks": 240,
+      "materials": [{ "resource": "Ore", "variant": "IronOre", "quantity": 2 }, { "resource": "Coal", "quantity": 1 }],
+      "output": { "resource": "Materials", "variant": "IronBar", "quantity": 1 }
+    },
+    {
+      "id": "smelt-copper-bar",
+      "kind": "SmeltCopperBar",
+      "workshop": "SmeltingFurnace",
+      "level": 1,
+      "baseWorkTicks": 220,
+      "materials": [{ "resource": "Ore", "variant": "CopperOre", "quantity": 2 }, { "resource": "Coal", "quantity": 1 }],
+      "output": { "resource": "Materials", "variant": "CopperBar", "quantity": 1 }
+    },
+    {
+      "id": "smelt-silver-bar",
+      "kind": "SmeltSilverBar",
+      "workshop": "CrucibleFurnace",
+      "level": 2,
+      "baseWorkTicks": 300,
+      "materials": [{ "resource": "Ore", "variant": "SilverOre", "quantity": 2 }, { "resource": "Coal", "quantity": 1 }],
+      "output": { "resource": "Materials", "variant": "SilverBar", "quantity": 1 }
+    },
+    {
+      "id": "smelt-gold-bar",
+      "kind": "SmeltGoldBar",
+      "workshop": "CrucibleFurnace",
+      "level": 2,
+      "baseWorkTicks": 320,
+      "materials": [{ "resource": "Ore", "variant": "GoldOre", "quantity": 2 }, { "resource": "Coal", "quantity": 1 }],
+      "output": { "resource": "Materials", "variant": "GoldBar", "quantity": 1 }
+    }
+  ]
+}

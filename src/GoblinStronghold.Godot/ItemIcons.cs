@@ -62,6 +62,7 @@ internal static class ItemIcons
         ResourceKind.Bone => ItemIcon.Bone,
         ResourceKind.Hide => ItemIcon.RagClothes,
         ResourceKind.Equipment => ItemIcon.Cargo,
+        ResourceKind.Water => ItemIcon.WoodenBucket,
         _ => ItemIcon.Unknown,
     };
 
@@ -70,6 +71,7 @@ internal static class ItemIcons
         ResourceKind.Coal => new Color("5f6468"),
         ResourceKind.Ore => new Color("d9783d"),
         ResourceKind.Hide => new Color("b88759"),
+        ResourceKind.Water => new Color("68b7d4"),
         _ => Colors.White,
     };
 }

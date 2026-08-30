@@ -6,6 +6,7 @@ namespace GoblinStronghold.Simulation;
 
 public readonly record struct CraftingMaterialSnapshot(
     ResourceKind Resource,
+    ResourceVariant Variant,
     int RequiredQuantity,
     int DeliveredQuantity)
 {
@@ -49,155 +50,90 @@ internal sealed class CraftingOrderState(
     EntityId id,
     CraftingRecipeKind recipe,
     GridPosition workshop,
-    int deliveredHide,
-    int deliveredBone,
-    int deliveredWood,
-    int deliveredStone,
-    int deliveredReeds,
+    IEnumerable<CraftingDeliveredMaterialState> deliveredMaterials,
     int remainingWorkTicks)
 {
+    private readonly SortedDictionary<(ResourceKind Resource, ResourceVariant Variant), int>
+        _deliveredMaterials = CreateDeliveredMaterials(deliveredMaterials);
+
     public EntityId Id { get; } = id;
 
     public CraftingRecipeKind Recipe { get; } = recipe;
 
     public GridPosition Workshop { get; } = workshop;
 
-    public int DeliveredHide { get; set; } = deliveredHide;
-
-    public int DeliveredBone { get; set; } = deliveredBone;
-
-    public int DeliveredWood { get; set; } = deliveredWood;
-
-    public int DeliveredStone { get; set; } = deliveredStone;
-
-    public int DeliveredReeds { get; set; } = deliveredReeds;
-
     public int RemainingWorkTicks { get; set; } = remainingWorkTicks;
 
     public int TotalWorkTicks => CraftingRecipeCatalog.GetWorkTicks(Recipe);
 
-    public int GetDelivered(ResourceKind resource) => resource switch
-    {
-        ResourceKind.Hide => DeliveredHide,
-        ResourceKind.Bone => DeliveredBone,
-        ResourceKind.Wood => DeliveredWood,
-        ResourceKind.Stone => DeliveredStone,
-        ResourceKind.Reeds => DeliveredReeds,
-        _ => 0,
-    };
+    public IReadOnlyList<CraftingDeliveredMaterialState> DeliveredMaterials =>
+        _deliveredMaterials.Select(material => new CraftingDeliveredMaterialState(
+            material.Key.Resource,
+            material.Key.Variant,
+            material.Value)).ToArray();
 
-    public void Deliver(ResourceKind resource, int quantity)
+    public int GetDelivered(CraftingMaterialRequirement requirement) =>
+        _deliveredMaterials
+            .Where(material => requirement.Matches(
+                material.Key.Resource,
+                material.Key.Variant))
+            .Sum(material => material.Value);
+
+    public void Deliver(ResourceKind resource, ResourceVariant variant, int quantity)
     {
-        switch (resource)
+        var requirement = CraftingRecipeCatalog.FindMaterial(Recipe, resource, variant)
+            ?? throw new InvalidOperationException(
+                "The crafting order cannot accept this material.");
+        if (quantity <= 0 || quantity > GetMissing(requirement))
         {
-            case ResourceKind.Hide:
-                DeliveredHide = checked(DeliveredHide + quantity);
-                break;
-            case ResourceKind.Bone:
-                DeliveredBone = checked(DeliveredBone + quantity);
-                break;
-            case ResourceKind.Wood:
-                DeliveredWood = checked(DeliveredWood + quantity);
-                break;
-            case ResourceKind.Stone:
-                DeliveredStone = checked(DeliveredStone + quantity);
-                break;
-            case ResourceKind.Reeds:
-                DeliveredReeds = checked(DeliveredReeds + quantity);
-                break;
-            default:
-                throw new InvalidOperationException("The crafting order cannot accept this material.");
+            throw new InvalidOperationException(
+                "The crafting delivery exceeds the outstanding requirement.");
         }
+
+        var key = (resource, variant);
+        _deliveredMaterials[key] = checked(
+            _deliveredMaterials.GetValueOrDefault(key) + quantity);
     }
 
-    public int GetMissing(ResourceKind resource) => Math.Max(
+    public int GetMissing(CraftingMaterialRequirement requirement) => Math.Max(
         0,
-        CraftingRecipeCatalog.GetRequiredQuantity(Recipe, resource) - GetDelivered(resource));
+        requirement.Quantity - GetDelivered(requirement));
 
-    public bool HasAllMaterials => CraftingRecipeCatalog.GetMaterials(Recipe)
-        .All(material => GetMissing(material.Resource) == 0);
+    public int GetMissing(ResourceKind resource, ResourceVariant variant) =>
+        CraftingRecipeCatalog.FindMaterial(Recipe, resource, variant) is { } requirement
+            ? GetMissing(requirement)
+            : 0;
+
+    public bool HasAllMaterials => CraftingRecipeCatalog.Get(Recipe).Materials
+        .All(material => GetMissing(material) == 0);
 
     public CraftingOrderSnapshot ToSnapshot() => new(
         Id,
         Recipe,
         Workshop,
-        CraftingRecipeCatalog.GetMaterials(Recipe)
+        CraftingRecipeCatalog.Get(Recipe).Materials
             .Select(material => new CraftingMaterialSnapshot(
                 material.Resource,
+                material.Variant,
                 material.Quantity,
-                GetDelivered(material.Resource)))
+                GetDelivered(material)))
             .ToArray(),
         RemainingWorkTicks,
         TotalWorkTicks);
+
+    private static SortedDictionary<(ResourceKind, ResourceVariant), int>
+        CreateDeliveredMaterials(IEnumerable<CraftingDeliveredMaterialState> materials)
+    {
+        var result = new SortedDictionary<(ResourceKind, ResourceVariant), int>();
+        foreach (var material in materials)
+        {
+            result.Add((material.Resource, material.Variant), material.Quantity);
+        }
+        return result;
+    }
 }
 
-internal static class CraftingRecipeCatalog
-{
-    private static readonly (ResourceKind Resource, int Quantity)[] PrimitiveSlingMaterials =
-    [
-        (ResourceKind.Hide, 1),
-        (ResourceKind.Bone, 1),
-    ];
-
-    private static readonly (ResourceKind Resource, int Quantity)[] BoneKnifeMaterials =
-    [
-        (ResourceKind.Bone, 1),
-    ];
-
-    private static readonly (ResourceKind Resource, int Quantity)[] FightingStickMaterials =
-    [
-        (ResourceKind.Wood, 3),
-    ];
-
-    private static readonly (ResourceKind Resource, int Quantity)[] StoneClubMaterials =
-    [
-        (ResourceKind.Wood, 1),
-        (ResourceKind.Stone, 1),
-    ];
-
-    private static readonly (ResourceKind Resource, int Quantity)[] HideClothesMaterials =
-    [
-        (ResourceKind.Hide, 2),
-    ];
-
-    private static readonly (ResourceKind Resource, int Quantity)[] ReedClothesMaterials =
-    [
-        (ResourceKind.Reeds, 3),
-    ];
-
-    private static readonly (ResourceKind Resource, int Quantity)[] PrimitiveWaterskinMaterials =
-    [
-        (ResourceKind.Hide, 1),
-    ];
-
-    public static IReadOnlyList<(ResourceKind Resource, int Quantity)> GetMaterials(
-        CraftingRecipeKind recipe) => recipe switch
-    {
-        CraftingRecipeKind.PrimitiveSling => PrimitiveSlingMaterials,
-        CraftingRecipeKind.BoneKnife => BoneKnifeMaterials,
-        CraftingRecipeKind.FightingStick => FightingStickMaterials,
-        CraftingRecipeKind.StoneClub => StoneClubMaterials,
-        CraftingRecipeKind.HideClothes => HideClothesMaterials,
-        CraftingRecipeKind.ReedClothes => ReedClothesMaterials,
-        CraftingRecipeKind.PrimitiveWaterskin => PrimitiveWaterskinMaterials,
-        _ => throw new ArgumentOutOfRangeException(nameof(recipe), recipe, null),
-    };
-
-    public static int GetRequiredQuantity(CraftingRecipeKind recipe, ResourceKind resource) =>
-        GetMaterials(recipe)
-            .Where(material => material.Resource == resource)
-            .Select(material => material.Quantity)
-            .SingleOrDefault();
-
-    public static int GetWorkTicks(CraftingRecipeKind recipe) => recipe switch
-    {
-        CraftingRecipeKind.PrimitiveSling => 80,
-        CraftingRecipeKind.BoneKnife => 55,
-        CraftingRecipeKind.FightingStick => 45,
-        CraftingRecipeKind.StoneClub => 70,
-        CraftingRecipeKind.HideClothes => 100,
-        CraftingRecipeKind.ReedClothes => 80,
-        CraftingRecipeKind.PrimitiveWaterskin => 65,
-        _ => throw new ArgumentOutOfRangeException(nameof(recipe), recipe, null),
-    };
-}
+internal readonly record struct CraftingDeliveredMaterialState(
+    ResourceKind Resource,
+    ResourceVariant Variant,
+    int Quantity);

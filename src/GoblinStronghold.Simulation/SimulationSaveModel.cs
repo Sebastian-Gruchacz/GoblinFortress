@@ -50,6 +50,8 @@ internal sealed class SimulationSaveModel
 
     public List<ulong> RaidPartyIds { get; set; } = [];
 
+    public bool RaidRosterConfigured { get; set; }
+
     public int RaidTargetX { get; set; }
 
     public int RaidTargetY { get; set; }
@@ -118,6 +120,8 @@ internal sealed class CorpseSaveModel
     public int ContainedWater { get; set; }
 
     public int? EdiblePortions { get; set; }
+
+    public CorpseDirective Directives { get; set; }
 
     public GoblinSkill InheritableSkills { get; set; }
 
@@ -245,6 +249,8 @@ internal sealed class HumanVillageSaveModel
     public int Population { get; set; }
 
     public int FoodStock { get; set; }
+
+    public int GrainStock { get; set; }
 
     public int WoodStock { get; set; }
 
@@ -378,6 +384,8 @@ internal sealed class WorldObjectSaveModel
     public int AnchorZ { get; set; }
 
     public Map.CardinalOrientation Orientation { get; set; }
+
+    public Resources.ResourceVariant MaterialVariant { get; set; }
 
     public List<WorldObjectPartSaveModel> Parts { get; set; } = [];
 }
@@ -656,9 +664,13 @@ internal sealed class ConstructionSiteSaveModel
 
     public Resources.ResourceKind? RequiredResource { get; set; }
 
+    public Resources.ResourceVariant? RequiredVariant { get; set; }
+
     public int RequiredWood { get; set; }
 
     public int DeliveredWood { get; set; }
+
+    public Resources.ResourceVariant DeliveredVariant { get; set; }
 
     public int RemainingWorkTicks { get; set; }
 
@@ -689,17 +701,18 @@ internal sealed class CraftingOrderSaveModel
 
     public int WorkshopZ { get; set; }
 
-    public int DeliveredHide { get; set; }
-
-    public int DeliveredBone { get; set; }
-
-    public int DeliveredWood { get; set; }
-
-    public int DeliveredStone { get; set; }
-
-    public int DeliveredReeds { get; set; }
+    public List<CraftingDeliveredMaterialSaveModel> DeliveredMaterials { get; set; } = [];
 
     public int RemainingWorkTicks { get; set; }
+}
+
+internal sealed class CraftingDeliveredMaterialSaveModel
+{
+    public Resources.ResourceKind Resource { get; set; }
+
+    public Resources.ResourceVariant Variant { get; set; }
+
+    public int Quantity { get; set; }
 }
 
 internal sealed class CommandSaveModel

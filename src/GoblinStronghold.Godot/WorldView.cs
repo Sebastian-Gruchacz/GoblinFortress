@@ -29,6 +29,8 @@ public partial class WorldView : Node2D
     private Texture2D _iconAtlas = null!;
     private Texture2D _itemIconAtlas = null!;
     private Texture2D _environmentAtlas = null!;
+    private Texture2D _treePartAtlas = null!;
+    private Texture2D _treeCrownAtlas = null!;
     private Texture2D _terrainAtlas = null!;
     private Texture2D _terrainTransitionAtlas = null!;
     private Texture2D _caveAtlas = null!;
@@ -46,6 +48,7 @@ public partial class WorldView : Node2D
     private readonly Dictionary<int, (ulong TopologyVersion, HashSet<GridPosition> Solids)>
         _cachedCaveSolids = [];
     private readonly Dictionary<int, StructureRenderCache> _structureRenderCaches = [];
+    private readonly MaterialPaletteTextureCache _materialPaletteTextures = new();
 
     public int VisibleLevel => _visibleLevel;
 
@@ -58,6 +61,8 @@ public partial class WorldView : Node2D
         _iconAtlas = UiIcons.LoadAtlas();
         _itemIconAtlas = ItemIcons.LoadAtlas();
         _environmentAtlas = EnvironmentSprites.LoadAtlas();
+        _treePartAtlas = TreePartSprites.LoadAtlas();
+        _treeCrownAtlas = TreeCrownSprites.LoadAtlas();
         _terrainAtlas = TerrainSprites.LoadAtlas();
         _terrainTransitionAtlas = TerrainTransitionSprites.LoadAtlas();
         _caveAtlas = CaveSprites.LoadAtlas();
@@ -69,6 +74,8 @@ public partial class WorldView : Node2D
         _undergroundFaunaAtlas = UndergroundSprites.LoadFaunaAtlas();
         _mineralDepositAtlas = UndergroundSprites.LoadMineralAtlas();
     }
+
+    public override void _ExitTree() => _materialPaletteTextures.Dispose();
 
     public void SetWorld(SimulationEngine engine)
     {
@@ -516,13 +523,20 @@ public partial class WorldView : Node2D
                     continue;
                 }
 
-                if (_engine.World.TryGetFluid(position, out var fluid, out var depthLevels) &&
-                    fluid == CellFluidKind.Water)
+                if (_engine.World.TryGetFluid(position, out var fluid, out var depthLevels))
                 {
-                    DrawWaterTile(x, y, TerrainKind.DeepWater);
-                    DrawRect(
-                        CellRect(x, y),
-                        new Color(0.015f, 0.035f, 0.045f, Math.Min(0.34f, depthLevels * 0.17f)));
+                    if (fluid == CellFluidKind.Lava)
+                    {
+                        DrawLavaTile(x, y);
+                    }
+                    else
+                    {
+                        DrawWaterTile(x, y, TerrainKind.DeepWater);
+                        DrawRect(
+                            CellRect(x, y),
+                            new Color(0.015f, 0.035f, 0.045f,
+                                Math.Min(0.34f, depthLevels * 0.17f)));
+                    }
                     continue;
                 }
 
@@ -555,9 +569,13 @@ public partial class WorldView : Node2D
                 }
                 else
                 {
-                    var rockTint = cell.Rock == RockKind.Sandstone
-                        ? new Color("19140f")
-                        : new Color("101216");
+                    var rockTint = cell.Rock switch
+                    {
+                        RockKind.Sandstone => new Color("19140f"),
+                        RockKind.Basalt => new Color("0b090a"),
+                        RockKind.Obsidian => new Color("100817"),
+                        _ => new Color("101216"),
+                    };
                     DrawRect(CellRect(x, y), rockTint);
                 }
                 DrawCaveInnerCorners(position, cell.Rock);
@@ -572,10 +590,21 @@ public partial class WorldView : Node2D
     private void DrawMineralDeposit(GridPosition position, MineralDepositKind deposit)
     {
         var rect = CellRect(position.X, position.Y);
-        DrawTextureRectRegion(
-            _mineralDepositAtlas,
-            rect,
-            UndergroundSprites.GetMineralRegion(_mineralDepositAtlas, deposit));
+        var palette = deposit switch
+        {
+            MineralDepositKind.Coal => MaterialPaletteColors.For("coal"),
+            MineralDepositKind.IronOre => MaterialPaletteColors.For(ResourceVariant.IronOre),
+            MineralDepositKind.CopperOre => MaterialPaletteColors.For(ResourceVariant.CopperOre),
+            MineralDepositKind.SilverOre => MaterialPaletteColors.For(ResourceVariant.SilverOre),
+            MineralDepositKind.GoldOre => MaterialPaletteColors.For(ResourceVariant.GoldOre),
+            MineralDepositKind.Ruby => MaterialPaletteColors.For(ResourceVariant.Ruby),
+            MineralDepositKind.Emerald => MaterialPaletteColors.For(ResourceVariant.Emerald),
+            MineralDepositKind.Diamond => MaterialPaletteColors.For(ResourceVariant.Diamond),
+            _ => throw new ArgumentOutOfRangeException(nameof(deposit), deposit, null),
+        };
+        DrawCircle(rect.GetCenter(), 4.5f, palette.Midtone);
+        DrawCircle(rect.GetCenter() + new Vector2(-5f, 4f), 2.5f, palette.Shadow);
+        DrawCircle(rect.GetCenter() + new Vector2(5f, -4f), 2f, palette.Highlight);
     }
 
     private void DrawCaveInnerCorners(GridPosition position, RockKind rock)
@@ -849,6 +878,19 @@ public partial class WorldView : Node2D
         DrawCrossFadedTerrain(CellRect(x, y), first, second, phaseOffset);
     }
 
+    private void DrawLavaTile(int x, int y)
+    {
+        var rect = CellRect(x, y);
+        var pulse = WaterAnimationBlend(((x * 17 + y * 31) & 15) / 16f);
+        DrawRect(rect, new Color("491006"));
+        DrawRect(rect.Grow(-2f), new Color(0.92f, 0.19f + (pulse * 0.12f), 0.025f, 0.88f));
+        DrawLine(
+            rect.Position + new Vector2(2f, 5f + (pulse * 3f)),
+            rect.End - new Vector2(2f, 6f - (pulse * 2f)),
+            new Color(1f, 0.72f, 0.12f, 0.8f),
+            1.5f);
+    }
+
     private void DrawCrossFadedTerrain(
         Rect2 destination,
         TerrainSprite first,
@@ -939,12 +981,14 @@ public partial class WorldView : Node2D
     private void DrawStructures()
     {
         var structureCache = GetStructureRenderCache();
-        DrawWalkways(structureCache.WalkwayCells);
+        DrawWalkways(structureCache.WalkwayCells, Colors.White);
+        DrawWalkways(structureCache.BasaltWalkwayCells, new Color("8f8982"));
         DrawPrimitiveBarriers(structureCache);
 
         foreach (var worldObject in _snapshot.WorldObjects)
         {
             if (worldObject.Kind is WorldObjectKind.WoodenWalkway or
+                WorldObjectKind.BasaltWalkway or
                 WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall or
                 WorldObjectKind.WoodenDoorFrame or WorldObjectKind.StoneDoorFrame or
                 WorldObjectKind.WoodenDoorLeaf or WorldObjectKind.WallTorch)
@@ -984,27 +1028,33 @@ public partial class WorldView : Node2D
                 continue;
             }
 
-            if (worldObject.Kind == WorldObjectKind.PrimitiveWorkshop &&
+            if (worldObject.Kind is WorldObjectKind.PrimitiveWorkshop or
+                    WorldObjectKind.Bloomery or WorldObjectKind.SmeltingFurnace or
+                    WorldObjectKind.CrucibleFurnace &&
                 worldObject.Anchor.Z == _visibleLevel)
             {
-                DrawPrimitiveWorkshop(worldObject.Anchor);
+                DrawWorkshop(worldObject);
                 continue;
             }
 
-            var baseColor = worldObject.Kind == WorldObjectKind.WoodenWalkway
+            var materialPalette = worldObject.MaterialVariant == ResourceVariant.None
+                ? (MaterialPaletteColors?)null
+                : MaterialPaletteColors.For(worldObject.MaterialVariant);
+            var baseColor = materialPalette?.Midtone ??
+                (worldObject.Kind == WorldObjectKind.WoodenWalkway
                 ? new Color("b8894c")
                 : worldObject.Owner == WorldObjectOwner.GoblinTribe
                 ? new Color("745b3b")
-                : new Color("c08b55");
+                : new Color("c08b55"));
             foreach (var (position, part) in worldObject.GetAbsoluteParts().Where(item =>
                          item.Position.Z == _visibleLevel))
             {
                 var color = part.Kind switch
                 {
                     WorldObjectPartKind.Floor => baseColor.Darkened(0.18f),
-                    WorldObjectPartKind.Door => new Color("e3c06c"),
+                    WorldObjectPartKind.Door => materialPalette?.Highlight ?? new Color("e3c06c"),
                     WorldObjectPartKind.WellRim => new Color("9ca4a1"),
-                    WorldObjectPartKind.Walkway => new Color("b8894c"),
+                    WorldObjectPartKind.Walkway => materialPalette?.Midtone ?? new Color("b8894c"),
                     _ => baseColor,
                 };
                 DrawRect(
@@ -1015,28 +1065,56 @@ public partial class WorldView : Node2D
         }
     }
 
-    private void DrawPrimitiveWorkshop(GridPosition position)
+    private void DrawWorkshop(WorldObjectSnapshot workshop)
     {
+        var position = workshop.Anchor;
+        var kind = workshop.Kind;
+        var palette = workshop.MaterialVariant == ResourceVariant.None
+            ? (MaterialPaletteColors?)null
+            : MaterialPaletteColors.For(workshop.MaterialVariant);
         var rect = CellRect(position.X, position.Y).Grow(-2.5f);
-        DrawRect(rect, new Color("37281d"));
+        DrawRect(rect, palette?.Edge ?? new Color("37281d"));
+        if (kind != WorldObjectKind.PrimitiveWorkshop)
+        {
+            var bodyColor = palette?.Midtone ?? kind switch
+            {
+                WorldObjectKind.Bloomery => new Color("766753"),
+                WorldObjectKind.SmeltingFurnace => new Color("59606a"),
+                WorldObjectKind.CrucibleFurnace => new Color("49434f"),
+                _ => new Color("766753"),
+            };
+            var body = rect.Grow(-2f);
+            DrawRect(body, bodyColor);
+            DrawRect(new Rect2(
+                body.Position + new Vector2(body.Size.X * 0.28f, body.Size.Y * 0.57f),
+                new Vector2(body.Size.X * 0.44f, body.Size.Y * 0.35f)),
+                new Color("211b19"));
+            DrawCircle(body.Position + new Vector2(
+                body.Size.X * 0.5f,
+                body.Size.Y * 0.75f), 2.2f, new Color("ff8a2b"));
+            return;
+        }
+
         var bench = new Rect2(
             rect.Position + new Vector2(1.5f, rect.Size.Y * 0.28f),
             new Vector2(rect.Size.X - 3f, rect.Size.Y * 0.38f));
-        DrawRect(bench, new Color("8b6038"));
+        DrawRect(bench, palette?.Midtone ?? new Color("8b6038"));
         DrawLine(bench.Position, new Vector2(bench.End.X, bench.Position.Y),
-            new Color("c18a50"), 1.2f);
+            palette?.Highlight ?? new Color("c18a50"), 1.2f);
         DrawLine(bench.Position + new Vector2(3f, bench.Size.Y),
             bench.Position + new Vector2(2f, rect.Size.Y * 0.62f),
-            new Color("5a3b26"), 2f);
+            palette?.Shadow ?? new Color("5a3b26"), 2f);
         DrawLine(new Vector2(bench.End.X - 3f, bench.End.Y),
             new Vector2(bench.End.X - 2f, rect.End.Y - 1f),
-            new Color("5a3b26"), 2f);
+            palette?.Shadow ?? new Color("5a3b26"), 2f);
         DrawCircle(bench.GetCenter() + new Vector2(-3f, -1f), 2.2f, new Color("d7d0b2"));
         DrawLine(bench.GetCenter(), bench.GetCenter() + new Vector2(5f, -4f),
             new Color("8e9594"), 1.5f);
     }
 
-    private void DrawWalkways(IReadOnlySet<GridPosition> walkwayCells)
+    private void DrawWalkways(
+        IReadOnlySet<GridPosition> walkwayCells,
+        Color modulate)
     {
         foreach (var position in walkwayCells)
         {
@@ -1050,7 +1128,8 @@ public partial class WorldView : Node2D
             DrawTextureRectRegion(
                 _walkwayAtlas,
                 cell,
-                WalkwaySprites.GetRegion(_walkwayAtlas, mask));
+                WalkwaySprites.GetRegion(_walkwayAtlas, mask),
+                modulate);
         }
     }
 
@@ -1061,36 +1140,69 @@ public partial class WorldView : Node2D
         {
             return;
         }
-        foreach (var position in cache.WoodenWalls)
+        foreach (var (position, wall) in cache.WoodenWalls)
         {
             var mask = GetCardinalConnectionMask(position, cache.ConnectedCells);
-            DrawTextureRectRegion(
+            var destination = CellRect(position.X, position.Y).Grow(-0.5f);
+            var region = StructureWallSprites.GetRegion(
                 _structureWallAtlas,
-                CellRect(position.X, position.Y).Grow(-0.5f),
-                StructureWallSprites.GetRegion(
-                    _structureWallAtlas,
-                    StructureWallMaterial.GoblinBogwood,
-                    mask));
-            DrawInteriorWallFaces(
-                position,
-                cache.Enclosure!.GetWallSides(position).VisibleFaces);
-        }
-
-        foreach (var position in cache.StoneWalls)
-        {
-            var mask = GetCardinalConnectionMask(position, cache.ConnectedCells);
-            DrawTextureRectRegion(
-                _structureWallAtlas,
-                CellRect(position.X, position.Y).Grow(-0.5f),
-                StructureWallSprites.GetRegion(
-                    _structureWallAtlas,
-                    StructureWallMaterial.GoblinBogwood,
-                    mask),
-                new Color(0.62f, 0.7f, 0.76f));
+                StructureWallMaterial.GoblinBogwood,
+                mask);
+            var palette = PaletteFor(wall);
+            if (palette is null)
+            {
+                DrawTextureRectRegion(_structureWallAtlas, destination, region);
+            }
+            else
+            {
+                DrawTextureRect(
+                    _materialPaletteTextures.Get(
+                        _structureWallAtlas,
+                        region,
+                        wall.MaterialVariant,
+                        MaterialPaletteTextureProfile.CompleteSurface),
+                    destination,
+                    tile: false);
+            }
             DrawInteriorWallFaces(
                 position,
                 cache.Enclosure!.GetWallSides(position).VisibleFaces,
-                stone: true);
+                palette: palette);
+        }
+
+        foreach (var (position, wall) in cache.StoneWalls)
+        {
+            var mask = GetCardinalConnectionMask(position, cache.ConnectedCells);
+            var destination = CellRect(position.X, position.Y).Grow(-0.5f);
+            var region = StructureWallSprites.GetRegion(
+                _structureWallAtlas,
+                StructureWallMaterial.GoblinBogwood,
+                mask);
+            var palette = PaletteFor(wall);
+            if (palette is null)
+            {
+                DrawTextureRectRegion(
+                    _structureWallAtlas,
+                    destination,
+                    region,
+                    new Color(0.62f, 0.7f, 0.76f));
+            }
+            else
+            {
+                DrawTextureRect(
+                    _materialPaletteTextures.Get(
+                        _structureWallAtlas,
+                        region,
+                        wall.MaterialVariant,
+                        MaterialPaletteTextureProfile.CompleteSurface),
+                    destination,
+                    tile: false);
+            }
+            DrawInteriorWallFaces(
+                position,
+                cache.Enclosure!.GetWallSides(position).VisibleFaces,
+                stone: true,
+                palette: palette);
         }
 
         foreach (var (position, frame) in cache.DoorFrames)
@@ -1098,18 +1210,27 @@ public partial class WorldView : Node2D
             DrawDoorFrame(
                 position,
                 frame.Orientation,
-                stone: frame.Kind == WorldObjectKind.StoneDoorFrame);
-            if (cache.DoorLeaves.TryGetValue(position, out var isOpen))
+                stone: frame.Kind == WorldObjectKind.StoneDoorFrame,
+                palette: PaletteFor(frame));
+            if (cache.DoorLeaves.TryGetValue(position, out var leaf))
             {
-                DrawDoorLeaf(position, frame.Orientation, isOpen);
+                var isOpen = leaf.Parts.Single().Kind is
+                    WorldObjectPartKind.OpenDoorLeaf or
+                    WorldObjectPartKind.AutomaticallyOpenedDoorLeaf;
+                DrawDoorLeaf(position, frame.Orientation, isOpen, PaletteFor(leaf));
             }
         }
 
         foreach (var torch in cache.WallTorches)
         {
-            DrawWallTorch(torch.Anchor, torch.Orientation);
+            DrawWallTorch(torch.Anchor, torch.Orientation, PaletteFor(torch));
         }
     }
+
+    private static MaterialPaletteColors? PaletteFor(WorldObjectSnapshot worldObject) =>
+        worldObject.MaterialVariant == ResourceVariant.None
+            ? null
+            : MaterialPaletteColors.For(worldObject.MaterialVariant);
 
     private void DrawIllustratedHumanStructure(WorldObjectSnapshot worldObject)
     {
@@ -1242,11 +1363,12 @@ public partial class WorldView : Node2D
     private void DrawDoorFrame(
         GridPosition position,
         CardinalOrientation orientation,
-        bool stone = false)
+        bool stone = false,
+        MaterialPaletteColors? palette = null)
     {
         var rect = CellRect(position.X, position.Y).Grow(-1.2f);
-        var timber = stone ? new Color("9daab5") : new Color("b47d43");
-        var shadow = stone ? new Color("3d4852") : new Color("4a2e19");
+        var timber = palette?.Midtone ?? (stone ? new Color("9daab5") : new Color("b47d43"));
+        var shadow = palette?.Edge ?? (stone ? new Color("3d4852") : new Color("4a2e19"));
         const float postSize = 4.2f;
         if (orientation is CardinalOrientation.North or CardinalOrientation.South)
         {
@@ -1270,7 +1392,10 @@ public partial class WorldView : Node2D
         }
     }
 
-    private void DrawWallTorch(GridPosition position, CardinalOrientation orientation)
+    private void DrawWallTorch(
+        GridPosition position,
+        CardinalOrientation orientation,
+        MaterialPaletteColors? palette = null)
     {
         var direction = orientation switch
         {
@@ -1284,9 +1409,9 @@ public partial class WorldView : Node2D
         var flameCenter = wallPoint + (direction * 5.5f);
         var tangent = new Vector2(-direction.Y, direction.X);
         DrawLine(wallPoint - (tangent * 3.6f), wallPoint + (tangent * 3.6f),
-            new Color("3b2819"), 2.6f, antialiased: true);
+            palette?.Edge ?? new Color("3b2819"), 2.6f, antialiased: true);
         DrawLine(wallPoint, flameCenter - (direction * 2f),
-            new Color("956038"), 2.2f, antialiased: true);
+            palette?.Midtone ?? new Color("956038"), 2.2f, antialiased: true);
         var phase = ((float)Time.GetTicksMsec() * 0.012f) +
             (position.X * 0.73f) + (position.Y * 1.17f) + (position.Z * 0.41f);
         var flicker = 0.5f + (0.5f * Mathf.Sin(phase));
@@ -1301,7 +1426,8 @@ public partial class WorldView : Node2D
     private void DrawInteriorWallFaces(
         GridPosition position,
         WallInteriorFacing facing,
-        bool stone = false)
+        bool stone = false,
+        MaterialPaletteColors? palette = null)
     {
         if (facing == WallInteriorFacing.None)
         {
@@ -1311,32 +1437,36 @@ public partial class WorldView : Node2D
         var rect = CellRect(position.X, position.Y).Grow(-0.5f);
         if ((facing & WallInteriorFacing.North) != 0)
         {
-            DrawInteriorWallFace(rect, WallInteriorFacing.North, stone);
+            DrawInteriorWallFace(rect, WallInteriorFacing.North, stone, palette);
         }
         if ((facing & WallInteriorFacing.East) != 0)
         {
-            DrawInteriorWallFace(rect, WallInteriorFacing.East, stone);
+            DrawInteriorWallFace(rect, WallInteriorFacing.East, stone, palette);
         }
         if ((facing & WallInteriorFacing.South) != 0)
         {
-            DrawInteriorWallFace(rect, WallInteriorFacing.South, stone);
+            DrawInteriorWallFace(rect, WallInteriorFacing.South, stone, palette);
         }
         if ((facing & WallInteriorFacing.West) != 0)
         {
-            DrawInteriorWallFace(rect, WallInteriorFacing.West, stone);
+            DrawInteriorWallFace(rect, WallInteriorFacing.West, stone, palette);
         }
     }
 
-    private void DrawInteriorWallFace(Rect2 rect, WallInteriorFacing direction, bool stone)
+    private void DrawInteriorWallFace(
+        Rect2 rect,
+        WallInteriorFacing direction,
+        bool stone,
+        MaterialPaletteColors? palette)
     {
         const int bands = 7;
         const float faceFraction = 0.66f;
-        var light = stone
+        var light = palette?.Midtone ?? (stone
             ? new Color(0.38f, 0.42f, 0.45f, 0.96f)
-            : new Color(0.43f, 0.29f, 0.17f, 0.94f);
-        var dark = stone
+            : new Color(0.43f, 0.29f, 0.17f, 0.94f));
+        var dark = palette?.Edge ?? (stone
             ? new Color(0.08f, 0.095f, 0.11f, 0.99f)
-            : new Color(0.13f, 0.075f, 0.04f, 0.98f);
+            : new Color(0.13f, 0.075f, 0.04f, 0.98f));
         for (var band = 0; band < bands; band++)
         {
             var phase = (band + 0.5f) / bands;
@@ -1381,9 +1511,9 @@ public partial class WorldView : Node2D
             DrawRect(strip, color);
         }
 
-        var rim = stone
+        var rim = palette?.Highlight ?? (stone
             ? new Color(0.62f, 0.68f, 0.72f, 0.96f)
-            : new Color(0.68f, 0.47f, 0.27f, 0.95f);
+            : new Color(0.68f, 0.47f, 0.27f, 0.95f));
         switch (direction)
         {
             case WallInteriorFacing.North:
@@ -1420,11 +1550,12 @@ public partial class WorldView : Node2D
     private void DrawDoorLeaf(
         GridPosition position,
         CardinalOrientation orientation,
-        bool isOpen)
+        bool isOpen,
+        MaterialPaletteColors? palette = null)
     {
         var rect = CellRect(position.X, position.Y).Grow(-5.2f);
-        var timber = new Color("8f5d30");
-        var edge = new Color("402716");
+        var timber = palette?.Midtone ?? new Color("8f5d30");
+        var edge = palette?.Edge ?? new Color("402716");
         var horizontal = orientation is CardinalOrientation.North or CardinalOrientation.South;
         if (!isOpen)
         {
@@ -1479,28 +1610,47 @@ public partial class WorldView : Node2D
         {
             if (_visibleLevel == worldObject.Anchor.Z + surfaceOffset)
             {
-                const float boulderSize = 25f;
-                DrawCircle(center + new Vector2(1.5f, 2f), 10.5f, new Color(0, 0, 0, 0.45f));
-                DrawTextureRectRegion(
-                    _itemIconAtlas,
-                    new Rect2(
-                        center - new Vector2(boulderSize / 2f, boulderSize / 2f),
-                        new Vector2(boulderSize, boulderSize)),
-                    ItemIcons.GetRegion(_itemIconAtlas, ItemIcon.Stone));
+                var stoneVariant = StoneMaterialPolicy.VariantFor(
+                    _engine.WorldSeed,
+                    _engine.Map.Width,
+                    worldObject.Anchor);
+                DrawMaterialBoulder(center, stoneVariant);
             }
             return;
         }
 
+        var woodVariant = WoodMaterialPolicy.VariantFor(
+            _engine.WorldSeed,
+            _engine.Map.Width,
+            worldObject.Anchor);
+        var woodModulate = TreePartSprites.GetWoodModulate(woodVariant);
+
         if (worldObject.Kind == WorldObjectKind.DeadTreeStump)
         {
-            if (_visibleLevel == worldObject.Anchor.Z + surfaceOffset)
+            var stumpLevel = worldObject.Anchor.Z + surfaceOffset;
+            if (_visibleLevel == stumpLevel - 1)
             {
-                const float stumpSize = 17f;
-                DrawTextureRectRegion(
-                    _environmentAtlas,
-                    new Rect2(center - new Vector2(stumpSize / 2f, stumpSize / 2f), new Vector2(stumpSize, stumpSize)),
-                    EnvironmentSprites.GetRegion(_environmentAtlas, EnvironmentSprite.TreeTrunk));
+                DrawTreePartSprite(
+                    center, TreePartSprite.UndergroundRoots, 39f, woodModulate);
+                return;
             }
+            if (_visibleLevel == stumpLevel)
+            {
+                if (worldObject.Parts.Any(part =>
+                        part.Kind == WorldObjectPartKind.FelledTreeRemains))
+                {
+                    DrawTreePartSprite(
+                        center, TreePartSprite.FelledRemains, 43f, woodModulate);
+                }
+                DrawTreePartSprite(center, TreePartSprite.CutStump, 18f, woodModulate);
+            }
+            return;
+        }
+
+        if (_visibleLevel == worldObject.Anchor.Z + surfaceOffset - 1)
+        {
+            DrawTreePartSprite(
+                center, TreePartSprite.UndergroundRoots, 39f, woodModulate);
             return;
         }
 
@@ -1510,11 +1660,7 @@ public partial class WorldView : Node2D
             .ToArray();
         if (visibleParts.Contains(WorldObjectPartKind.TreeTrunk))
         {
-            const float trunkSize = 21f;
-            DrawTextureRectRegion(
-                _environmentAtlas,
-                new Rect2(center - new Vector2(trunkSize / 2f, trunkSize / 2f), new Vector2(trunkSize, trunkSize)),
-                EnvironmentSprites.GetRegion(_environmentAtlas, EnvironmentSprite.TreeTrunk));
+            DrawStandingTrunk(center, woodVariant);
             return;
         }
 
@@ -1525,14 +1671,67 @@ public partial class WorldView : Node2D
 
         var crownSize = new Vector2(TileSize * 3f, TileSize * 3f);
         DrawTextureRectRegion(
-            _environmentAtlas,
+            _treeCrownAtlas,
             new Rect2(center - crownSize / 2f, crownSize),
-            EnvironmentSprites.GetRegion(_environmentAtlas, EnvironmentSprite.TreeCrown));
+            TreeCrownSprites.GetRegion(_treeCrownAtlas, woodVariant));
+    }
+
+    private void DrawTreePartSprite(
+        Vector2 center,
+        TreePartSprite sprite,
+        float size,
+        Color modulate)
+    {
+        var dimensions = new Vector2(size, size);
+        DrawTextureRectRegion(
+            _treePartAtlas,
+            new Rect2(center - dimensions / 2f, dimensions),
+            TreePartSprites.GetRegion(_treePartAtlas, sprite),
+            modulate);
+    }
+
+    private void DrawStandingTrunk(Vector2 center, ResourceVariant variant)
+    {
+        var palette = MaterialPaletteColors.For(variant);
+        DrawCircle(center + new Vector2(1.2f, 1.7f), 9f, new Color(0, 0, 0, 0.42f));
+        DrawCircle(center, 8.7f, palette.Edge);
+        DrawCircle(center, 6.9f, palette.Highlight);
+        DrawCircle(center + new Vector2(0.3f, 0.15f), 5.3f, palette.Midtone);
+        DrawCircle(center + new Vector2(-0.2f, -0.15f), 4f, palette.Highlight);
+        DrawCircle(center + new Vector2(0.15f, 0.1f), 2.9f, palette.Shadow);
+        DrawCircle(center + new Vector2(-0.1f, -0.05f), 1.85f, palette.Midtone);
+        DrawCircle(center, 0.85f, palette.Shadow);
+    }
+
+    private void DrawMaterialBoulder(Vector2 center, ResourceVariant variant)
+    {
+        var dimensions = new Vector2(24f, 21f);
+        var visualCenter = center + new Vector2(0f, -1f);
+        var destination = new Rect2(visualCenter - dimensions / 2f, dimensions);
+
+        DrawCircle(center + new Vector2(0.8f, 2f), 9.5f, new Color(0, 0, 0, 0.45f));
+        DrawTextureRect(
+            _materialPaletteTextures.Get(
+                _itemIconAtlas,
+                GetNeutralStoneRegion(),
+                variant,
+                MaterialPaletteTextureProfile.CompleteSurface),
+            destination,
+            tile: false);
+    }
+
+    private Rect2 GetNeutralStoneRegion()
+    {
+        var cell = ItemIcons.GetRegion(_itemIconAtlas, ItemIcon.Stone);
+        return new Rect2(
+            cell.Position + new Vector2(cell.Size.X * 0.05f, cell.Size.Y * 0.17f),
+            new Vector2(cell.Size.X * 0.78f, cell.Size.Y * 0.77f));
     }
 
     private void DrawIllustratedGoblinStructure(WorldObjectSnapshot worldObject)
     {
-        var sprite = (worldObject.Kind, _visibleLevel) switch
+        var relativeLevel = _visibleLevel - worldObject.Anchor.Z;
+        var sprite = (worldObject.Kind, relativeLevel) switch
         {
             (WorldObjectKind.GoblinHut, 0) => EnvironmentSprite.GoblinHutGround,
             (WorldObjectKind.GoblinHut, 1) => EnvironmentSprite.GoblinHutRoof,
@@ -1568,11 +1767,24 @@ public partial class WorldView : Node2D
         var rotation = worldObject.Kind == WorldObjectKind.GoblinFieldCamp
             ? 0f
             : RotationFor(worldObject.Orientation);
+        var region = EnvironmentSprites.GetRegion(_environmentAtlas, sprite.Value);
         DrawSetTransform(center, rotation);
-        DrawTextureRectRegion(
-            _environmentAtlas,
-            new Rect2(-size / 2f, size),
-            EnvironmentSprites.GetRegion(_environmentAtlas, sprite.Value));
+        var destination = new Rect2(-size / 2f, size);
+        if (worldObject.MaterialVariant == ResourceVariant.None)
+        {
+            DrawTextureRectRegion(_environmentAtlas, destination, region);
+        }
+        else
+        {
+            DrawTextureRect(
+                _materialPaletteTextures.Get(
+                    _environmentAtlas,
+                    region,
+                    worldObject.MaterialVariant,
+                    MaterialPaletteTextureProfile.IllustratedTimber),
+                destination,
+                tile: false);
+        }
         DrawSetTransform(Vector2.Zero);
         if (worldObject.Kind == WorldObjectKind.GoblinFieldCamp)
         {
@@ -1846,7 +2058,13 @@ public partial class WorldView : Node2D
                 DrawTextureRectRegion(
                     _undergroundFaunaAtlas,
                     new Rect2(center - (size / 2f), size),
-                    UndergroundSprites.GetCaveSpiderRegion(_undergroundFaunaAtlas));
+                    UndergroundSprites.GetCaveSpiderRegion(_undergroundFaunaAtlas),
+                    animal.Kind switch
+                    {
+                        AnimalKind.DeepCrawler => new Color("9d57bd"),
+                        AnimalKind.MagmaWyrm => new Color("ef6b32"),
+                        _ => Colors.White,
+                    });
                 if (animal.Activity == AnimalActivity.Threatening)
                 {
                     DrawArc(center, 9f, 0, Mathf.Tau, 20, new Color("e15b45"), 1.8f);
@@ -1969,9 +2187,12 @@ public partial class WorldView : Node2D
         foreach (var zone in _snapshot.StorageZones.Where(zone => zone.Position.Z == _visibleLevel))
         {
             var rect = CellRect(zone.Position.X, zone.Position.Y).Grow(-2f);
-            var zoneColor = zone.AcceptedResource == ResourceKind.Wood
-                ? new Color(0.34f, 0.22f, 0.12f, 0.68f)
-                : new Color(0.2f, 0.32f, 0.23f, 0.62f);
+            var zoneColor = zone.AcceptedResource switch
+            {
+                ResourceKind.Wood => new Color(0.34f, 0.22f, 0.12f, 0.68f),
+                ResourceKind.Water => new Color(0.28f, 0.18f, 0.1f, 0.92f),
+                _ => new Color(0.2f, 0.32f, 0.23f, 0.62f),
+            };
             DrawRect(rect, zoneColor);
             if (zone.StoredQuantity > 0 &&
                 _snapshot.GetVisibility(zone.Position, _engine.Map.Width) == CellVisibility.Visible)
@@ -1979,10 +2200,20 @@ public partial class WorldView : Node2D
                 var fillHeight = rect.Size.Y * zone.StoredQuantity / zone.Capacity;
                 DrawRect(
                     new Rect2(rect.Position.X, rect.End.Y - fillHeight, rect.Size.X, fillHeight),
-                    new Color(0.84f, 0.58f, 0.24f, 0.82f));
+                    zone.AcceptedResource == ResourceKind.Water
+                        ? new Color(0.25f, 0.65f, 0.82f, 0.86f)
+                        : new Color(0.84f, 0.58f, 0.24f, 0.82f));
             }
 
             DrawRect(rect, new Color("d8c379"), filled: false, width: 1.5f);
+            if (zone.AcceptedResource == ResourceKind.Water)
+            {
+                DrawLine(
+                    new Vector2(rect.Position.X, rect.GetCenter().Y),
+                    new Vector2(rect.End.X, rect.GetCenter().Y),
+                    new Color("d8c379"),
+                    1f);
+            }
         }
     }
 
@@ -1995,12 +2226,39 @@ public partial class WorldView : Node2D
         {
             var center = CellCenter(stack.Location.Position);
             var size = 11f + Math.Min(5f, stack.Quantity / 4f);
-            DrawCircle(center + new Vector2(1, 1), size * 0.46f, new Color(0, 0, 0, 0.46f));
-            DrawTextureRectRegion(
-                _itemIconAtlas,
-                new Rect2(center - new Vector2(size / 2, size / 2), new Vector2(size, size)),
-                ItemIcons.GetRegion(_itemIconAtlas, ItemIcons.ForResource(stack.Resource)),
-                ItemIcons.TintForResource(stack.Resource));
+            var icon = ItemIcons.ForResource(stack.Resource);
+            var isStoneCluster = icon == ItemIcon.Stone;
+            var dimensions = isStoneCluster
+                ? new Vector2(size, size * 0.86f)
+                : new Vector2(size, size);
+            var visualCenter = center + (isStoneCluster
+                ? new Vector2(0f, -0.5f)
+                : Vector2.Zero);
+            var destination = new Rect2(visualCenter - dimensions / 2f, dimensions);
+            DrawCircle(center + new Vector2(0.5f, 1f), size * 0.43f,
+                new Color(0, 0, 0, 0.46f));
+
+            if (isStoneCluster && stack.Variant != ResourceVariant.None)
+            {
+                DrawTextureRect(
+                    _materialPaletteTextures.Get(
+                        _itemIconAtlas,
+                        GetNeutralStoneRegion(),
+                        stack.Variant,
+                        MaterialPaletteTextureProfile.CompleteSurface),
+                    destination,
+                    tile: false);
+            }
+            else
+            {
+                DrawTextureRectRegion(
+                    _itemIconAtlas,
+                    destination,
+                    isStoneCluster
+                        ? GetNeutralStoneRegion()
+                        : ItemIcons.GetRegion(_itemIconAtlas, icon),
+                    ItemIcons.TintForResource(stack.Resource));
+            }
         }
     }
 
@@ -2348,7 +2606,7 @@ public partial class WorldView : Node2D
                 if (_visibleLevel < 0)
                 {
                     if (_engine.World.TryGetFluid(position, out var fluid, out _) &&
-                        fluid == CellFluidKind.Water)
+                        fluid != CellFluidKind.None)
                     {
                         return true;
                     }
@@ -2403,13 +2661,11 @@ public partial class WorldView : Node2D
         var woodenWalls = _snapshot.WorldObjects
             .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenWall &&
                 worldObject.Anchor.Z == _visibleLevel)
-            .Select(worldObject => worldObject.Anchor)
-            .ToHashSet();
+            .ToDictionary(worldObject => worldObject.Anchor);
         var stoneWalls = _snapshot.WorldObjects
             .Where(worldObject => worldObject.Kind == WorldObjectKind.StoneWall &&
                 worldObject.Anchor.Z == _visibleLevel)
-            .Select(worldObject => worldObject.Anchor)
-            .ToHashSet();
+            .ToDictionary(worldObject => worldObject.Anchor);
         var doorFrames = _snapshot.WorldObjects
             .Where(worldObject => worldObject.Kind is (WorldObjectKind.WoodenDoorFrame or
                     WorldObjectKind.StoneDoorFrame) &&
@@ -2418,11 +2674,7 @@ public partial class WorldView : Node2D
         var doorLeaves = _snapshot.WorldObjects
             .Where(worldObject => worldObject.Kind == WorldObjectKind.WoodenDoorLeaf &&
                 worldObject.Anchor.Z == _visibleLevel)
-            .ToDictionary(
-                worldObject => worldObject.Anchor,
-                worldObject => worldObject.Parts.Single().Kind is
-                    WorldObjectPartKind.OpenDoorLeaf or
-                    WorldObjectPartKind.AutomaticallyOpenedDoorLeaf);
+            .ToDictionary(worldObject => worldObject.Anchor);
         var wallTorches = _snapshot.WorldObjects
             .Where(worldObject => worldObject.Kind == WorldObjectKind.WallTorch &&
                 worldObject.Anchor.Z == _visibleLevel)
@@ -2434,7 +2686,16 @@ public partial class WorldView : Node2D
                 item.Part.Kind == WorldObjectPartKind.Walkway)
             .Select(item => item.Position)
             .ToHashSet();
-        var connectedCells = woodenWalls.Concat(stoneWalls).Concat(doorFrames.Keys).ToHashSet();
+        var basaltWalkwayCells = _snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.BasaltWalkway)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(item => item.Position.Z == _visibleLevel &&
+                item.Part.Kind == WorldObjectPartKind.Walkway)
+            .Select(item => item.Position)
+            .ToHashSet();
+        var connectedCells = woodenWalls.Keys.Concat(stoneWalls.Keys)
+            .Concat(doorFrames.Keys)
+            .ToHashSet();
         var structuralSolids = _snapshot.WorldObjects
             .Where(worldObject => worldObject.Kind is not (
                 WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall or
@@ -2461,6 +2722,7 @@ public partial class WorldView : Node2D
         cached = new StructureRenderCache(
             _snapshotTopologyVersion,
             walkwayCells,
+            basaltWalkwayCells,
             woodenWalls,
             stoneWalls,
             doorFrames,
@@ -2475,10 +2737,11 @@ public partial class WorldView : Node2D
     private sealed record StructureRenderCache(
         ulong TopologyVersion,
         HashSet<GridPosition> WalkwayCells,
-        HashSet<GridPosition> WoodenWalls,
-        HashSet<GridPosition> StoneWalls,
+        HashSet<GridPosition> BasaltWalkwayCells,
+        Dictionary<GridPosition, WorldObjectSnapshot> WoodenWalls,
+        Dictionary<GridPosition, WorldObjectSnapshot> StoneWalls,
         Dictionary<GridPosition, WorldObjectSnapshot> DoorFrames,
-        Dictionary<GridPosition, bool> DoorLeaves,
+        Dictionary<GridPosition, WorldObjectSnapshot> DoorLeaves,
         WorldObjectSnapshot[] WallTorches,
         HashSet<GridPosition> ConnectedCells,
         WallEnclosureAnalysis? Enclosure);

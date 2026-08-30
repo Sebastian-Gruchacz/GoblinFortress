@@ -16,6 +16,7 @@ public enum ResourceKind : byte
     Hide = 9,
     Equipment = 10,
     Materials = 11,
+    Water = 12,
 }
 
 public enum FoodKind : byte
@@ -55,6 +56,20 @@ public enum ResourceVariant : byte
     EquipmentHumanWoodenAxe = 21,
     EquipmentWoodenBucket = 22,
     EquipmentWoodenSpear = 23,
+    Basalt = 24,
+    Obsidian = 25,
+    CopperOre = 26,
+    SilverOre = 27,
+    GoldOre = 28,
+    Ruby = 29,
+    Emerald = 30,
+    Diamond = 31,
+    EquipmentReinforcedPickaxe = 32,
+    EquipmentWoodenBarrel = 33,
+    IronBar = 34,
+    CopperBar = 35,
+    SilverBar = 36,
+    GoldBar = 37,
 }
 
 public enum ItemLocationKind : byte
@@ -126,6 +141,7 @@ public enum StorageDeliveryState : byte
     NoAvailableHauler = 7,
     AssignedHaulerBusy = 8,
     WaitingForHauler = 9,
+    NoAvailableTool = 10,
 }
 
 public readonly record struct StorageDeliveryDiagnostic(

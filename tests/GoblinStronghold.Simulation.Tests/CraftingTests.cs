@@ -333,7 +333,8 @@ public sealed class CraftingTests
             engine.Map.GoblinSpawn,
             ResourceKind.Stone,
             quantity: 6,
-            storageZoneId: zone.Id);
+            storageZoneId: zone.Id,
+            equipSling: false);
 
         for (var index = 0; index < 1_000 &&
              engine.CreateSnapshot().Actors.Sum(actor => actor.PersonalStoneAmmo) == 0; index++)
@@ -347,6 +348,8 @@ public sealed class CraftingTests
             .Where(stack => stack.Resource == ResourceKind.Stone)
             .Sum(stack => stack.Quantity);
         Assert.True(carriedAmmo > 0);
+        Assert.All(snapshot.Actors, actor =>
+            Assert.False(actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling)));
         Assert.Equal(6, carriedAmmo + looseStone);
     }
 
@@ -515,12 +518,16 @@ public sealed class CraftingTests
         GridPosition position,
         ResourceKind resource,
         int quantity,
-        EntityId storageZoneId = default)
+        EntityId storageZoneId = default,
+        bool equipSling = true)
     {
         var save = JsonNode.Parse(engine.Save())!.AsObject();
         var actor = save["actors"]!.AsArray()[0]!.AsObject();
-        actor["equipment"] = actor["equipment"]!.GetValue<int>() |
-            (int)PersonalEquipment.PrimitiveSling;
+        if (equipSling)
+        {
+            actor["equipment"] = actor["equipment"]!.GetValue<int>() |
+                (int)PersonalEquipment.PrimitiveSling;
+        }
         var nextId = save["nextEntityId"]!.GetValue<ulong>();
         save["itemStacks"]!.AsArray().Add(CreateStack(
             nextId,

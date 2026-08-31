@@ -37,6 +37,19 @@ public enum SimulationCommandKind
     OrderAttackArea = 29,
     OrderHuntArea = 30,
     ConfigureCorpseDirectives = 31,
+    CreateLogisticsNetwork = 32,
+    ConfigureLogisticsHauler = 33,
+    ConfigureLogisticsSource = 34,
+    ConfigureStorageNetwork = 35,
+    CreateStorageArea = 36,
+    ConfigureStorageAreaNetwork = 37,
+    RenameLogisticsNetwork = 38,
+    RenameStorageArea = 39,
+    ConfigureStorageFilter = 40,
+    DeleteLogisticsNetwork = 41,
+    ResizeStorageArea = 42,
+    DissolveStorageArea = 43,
+    ConfigureStorageFilterResource = 44,
 }
 
 public enum ConstructionKind : byte
@@ -61,6 +74,9 @@ public enum ConstructionKind : byte
     Bloomery = 18,
     SmeltingFurnace = 19,
     CrucibleFurnace = 20,
+    WoodenBox = 21,
+    WoodenChest = 22,
+    WoodenBulkBin = 23,
 }
 
 public enum CraftingRecipeKind : byte
@@ -79,6 +95,9 @@ public enum CraftingRecipeKind : byte
     SmeltCopperBar = 12,
     SmeltSilverBar = 13,
     SmeltGoldBar = 14,
+    WoodenBox = 15,
+    WoodenChest = 16,
+    WoodenBulkBin = 17,
 }
 
 public readonly record struct SimulationCommand(
@@ -91,7 +110,8 @@ public readonly record struct SimulationCommand(
     GridPosition EndPosition,
     ConstructionKind Construction,
     ResourceKind Resource,
-    int Amount)
+    int Amount,
+    string Text = "")
 {
     public static IReadOnlyList<GridPosition> GetLinearCells(
         GridPosition start,
@@ -336,6 +356,44 @@ public readonly record struct SimulationCommand(
             position,
             position,
             ConstructionKind.WaterBarrel,
+            ResourceKind.Equipment,
+            Amount: 1);
+
+    public static SimulationCommand PlaceWoodenBox(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        PlaceStorageContainer(
+            executeAt, sequence, position, ConstructionKind.WoodenBox);
+
+    public static SimulationCommand PlaceWoodenChest(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        PlaceStorageContainer(
+            executeAt, sequence, position, ConstructionKind.WoodenChest);
+
+    public static SimulationCommand PlaceWoodenBulkBin(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        PlaceStorageContainer(
+            executeAt, sequence, position, ConstructionKind.WoodenBulkBin);
+
+    private static SimulationCommand PlaceStorageContainer(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position,
+        ConstructionKind construction) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            construction,
             ResourceKind.Equipment,
             Amount: 1);
 
@@ -887,6 +945,230 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Stone,
             Amount: (int)filter);
+
+    public static SimulationCommand CreateLogisticsNetwork(
+        SimulationTick executeAt,
+        ulong sequence) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.CreateLogisticsNetwork,
+            EntityId.None,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ConfigureLogisticsHauler(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId logisticsNetwork,
+        EntityId actor,
+        bool assigned) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureLogisticsHauler,
+            actor,
+            logisticsNetwork,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: assigned ? 1 : 0);
+
+    public static SimulationCommand ConfigureLogisticsSource(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId logisticsNetwork,
+        EntityId storageZone,
+        bool included) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureLogisticsSource,
+            storageZone,
+            logisticsNetwork,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: included ? 1 : 0);
+
+    public static SimulationCommand ConfigureStorageNetwork(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZone,
+        EntityId logisticsNetwork) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStorageNetwork,
+            logisticsNetwork,
+            storageZone,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand CreateStorageArea(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end,
+        EntityId logisticsNetwork = default) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.CreateStorageArea,
+            logisticsNetwork,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ConfigureStorageAreaNetwork(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageArea,
+        EntityId logisticsNetwork) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStorageAreaNetwork,
+            logisticsNetwork,
+            storageArea,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand RenameLogisticsNetwork(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId logisticsNetwork,
+        string name) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.RenameLogisticsNetwork,
+            EntityId.None,
+            logisticsNetwork,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0,
+            Text: name);
+
+    public static SimulationCommand RenameStorageArea(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageArea,
+        string name) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.RenameStorageArea,
+            EntityId.None,
+            storageArea,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0,
+            Text: name);
+
+    public static SimulationCommand ConfigureStorageFilter(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZone,
+        ResourceKind acceptedResource) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStorageFilter,
+            EntityId.None,
+            storageZone,
+            default,
+            default,
+            default,
+            acceptedResource,
+            Amount: 0);
+
+    public static SimulationCommand DeleteLogisticsNetwork(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId logisticsNetwork) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DeleteLogisticsNetwork,
+            EntityId.None,
+            logisticsNetwork,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ResizeStorageArea(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageArea,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ResizeStorageArea,
+            EntityId.None,
+            storageArea,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand DissolveStorageArea(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageArea) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DissolveStorageArea,
+            EntityId.None,
+            storageArea,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand ConfigureStorageFilterResource(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZone,
+        ResourceKind resource,
+        bool included) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureStorageFilterResource,
+            EntityId.None,
+            storageZone,
+            default,
+            default,
+            default,
+            resource,
+            Amount: included ? 1 : 0);
 
     public static SimulationCommand ConfigureResourcePriority(
         SimulationTick executeAt,

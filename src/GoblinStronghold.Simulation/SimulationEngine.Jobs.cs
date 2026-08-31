@@ -87,7 +87,8 @@ public sealed partial class SimulationEngine
             stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             if (actor.JobKind == ActorJobKind.None)
             {
-                var needsFood = actor.Hunger >= Definitions.FoodSeekThreshold;
+                var needsFood = actor.Hunger >= Definitions.FoodSeekThreshold &&
+                    actor.PersonalFood == 0;
                 var needsWater = actor.Thirst >= Definitions.DrinkThreshold && actor.PersonalWater == 0;
                 var shouldPlanBackgroundWork = IsBackgroundPlanningTick(actor);
                 var reserveForExploration = shouldPlanBackgroundWork &&
@@ -184,6 +185,12 @@ public sealed partial class SimulationEngine
                 else if (TryPlanEquipmentResupply(actor, reservedSourceQuantities))
                 {
                     // Finished gear remains physical until a goblin collects a missing item.
+                }
+                else if (actor.PersonalStoneAmmo == 0 &&
+                         actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling) &&
+                         TryPlanStoneAmmoResupply(actor, reservedSourceQuantities))
+                {
+                    // An empty sling is replenished before ordinary settlement work.
                 }
                 else if (HasAssignedStorageDuty(actor.Id) &&
                          TryPlanHaulCollection(
@@ -474,6 +481,45 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanRaidMarch(ActorState actor)
     {
+        var combatTarget = GetRaidCombatTarget(actor);
+        if (combatTarget is { } villager)
+        {
+            var distance = Distance(actor.Position, villager.Position);
+            var hasSling = actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling);
+            var rangedRange = hasSling
+                ? Definitions.RangedCombat.SlingRange
+                : Definitions.RangedCombat.ThrownStoneRange;
+            if (distance <= 1 || actor.PersonalStoneAmmo > 0 && distance <= rangedRange)
+            {
+                return true;
+            }
+
+            var approachPositions = World.GetCardinalWorldNeighbors(villager.Position)
+                .Where(World.IsTerrainTraversable)
+                .ToHashSet();
+            var approachRoute = FindActorPathToNearest(actor, approachPositions) ??
+                World.GetCardinalWorldNeighbors(actor.Position)
+                    .Where(World.IsTerrainTraversable)
+                    .OrderBy(position => Distance(position, villager.Position))
+                    .ThenBy(position => position.Y)
+                    .ThenBy(position => position.X)
+                    .Take(1)
+                    .ToArray();
+            if (approachRoute is null)
+            {
+                return true;
+            }
+
+            var approachDestination = approachRoute.Count == 0
+                ? actor.Position
+                : approachRoute[^1];
+            actor.JobKind = ActorJobKind.Move;
+            actor.JobPhase = ActorJobPhase.Traveling;
+            actor.JobTarget = approachDestination;
+            actor.RemainingRoute.AddRange(approachRoute);
+            return true;
+        }
+
         if (actor.Position == _raidTarget)
         {
             return true;
@@ -782,8 +828,7 @@ public sealed partial class SimulationEngine
                 : ResourceKind.Stone;
             if (!_storageZones.Values.Any(zone =>
                     GetStoredQuantity(zone.Id) < zone.Capacity &&
-                    (zone.AcceptedResource == ResourceKind.Any ||
-                     zone.AcceptedResource == resource)))
+                    ZoneCategoryAccepts(zone, resource)))
             {
                 return false;
             }
@@ -1040,6 +1085,7 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> destinationReservations)
     {
         if (actor.Hunger < Definitions.FoodSeekThreshold ||
+            actor.PersonalFood > 0 ||
             actor.CarriedStackId != EntityId.None ||
             actor.JobKind is ActorJobKind.None or ActorJobKind.Eat or ActorJobKind.Resupply)
         {
@@ -1676,8 +1722,7 @@ public sealed partial class SimulationEngine
     {
         var isPreparingForRaid = _raidPhase == GoblinRaidPhase.Preparing &&
             _raidPartyIds.Contains(actor.Id);
-        if (!isPreparingForRaid &&
-            !actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling))
+        if (!isPreparingForRaid && IsJuvenile(actor))
         {
             return false;
         }
@@ -1689,12 +1734,15 @@ public sealed partial class SimulationEngine
             return false;
         }
 
+        var settlementReserve = isPreparingForRaid ? 0 : 1;
         var best = FindPersonalSupplySource(
             actor,
             ResourceKind.Stone,
             itemReservations,
             requiredPosition: null,
-            storageOnly: true);
+            storageOnly: true,
+            filter: stack => stack.Quantity -
+                itemReservations.GetValueOrDefault(stack.Id) > settlementReserve);
         if (best is not { } source)
         {
             return false;
@@ -1702,7 +1750,8 @@ public sealed partial class SimulationEngine
 
         var quantity = Math.Min(
             missing,
-            source.Stack.Quantity - itemReservations.GetValueOrDefault(source.Stack.Id));
+            source.Stack.Quantity - itemReservations.GetValueOrDefault(source.Stack.Id) -
+                settlementReserve);
         actor.JobKind = ActorJobKind.Resupply;
         actor.JobStage = ActorJobStage.ProvisioningAmmo;
         actor.SourceStackId = source.Stack.Id;
@@ -3574,7 +3623,7 @@ public sealed partial class SimulationEngine
                          IsSourceAllowedForZone(source, zone) &&
                          CanStoreStack(zone, source, 1) &&
                          (requiredDestination is null || zone.Id == requiredDestination.Value) &&
-                         (!assignedDestinationsOnly || zone.AssignedHaulerId == actor.Id))
+                         (!assignedDestinationsOnly || IsExplicitHaulingDuty(actor, zone)))
                 .Where(zone =>
                 {
                     var stored = GetStoredQuantity(zone.Id);
@@ -3705,7 +3754,7 @@ public sealed partial class SimulationEngine
                 IsHaulerAllowedForZone(actor, zone) &&
                 zone.SlotPolicy.Supports(StorageRequirement.SealedLiquid) &&
                 (requiredDestination is null || zone.Id == requiredDestination.Value) &&
-                (!assignedDestinationsOnly || zone.AssignedHaulerId == actor.Id))
+                (!assignedDestinationsOnly || IsExplicitHaulingDuty(actor, zone)))
             .Select(zone => new
             {
                 Zone = zone,
@@ -3738,7 +3787,10 @@ public sealed partial class SimulationEngine
     }
 
     private bool HasAssignedStorageDuty(EntityId actorId) =>
-        _storageZones.Values.Any(zone => zone.AssignedHaulerId == actorId);
+        _storageZones.Values.Any(zone =>
+            zone.AssignedHaulerId == actorId ||
+            zone.LogisticsNetworkId != EntityId.None &&
+            _logisticsNetworks[zone.LogisticsNetworkId].AssignedHaulerIds.Contains(actorId));
 
     private bool IsBackgroundPlanningTick(ActorState actor)
     {
@@ -4079,13 +4131,43 @@ public sealed partial class SimulationEngine
         return true;
     }
 
-    private static bool IsHaulerAllowedForZone(ActorState actor, StorageZoneState zone) =>
-        zone.AssignedHaulerId == EntityId.None || zone.AssignedHaulerId == actor.Id;
+    private bool IsHaulerAllowedForZone(ActorState actor, StorageZoneState zone)
+    {
+        if (zone.AssignedHaulerId != EntityId.None)
+        {
+            return zone.AssignedHaulerId == actor.Id;
+        }
 
-    private static bool IsSourceAllowedForZone(ItemStackState source, StorageZoneState zone) =>
-        zone.SourceStorageZoneId == EntityId.None ||
-        (source.Location.Kind == ItemLocationKind.StorageZone &&
-         source.Location.OwnerId == zone.SourceStorageZoneId);
+        if (zone.LogisticsNetworkId != EntityId.None)
+        {
+            return _logisticsNetworks[zone.LogisticsNetworkId]
+                .AssignedHaulerIds.Contains(actor.Id);
+        }
+
+        return !_logisticsNetworks.Values.Any(network =>
+            network.Id != EntityId.None && network.AssignedHaulerIds.Contains(actor.Id));
+    }
+
+    private bool IsExplicitHaulingDuty(ActorState actor, StorageZoneState zone) =>
+        zone.AssignedHaulerId == actor.Id ||
+        zone.LogisticsNetworkId != EntityId.None &&
+        _logisticsNetworks[zone.LogisticsNetworkId].AssignedHaulerIds.Contains(actor.Id);
+
+    private bool IsSourceAllowedForZone(ItemStackState source, StorageZoneState zone)
+    {
+        if (zone.SourceStorageZoneId != EntityId.None)
+        {
+            return source.Location.Kind == ItemLocationKind.StorageZone &&
+                source.Location.OwnerId == zone.SourceStorageZoneId;
+        }
+        if (zone.LogisticsNetworkId == EntityId.None ||
+            source.Location.Kind == ItemLocationKind.Ground)
+        {
+            return true;
+        }
+        return _logisticsNetworks[zone.LogisticsNetworkId]
+            .SourceStorageZoneIds.Contains(source.Location.OwnerId);
+    }
 
     private void BeginJobLeg(
         ActorState actor,

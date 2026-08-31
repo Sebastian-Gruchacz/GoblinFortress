@@ -70,6 +70,9 @@ public enum ResourceVariant : byte
     CopperBar = 35,
     SilverBar = 36,
     GoldBar = 37,
+    EquipmentWoodenBox = 38,
+    EquipmentWoodenChest = 39,
+    EquipmentWoodenBulkBin = 40,
 }
 
 public enum ItemLocationKind : byte
@@ -100,6 +103,35 @@ public enum StorageRequirement : byte
 {
     SolidGoods = 1,
     SealedLiquid = 2,
+}
+
+public enum StorageProviderKind : byte
+{
+    OpenPile = 0,
+    WaterBarrel = 1,
+    WoodenBox = 2,
+    WoodenChest = 3,
+    WoodenBulkBin = 4,
+}
+
+[Flags]
+public enum StorageResourceFilter : ushort
+{
+    None = 0,
+    Food = 1 << 0,
+    Wood = 1 << 1,
+    Reeds = 1 << 2,
+    Stone = 1 << 3,
+    Bone = 1 << 4,
+    Vegetation = 1 << 5,
+    Coal = 1 << 6,
+    Ore = 1 << 7,
+    Hide = 1 << 8,
+    Equipment = 1 << 9,
+    Materials = 1 << 10,
+    Water = 1 << 11,
+    SolidGoods = Food | Wood | Reeds | Stone | Bone | Coal | Ore | Hide | Equipment | Materials,
+    All = SolidGoods | Vegetation | Water,
 }
 
 public readonly record struct StorageSlotPolicy(
@@ -211,4 +243,25 @@ public readonly record struct StorageZoneSnapshot(
     int UsedTypeSlots,
     MineralStorageFilter MineralFilter,
     bool SeparatesItemTypes,
-    StorageCapability Capabilities);
+    StorageCapability Capabilities,
+    EntityId LogisticsNetworkId,
+    EntityId StorageAreaId,
+    StorageProviderKind ProviderKind,
+    StorageResourceFilter ResourceFilter);
+
+public readonly record struct StorageAreaSnapshot(
+    EntityId Id,
+    string Name,
+    IReadOnlyList<GridPosition> Footprint,
+    EntityId LogisticsNetworkId,
+    IReadOnlyList<EntityId> StorageZoneIds,
+    int Capacity,
+    int StoredQuantity);
+
+public readonly record struct LogisticsNetworkSnapshot(
+    EntityId Id,
+    string Name,
+    bool IsDefault,
+    IReadOnlyList<EntityId> AssignedHaulerIds,
+    IReadOnlyList<EntityId> SourceStorageZoneIds,
+    IReadOnlyList<EntityId> DestinationStorageZoneIds);

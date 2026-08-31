@@ -507,6 +507,8 @@ public sealed class SimulationSnapshot
         VillageLootContainerSnapshot[] villageLootContainers,
         ItemStackSnapshot[] itemStacks,
         StorageZoneSnapshot[] storageZones,
+        StorageAreaSnapshot[] storageAreas,
+        LogisticsNetworkSnapshot[] logisticsNetworks,
         ResourcePrioritySnapshot[] resourcePriorities,
         ResourceInventorySnapshot[] resourceInventory,
         ConstructionSiteSnapshot[] constructionSites,
@@ -549,6 +551,8 @@ public sealed class SimulationSnapshot
             villageLootContainers);
         ItemStacks = new ReadOnlyCollection<ItemStackSnapshot>(itemStacks);
         StorageZones = new ReadOnlyCollection<StorageZoneSnapshot>(storageZones);
+        StorageAreas = new ReadOnlyCollection<StorageAreaSnapshot>(storageAreas);
+        LogisticsNetworks = new ReadOnlyCollection<LogisticsNetworkSnapshot>(logisticsNetworks);
         ResourcePriorities = new ReadOnlyCollection<ResourcePrioritySnapshot>(resourcePriorities);
         ResourceInventory = new ReadOnlyCollection<ResourceInventorySnapshot>(resourceInventory);
         ConstructionSites = new ReadOnlyCollection<ConstructionSiteSnapshot>(constructionSites);
@@ -603,6 +607,10 @@ public sealed class SimulationSnapshot
     public IReadOnlyList<ItemStackSnapshot> ItemStacks { get; }
 
     public IReadOnlyList<StorageZoneSnapshot> StorageZones { get; }
+
+    public IReadOnlyList<StorageAreaSnapshot> StorageAreas { get; }
+
+    public IReadOnlyList<LogisticsNetworkSnapshot> LogisticsNetworks { get; }
 
     public IReadOnlyList<ResourcePrioritySnapshot> ResourcePriorities { get; }
 

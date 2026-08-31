@@ -23,10 +23,24 @@ if (-not $godotPath) {
     throw 'Godot .NET 4.7.2 was not found. Set GODOT4 to the editor executable path.'
 }
 
+function Invoke-GodotImport {
+    $importProcess = Start-Process -FilePath $godotPath -ArgumentList @(
+        '--headless',
+        '--path',
+        $projectPath,
+        '--import'
+    ) -Wait -PassThru -NoNewWindow
+    if ($importProcess.ExitCode -ne 0) {
+        throw "Godot asset import failed with exit code $($importProcess.ExitCode)."
+    }
+}
+
 dotnet build (Join-Path $projectPath 'GoblinStronghold.Godot.csproj') --no-restore -c Debug
 if ($LASTEXITCODE -ne 0) {
     throw 'The asset baker build failed.'
 }
+
+Invoke-GodotImport
 
 foreach ($recipePath in $Recipe) {
     $bakeProcess = Start-Process -FilePath $godotPath -ArgumentList @(
@@ -41,3 +55,7 @@ foreach ($recipePath in $Recipe) {
         throw "Asset baking failed for '$recipePath' with exit code $($bakeProcess.ExitCode)."
     }
 }
+
+# Baking rewrites generated PNG files. Import them again so command-line exports
+# package the current textures instead of stale or missing .ctex cache entries.
+Invoke-GodotImport

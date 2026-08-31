@@ -35,6 +35,9 @@ public partial class Main : Node
     private GridContainer _statisticsMenuGrid = null!;
     private Texture2D _iconAtlas = null!;
     private Texture2D _itemIconAtlas = null!;
+    private Texture2D _treePartAtlas = null!;
+    private Texture2D? _foodIconAtlas;
+    private readonly MaterialPaletteTextureCache _resourceThumbnailTextures = new();
     private Texture2D _pickaxeIcon = null!;
     private Texture2D _commandingHandIcon = null!;
     private Window _goblinDetails = null!;
@@ -83,6 +86,11 @@ public partial class Main : Node
     private VBoxContainer _plannerRows = null!;
     private Label _plannerSummary = null!;
     private string _plannerSignature = string.Empty;
+    private Window _logisticsWindow = null!;
+    private VBoxContainer _logisticsRows = null!;
+    private Label _logisticsSummary = null!;
+    private string _logisticsSignature = string.Empty;
+    private EntityId _resizingStorageAreaId = EntityId.None;
     private EntityId _replacingWorkOrderId = EntityId.None;
     private StoragePriority? _replacementWorkPriority;
     private bool _replacementWorkSuspended;
@@ -107,6 +115,8 @@ public partial class Main : Node
     private float _rightDragDistance;
     private Window _storageDetails = null!;
     private Label _storageSummary = null!;
+    private Label _storageContentsLabel = null!;
+    private GridContainer _storageContentsGrid = null!;
     private Control _storageMineralFilters = null!;
     private CheckButton _storageSandstone = null!;
     private CheckButton _storageGranite = null!;
@@ -175,6 +185,10 @@ public partial class Main : Node
         EquipmentStorage,
         MaterialsStorage,
         WaterBarrel,
+        WoodenBox,
+        WoodenChest,
+        WoodenBulkBin,
+        StorageArea,
         FieldCamp,
         WoodenWall,
         StoneWall,
@@ -283,6 +297,8 @@ public partial class Main : Node
         _cameraAngleButton = GetNode<Button>("Interface/RightHud/CameraPanel/Controls/Angle");
         _iconAtlas = UiIcons.LoadAtlas();
         _itemIconAtlas = ItemIcons.LoadAtlas();
+        _treePartAtlas = TreePartSprites.LoadAtlas();
+        _foodIconAtlas = ResourceThumbnails.TryLoadFoodAtlas();
         _pickaxeIcon = GD.Load<Texture2D>("res://Assets/UI/primitive-pickaxe-v1.svg");
         _commandingHandIcon = GD.Load<Texture2D>("res://Assets/UI/commanding-hand-v1.svg");
         _goblinDetails = GetNode<Window>("GoblinDetails");
@@ -292,12 +308,18 @@ public partial class Main : Node
         _storedResourcesSummary = GetNode<Label>("StoredResourcesWindow/Margin/Content/Summary");
         _storedResourcesDetailed = GetNode<CheckButton>(
             "StoredResourcesWindow/Margin/Content/Detailed");
-        _storedResourcesGrid = GetNode<GridContainer>("StoredResourcesWindow/Margin/Content/Grid");
+        _storedResourcesGrid = GetNodeOrNull<GridContainer>(
+            "StoredResourcesWindow/Margin/Content/Scroll/Grid") ??
+            GetNode<GridContainer>("StoredResourcesWindow/Margin/Content/Grid");
+        _storedResourcesGrid.Columns = 3;
         _looseResourcesWindow = GetNode<Window>("LooseResourcesWindow");
         _looseResourcesSummary = GetNode<Label>("LooseResourcesWindow/Margin/Content/Summary");
         _looseResourcesDetailed = GetNode<CheckButton>(
             "LooseResourcesWindow/Margin/Content/Detailed");
-        _looseResourcesGrid = GetNode<GridContainer>("LooseResourcesWindow/Margin/Content/Grid");
+        _looseResourcesGrid = GetNodeOrNull<GridContainer>(
+            "LooseResourcesWindow/Margin/Content/Scroll/Grid") ??
+            GetNode<GridContainer>("LooseResourcesWindow/Margin/Content/Grid");
+        _looseResourcesGrid.Columns = 3;
         _goblinRosterWindow = GetNode<Window>("GoblinRosterWindow");
         _goblinRosterRows = GetNode<VBoxContainer>("GoblinRosterWindow/Scroll/Rows");
         _statisticsWindow = GetNode<Window>("StatisticsWindow");
@@ -316,6 +338,12 @@ public partial class Main : Node
             "Planer plemienia\nPriorytety, obszary i stan zleceń",
             ShowPlanner,
             GameShortcutId.ShowPlanner);
+        CreateTextureTileButton(
+            _managementMenuGrid,
+            _managementMenu,
+            CreateStorageIcon(ItemIcon.Cargo),
+            "Logistyka\nSieci, tragarze, źródła, obszary i filtry pojemników",
+            ShowLogistics);
         CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateStorageIcon(ItemIcon.Food),
             "Skład żywności\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.FoodStorage),
             GameShortcutId.BuildFoodStorage);
@@ -338,6 +366,22 @@ public partial class Main : Node
             ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.WoodenBucket),
             "Beczka na wodę\nWymaga gotowej beczki z warsztatu • pojemność 32",
             () => SelectBuildMode((long)BuildMode.WaterBarrel));
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateStorageIcon(ItemIcon.Cargo),
+            "Drewniana skrzynka\n4 typy × 8 • wymaga gotowej skrzynki z warsztatu",
+            () => SelectBuildMode((long)BuildMode.WoodenBox));
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateStorageIcon(ItemIcon.Cargo),
+            "Drewniana skrzynia\n8 typów × 8 • wymaga gotowej skrzyni z warsztatu",
+            () => SelectBuildMode((long)BuildMode.WoodenChest));
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateStorageIcon(ItemIcon.Stone),
+            "Zasobnik masowy\n1 typ × 64 • wymaga gotowego zasobnika z warsztatu",
+            () => SelectBuildMode((long)BuildMode.WoodenBulkBin));
+        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
+            CreateStorageIcon(ItemIcon.Cargo),
+            "Obszar magazynowy\nPrzeciągnij do 256 pól • pojemność zapewniają ustawione pojemniki",
+            () => SelectBuildMode((long)BuildMode.StorageArea));
         CreateTileButton(_buildMenuGrid, _buildMenu, UiIcon.Walkway,
             "Pomost\nKoszt: 1 drewno za segment", () => SelectBuildMode((long)BuildMode.Walkway),
             GameShortcutId.BuildWalkway);
@@ -488,6 +532,30 @@ public partial class Main : Node
         };
         _storageDetails = GetNode<Window>("StorageDetails");
         _storageSummary = GetNode<Label>("StorageDetails/Margin/Controls/Summary");
+        var storageControls = GetNode<VBoxContainer>("StorageDetails/Margin/Controls");
+        _storageContentsLabel = storageControls.GetNodeOrNull<Label>("ContentsLabel") ??
+            new Label
+            {
+                Name = "ContentsLabel",
+                Text = "Zawartość: pusty",
+            };
+        if (_storageContentsLabel.GetParent() is null)
+        {
+            storageControls.AddChild(_storageContentsLabel);
+            storageControls.MoveChild(_storageContentsLabel, _storageSummary.GetIndex() + 1);
+        }
+
+        _storageContentsGrid = storageControls.GetNodeOrNull<GridContainer>("ContentsGrid") ??
+            new GridContainer
+            {
+                Name = "ContentsGrid",
+                Columns = 3,
+            };
+        if (_storageContentsGrid.GetParent() is null)
+        {
+            storageControls.AddChild(_storageContentsGrid);
+            storageControls.MoveChild(_storageContentsGrid, _storageContentsLabel.GetIndex() + 1);
+        }
         _storageMineralFilters = GetNode<Control>(
             "StorageDetails/Margin/Controls/MineralFilters");
         _storageSandstone = GetNode<CheckButton>(
@@ -605,6 +673,7 @@ public partial class Main : Node
             GetToolbarButton("Move"),
             "Rozkazy wybranych goblinów • M/A/H/P");
         CreatePlannerWindow();
+        CreateLogisticsWindow();
         CreateRaidWindow();
         CreateWorkshopWindow();
         CreateWorldContextMenu();
@@ -615,6 +684,8 @@ public partial class Main : Node
         UpdateSpeedButtons();
         ShowMainMenu();
     }
+
+    public override void _ExitTree() => _resourceThumbnailTextures.Dispose();
 
     public override void _Process(double delta)
     {
@@ -2397,6 +2468,7 @@ public partial class Main : Node
         CancelWorkMode(clearInspector: false);
         _unitOrderMode = UnitOrderMode.None;
         _worldView.SetRaidTargetPreview(null, 0);
+        _resizingStorageAreaId = EntityId.None;
         _buildMode = mode;
         _isDraggingLinearBuild = false;
         _worldView.SetConstructionPreview([]);
@@ -2409,6 +2481,10 @@ public partial class Main : Node
             BuildMode.EquipmentStorage => "Budowa składu sprzętu: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
             BuildMode.MaterialsStorage => "Budowa składu materiałów: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
             BuildMode.WaterBarrel => "Ustaw beczkę na wodę: wskaż odkryte pole LPM • gotowa beczka zostanie przyniesiona z warsztatu lub składu • PPM lub Esc anuluje",
+            BuildMode.WoodenBox => "Ustaw skrzynkę w obszarze magazynowym: 4 typy po 8 sztuk • gotowa skrzynka zostanie dostarczona • PPM lub Esc anuluje",
+            BuildMode.WoodenChest => "Ustaw skrzynię w obszarze magazynowym: 8 typów po 8 sztuk • gotowa skrzynia zostanie dostarczona • PPM lub Esc anuluje",
+            BuildMode.WoodenBulkBin => "Ustaw zasobnik masowy: jeden typ do 64 sztuk • gotowy zasobnik zostanie dostarczony • PPM lub Esc anuluje",
+            BuildMode.StorageArea => "Wyznacz obszar magazynowy: przeciągnij prostokąt do 256 odkrytych pól • sam obszar nie daje pojemności • PPM lub Esc anuluje",
             BuildMode.Walkway => "Budowa pomostu: przeciągnij LPM od początku do końca • 1 drewno/segment • drewno nie może przykrywać lawy • PPM lub Esc anuluje",
             BuildMode.BasaltWalkway => "Budowa bazaltowego pomostu: przeciągnij LPM od początku do końca • 1 bazalt/segment • odporny na lawę • PPM lub Esc anuluje",
             BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu • PPM lub Esc anuluje",
@@ -2473,7 +2549,8 @@ public partial class Main : Node
 
         if (_buildMode is BuildMode.FoodStorage or BuildMode.WoodStorage or
             BuildMode.StoneStorage or BuildMode.EquipmentStorage or BuildMode.MaterialsStorage or
-            BuildMode.WaterBarrel)
+            BuildMode.WaterBarrel or BuildMode.WoodenBox or BuildMode.WoodenChest or
+            BuildMode.WoodenBulkBin)
         {
             var resource = _buildMode switch
             {
@@ -2483,11 +2560,21 @@ public partial class Main : Node
                 BuildMode.EquipmentStorage => ResourceKind.Equipment,
                 BuildMode.MaterialsStorage => ResourceKind.Materials,
                 BuildMode.WaterBarrel => ResourceKind.Water,
+                BuildMode.WoodenBox or BuildMode.WoodenChest or BuildMode.WoodenBulkBin =>
+                    ResourceKind.Any,
                 _ => throw new InvalidOperationException(),
             };
             CreateStorage(
                 cell,
-                resource);
+                resource,
+                _buildMode switch
+                {
+                    BuildMode.WaterBarrel => StorageProviderKind.WaterBarrel,
+                    BuildMode.WoodenBox => StorageProviderKind.WoodenBox,
+                    BuildMode.WoodenChest => StorageProviderKind.WoodenChest,
+                    BuildMode.WoodenBulkBin => StorageProviderKind.WoodenBulkBin,
+                    _ => StorageProviderKind.OpenPile,
+                });
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -2588,7 +2675,15 @@ public partial class Main : Node
             return;
         }
 
-        var cells = SimulationCommand.GetLinearCells(_linearBuildStart, end);
+        var cells = _buildMode == BuildMode.StorageArea
+            ? GetAreaCells(_linearBuildStart, end)
+            : SimulationCommand.GetLinearCells(_linearBuildStart, end);
+        if (_buildMode == BuildMode.StorageArea && cells.Count > 256)
+        {
+            _inspector.Text = "Obszar magazynowy może obejmować najwyżej 256 pól.";
+            UpdateBuildPreview(screenPosition);
+            return;
+        }
         if (!IsLinearConstructionPlacementValid(cells))
         {
             _inspector.Text = _buildMode switch
@@ -2597,6 +2692,10 @@ public partial class Main : Node
                     "Drewniany pomost nie może przebiegać nad lawą. Użyj pomostu bazaltowego.",
                 BuildMode.Walkway or BuildMode.BasaltWalkway =>
                     "Pomost musi mieścić się w wolnej przestrzeni i stykać odkryte krawędzie terenu.",
+                BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
+                    "Nowy obszar nie może nachodzić na inny ani pozostawić istniejącego pojemnika poza granicą.",
+                BuildMode.StorageArea =>
+                    "Obszar magazynowy musi obejmować odkryte pola i nie może nachodzić na inny obszar.",
                 _ => "Cała liniowa konstrukcja musi przebiegać przez odkryty teren.",
             };
             UpdateBuildPreview(screenPosition);
@@ -2611,6 +2710,15 @@ public partial class Main : Node
                 _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
             BuildMode.BasaltWalkway => SimulationCommand.BuildBasaltWalkway(
                 _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
+            BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
+                SimulationCommand.ResizeStorageArea(
+                    _engine.CurrentTick.Next(),
+                    _commandSequence++,
+                    _resizingStorageAreaId,
+                    _linearBuildStart,
+                    end),
+            BuildMode.StorageArea => SimulationCommand.CreateStorageArea(
+                _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
             _ => SimulationCommand.BuildWalkway(
                 _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
         };
@@ -2623,6 +2731,10 @@ public partial class Main : Node
                 $"Zlecono kamienny mur: {cells.Count} segmentów • koszt {cells.Count * 2} jednostek kamienia",
             BuildMode.BasaltWalkway =>
                 $"Zlecono bazaltowy pomost: {cells.Count} segmentów • koszt {cells.Count} bazaltu",
+            BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
+                $"Zlecono zmianę rozmiaru obszaru {_resizingStorageAreaId}: {cells.Count} pól",
+            BuildMode.StorageArea =>
+                $"Wyznaczono obszar magazynowy: {cells.Count} pól • pojemność 0 do czasu ustawienia pojemników",
             _ => $"Zlecono pomost: {cells.Count} segmentów • koszt {cells.Count} drewna",
         };
         UpdateBuildPreview(screenPosition);
@@ -2643,6 +2755,8 @@ public partial class Main : Node
                 BuildMode.StoneWall
                 when _isDraggingLinearBuild =>
                 SimulationCommand.GetLinearCells(_linearBuildStart, cell),
+            BuildMode.StorageArea when _isDraggingLinearBuild =>
+                GetAreaCells(_linearBuildStart, cell),
             BuildMode.FieldCamp => GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
             BuildMode.GoblinHut => GetAreaCells(cell, cell with { X = cell.X + 2, Y = cell.Y + 2 }),
             _ => new[] { cell },
@@ -2660,6 +2774,10 @@ public partial class Main : Node
                     $"Bazaltowy pomost: {cells.Count} segmentów • koszt {cells.Count} bazaltu • odporny na lawę",
                 BuildMode.Walkway when ContainsLava(cells) =>
                     "Pomost niedostępny: lawa spali drewnianą konstrukcję.",
+                BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
+                    $"Nowy rozmiar obszaru {_resizingStorageAreaId}: {cells.Count}/256 pól • wszystkie pojemniki muszą pozostać wewnątrz",
+                BuildMode.StorageArea =>
+                    $"Obszar magazynowy: {cells.Count}/256 pól • pojemność zapewnią pojemniki",
                 _ => $"Pomost: {cells.Count} segmentów • koszt {cells.Count} drewna",
             };
         }
@@ -2669,6 +2787,7 @@ public partial class Main : Node
     {
         var wasActive = _buildMode != BuildMode.None;
         _buildMode = BuildMode.None;
+        _resizingStorageAreaId = EntityId.None;
         _isDraggingLinearBuild = false;
         _worldView.SetConstructionPreview([]);
         UpdateActiveToolCursor();
@@ -2679,10 +2798,34 @@ public partial class Main : Node
     }
 
     private bool IsConstructionPreviewValid(IReadOnlyList<GridPosition> cells) =>
-        cells.Count > 0 && (_buildMode is BuildMode.Walkway or BuildMode.BasaltWalkway or
-            BuildMode.WoodenWall or BuildMode.StoneWall
-            ? IsLinearConstructionPlacementValid(cells)
-            : cells.All(IsDiscoveredConstructionCell));
+        cells.Count > 0 && (_buildMode == BuildMode.StorageArea
+            ? IsStorageAreaPreviewValid(cells)
+            : _buildMode is BuildMode.Walkway or BuildMode.BasaltWalkway or
+                BuildMode.WoodenWall or BuildMode.StoneWall
+                ? IsLinearConstructionPlacementValid(cells)
+                : cells.All(IsDiscoveredConstructionCell));
+
+    private bool IsStorageAreaPreviewValid(IReadOnlyList<GridPosition> cells)
+    {
+        if (cells.Count > 256 || !cells.All(IsDiscoveredConstructionCell) ||
+            cells.Any(cell => _latestSnapshot.StorageAreas.Any(area =>
+                area.Id != _resizingStorageAreaId && area.Footprint.Contains(cell))))
+        {
+            return false;
+        }
+
+        if (_resizingStorageAreaId == EntityId.None)
+        {
+            return true;
+        }
+
+        var resizedArea = _latestSnapshot.StorageAreas.FirstOrDefault(area =>
+            area.Id == _resizingStorageAreaId);
+        return resizedArea.Id == _resizingStorageAreaId &&
+            _latestSnapshot.StorageZones
+                .Where(zone => zone.StorageAreaId == resizedArea.Id)
+                .All(zone => cells.Contains(zone.Position));
+    }
 
     private bool IsLinearConstructionPlacementValid(IReadOnlyList<GridPosition> cells)
     {
@@ -3075,7 +3218,10 @@ public partial class Main : Node
         return cells;
     }
 
-    private void CreateStorage(GridPosition cell, ResourceKind resource)
+    private void CreateStorage(
+        GridPosition cell,
+        ResourceKind resource,
+        StorageProviderKind providerKind = StorageProviderKind.OpenPile)
     {
         var terrainAvailable = cell.Z == 0
             ? _engine.World.IsSurfaceTraversable(cell)
@@ -3097,21 +3243,30 @@ public partial class Main : Node
             return;
         }
 
-        var command = resource switch
+        var command = providerKind switch
         {
-            ResourceKind.Food => SimulationCommand.BuildFoodStorage(
+            StorageProviderKind.WaterBarrel => SimulationCommand.PlaceWaterBarrel(
                 _engine.CurrentTick.Next(), _commandSequence++, cell),
-            ResourceKind.Wood => SimulationCommand.BuildWoodStorage(
+            StorageProviderKind.WoodenBox => SimulationCommand.PlaceWoodenBox(
                 _engine.CurrentTick.Next(), _commandSequence++, cell),
-            ResourceKind.Stone => SimulationCommand.BuildStoneStorage(
+            StorageProviderKind.WoodenChest => SimulationCommand.PlaceWoodenChest(
                 _engine.CurrentTick.Next(), _commandSequence++, cell),
-            ResourceKind.Equipment => SimulationCommand.BuildEquipmentStorage(
+            StorageProviderKind.WoodenBulkBin => SimulationCommand.PlaceWoodenBulkBin(
                 _engine.CurrentTick.Next(), _commandSequence++, cell),
-            ResourceKind.Materials => SimulationCommand.BuildMaterialsStorage(
-                _engine.CurrentTick.Next(), _commandSequence++, cell),
-            ResourceKind.Water => SimulationCommand.PlaceWaterBarrel(
-                _engine.CurrentTick.Next(), _commandSequence++, cell),
-            _ => throw new ArgumentOutOfRangeException(nameof(resource)),
+            _ => resource switch
+            {
+                ResourceKind.Food => SimulationCommand.BuildFoodStorage(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                ResourceKind.Wood => SimulationCommand.BuildWoodStorage(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                ResourceKind.Stone => SimulationCommand.BuildStoneStorage(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                ResourceKind.Equipment => SimulationCommand.BuildEquipmentStorage(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                ResourceKind.Materials => SimulationCommand.BuildMaterialsStorage(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                _ => throw new ArgumentOutOfRangeException(nameof(resource)),
+            },
         };
         _engine.QueueCommand(command);
         var capacity = resource switch
@@ -3120,17 +3275,25 @@ public partial class Main : Node
             ResourceKind.Equipment => 32,
             ResourceKind.Materials => 64,
             ResourceKind.Water => 32,
+            ResourceKind.Any when providerKind == StorageProviderKind.WoodenBox => 32,
+            ResourceKind.Any when providerKind is StorageProviderKind.WoodenChest or
+                StorageProviderKind.WoodenBulkBin => 64,
             _ => 64,
         };
-        _inspector.Text = resource == ResourceKind.Water
-            ? $"{cell} • wyznaczono miejsce na beczkę 0/{capacity} • zlecenie żąda gotowej beczki z warsztatu lub składu"
-            : $"{cell} • wyznaczono plac pod skład {DescribeResource(resource)} 0/{capacity} • blueprint żąda 2 drewna";
+        _inspector.Text = providerKind == StorageProviderKind.OpenPile
+            ? $"{cell} • wyznaczono plac pod skład {DescribeResource(resource)} 0/{capacity} • blueprint żąda 2 drewna"
+            : $"{cell} • wyznaczono miejsce na {DescribeStorageProvider(providerKind)} 0/{capacity} • zlecenie żąda gotowego pojemnika z warsztatu lub składu";
     }
 
     private void HandleEvents(
         IReadOnlyList<SimulationEvent> events,
         SimulationSnapshot snapshot)
     {
+        if (!_use3DView)
+        {
+            _worldView.ShowCombatEvents(events, snapshot);
+        }
+
         var workEvent = events.LastOrDefault(item =>
             item.Kind is SimulationEventKind.WorkDesignationCreated or
                 SimulationEventKind.WorkDesignationRemoved or
@@ -3785,6 +3948,16 @@ public partial class Main : Node
     private static string DescribeCraftingRecipe(CraftingRecipeKind recipe) =>
         TranslationCatalog.Get("pl", "recipes", "names", recipe.ToString());
 
+    private static string DescribeStorageProvider(StorageProviderKind providerKind) =>
+        providerKind switch
+        {
+            StorageProviderKind.WaterBarrel => "beczkę na wodę",
+            StorageProviderKind.WoodenBox => "drewnianą skrzynkę",
+            StorageProviderKind.WoodenChest => "drewnianą skrzynię",
+            StorageProviderKind.WoodenBulkBin => "drewniany zasobnik masowy",
+            _ => "skład",
+        };
+
     private static string DescribeResourceVariant(ResourceVariant variant)
     {
         if (MaterialCatalog.TryGet(variant, out var material))
@@ -3810,6 +3983,9 @@ public partial class Main : Node
             ResourceVariant.EquipmentWoodenSpear => "drewniana włócznia",
             ResourceVariant.EquipmentReinforcedPickaxe => "wzmocniony kilof",
             ResourceVariant.EquipmentWoodenBarrel => "drewniana beczka",
+            ResourceVariant.EquipmentWoodenBox => "drewniana skrzynka",
+            ResourceVariant.EquipmentWoodenChest => "drewniana skrzynia",
+            ResourceVariant.EquipmentWoodenBulkBin => "drewniany zasobnik masowy",
             _ => "towar",
         };
     }
@@ -4061,6 +4237,9 @@ public partial class Main : Node
         ConstructionKind.EquipmentStorage => "składu sprzętu",
         ConstructionKind.MaterialsStorage => "składu materiałów",
         ConstructionKind.WaterBarrel => "beczki na wodę",
+        ConstructionKind.WoodenBox => "drewnianej skrzynki",
+        ConstructionKind.WoodenChest => "drewnianej skrzyni",
+        ConstructionKind.WoodenBulkBin => "drewnianego zasobnika masowego",
         ConstructionKind.WoodenWalkway => "pomostu",
         ConstructionKind.BasaltWalkway => "bazaltowego pomostu",
         ConstructionKind.GoblinFieldCamp => "obozu wypadowego",
@@ -4220,11 +4399,16 @@ public partial class Main : Node
             child.QueueFree();
         }
 
-        void AddTile(ResourceKind resource, int quantity, string tooltip)
+        void AddTile(
+            ResourceKind resource,
+            FoodKind foodKind,
+            ResourceVariant variant,
+            int quantity,
+            string tooltip)
         {
             var tile = new PanelContainer
             {
-                CustomMinimumSize = new Vector2(70, 92),
+                CustomMinimumSize = new Vector2(142, 92),
                 TooltipText = tooltip,
             };
             var content = new VBoxContainer
@@ -4235,8 +4419,17 @@ public partial class Main : Node
             var icon = new TextureRect
             {
                 CustomMinimumSize = new Vector2(58, 58),
-                Texture = ItemIcons.CreateTexture(_itemIconAtlas, ItemIcons.ForResource(resource)),
-                SelfModulate = ItemIcons.TintForResource(resource),
+                Texture = ResourceThumbnails.Create(
+                    _itemIconAtlas,
+                    _treePartAtlas,
+                    _foodIconAtlas,
+                    _resourceThumbnailTextures,
+                    resource,
+                    foodKind,
+                    variant),
+                SelfModulate = foodKind == FoodKind.None && variant == ResourceVariant.None
+                    ? ItemIcons.TintForResource(resource)
+                    : Colors.White,
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
                 MouseFilter = Control.MouseFilterEnum.Ignore,
@@ -4267,7 +4460,12 @@ public partial class Main : Node
                     : group.Key.Variant != ResourceVariant.None
                         ? DescribeResourceVariant(group.Key.Variant)
                         : DescribeResource(group.Key.Resource);
-                AddTile(group.Key.Resource, quantity, $"{name}: {quantity:N0} szt. {location}");
+                AddTile(
+                    group.Key.Resource,
+                    group.Key.FoodKind,
+                    group.Key.Variant,
+                    quantity,
+                    $"{name}: {quantity:N0} szt. {location}");
             }
             return;
         }
@@ -4277,6 +4475,8 @@ public partial class Main : Node
             var quantity = quantitySelector(item);
             AddTile(
                 item.Resource,
+                FoodKind.None,
+                ResourceVariant.None,
                 quantity,
                 DescribeResourceOverviewTooltip(
                     snapshot,
@@ -4629,6 +4829,7 @@ public partial class Main : Node
         _constructionDetails.Hide();
         _selectedStorageId = zone.Id;
         _storageSettingsDirty = false;
+        _storageDetails.Title = DescribeStorageWindowTitle(zone);
         UpdateStorageDetails(zone);
         _storageDetails.Popup();
     }
@@ -4644,14 +4845,14 @@ public partial class Main : Node
         SimulationSnapshot snapshot)
     {
         var delivery = _engine.InspectStorageDelivery(zone.Id);
-        var contents = snapshot.ItemStacks
+        var contentStacks = snapshot.ItemStacks
             .Where(stack =>
                 stack.Location.Kind == ItemLocationKind.StorageZone &&
                 stack.Location.OwnerId == zone.Id)
             .OrderBy(stack => stack.FoodKind)
             .ThenBy(stack => stack.Id)
-            .Select(DescribeStack)
             .ToArray();
+        RebuildStorageContentsGrid(contentStacks);
         var assignedHauler = snapshot.Actors.FirstOrDefault(actor =>
             actor.Id == zone.AssignedHaulerId);
         var haulerDescription = assignedHauler.Id == EntityId.None
@@ -4666,7 +4867,8 @@ public partial class Main : Node
                   $"({sourceZone.StoredQuantity}/{sourceZone.Capacity}, " +
                   $"rezerwa {sourceZone.DesiredQuantity})"
                 : $"skład {sourceZone.Id} przy {sourceZone.Position}";
-        var hasGlobalResourcePriority = zone.AcceptedResource != ResourceKind.Materials;
+        var hasGlobalResourcePriority = zone.AcceptedResource is not (
+            ResourceKind.Materials or ResourceKind.Any);
         var globalPriority = hasGlobalResourcePriority
             ? snapshot.ResourcePriorities
                 .Single(priority => priority.Resource == zone.AcceptedResource)
@@ -4675,16 +4877,15 @@ public partial class Main : Node
         var mineralFilterDescription = zone.AcceptedResource == ResourceKind.Stone
             ? $"Przyjmowany urobek: {DescribeMineralFilter(zone.MineralFilter)}.\n"
             : string.Empty;
-        _storageSummary.Text = (zone.AcceptedResource == ResourceKind.Water
-                ? "Beczka na wodę\n"
-                : $"Skład {DescribeResource(zone.AcceptedResource)}\n") +
+        _storageSummary.Text = $"Obszar: {zone.StorageAreaId} • " +
+            (zone.LogisticsNetworkId == EntityId.None
+                ? "sieć Default\n"
+                : $"sieć {zone.LogisticsNetworkId}\n") +
             $"Stan: {zone.StoredQuantity}/{zone.Capacity}\n" +
             (zone.SeparatesItemTypes
                 ? $"Sloty rodzajowe: {zone.UsedTypeSlots}/{zone.TypeSlotCount}, " +
                   $"stos do {zone.StackCapacity} szt.\n"
                 : string.Empty) +
-            (contents.Length == 0 ? "Zawartość: pusty\n" :
-                $"Zawartość: {string.Join(", ", contents)}\n") +
             mineralFilterDescription +
             (zone.DesiredQuantity == 0
                 ? "Automatyczne dostawy wyłączone.\n"
@@ -4742,7 +4943,8 @@ public partial class Main : Node
             _storageSourceZoneIds.Add(EntityId.None);
             foreach (var candidate in snapshot.StorageZones
                          .Where(candidate => candidate.Id != zone.Id &&
-                             candidate.AcceptedResource == zone.AcceptedResource)
+                         (candidate.ResourceFilter & zone.ResourceFilter) !=
+                            StorageResourceFilter.None)
                          .OrderBy(candidate => candidate.Id))
             {
                 _storageSource.AddItem(candidate.AcceptedResource == ResourceKind.Water
@@ -4761,6 +4963,80 @@ public partial class Main : Node
             _updatingStorageControls = false;
         }
     }
+
+    private void RebuildStorageContentsGrid(IReadOnlyList<ItemStackSnapshot> stacks)
+    {
+        foreach (var child in _storageContentsGrid.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        var groups = stacks
+            .GroupBy(stack => (stack.Resource, stack.FoodKind, stack.Variant))
+            .OrderBy(group => group.Key.Resource)
+            .ThenBy(group => group.Key.FoodKind)
+            .ThenBy(group => group.Key.Variant)
+            .ToArray();
+        _storageContentsLabel.Text = groups.Length == 0
+            ? "Zawartość: pusty"
+            : $"Zawartość • {groups.Length} zajętych slotów:";
+        _storageContentsGrid.Visible = groups.Length > 0;
+        foreach (var group in groups)
+        {
+            var quantity = group.Sum(stack => stack.Quantity);
+            var name = DescribeResourceVariant(
+                group.Key.Resource,
+                group.Key.FoodKind,
+                group.Key.Variant);
+            var tile = new PanelContainer
+            {
+                CustomMinimumSize = new Vector2(138, 76),
+                TooltipText = $"{name}: {quantity:N0} szt.",
+            };
+            var content = new VBoxContainer
+            {
+                Alignment = BoxContainer.AlignmentMode.Center,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            content.AddChild(new TextureRect
+            {
+                CustomMinimumSize = new Vector2(48, 48),
+                Texture = ResourceThumbnails.Create(
+                    _itemIconAtlas,
+                    _treePartAtlas,
+                    _foodIconAtlas,
+                    _resourceThumbnailTextures,
+                    group.Key.Resource,
+                    group.Key.FoodKind,
+                    group.Key.Variant),
+                SelfModulate = group.Key.FoodKind == FoodKind.None &&
+                    group.Key.Variant == ResourceVariant.None
+                        ? ItemIcons.TintForResource(group.Key.Resource)
+                        : Colors.White,
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+            content.AddChild(new Label
+            {
+                Text = quantity.ToString("N0"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+            tile.AddChild(content);
+            _storageContentsGrid.AddChild(tile);
+        }
+    }
+
+    private static string DescribeStorageWindowTitle(StorageZoneSnapshot zone) =>
+        zone.ProviderKind switch
+        {
+            StorageProviderKind.WaterBarrel => "▣ Beczka na wodę",
+            StorageProviderKind.WoodenBox => "□ Drewniana skrzynka",
+            StorageProviderKind.WoodenChest => "▤ Drewniana skrzynia",
+            StorageProviderKind.WoodenBulkBin => "▥ Drewniany zasobnik masowy",
+            _ => $"◇ Skład: {DescribeResource(zone.AcceptedResource)}",
+        };
 
     private void MarkStorageSettingsDirty()
     {
@@ -5221,7 +5497,14 @@ public partial class Main : Node
         if (cargo is not null)
         {
             AddInventoryIcon(
-                ItemIcons.ForResource(cargo.Value.Resource),
+                ResourceThumbnails.Create(
+                    _itemIconAtlas,
+                    _treePartAtlas,
+                    _foodIconAtlas,
+                    _resourceThumbnailTextures,
+                    cargo.Value.Resource,
+                    cargo.Value.FoodKind,
+                    cargo.Value.Variant),
                 $"Ładunek roboczy • {DescribeStack(cargo.Value)}",
                 cargo.Value.Quantity);
         }
@@ -5573,6 +5856,21 @@ public partial class Main : Node
             "Drewniana beczka",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 3),
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 2));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.WoodenBox,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo),
+            "Drewniana skrzynka",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.WoodenChest,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo),
+            "Drewniana skrzynia",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 4),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.WoodenBulkBin,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo),
+            "Drewniany zasobnik masowy",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 3),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 2));
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltIronBar,
             ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka żelaza",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda żelaza", 2),
@@ -5750,6 +6048,362 @@ public partial class Main : Node
                 : "Kolejka:\n" + string.Join("\n", orders.Select((order, index) =>
                     $"{index + 1}. {DescribeCraftingOrder(order)}")));
     }
+
+    private void CreateLogisticsWindow()
+    {
+        _logisticsWindow = new Window
+        {
+            Title = "Logistyka twierdzy",
+            Size = new Vector2I(920, 700),
+            MinSize = new Vector2I(680, 440),
+            Unresizable = false,
+            Visible = false,
+        };
+        _logisticsWindow.CloseRequested += _logisticsWindow.Hide;
+        AddChild(_logisticsWindow);
+        _logisticsWindow.Hide();
+
+        var margin = new MarginContainer();
+        margin.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        foreach (var side in new[] { "left", "top", "right", "bottom" })
+        {
+            margin.AddThemeConstantOverride($"margin_{side}", 14);
+        }
+        _logisticsWindow.AddChild(margin);
+        var content = new VBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        content.AddThemeConstantOverride("separation", 8);
+        margin.AddChild(content);
+        _logisticsSummary = new Label
+        {
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        };
+        content.AddChild(_logisticsSummary);
+        var createNetwork = new Button
+        {
+            Text = "Utwórz sieć specjalistyczną",
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+        };
+        createNetwork.Pressed += () =>
+        {
+            QueueLogisticsCommand(SimulationCommand.CreateLogisticsNetwork(
+                _engine.CurrentTick.Next(), _commandSequence++));
+            _inspector.Text = "Zlecono utworzenie nowej sieci logistycznej.";
+        };
+        content.AddChild(createNetwork);
+        var scroll = new ScrollContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        content.AddChild(scroll);
+        _logisticsRows = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        _logisticsRows.AddThemeConstantOverride("separation", 10);
+        scroll.AddChild(_logisticsRows);
+        var close = new Button { Text = "Zamknij", SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd };
+        close.Pressed += _logisticsWindow.Hide;
+        content.AddChild(close);
+    }
+
+    private void ShowLogistics()
+    {
+        _managementMenu.Hide();
+        UpdateLogisticsWindow(_engine.CreateSnapshot(), force: true);
+        _logisticsWindow.PopupCentered();
+    }
+
+    private void QueueLogisticsCommand(SimulationCommand command)
+    {
+        _engine.QueueCommand(command);
+        _logisticsSignature = string.Empty;
+    }
+
+    private void UpdateLogisticsWindow(SimulationSnapshot snapshot, bool force = false)
+    {
+        var signature = string.Join('|', snapshot.LogisticsNetworks.Select(network =>
+                $"{network.Id}:{network.Name}:{string.Join(',', network.AssignedHaulerIds)}:" +
+                $"{string.Join(',', network.SourceStorageZoneIds)}:{string.Join(',', network.DestinationStorageZoneIds)}")) +
+            "#" + string.Join('|', snapshot.StorageAreas.Select(area =>
+                $"{area.Id}:{area.Name}:{area.LogisticsNetworkId}:{area.Capacity}:{area.StoredQuantity}:" +
+                $"{string.Join(',', area.StorageZoneIds)}:" +
+                string.Join(',', area.Footprint.Select(cell => $"{cell.X}/{cell.Y}/{cell.Z}")))) +
+            "#" + string.Join('|', snapshot.StorageZones.Select(zone =>
+                $"{zone.Id}:{zone.AcceptedResource}:{zone.ResourceFilter}:" +
+                $"{zone.ProviderKind}:{zone.LogisticsNetworkId}")) +
+            "#" + string.Join('|', snapshot.Actors.Select(actor =>
+                $"{actor.Id}:{actor.Name}:{actor.IsJuvenile}"));
+        if (!force && signature == _logisticsSignature)
+        {
+            return;
+        }
+        _logisticsSignature = signature;
+        foreach (var child in _logisticsRows.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        _logisticsSummary.Text =
+            $"Sieci: {snapshot.LogisticsNetworks.Count} • obszary: {snapshot.StorageAreas.Count} • " +
+            $"pojemniki i składy: {snapshot.StorageZones.Count}.\n" +
+            "Default automatycznie korzysta ze wszystkich dorosłych, którzy nie należą do sieci specjalistycznej.";
+        foreach (var network in snapshot.LogisticsNetworks.OrderBy(network => network.Id))
+        {
+            var panel = new PanelContainer();
+            var section = new VBoxContainer();
+            section.AddThemeConstantOverride("separation", 4);
+            panel.AddChild(section);
+            _logisticsRows.AddChild(panel);
+            var heading = new HBoxContainer();
+            section.AddChild(heading);
+            heading.AddChild(new Label
+            {
+                Text = network.IsDefault ? "Sieć domyślna" : $"Sieć {network.Id}",
+                CustomMinimumSize = new Vector2(130, 0),
+            });
+            var name = new LineEdit
+            {
+                Text = network.Name,
+                MaxLength = 40,
+                Editable = !network.IsDefault,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            heading.AddChild(name);
+            var rename = new Button { Text = "Zmień nazwę", Disabled = network.IsDefault };
+            rename.Pressed += () =>
+            {
+                if (!string.IsNullOrWhiteSpace(name.Text))
+                {
+                    QueueLogisticsCommand(SimulationCommand.RenameLogisticsNetwork(
+                        _engine.CurrentTick.Next(), _commandSequence++, network.Id, name.Text));
+                }
+            };
+            heading.AddChild(rename);
+            if (!network.IsDefault)
+            {
+                var delete = new Button
+                {
+                    Text = "Usuń",
+                    TooltipText = "Obszary wrócą do sieci Default, a tragarze zostaną zwolnieni. Zawartość składów pozostanie bez zmian.",
+                };
+                delete.Pressed += () =>
+                {
+                    QueueLogisticsCommand(SimulationCommand.DeleteLogisticsNetwork(
+                        _engine.CurrentTick.Next(), _commandSequence++, network.Id));
+                    _inspector.Text =
+                        $"Zlecono usunięcie sieci {network.Name}. Składy wrócą do Default; towary pozostaną na miejscu.";
+                };
+                heading.AddChild(delete);
+            }
+
+            section.AddChild(new Label { Text = "Przypisani tragarze:" });
+            var haulers = new HFlowContainer();
+            section.AddChild(haulers);
+            foreach (var actor in snapshot.Actors.Where(actor => !actor.IsJuvenile).OrderBy(actor => actor.Id))
+            {
+                var check = new CheckButton
+                {
+                    Text = actor.Name,
+                    ButtonPressed = network.IsDefault
+                        ? !snapshot.LogisticsNetworks.Any(other =>
+                            !other.IsDefault && other.AssignedHaulerIds.Contains(actor.Id))
+                        : network.AssignedHaulerIds.Contains(actor.Id),
+                    Disabled = network.IsDefault,
+                };
+                check.Toggled += assigned => QueueLogisticsCommand(
+                    SimulationCommand.ConfigureLogisticsHauler(
+                        _engine.CurrentTick.Next(), _commandSequence++, network.Id, actor.Id, assigned));
+                haulers.AddChild(check);
+            }
+
+            section.AddChild(new Label { Text = "Dozwolone źródła:" });
+            var sources = new HFlowContainer();
+            section.AddChild(sources);
+            foreach (var zone in snapshot.StorageZones.OrderBy(zone => zone.Id))
+            {
+                var check = new CheckButton
+                {
+                    Text = $"{zone.Id} {DescribeStorageProvider(zone.ProviderKind)}",
+                    ButtonPressed = network.SourceStorageZoneIds.Contains(zone.Id),
+                    Disabled = network.IsDefault,
+                };
+                check.Toggled += included => QueueLogisticsCommand(
+                    SimulationCommand.ConfigureLogisticsSource(
+                        _engine.CurrentTick.Next(), _commandSequence++, network.Id, zone.Id, included));
+                sources.AddChild(check);
+            }
+        }
+
+        _logisticsRows.AddChild(new HSeparator());
+        _logisticsRows.AddChild(new Label { Text = "Obszary i pojemniki", ThemeTypeVariation = "HeaderMedium" });
+        foreach (var area in snapshot.StorageAreas.OrderBy(area => area.Id))
+        {
+            AddStorageAreaManagementRow(snapshot, area);
+        }
+    }
+
+    private void AddStorageAreaManagementRow(
+        SimulationSnapshot snapshot,
+        StorageAreaSnapshot area)
+    {
+        var panel = new PanelContainer();
+        var section = new VBoxContainer();
+        section.AddThemeConstantOverride("separation", 4);
+        panel.AddChild(section);
+        _logisticsRows.AddChild(panel);
+        var heading = new HBoxContainer();
+        section.AddChild(heading);
+        heading.AddChild(new Label
+        {
+            Text = $"Obszar {area.Id}",
+            CustomMinimumSize = new Vector2(110, 0),
+        });
+        var name = new LineEdit
+        {
+            Text = area.Name,
+            MaxLength = 40,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        heading.AddChild(name);
+        var rename = new Button { Text = "Zmień nazwę" };
+        rename.Pressed += () =>
+        {
+            if (!string.IsNullOrWhiteSpace(name.Text))
+            {
+                QueueLogisticsCommand(SimulationCommand.RenameStorageArea(
+                    _engine.CurrentTick.Next(), _commandSequence++, area.Id, name.Text));
+            }
+        };
+        heading.AddChild(rename);
+        var networkChoice = new OptionButton { CustomMinimumSize = new Vector2(170, 0) };
+        var availableNetworks = snapshot.LogisticsNetworks.OrderBy(network => network.Id).ToArray();
+        foreach (var network in availableNetworks)
+        {
+            networkChoice.AddItem(network.Name);
+            if (network.Id == area.LogisticsNetworkId)
+            {
+                networkChoice.Select(networkChoice.ItemCount - 1);
+            }
+        }
+        networkChoice.ItemSelected += index =>
+        {
+            var networkId = availableNetworks[(int)index].Id;
+            QueueLogisticsCommand(SimulationCommand.ConfigureStorageAreaNetwork(
+                _engine.CurrentTick.Next(), _commandSequence++, area.Id, networkId));
+        };
+        heading.AddChild(networkChoice);
+        section.AddChild(new Label
+        {
+            Text = $"Pola: {area.Footprint.Count} • pojemność {area.StoredQuantity}/{area.Capacity}",
+        });
+        var actions = new HBoxContainer();
+        section.AddChild(actions);
+        var resize = new Button
+        {
+            Text = "Zmień rozmiar",
+            TooltipText = "Wskaż nowy prostokąt. Nie można nakładać obszarów ani wykluczyć pola z istniejącym pojemnikiem.",
+        };
+        resize.Pressed += () => BeginStorageAreaResize(area.Id, area.Name);
+        actions.AddChild(resize);
+        var dissolve = new Button
+        {
+            Text = "Rozwiąż obszar",
+            TooltipText = "Usuwa wspólny obszar. Pojemniki i zawartość pozostają jako bezpieczne składy jednopunktowe w tej samej sieci.",
+        };
+        dissolve.Pressed += () =>
+        {
+            QueueLogisticsCommand(SimulationCommand.DissolveStorageArea(
+                _engine.CurrentTick.Next(), _commandSequence++, area.Id));
+            _inspector.Text =
+                $"Zlecono rozwiązanie obszaru {area.Name}. Pojemniki i towary pozostaną na miejscu.";
+        };
+        actions.AddChild(dissolve);
+
+        foreach (var zone in snapshot.StorageZones
+                     .Where(zone => zone.StorageAreaId == area.Id)
+                     .OrderBy(zone => zone.Id))
+        {
+            var row = new VBoxContainer();
+            section.AddChild(row);
+            var provider = new HBoxContainer();
+            row.AddChild(provider);
+            provider.AddChild(new Label
+            {
+                Text = $"{zone.Id} • {DescribeStorageProvider(zone.ProviderKind)} " +
+                    $"{zone.StoredQuantity}/{zone.Capacity}",
+                CustomMinimumSize = new Vector2(300, 0),
+            });
+            if (zone.ProviderKind is StorageProviderKind.WoodenBox or
+                StorageProviderKind.WoodenChest or StorageProviderKind.WoodenBulkBin)
+            {
+                var filters = new HFlowContainer
+                {
+                    TooltipText = "Filtr dotyczy nowych dostaw; istniejąca zawartość nie jest niszczona.",
+                };
+                row.AddChild(filters);
+                foreach (var resource in SolidContainerFilterCategories)
+                {
+                    var resourceFilter = ToStorageResourceFilter(resource);
+                    var check = new CheckButton
+                    {
+                        Text = DescribeResource(resource),
+                        ButtonPressed = zone.ResourceFilter.HasFlag(resourceFilter),
+                        TooltipText = "Włącz lub wyłącz tę kategorię dla przyszłych dostaw.",
+                    };
+                    check.Toggled += included => QueueLogisticsCommand(
+                        SimulationCommand.ConfigureStorageFilterResource(
+                            _engine.CurrentTick.Next(),
+                            _commandSequence++,
+                            zone.Id,
+                            resource,
+                            included));
+                    filters.AddChild(check);
+                }
+            }
+            else
+            {
+                provider.AddChild(new Label
+                {
+                    Text = $"filtr: {DescribeResource(zone.AcceptedResource)}",
+                });
+            }
+        }
+    }
+
+    private void BeginStorageAreaResize(EntityId areaId, string areaName)
+    {
+        SelectBuildMode((long)BuildMode.StorageArea);
+        if (_buildMode != BuildMode.StorageArea)
+        {
+            return;
+        }
+
+        _resizingStorageAreaId = areaId;
+        _logisticsWindow.Hide();
+        _inspector.Text =
+            $"Zmiana rozmiaru {areaName}: przeciągnij nowy prostokąt do 256 pól • wszystkie pojemniki muszą pozostać wewnątrz • PPM lub Esc anuluje";
+    }
+
+    private static readonly ResourceKind[] SolidContainerFilterCategories =
+    [
+        ResourceKind.Food,
+        ResourceKind.Wood,
+        ResourceKind.Reeds,
+        ResourceKind.Stone,
+        ResourceKind.Bone,
+        ResourceKind.Coal,
+        ResourceKind.Ore,
+        ResourceKind.Hide,
+        ResourceKind.Equipment,
+        ResourceKind.Materials,
+    ];
+
+    private static StorageResourceFilter ToStorageResourceFilter(ResourceKind resource) =>
+        resource == ResourceKind.Any
+            ? StorageResourceFilter.SolidGoods
+            : (StorageResourceFilter)(1 << ((int)resource - 1));
 
     private void CreatePlannerWindow()
     {
@@ -6079,8 +6733,7 @@ public partial class Main : Node
                 : ResourceKind.Stone;
             if (!snapshot.StorageZones.Any(zone =>
                     zone.StoredQuantity < zone.Capacity &&
-                    (zone.AcceptedResource is ResourceKind.Any ||
-                     zone.AcceptedResource == resource)))
+                    zone.ResourceFilter.HasFlag(ToStorageResourceFilter(resource))))
             {
                 return "wstrzymane: brak miejsca w pasującym składzie";
             }
@@ -7217,6 +7870,10 @@ public partial class Main : Node
         if (_workshopDetails.Visible)
         {
             UpdateWorkshopDetails(snapshot);
+        }
+        if (_logisticsWindow.Visible)
+        {
+            UpdateLogisticsWindow(snapshot);
         }
         if (villageVisibility == CellVisibility.Visible)
         {

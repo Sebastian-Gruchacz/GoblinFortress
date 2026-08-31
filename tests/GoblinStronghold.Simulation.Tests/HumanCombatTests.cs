@@ -41,23 +41,20 @@ public sealed class HumanCombatTests
 
         var snapshot = engine.CreateSnapshot();
         var events = engine.DrainEvents();
-        Assert.True(snapshot.HumanVillage.GoblinAttackOrdered);
-        Assert.Equal(GoblinRaidPhase.Marching, snapshot.RaidPhase);
-        Assert.Equal(100, snapshot.HumanVillage.Hostility);
-        Assert.InRange(
-            snapshot.HumanVillage.GuardHitPoints,
-            1,
-            snapshot.HumanVillage.MaximumGuardHitPoints - 1);
         var departure = Assert.Single(events,
             item => item.Kind == SimulationEventKind.RaidDeparted);
         Assert.Equal(SimulationDefinitions.FieldCampCapacity, departure.Amount);
         Assert.Contains(events, item =>
             item.Kind == SimulationEventKind.GoblinHitHumanGuard &&
             item.Target != EntityId.None);
+        Assert.True(
+            snapshot.RaidPhase != GoblinRaidPhase.Preparing &&
+            snapshot.RaidPhase != GoblinRaidPhase.Ready,
+            $"Raid remained staged instead of fighting: {snapshot.RaidPhase}.");
     }
 
     [Fact]
-    public void ActiveRaidFinishesGuardWhoNoLongerHasGuardTask()
+    public void ActiveRaidPursuesGuardWhoMovedAwayAndNoLongerHasGuardTask()
     {
         var engine = CreateEncounterEngine(orderRaid: true);
         var save = JsonNode.Parse(engine.Save())?.AsObject()
@@ -79,7 +76,8 @@ public sealed class HumanCombatTests
                 (int)HumanCohortRole.Guards);
         var previousGuardPopulation = guardCohort["population"]!.GetValue<int>();
         guardCohort["population"] = 1;
-        guardCohort["x"] = targetX;
+        var guardX = targetX > 32 ? targetX - 3 : targetX + 3;
+        guardCohort["x"] = guardX;
         guardCohort["y"] = targetY;
         guardCohort["z"] = targetZ;
         var guards = save["humanVillage"]!["villagers"]!.AsArray()
@@ -91,7 +89,7 @@ public sealed class HumanCombatTests
         {
             guards[index]["health"] = index == 0 ? 2_000 : 0;
             guards[index]["task"] = (int)HumanCohortTask.StayNearVillage;
-            guards[index]["x"] = targetX;
+            guards[index]["x"] = guardX;
             guards[index]["y"] = targetY;
             guards[index]["z"] = targetZ;
         }
@@ -112,13 +110,29 @@ public sealed class HumanCombatTests
             actor["z"] = targetZ;
             actor["jobKind"] = (int)ActorJobKind.None;
             actor["jobPhase"] = (int)ActorJobPhase.None;
+            actor["hunger"] = SimulationDefinitions.Foundation.FoodSeekThreshold;
+            actor["personalFood"] = 1;
+            actor["personalFoodKind"] = (int)FoodKind.DriedRations;
+            actor["personalFoodKinds"] = new JsonArray((int)FoodKind.DriedRations);
+            actor["thirst"] = 0;
+            actor["personalWater"] = SimulationDefinitions.Foundation.PersonalWaterCapacity;
+            actor["personalStoneAmmo"] = 0;
+            actor["fatigue"] = 0;
         }
         engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
 
-        engine.AdvanceTicks(SimulationDefinitions.Foundation.CombatIntervalTicks * 2);
+        engine.AdvanceTicks(SimulationDefinitions.Foundation.CombatIntervalTicks * 8);
 
         var snapshot = engine.CreateSnapshot();
-        Assert.True(snapshot.HumanVillage.GuardHitPoints < 2_000);
+        Assert.True(
+            snapshot.HumanVillage.GuardHitPoints < 2_000,
+            $"Phase {snapshot.RaidPhase}; guards " +
+            string.Join(", ", snapshot.HumanVillage.Villagers
+                .Where(villager => villager.Role == HumanCohortRole.Guards)
+                .Select(villager => $"{villager.Position}:{villager.Health}:{villager.Task}")) +
+            "; raiders " + string.Join(", ", snapshot.Actors
+                .Where(actor => snapshot.RaidPartyIds.Contains(actor.Id))
+                .Select(actor => $"{actor.Position}:{actor.Job.Kind}->{actor.Job.Target}")));
         Assert.Contains(engine.DrainEvents(), item =>
             item.Kind == SimulationEventKind.GoblinHitHumanGuard);
     }

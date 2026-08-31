@@ -207,7 +207,9 @@ internal static class ConstructionBlueprintCatalog
     public static bool RetainsMaterialIdentity(ConstructionKind kind) => kind is not (
         ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
         ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
-        ConstructionKind.MaterialsStorage or ConstructionKind.WaterBarrel);
+        ConstructionKind.MaterialsStorage or ConstructionKind.WaterBarrel or
+        ConstructionKind.WoodenBox or ConstructionKind.WoodenChest or
+        ConstructionKind.WoodenBulkBin);
 
     public static ConstructionSiteState CreateSite(
         EntityId id,
@@ -228,12 +230,17 @@ internal static class ConstructionBlueprintCatalog
                 ConstructionKind.StoneDoorFrame or ConstructionKind.Bloomery or
                 ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace =>
                 ResourceKind.Stone,
-            ConstructionKind.WaterBarrel => ResourceKind.Equipment,
+            ConstructionKind.WaterBarrel or ConstructionKind.WoodenBox or
+                ConstructionKind.WoodenChest or ConstructionKind.WoodenBulkBin =>
+                ResourceKind.Equipment,
             _ => ResourceKind.Wood,
         };
         var requiredVariant = kind switch
         {
             ConstructionKind.WaterBarrel => ResourceVariant.EquipmentWoodenBarrel,
+            ConstructionKind.WoodenBox => ResourceVariant.EquipmentWoodenBox,
+            ConstructionKind.WoodenChest => ResourceVariant.EquipmentWoodenChest,
+            ConstructionKind.WoodenBulkBin => ResourceVariant.EquipmentWoodenBulkBin,
             ConstructionKind.BasaltWalkway => ResourceVariant.Basalt,
             _ => ResourceVariant.None,
         };
@@ -243,6 +250,8 @@ internal static class ConstructionBlueprintCatalog
                 ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
                 ConstructionKind.MaterialsStorage => 2,
             ConstructionKind.WaterBarrel => 1,
+            ConstructionKind.WoodenBox or ConstructionKind.WoodenChest or
+                ConstructionKind.WoodenBulkBin => 1,
             ConstructionKind.WoodenWalkway => segmentCount,
             ConstructionKind.BasaltWalkway => segmentCount,
             ConstructionKind.GoblinFieldCamp => 6,
@@ -264,6 +273,9 @@ internal static class ConstructionBlueprintCatalog
                 ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
                 ConstructionKind.MaterialsStorage => 40,
             ConstructionKind.WaterBarrel => 20,
+            ConstructionKind.WoodenBox => 15,
+            ConstructionKind.WoodenChest => 25,
+            ConstructionKind.WoodenBulkBin => 20,
             ConstructionKind.WoodenWalkway => checked(segmentCount * 25),
             ConstructionKind.BasaltWalkway => checked(segmentCount * 45),
             ConstructionKind.GoblinFieldCamp => 120,

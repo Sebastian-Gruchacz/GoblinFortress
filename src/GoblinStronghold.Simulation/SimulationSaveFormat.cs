@@ -4,7 +4,7 @@ namespace GoblinStronghold.Simulation;
 
 public static class SimulationSaveFormat
 {
-    public const int CurrentVersion = 65;
+    public const int CurrentVersion = 70;
 }
 
 internal static class SimulationSaveReader

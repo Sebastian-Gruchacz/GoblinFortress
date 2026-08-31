@@ -92,6 +92,33 @@
       "output": { "resource": "Equipment", "variant": "EquipmentWoodenBarrel", "quantity": 1 }
     },
     {
+      "id": "wooden-box",
+      "kind": "WoodenBox",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 80,
+      "materials": [{ "resource": "Wood", "quantity": 2 }, { "resource": "Reeds", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentWoodenBox", "quantity": 1 }
+    },
+    {
+      "id": "wooden-chest",
+      "kind": "WoodenChest",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 120,
+      "materials": [{ "resource": "Wood", "quantity": 4 }, { "resource": "Reeds", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentWoodenChest", "quantity": 1 }
+    },
+    {
+      "id": "wooden-bulk-bin",
+      "kind": "WoodenBulkBin",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 100,
+      "materials": [{ "resource": "Wood", "quantity": 3 }, { "resource": "Reeds", "quantity": 2 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentWoodenBulkBin", "quantity": 1 }
+    },
+    {
       "id": "smelt-iron-bar",
       "kind": "SmeltIronBar",
       "workshop": "Bloomery",

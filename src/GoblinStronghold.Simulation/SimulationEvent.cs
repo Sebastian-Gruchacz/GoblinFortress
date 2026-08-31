@@ -52,6 +52,19 @@ public enum SimulationEventKind
     ActorCollectedStoneAmmo = 48,
     CorpseConsumed = 49,
     GoblinHitHumanCivilian = 50,
+    LogisticsNetworkCreated = 51,
+    LogisticsHaulerConfigured = 52,
+    LogisticsSourceConfigured = 53,
+    StorageNetworkConfigured = 54,
+    StorageAreaCreated = 55,
+    StorageAreaNetworkConfigured = 56,
+    LogisticsNetworkRenamed = 57,
+    StorageAreaRenamed = 58,
+    StorageFilterConfigured = 59,
+    LogisticsNetworkDeleted = 60,
+    StorageAreaResized = 61,
+    StorageAreaDissolved = 62,
+    StorageFilterResourceConfigured = 63,
 }
 
 public readonly record struct SimulationEvent(

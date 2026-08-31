@@ -197,7 +197,7 @@ public sealed class FieldCampTests
     }
 
     [Fact]
-    public void IdleMarchingRaiderResumesRouteToRaidTarget()
+    public void IdleMarchingRaiderResumesRouteTowardActiveRaidObjective()
     {
         var engine = CreateEngine();
         var campPosition = FindCampPosition(engine);
@@ -236,7 +236,13 @@ public sealed class FieldCampTests
 
         var marching = Assert.Single(engine.CreateSnapshot().Actors);
         Assert.Equal(ActorJobKind.Move, marching.Job.Kind);
-        Assert.Equal(engine.CreateSnapshot().RaidPlan.Target, marching.Job.Target);
+        var raidPlan = engine.CreateSnapshot().RaidPlan;
+        Assert.InRange(
+            Math.Abs(marching.Job.Target.X - raidPlan.Target.X) +
+            Math.Abs(marching.Job.Target.Y - raidPlan.Target.Y) +
+            Math.Abs(marching.Job.Target.Z - raidPlan.Target.Z),
+            0,
+            raidPlan.TargetRadius);
     }
 
     [Fact]

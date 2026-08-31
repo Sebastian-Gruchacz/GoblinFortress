@@ -10,6 +10,9 @@ public partial class WorldView : Node2D
     private const float TileSize = 20f;
     private const double WaterAnimationCycleSeconds = 4.0;
     private const double WaterAnimationRedrawSeconds = 1d / 20d;
+    private const double CombatEffectDurationSeconds = 0.42;
+    private const int MaximumCombatEffects = 32;
+    private const int CombatAudioPlayerCount = 4;
     private readonly Dictionary<EntityId, Vector2> _visualActorPositions = [];
     private readonly Dictionary<EntityId, Vector2> _targetActorPositions = [];
     private readonly Dictionary<ulong, Vector2> _visualAnimalPositions = [];
@@ -28,6 +31,7 @@ public partial class WorldView : Node2D
     private int _raidTargetRadius;
     private Texture2D _iconAtlas = null!;
     private Texture2D _itemIconAtlas = null!;
+    private Texture2D? _foodIconAtlas;
     private Texture2D _environmentAtlas = null!;
     private Texture2D _treePartAtlas = null!;
     private Texture2D _treeCrownAtlas = null!;
@@ -49,6 +53,11 @@ public partial class WorldView : Node2D
         _cachedCaveSolids = [];
     private readonly Dictionary<int, StructureRenderCache> _structureRenderCaches = [];
     private readonly MaterialPaletteTextureCache _materialPaletteTextures = new();
+    private readonly List<CombatEffect> _combatEffects = [];
+    private readonly AudioStreamPlayer[] _combatAudioPlayers = new AudioStreamPlayer[CombatAudioPlayerCount];
+    private AudioStreamWav _stoneHitSound = null!;
+    private AudioStreamWav _meleeHitSound = null!;
+    private int _nextCombatAudioPlayer;
 
     public int VisibleLevel => _visibleLevel;
 
@@ -60,6 +69,7 @@ public partial class WorldView : Node2D
     {
         _iconAtlas = UiIcons.LoadAtlas();
         _itemIconAtlas = ItemIcons.LoadAtlas();
+        _foodIconAtlas = ResourceThumbnails.TryLoadFoodAtlas();
         _environmentAtlas = EnvironmentSprites.LoadAtlas();
         _treePartAtlas = TreePartSprites.LoadAtlas();
         _treeCrownAtlas = TreeCrownSprites.LoadAtlas();
@@ -73,6 +83,18 @@ public partial class WorldView : Node2D
         _bloodAtlas = BloodSprites.LoadAtlas();
         _undergroundFaunaAtlas = UndergroundSprites.LoadFaunaAtlas();
         _mineralDepositAtlas = UndergroundSprites.LoadMineralAtlas();
+        _stoneHitSound = CreateCombatSound(720f, 0.075f, 0.22f);
+        _meleeHitSound = CreateCombatSound(145f, 0.11f, 0.38f);
+        for (var index = 0; index < _combatAudioPlayers.Length; index++)
+        {
+            var player = new AudioStreamPlayer
+            {
+                Name = $"CombatAudio{index + 1}",
+                VolumeDb = -13f,
+            };
+            AddChild(player);
+            _combatAudioPlayers[index] = player;
+        }
     }
 
     public override void _ExitTree() => _materialPaletteTextures.Dispose();
@@ -83,6 +105,7 @@ public partial class WorldView : Node2D
         _targetActorPositions.Clear();
         _visualAnimalPositions.Clear();
         _targetAnimalPositions.Clear();
+        _combatEffects.Clear();
         _snapshotTopologyVersion = 0;
         _cachedCaveSolids.Clear();
         _structureRenderCaches.Clear();
@@ -150,6 +173,40 @@ public partial class WorldView : Node2D
         QueueRedraw();
     }
 
+    public void ShowCombatEvents(
+        IReadOnlyList<SimulationEvent> events,
+        SimulationSnapshot snapshot)
+    {
+        var soundCount = 0;
+        foreach (var simulationEvent in events.Where(item => item.Kind is
+                     SimulationEventKind.HumanGuardHitGoblin or
+                     SimulationEventKind.GoblinHitHumanGuard or
+                     SimulationEventKind.GoblinHitHumanCivilian))
+        {
+            if (!TryGetCombatPositions(simulationEvent, snapshot, out var from, out var to,
+                    out var level, out var ranged))
+            {
+                continue;
+            }
+
+            if (_combatEffects.Count >= MaximumCombatEffects)
+            {
+                _combatEffects.RemoveAt(0);
+            }
+            _combatEffects.Add(new CombatEffect(from, to, level, ranged));
+            if (level == _visibleLevel && soundCount++ < 3)
+            {
+                PlayCombatSound(ranged ? _stoneHitSound : _meleeHitSound,
+                    simulationEvent.Sequence);
+            }
+        }
+
+        if (_combatEffects.Count > 0)
+        {
+            QueueRedraw();
+        }
+    }
+
     public GridPosition WorldToCell(Vector2 position) => new(
         Mathf.FloorToInt(position.X / TileSize),
         Mathf.FloorToInt(position.Y / TileSize));
@@ -164,6 +221,16 @@ public partial class WorldView : Node2D
         }
 
         _waterAnimationElapsed = (_waterAnimationElapsed + delta) % WaterAnimationCycleSeconds;
+        var combatEffectsChanged = false;
+        for (var index = _combatEffects.Count - 1; index >= 0; index--)
+        {
+            _combatEffects[index].ElapsedSeconds += delta;
+            combatEffectsChanged = true;
+            if (_combatEffects[index].ElapsedSeconds >= CombatEffectDurationSeconds)
+            {
+                _combatEffects.RemoveAt(index);
+            }
+        }
         _waterAnimationRedrawElapsed += delta;
         if (_waterAnimationRedrawElapsed >= WaterAnimationRedrawSeconds)
         {
@@ -177,6 +244,10 @@ public partial class WorldView : Node2D
         if (_simulationSpeed == 0 ||
             (_visualActorPositions.Count == 0 && _visualAnimalPositions.Count == 0))
         {
+            if (combatEffectsChanged)
+            {
+                QueueRedraw();
+            }
             return;
         }
 
@@ -211,7 +282,7 @@ public partial class WorldView : Node2D
             }
         }
 
-        if (changed)
+        if (changed || combatEffectsChanged)
         {
             QueueRedraw();
         }
@@ -237,6 +308,7 @@ public partial class WorldView : Node2D
         {
             DrawHumanCohorts();
         }
+        DrawStorageAreas();
         DrawStorageZones();
         DrawConstructionSites();
         DrawCraftingOrders();
@@ -246,6 +318,7 @@ public partial class WorldView : Node2D
         DrawGoblinBuds();
         DrawAnimals();
         DrawActors();
+        DrawCombatEffects();
         DrawNightLighting();
         DrawFog();
         DrawWorkDesignations();
@@ -1654,7 +1727,8 @@ public partial class WorldView : Node2D
             return;
         }
 
-        var visibleParts = worldObject.GetAbsoluteParts()
+        var absoluteParts = worldObject.GetAbsoluteParts().ToArray();
+        var visibleParts = absoluteParts
             .Where(item => item.Position.Z + surfaceOffset == _visibleLevel)
             .Select(item => item.Part.Kind)
             .ToArray();
@@ -1664,16 +1738,26 @@ public partial class WorldView : Node2D
             return;
         }
 
-        if (!visibleParts.Contains(WorldObjectPartKind.TreeCrown))
+        var crownLevel = absoluteParts
+            .Where(item => item.Part.Kind == WorldObjectPartKind.TreeCrown)
+            .Select(item => item.Position.Z + surfaceOffset)
+            .DefaultIfEmpty(int.MaxValue)
+            .Max();
+        if (_visibleLevel < crownLevel)
         {
             return;
         }
 
+        var levelDifference = _visibleLevel - crownLevel;
+        var crownOpacity = levelDifference == 0
+            ? 1f
+            : Mathf.Max(0.16f, 0.32f - ((levelDifference - 1) * 0.08f));
         var crownSize = new Vector2(TileSize * 3f, TileSize * 3f);
         DrawTextureRectRegion(
             _treeCrownAtlas,
             new Rect2(center - crownSize / 2f, crownSize),
-            TreeCrownSprites.GetRegion(_treeCrownAtlas, woodVariant));
+            TreeCrownSprites.GetRegion(_treeCrownAtlas, woodVariant),
+            new Color(1f, 1f, 1f, crownOpacity));
     }
 
     private void DrawTreePartSprite(
@@ -1973,9 +2057,164 @@ public partial class WorldView : Node2D
                 DrawCircle(center, 3.6f, new Color("78a947"));
                 DrawCircle(center + new Vector2(-1.2f, -0.6f), 0.65f, new Color("182117"));
                 DrawCircle(center + new Vector2(1.2f, -0.6f), 0.65f, new Color("182117"));
+                DrawCarriedResource(actors[index], center);
                 DrawActorIntent(actors[index], center);
             }
         }
+    }
+
+    private void DrawCombatEffects()
+    {
+        foreach (var effect in _combatEffects.Where(effect => effect.Level == _visibleLevel))
+        {
+            var progress = Mathf.Clamp(
+                (float)(effect.ElapsedSeconds / CombatEffectDurationSeconds), 0f, 1f);
+            var direction = effect.To - effect.From;
+            if (direction.LengthSquared() < 0.01f)
+            {
+                direction = Vector2.Right;
+            }
+            direction = direction.Normalized();
+
+            if (effect.Ranged)
+            {
+                var flightProgress = Mathf.Clamp(progress / 0.72f, 0f, 1f);
+                var position = effect.From.Lerp(effect.To, flightProgress);
+                var arcOffset = new Vector2(0f, -Mathf.Sin(flightProgress * Mathf.Pi) * 5f);
+                position += arcOffset;
+                DrawLine(position - direction * 4f, position - direction * 1.5f,
+                    new Color(0.72f, 0.68f, 0.58f, 0.55f), 1.2f, true);
+                DrawCircle(position, 2.1f, new Color(0.12f, 0.11f, 0.1f, 0.92f));
+                DrawCircle(position, 1.35f, new Color(0.72f, 0.7f, 0.64f));
+            }
+            else
+            {
+                var normal = new Vector2(-direction.Y, direction.X);
+                var swing = Mathf.Sin(Mathf.Clamp(progress / 0.62f, 0f, 1f) * Mathf.Pi);
+                var hand = effect.From + direction * 3f;
+                var weaponTip = hand + direction * (4f + swing * 3f) + normal * (4f - swing * 8f);
+                DrawLine(hand, weaponTip, new Color(0.16f, 0.11f, 0.08f), 2.5f, true);
+                DrawLine(hand, weaponTip, new Color(0.78f, 0.66f, 0.42f), 1.15f, true);
+            }
+
+            if (progress >= 0.58f)
+            {
+                var impactProgress = (progress - 0.58f) / 0.42f;
+                DrawArc(effect.To, 2f + impactProgress * 6f, 0f, Mathf.Tau, 16,
+                    new Color(1f, 0.84f, 0.38f, 0.85f * (1f - impactProgress)), 1.5f, true);
+            }
+        }
+    }
+
+    private static bool TryGetCombatPositions(
+        SimulationEvent simulationEvent,
+        SimulationSnapshot snapshot,
+        out Vector2 from,
+        out Vector2 to,
+        out int level,
+        out bool ranged)
+    {
+        ActorSnapshot? goblin;
+        HumanVillagerSnapshot? human;
+        if (simulationEvent.Kind == SimulationEventKind.HumanGuardHitGoblin)
+        {
+            goblin = snapshot.Actors
+                .Where(actor => actor.Id == simulationEvent.Target)
+                .Select(actor => (ActorSnapshot?)actor)
+                .FirstOrDefault();
+            human = FindHumanVillager(snapshot, simulationEvent.Subject);
+            ranged = false;
+            if (goblin is not { } targetGoblin || human is not { } attackingHuman)
+            {
+                from = default;
+                to = default;
+                level = default;
+                return false;
+            }
+            from = CellCenter(attackingHuman.Position);
+            to = CellCenter(targetGoblin.Position);
+            level = targetGoblin.Position.Z;
+            return attackingHuman.Position.Z == level;
+        }
+
+        goblin = snapshot.Actors
+            .Where(actor => actor.Id == simulationEvent.Subject)
+            .Select(actor => (ActorSnapshot?)actor)
+            .FirstOrDefault();
+        human = FindHumanVillager(snapshot, simulationEvent.Target);
+        if (goblin is not { } attackingGoblin || human is not { } targetHuman)
+        {
+            from = default;
+            to = default;
+            level = default;
+            ranged = default;
+            return false;
+        }
+        from = CellCenter(attackingGoblin.Position);
+        to = CellCenter(targetHuman.Position);
+        level = attackingGoblin.Position.Z;
+        ranged = Math.Abs(attackingGoblin.Position.X - targetHuman.Position.X) +
+            Math.Abs(attackingGoblin.Position.Y - targetHuman.Position.Y) > 1;
+        return targetHuman.Position.Z == level;
+    }
+
+    private static HumanVillagerSnapshot? FindHumanVillager(
+        SimulationSnapshot snapshot,
+        EntityId entityId)
+    {
+        var villagerId = unchecked((int)(entityId.Value & uint.MaxValue));
+        return snapshot.HumanVillage.Villagers
+            .Where(villager => villager.Id == villagerId)
+            .Select(villager => (HumanVillagerSnapshot?)villager)
+            .FirstOrDefault();
+    }
+
+    private void PlayCombatSound(AudioStreamWav stream, ulong sequence)
+    {
+        var player = _combatAudioPlayers[_nextCombatAudioPlayer++ % _combatAudioPlayers.Length];
+        player.Stop();
+        player.Stream = stream;
+        player.PitchScale = 0.94f + (sequence % 7) * 0.02f;
+        player.Play();
+    }
+
+    private static AudioStreamWav CreateCombatSound(float frequency, float duration, float grit)
+    {
+        const int mixRate = 22_050;
+        var sampleCount = Mathf.CeilToInt(duration * mixRate);
+        var data = new byte[sampleCount * sizeof(short)];
+        for (var index = 0; index < sampleCount; index++)
+        {
+            var time = (float)index / mixRate;
+            var envelope = Mathf.Pow(1f - (float)index / sampleCount, 2f);
+            var tone = Mathf.Sin(Mathf.Tau * frequency * time);
+            var noise = Mathf.Sin(Mathf.Tau * frequency * 3.73f * time + index * 1.17f);
+            var sample = (short)(Mathf.Clamp((tone * (1f - grit) + noise * grit) * envelope,
+                -1f, 1f) * short.MaxValue * 0.55f);
+            data[index * 2] = (byte)(sample & 0xff);
+            data[index * 2 + 1] = (byte)((sample >> 8) & 0xff);
+        }
+
+        return new AudioStreamWav
+        {
+            Format = AudioStreamWav.FormatEnum.Format16Bits,
+            MixRate = mixRate,
+            Stereo = false,
+            Data = data,
+        };
+    }
+
+    private sealed class CombatEffect(Vector2 from, Vector2 to, int level, bool ranged)
+    {
+        public Vector2 From { get; } = from;
+
+        public Vector2 To { get; } = to;
+
+        public int Level { get; } = level;
+
+        public bool Ranged { get; } = ranged;
+
+        public double ElapsedSeconds { get; set; }
     }
 
     private void DrawCorpses()
@@ -2182,6 +2421,29 @@ public partial class WorldView : Node2D
         }
     }
 
+    private void DrawStorageAreas()
+    {
+        foreach (var area in _snapshot.StorageAreas.Where(area =>
+                     area.Footprint.Any(cell => cell.Z == _visibleLevel)))
+        {
+            var color = area.LogisticsNetworkId == EntityId.None
+                ? new Color(0.35f, 0.55f, 0.3f, 0.16f)
+                : new Color(0.28f, 0.48f, 0.68f, 0.2f);
+            foreach (var cell in area.Footprint.Where(cell =>
+                         cell.Z == _visibleLevel &&
+                         _snapshot.GetVisibility(cell, _engine.Map.Width) !=
+                             CellVisibility.Unknown))
+            {
+                var rect = CellRect(cell.X, cell.Y).Grow(-1f);
+                DrawRect(rect, color);
+                DrawDashedLine(rect.Position, new Vector2(rect.End.X, rect.Position.Y),
+                    new Color("879b68"), width: 1f, dash: 3f);
+                DrawDashedLine(rect.End, new Vector2(rect.Position.X, rect.End.Y),
+                    new Color("879b68"), width: 1f, dash: 3f);
+            }
+        }
+    }
+
     private void DrawStorageZones()
     {
         foreach (var zone in _snapshot.StorageZones.Where(zone => zone.Position.Z == _visibleLevel))
@@ -2206,11 +2468,42 @@ public partial class WorldView : Node2D
             }
 
             DrawRect(rect, new Color("d8c379"), filled: false, width: 1.5f);
-            if (zone.AcceptedResource == ResourceKind.Water)
+            if (zone.ProviderKind == StorageProviderKind.WaterBarrel)
             {
                 DrawLine(
                     new Vector2(rect.Position.X, rect.GetCenter().Y),
                     new Vector2(rect.End.X, rect.GetCenter().Y),
+                    new Color("d8c379"),
+                    1f);
+            }
+            else if (zone.ProviderKind == StorageProviderKind.WoodenBox)
+            {
+                DrawLine(rect.Position, rect.End, new Color("d8c379"), 1f);
+                DrawLine(
+                    new Vector2(rect.End.X, rect.Position.Y),
+                    new Vector2(rect.Position.X, rect.End.Y),
+                    new Color("d8c379"),
+                    1f);
+            }
+            else if (zone.ProviderKind == StorageProviderKind.WoodenChest)
+            {
+                DrawLine(
+                    new Vector2(rect.Position.X, rect.GetCenter().Y - 2f),
+                    new Vector2(rect.End.X, rect.GetCenter().Y - 2f),
+                    new Color("d8c379"),
+                    1.5f);
+                DrawCircle(rect.GetCenter() + new Vector2(0f, 2f), 1.8f, new Color("39281b"));
+            }
+            else if (zone.ProviderKind == StorageProviderKind.WoodenBulkBin)
+            {
+                DrawLine(
+                    new Vector2(rect.GetCenter().X - 3f, rect.Position.Y),
+                    new Vector2(rect.GetCenter().X - 3f, rect.End.Y),
+                    new Color("d8c379"),
+                    1f);
+                DrawLine(
+                    new Vector2(rect.GetCenter().X + 3f, rect.Position.Y),
+                    new Vector2(rect.GetCenter().X + 3f, rect.End.Y),
                     new Color("d8c379"),
                     1f);
             }
@@ -2238,7 +2531,21 @@ public partial class WorldView : Node2D
             DrawCircle(center + new Vector2(0.5f, 1f), size * 0.43f,
                 new Color(0, 0, 0, 0.46f));
 
-            if (isStoneCluster && stack.Variant != ResourceVariant.None)
+            if (stack.Resource is ResourceKind.Food or ResourceKind.Wood)
+            {
+                DrawTextureRect(
+                    ResourceThumbnails.Create(
+                        _itemIconAtlas,
+                        _treePartAtlas,
+                        _foodIconAtlas,
+                        _materialPaletteTextures,
+                        stack.Resource,
+                        stack.FoodKind,
+                        stack.Variant),
+                    destination,
+                    tile: false);
+            }
+            else if (isStoneCluster && stack.Variant != ResourceVariant.None)
             {
                 DrawTextureRect(
                     _materialPaletteTextures.Get(
@@ -2260,6 +2567,35 @@ public partial class WorldView : Node2D
                     ItemIcons.TintForResource(stack.Resource));
             }
         }
+    }
+
+    private void DrawCarriedResource(ActorSnapshot actor, Vector2 actorCenter)
+    {
+        if (actor.CarriedStackId == EntityId.None)
+        {
+            return;
+        }
+
+        var stack = _snapshot.ItemStacks.FirstOrDefault(item => item.Id == actor.CarriedStackId);
+        if (stack.Id == EntityId.None)
+        {
+            return;
+        }
+
+        var center = actorCenter + new Vector2(6.5f, -6.5f);
+        var size = new Vector2(9f, 9f);
+        DrawCircle(center, 5.6f, new Color(0.04f, 0.05f, 0.035f, 0.88f));
+        DrawTextureRect(
+            ResourceThumbnails.Create(
+                _itemIconAtlas,
+                _treePartAtlas,
+                _foodIconAtlas,
+                _materialPaletteTextures,
+                stack.Resource,
+                stack.FoodKind,
+                stack.Variant),
+            new Rect2(center - size / 2f, size),
+            tile: false);
     }
 
     private void DrawJobTargets()

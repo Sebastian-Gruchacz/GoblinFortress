@@ -16,9 +16,9 @@ if (-not $godotPath) {
     throw 'Godot .NET 4.7.2 was not found. Set GODOT4 to the editor executable path.'
 }
 
-dotnet build (Join-Path $PSScriptRoot 'GoblinStronghold.slnx') --no-restore -c Debug
+& (Join-Path $PSScriptRoot 'tools\bake-assets.ps1')
 if ($LASTEXITCODE -ne 0) {
-    throw 'The game build failed.'
+    throw 'Asset baking failed.'
 }
 
 & $godotPath --path $projectPath

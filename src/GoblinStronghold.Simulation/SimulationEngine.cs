@@ -30,6 +30,8 @@ public sealed partial class SimulationEngine
     private readonly SortedDictionary<EntityId, ActorState> _actors = [];
     private readonly SortedDictionary<EntityId, ItemStackState> _itemStacks = [];
     private readonly SortedDictionary<EntityId, StorageZoneState> _storageZones = [];
+    private readonly SortedDictionary<EntityId, StorageAreaState> _storageAreas = [];
+    private readonly SortedDictionary<EntityId, LogisticsNetworkState> _logisticsNetworks = [];
     private readonly ResourceSpatialIndex _resourceSpatialIndex = new();
     private readonly SortedDictionary<ResourceKind, StoragePriority> _resourcePriorities = [];
     private readonly SortedDictionary<EntityId, ConstructionSiteState> _constructionSites = [];
@@ -81,6 +83,9 @@ public sealed partial class SimulationEngine
         _undergroundFactions = UndergroundFactionDirector.Create(worldSeed, map.MinimumWorldLevel);
         _humanVillage = HumanVillageState.CreateInitial(World, definitions);
         _raidTarget = map.HumanVillage;
+        _logisticsNetworks.Add(
+            EntityId.None,
+            new LogisticsNetworkState(EntityId.None, "Default"));
         foreach (var resource in Enum.GetValues<ResourceKind>().Where(IsStorableResource))
         {
             _resourcePriorities.Add(resource, StoragePriority.Normal);
@@ -361,6 +366,8 @@ public sealed partial class SimulationEngine
         engine.ValidateLoadedRaidState();
         engine.LoadResourcePriorities(save.ResourcePriorities);
         engine.LoadStorageZones(save.StorageZones);
+        engine.LoadLogisticsNetworks(save.LogisticsNetworks);
+        engine.LoadStorageAreas(save.StorageAreas);
         engine.LoadWorkDesignations(save.WorkDesignations);
         engine.LoadItemStacks(save.ItemStacks);
         engine.LoadConstructionSites(save.ConstructionSites);
@@ -538,7 +545,39 @@ public sealed partial class SimulationEngine
                 zone.SlotPolicy.SeparatesItemTypes ? GetUsedTypeSlots(zone.Id) : 0,
                 zone.MineralFilter,
                 zone.SlotPolicy.SeparatesItemTypes,
-                zone.SlotPolicy.Capabilities))
+                zone.SlotPolicy.Capabilities,
+                zone.LogisticsNetworkId,
+                zone.StorageAreaId,
+                zone.ProviderKind,
+                zone.ResourceFilter))
+            .ToArray();
+        var storageAreas = _storageAreas.Values
+            .Select(area =>
+            {
+                var zones = _storageZones.Values
+                    .Where(zone => zone.StorageAreaId == area.Id)
+                    .ToArray();
+                return new StorageAreaSnapshot(
+                    area.Id,
+                    area.Name,
+                    area.Footprint.ToArray(),
+                    area.LogisticsNetworkId,
+                    zones.Select(zone => zone.Id).ToArray(),
+                    zones.Sum(zone => zone.Capacity),
+                    zones.Sum(zone => GetStoredQuantity(zone.Id)));
+            })
+            .ToArray();
+        var logisticsNetworks = _logisticsNetworks.Values
+            .Select(network => new LogisticsNetworkSnapshot(
+                network.Id,
+                network.Name,
+                network.Id == EntityId.None,
+                network.AssignedHaulerIds.ToArray(),
+                network.SourceStorageZoneIds.ToArray(),
+                _storageZones.Values
+                    .Where(zone => zone.LogisticsNetworkId == network.Id)
+                    .Select(zone => zone.Id)
+                    .ToArray()))
             .ToArray();
         var resourcePriorities = _resourcePriorities
             .Select(pair => new ResourcePrioritySnapshot(pair.Key, pair.Value))
@@ -572,6 +611,8 @@ public sealed partial class SimulationEngine
             CreateVillageLootSnapshot(),
             itemStacks,
             storageZones,
+            storageAreas,
+            logisticsNetworks,
             resourcePriorities,
             resourceInventory,
             constructionSites,
@@ -1137,6 +1178,8 @@ public sealed partial class SimulationEngine
                 .ToList(),
             ItemStacks = _itemStacks.Values.Select(ToSaveModel).ToList(),
             StorageZones = _storageZones.Values.Select(ToSaveModel).ToList(),
+            StorageAreas = _storageAreas.Values.Select(ToSaveModel).ToList(),
+            LogisticsNetworks = _logisticsNetworks.Values.Select(ToSaveModel).ToList(),
             ResourcePriorities = _resourcePriorities.Select(pair => new ResourcePrioritySaveModel
             {
                 Resource = pair.Key,
@@ -1579,6 +1622,40 @@ public sealed partial class SimulationEngine
             Append(canonical, zone.SlotPolicy.StackCapacity);
             Append(canonical, zone.SlotPolicy.SeparatesItemTypes ? 1 : 0);
             Append(canonical, (int)zone.SlotPolicy.Capabilities);
+            Append(canonical, zone.LogisticsNetworkId.Value);
+            Append(canonical, zone.StorageAreaId.Value);
+            Append(canonical, (int)zone.ProviderKind);
+            Append(canonical, (int)zone.ResourceFilter);
+        }
+
+        Append(canonical, _storageAreas.Count);
+        foreach (var area in _storageAreas.Values)
+        {
+            Append(canonical, area.Id.Value);
+            Append(canonical, area.Name);
+            Append(canonical, area.LogisticsNetworkId.Value);
+            Append(canonical, area.Footprint.Length);
+            foreach (var cell in area.Footprint)
+            {
+                Append(canonical, cell);
+            }
+        }
+
+        Append(canonical, _logisticsNetworks.Count);
+        foreach (var network in _logisticsNetworks.Values)
+        {
+            Append(canonical, network.Id.Value);
+            Append(canonical, network.Name);
+            Append(canonical, network.AssignedHaulerIds.Count);
+            foreach (var actorId in network.AssignedHaulerIds)
+            {
+                Append(canonical, actorId.Value);
+            }
+            Append(canonical, network.SourceStorageZoneIds.Count);
+            foreach (var zoneId in network.SourceStorageZoneIds)
+            {
+                Append(canonical, zoneId.Value);
+            }
         }
 
         Append(canonical, _workDesignations.Count);
@@ -1644,6 +1721,7 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)command.Construction);
             Append(canonical, (int)command.Resource);
             Append(canonical, command.Amount);
+            Append(canonical, command.Text);
         }
 
         var bytes = Encoding.UTF8.GetBytes(canonical.ToString());
@@ -1922,6 +2000,7 @@ public sealed partial class SimulationEngine
             var id = new EntityId(zoneModel.Id);
             var position = new GridPosition(zoneModel.X, zoneModel.Y, zoneModel.Z);
             var mineralFilter = zoneModel.MineralFilter ?? MineralStorageFilter.All;
+            var resourceFilter = zoneModel.ResourceFilter;
             var slotPolicy = zoneModel.SlotCount is null && zoneModel.StackCapacity is null &&
                 zoneModel.SeparatesItemTypes is null && zoneModel.Capabilities is null
                     ? CreateDefaultStorageSlotPolicy(zoneModel.AcceptedResource, zoneModel.Capacity)
@@ -1936,11 +2015,20 @@ public sealed partial class SimulationEngine
                 zoneModel.DesiredQuantity < 0 ||
                 zoneModel.DesiredQuantity > zoneModel.Capacity ||
                 !Enum.IsDefined(zoneModel.Priority) ||
+                !Enum.IsDefined(zoneModel.ProviderKind) ||
                 !IsValidMineralFilter(mineralFilter) ||
                 (zoneModel.AcceptedResource != ResourceKind.Stone &&
                  mineralFilter != MineralStorageFilter.All) ||
                 !IsStorageFilterResource(zoneModel.AcceptedResource) ||
-                !IsValidStorageSlotPolicy(slotPolicy, zoneModel.Capacity))
+                !IsValidStorageResourceFilter(resourceFilter) ||
+                GetStorageFilterDisplayResource(resourceFilter) != zoneModel.AcceptedResource ||
+                !IsValidStorageSlotPolicy(slotPolicy, zoneModel.Capacity) ||
+                !IsValidStorageProvider(
+                    zoneModel.ProviderKind,
+                    zoneModel.AcceptedResource,
+                    resourceFilter,
+                    zoneModel.Capacity,
+                    slotPolicy))
             {
                 throw new InvalidDataException("The save contains an invalid storage zone.");
             }
@@ -1955,12 +2043,92 @@ public sealed partial class SimulationEngine
                 new EntityId(zoneModel.SourceStorageZoneId),
                 zoneModel.Priority,
                 mineralFilter,
-                slotPolicy);
+                slotPolicy,
+                new EntityId(zoneModel.LogisticsNetworkId),
+                new EntityId(zoneModel.StorageAreaId),
+                zoneModel.ProviderKind,
+                resourceFilter);
             if (!_storageZones.TryAdd(id, zone))
             {
                 throw new InvalidDataException($"The save contains duplicate storage zone {id}.");
             }
             IndexStorageZone(zone);
+        }
+    }
+
+    private void LoadLogisticsNetworks(IEnumerable<LogisticsNetworkSaveModel> networkModels)
+    {
+        _logisticsNetworks.Clear();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var model in networkModels.OrderBy(network => network.Id))
+        {
+            var id = new EntityId(model.Id);
+            if (!IsValidManagementName(model.Name) || !names.Add(model.Name.Trim()) ||
+                model.AssignedHaulerIds.Distinct().Count() != model.AssignedHaulerIds.Count ||
+                model.SourceStorageZoneIds.Distinct().Count() != model.SourceStorageZoneIds.Count)
+            {
+                throw new InvalidDataException("The save contains an invalid logistics network.");
+            }
+
+            var network = new LogisticsNetworkState(id, model.Name);
+            foreach (var actorId in model.AssignedHaulerIds.Select(value => new EntityId(value)))
+            {
+                network.AssignedHaulerIds.Add(actorId);
+            }
+            foreach (var zoneId in model.SourceStorageZoneIds.Select(value => new EntityId(value)))
+            {
+                network.SourceStorageZoneIds.Add(zoneId);
+            }
+            if (!_logisticsNetworks.TryAdd(id, network))
+            {
+                throw new InvalidDataException($"The save contains duplicate logistics network {id}.");
+            }
+        }
+
+        if (!_logisticsNetworks.TryGetValue(EntityId.None, out var defaultNetwork) ||
+            defaultNetwork.Name != "Default" ||
+            defaultNetwork.AssignedHaulerIds.Count != 0 ||
+            defaultNetwork.SourceStorageZoneIds.Count != 0)
+        {
+            throw new InvalidDataException("The save does not contain the canonical default logistics network.");
+        }
+    }
+
+    private void LoadStorageAreas(IEnumerable<StorageAreaSaveModel> areaModels)
+    {
+        var occupiedCells = new HashSet<GridPosition>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var model in areaModels.OrderBy(area => area.Id))
+        {
+            var id = new EntityId(model.Id);
+            var networkId = new EntityId(model.LogisticsNetworkId);
+            var footprint = model.Footprint
+                .Select(cell => new GridPosition(cell.X, cell.Y, cell.Z))
+                .OrderBy(cell => cell.Z)
+                .ThenBy(cell => cell.Y)
+                .ThenBy(cell => cell.X)
+                .ToArray();
+            var isSingleLevel = footprint.Length > 0 &&
+                footprint.All(cell => cell.Z == footprint[0].Z);
+            var expectedRectangle = isSingleLevel
+                ? EnumerateAreaCells(footprint[0], footprint[^1]).ToArray()
+                : [];
+            if (id == EntityId.None || !IsValidManagementName(model.Name) ||
+                !names.Add(model.Name.Trim()) ||
+                !_logisticsNetworks.ContainsKey(networkId) || footprint.Length == 0 ||
+                footprint.Length > 256 || footprint.Distinct().Count() != footprint.Length ||
+                !isSingleLevel || !footprint.SequenceEqual(expectedRectangle) ||
+                footprint.Any(cell => !World.IsTerrainTraversable(cell)) ||
+                footprint.Any(cell => !occupiedCells.Add(cell)))
+            {
+                throw new InvalidDataException("The save contains an invalid storage area.");
+            }
+
+            var area = new StorageAreaState(id, model.Name, footprint, networkId);
+            if (!_storageAreas.TryAdd(id, area))
+            {
+                throw new InvalidDataException($"The save contains duplicate storage area {id}.");
+            }
         }
     }
 
@@ -2297,8 +2465,7 @@ public sealed partial class SimulationEngine
                     break;
                 case ItemLocationKind.StorageZone:
                     if (!_storageZones.TryGetValue(stack.Location.OwnerId, out var zone) ||
-                        zone.Position != stack.Location.Position ||
-                        !ZoneCategoryAccepts(zone, stack.Resource))
+                        zone.Position != stack.Location.Position)
                     {
                         throw new InvalidDataException("A stored stack does not match its storage zone.");
                     }
@@ -2338,12 +2505,36 @@ public sealed partial class SimulationEngine
         foreach (var zone in _storageZones.Values)
         {
             if (GetStoredQuantity(zone.Id) > zone.Capacity ||
+                GetStorageFilterDisplayResource(zone.ResourceFilter) != zone.AcceptedResource ||
+                !IsValidStorageProvider(
+                    zone.ProviderKind,
+                    zone.AcceptedResource,
+                    zone.ResourceFilter,
+                    zone.Capacity,
+                    zone.SlotPolicy) ||
+                !_logisticsNetworks.ContainsKey(zone.LogisticsNetworkId) ||
+                !_storageAreas.TryGetValue(zone.StorageAreaId, out var area) ||
+                !area.Footprint.Contains(zone.Position) ||
+                area.LogisticsNetworkId != zone.LogisticsNetworkId ||
                 (zone.AssignedHaulerId != EntityId.None &&
                  !_actors.ContainsKey(zone.AssignedHaulerId)) ||
                 (zone.SourceStorageZoneId != EntityId.None &&
                  (!TryGetCompatibleStorageSource(zone, zone.SourceStorageZoneId, out _))))
             {
                 throw new InvalidDataException($"Storage zone {zone.Id} has invalid ownership or capacity.");
+            }
+        }
+
+        var specialistHaulers = new HashSet<EntityId>();
+        foreach (var network in _logisticsNetworks.Values.Where(network =>
+                     network.Id != EntityId.None))
+        {
+            if (network.AssignedHaulerIds.Any(actorId =>
+                    !_actors.ContainsKey(actorId) || !specialistHaulers.Add(actorId)) ||
+                network.SourceStorageZoneIds.Any(zoneId => !_storageZones.ContainsKey(zoneId)))
+            {
+                throw new InvalidDataException(
+                    $"Logistics network {network.Id} has invalid or duplicate assignments.");
             }
         }
     }
@@ -2353,6 +2544,8 @@ public sealed partial class SimulationEngine
         var maximumId = _actors.Keys
             .Concat(_itemStacks.Keys)
             .Concat(_storageZones.Keys)
+            .Concat(_storageAreas.Keys)
+            .Concat(_logisticsNetworks.Keys.Where(id => id != EntityId.None))
             .Concat(_workDesignations.Keys)
             .Concat(_constructionSites.Keys)
             .Concat(_craftingOrders.Keys)
@@ -2382,7 +2575,8 @@ public sealed partial class SimulationEngine
                 new GridPosition(model.EndX, model.EndY, model.EndZ),
                 model.Construction,
                 model.Resource,
-                model.Amount);
+                model.Amount,
+                model.Text ?? string.Empty);
 
             ValidateCommandForQueue(command);
             var key = new CommandKey(command.ExecuteAt, command.Sequence);
@@ -2630,6 +2824,27 @@ public sealed partial class SimulationEngine
             TryExecuteConfigureConstructionPriority(command),
         SimulationCommandKind.ConfigureStorageMineralFilter =>
             TryExecuteConfigureStorageMineralFilter(command),
+        SimulationCommandKind.CreateLogisticsNetwork => TryExecuteCreateLogisticsNetwork(),
+        SimulationCommandKind.ConfigureLogisticsHauler =>
+            TryExecuteConfigureLogisticsHauler(command),
+        SimulationCommandKind.ConfigureLogisticsSource =>
+            TryExecuteConfigureLogisticsSource(command),
+        SimulationCommandKind.ConfigureStorageNetwork =>
+            TryExecuteConfigureStorageNetwork(command),
+        SimulationCommandKind.CreateStorageArea => TryExecuteCreateStorageArea(command),
+        SimulationCommandKind.ConfigureStorageAreaNetwork =>
+            TryExecuteConfigureStorageAreaNetwork(command),
+        SimulationCommandKind.RenameLogisticsNetwork =>
+            TryExecuteRenameLogisticsNetwork(command),
+        SimulationCommandKind.RenameStorageArea => TryExecuteRenameStorageArea(command),
+        SimulationCommandKind.ConfigureStorageFilter =>
+            TryExecuteConfigureStorageFilter(command),
+        SimulationCommandKind.DeleteLogisticsNetwork =>
+            TryExecuteDeleteLogisticsNetwork(command),
+        SimulationCommandKind.ResizeStorageArea => TryExecuteResizeStorageArea(command),
+        SimulationCommandKind.DissolveStorageArea => TryExecuteDissolveStorageArea(command),
+        SimulationCommandKind.ConfigureStorageFilterResource =>
+            TryExecuteConfigureStorageFilterResource(command),
         SimulationCommandKind.AttackHumanVillage => TryExecuteAttackHumanVillage(command),
         SimulationCommandKind.ConfigureRaidMember => TryExecuteConfigureRaidMember(command),
         SimulationCommandKind.SuspendRaidPreparation => TryExecuteSuspendRaidPreparation(),
@@ -3413,6 +3628,353 @@ public sealed partial class SimulationEngine
         return true;
     }
 
+    private bool TryExecuteCreateLogisticsNetwork()
+    {
+        var id = AllocateEntityId();
+        var network = new LogisticsNetworkState(id, $"Network {id.Value}");
+        _logisticsNetworks.Add(id, network);
+        Publish(
+            SimulationEventKind.LogisticsNetworkCreated,
+            EntityId.None,
+            id,
+            amount: 0);
+        return true;
+    }
+
+    private bool TryExecuteConfigureLogisticsHauler(SimulationCommand command)
+    {
+        if (command.Target == EntityId.None ||
+            !_logisticsNetworks.TryGetValue(command.Target, out var network) ||
+            !_actors.ContainsKey(command.Subject))
+        {
+            return false;
+        }
+
+        foreach (var other in _logisticsNetworks.Values.Where(other =>
+                     other.Id != EntityId.None && other.Id != network.Id))
+        {
+            other.AssignedHaulerIds.Remove(command.Subject);
+        }
+        if (command.Amount == 1)
+        {
+            network.AssignedHaulerIds.Add(command.Subject);
+        }
+        else
+        {
+            network.AssignedHaulerIds.Remove(command.Subject);
+        }
+        WakeLogisticsNetwork(network);
+        Publish(
+            SimulationEventKind.LogisticsHaulerConfigured,
+            command.Subject,
+            network.Id,
+            command.Amount);
+        return true;
+    }
+
+    private bool TryExecuteConfigureLogisticsSource(SimulationCommand command)
+    {
+        if (command.Target == EntityId.None ||
+            !_logisticsNetworks.TryGetValue(command.Target, out var network) ||
+            !_storageZones.ContainsKey(command.Subject))
+        {
+            return false;
+        }
+
+        if (command.Amount == 1)
+        {
+            network.SourceStorageZoneIds.Add(command.Subject);
+        }
+        else
+        {
+            network.SourceStorageZoneIds.Remove(command.Subject);
+        }
+        WakeLogisticsNetwork(network);
+        Publish(
+            SimulationEventKind.LogisticsSourceConfigured,
+            command.Subject,
+            network.Id,
+            command.Amount);
+        return true;
+    }
+
+    private bool TryExecuteConfigureStorageNetwork(SimulationCommand command)
+    {
+        if (!_storageZones.TryGetValue(command.Target, out var zone) ||
+            !_logisticsNetworks.ContainsKey(command.Subject))
+        {
+            return false;
+        }
+
+        if (!_storageAreas.TryGetValue(zone.StorageAreaId, out var area))
+        {
+            return false;
+        }
+
+        ConfigureStorageAreaNetwork(area, command.Subject);
+        if (_logisticsNetworks.TryGetValue(command.Subject, out var network))
+        {
+            WakeLogisticsNetwork(network);
+        }
+        Publish(
+            SimulationEventKind.StorageNetworkConfigured,
+            command.Subject,
+            zone.Id,
+            amount: 0);
+        return true;
+    }
+
+    private bool TryExecuteCreateStorageArea(SimulationCommand command)
+    {
+        if (!_logisticsNetworks.ContainsKey(command.Subject))
+        {
+            return false;
+        }
+
+        var cells = EnumerateAreaCells(command.Position, command.EndPosition).ToArray();
+        if (cells.Length == 0 || cells.Length > 256 ||
+            cells.Any(cell => !World.IsTerrainTraversable(cell)) ||
+            cells.Any(cell => _storageAreas.Values.Any(area => area.Footprint.Contains(cell))))
+        {
+            return false;
+        }
+
+        var id = AllocateEntityId();
+        var area = new StorageAreaState(
+            id,
+            $"Storage area {id.Value}",
+            cells,
+            command.Subject);
+        _storageAreas.Add(id, area);
+        Publish(SimulationEventKind.StorageAreaCreated, command.Subject, id, cells.Length);
+        return true;
+    }
+
+    private bool TryExecuteConfigureStorageAreaNetwork(SimulationCommand command)
+    {
+        if (!_storageAreas.TryGetValue(command.Target, out var area) ||
+            !_logisticsNetworks.ContainsKey(command.Subject))
+        {
+            return false;
+        }
+
+        ConfigureStorageAreaNetwork(area, command.Subject);
+        if (_logisticsNetworks.TryGetValue(command.Subject, out var network))
+        {
+            WakeLogisticsNetwork(network);
+        }
+        Publish(
+            SimulationEventKind.StorageAreaNetworkConfigured,
+            command.Subject,
+            area.Id,
+            amount: 0);
+        return true;
+    }
+
+    private void ConfigureStorageAreaNetwork(StorageAreaState area, EntityId networkId)
+    {
+        area.LogisticsNetworkId = networkId;
+        foreach (var member in _storageZones.Values.Where(zone => zone.StorageAreaId == area.Id))
+        {
+            member.LogisticsNetworkId = networkId;
+            WakeAssignedHauler(member);
+        }
+    }
+
+    private bool TryExecuteRenameLogisticsNetwork(SimulationCommand command)
+    {
+        if (command.Target == EntityId.None ||
+            !_logisticsNetworks.TryGetValue(command.Target, out var network) ||
+            _logisticsNetworks.Values.Any(candidate =>
+                candidate.Id != command.Target &&
+                string.Equals(
+                    candidate.Name,
+                    command.Text.Trim(),
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        network.Name = command.Text.Trim();
+        Publish(SimulationEventKind.LogisticsNetworkRenamed, EntityId.None, network.Id, 0);
+        return true;
+    }
+
+    private bool TryExecuteRenameStorageArea(SimulationCommand command)
+    {
+        if (!_storageAreas.TryGetValue(command.Target, out var area) ||
+            _storageAreas.Values.Any(candidate =>
+                candidate.Id != command.Target &&
+                string.Equals(
+                    candidate.Name,
+                    command.Text.Trim(),
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        area.Name = command.Text.Trim();
+        Publish(SimulationEventKind.StorageAreaRenamed, EntityId.None, area.Id, 0);
+        return true;
+    }
+
+    private bool TryExecuteConfigureStorageFilter(SimulationCommand command)
+    {
+        if (!_storageZones.TryGetValue(command.Target, out var zone) ||
+            zone.ProviderKind is not (StorageProviderKind.WoodenBox or
+                StorageProviderKind.WoodenChest or StorageProviderKind.WoodenBulkBin) ||
+            !IsSolidContainerFilter(command.Resource))
+        {
+            return false;
+        }
+
+        zone.AcceptedResource = command.Resource;
+        zone.ResourceFilter = CreateStorageResourceFilter(command.Resource);
+        if (zone.AcceptedResource != ResourceKind.Stone)
+        {
+            zone.MineralFilter = MineralStorageFilter.All;
+        }
+        IndexStorageZone(zone);
+        WakeAssignedHauler(zone);
+        Publish(
+            SimulationEventKind.StorageFilterConfigured,
+            EntityId.None,
+            zone.Id,
+            (int)zone.AcceptedResource);
+        return true;
+    }
+
+    private bool TryExecuteConfigureStorageFilterResource(SimulationCommand command)
+    {
+        if (!_storageZones.TryGetValue(command.Target, out var zone) ||
+            zone.ProviderKind is not (StorageProviderKind.WoodenBox or
+                StorageProviderKind.WoodenChest or StorageProviderKind.WoodenBulkBin) ||
+            !IsSolidContainerFilter(command.Resource))
+        {
+            return false;
+        }
+
+        var resource = CreateStorageResourceFilter(command.Resource, expandPreset: false);
+        var filter = command.Amount == 1
+            ? zone.ResourceFilter | resource
+            : zone.ResourceFilter & ~resource;
+        if (!IsValidSolidContainerResourceFilter(filter))
+        {
+            return false;
+        }
+
+        zone.ResourceFilter = filter;
+        zone.AcceptedResource = GetStorageFilterDisplayResource(filter);
+        if (zone.AcceptedResource != ResourceKind.Stone)
+        {
+            zone.MineralFilter = MineralStorageFilter.All;
+        }
+        IndexStorageZone(zone);
+        WakeAssignedHauler(zone);
+        Publish(
+            SimulationEventKind.StorageFilterResourceConfigured,
+            EntityId.None,
+            zone.Id,
+            (int)zone.ResourceFilter);
+        return true;
+    }
+
+    private bool TryExecuteDeleteLogisticsNetwork(SimulationCommand command)
+    {
+        if (command.Target == EntityId.None ||
+            !_logisticsNetworks.TryGetValue(command.Target, out var network))
+        {
+            return false;
+        }
+
+        foreach (var actorId in network.AssignedHaulerIds)
+        {
+            if (_actors.TryGetValue(actorId, out var actor) &&
+                actor.JobKind == ActorJobKind.Haul &&
+                _storageZones.TryGetValue(actor.DestinationZoneId, out var destination) &&
+                destination.LogisticsNetworkId == network.Id)
+            {
+                actor.ClearJob();
+            }
+        }
+        foreach (var area in _storageAreas.Values.Where(area =>
+                     area.LogisticsNetworkId == network.Id))
+        {
+            ConfigureStorageAreaNetwork(area, EntityId.None);
+        }
+        foreach (var zone in _storageZones.Values.Where(zone =>
+                     zone.LogisticsNetworkId == network.Id))
+        {
+            zone.LogisticsNetworkId = EntityId.None;
+            WakeAssignedHauler(zone);
+        }
+
+        _logisticsNetworks.Remove(network.Id);
+        Publish(SimulationEventKind.LogisticsNetworkDeleted, EntityId.None, network.Id, 0);
+        return true;
+    }
+
+    private bool TryExecuteResizeStorageArea(SimulationCommand command)
+    {
+        if (!_storageAreas.TryGetValue(command.Target, out var area))
+        {
+            return false;
+        }
+
+        var cells = EnumerateAreaCells(command.Position, command.EndPosition).ToArray();
+        if (cells.Length == 0 || cells.Length > 256 ||
+            (area.Footprint.Length > 0 && cells[0].Z != area.Footprint[0].Z) ||
+            cells.Any(cell => !World.IsTerrainTraversable(cell)) ||
+            cells.Any(cell => _storageAreas.Values.Any(other =>
+                other.Id != area.Id && other.Footprint.Contains(cell))) ||
+            _storageZones.Values.Any(zone =>
+                zone.StorageAreaId == area.Id && !cells.Contains(zone.Position)))
+        {
+            return false;
+        }
+
+        area.SetFootprint(cells);
+        Publish(SimulationEventKind.StorageAreaResized, EntityId.None, area.Id, cells.Length);
+        return true;
+    }
+
+    private bool TryExecuteDissolveStorageArea(SimulationCommand command)
+    {
+        if (!_storageAreas.Remove(command.Target, out var area))
+        {
+            return false;
+        }
+
+        var providersByPosition = _storageZones.Values
+            .Where(zone => zone.StorageAreaId == area.Id)
+            .GroupBy(zone => zone.Position)
+            .OrderBy(group => group.Key.Z)
+            .ThenBy(group => group.Key.Y)
+            .ThenBy(group => group.Key.X)
+            .ToArray();
+        foreach (var providers in providersByPosition)
+        {
+            var singletonId = AllocateEntityId();
+            var singleton = new StorageAreaState(
+                singletonId,
+                $"Storage {singletonId.Value}",
+                [providers.Key],
+                area.LogisticsNetworkId);
+            _storageAreas.Add(singleton.Id, singleton);
+            foreach (var zone in providers)
+            {
+                zone.StorageAreaId = singleton.Id;
+            }
+        }
+
+        Publish(
+            SimulationEventKind.StorageAreaDissolved,
+            EntityId.None,
+            area.Id,
+            providersByPosition.Length);
+        return true;
+    }
+
     private bool TryExecuteConfigureStoragePriority(SimulationCommand command)
     {
         var priority = (StoragePriority)command.Amount;
@@ -3496,6 +4058,18 @@ public sealed partial class SimulationEngine
             actor.JobKind == ActorJobKind.Explore)
         {
             actor.ClearJob();
+        }
+    }
+
+    private void WakeLogisticsNetwork(LogisticsNetworkState network)
+    {
+        foreach (var actorId in network.AssignedHaulerIds)
+        {
+            if (_actors.TryGetValue(actorId, out var actor) &&
+                actor.JobKind == ActorJobKind.Explore)
+            {
+                actor.ClearJob();
+            }
         }
     }
 
@@ -3588,7 +4162,9 @@ public sealed partial class SimulationEngine
         {
             ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
                 ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
-                ConstructionKind.MaterialsStorage or ConstructionKind.WaterBarrel =>
+                ConstructionKind.MaterialsStorage or ConstructionKind.WaterBarrel or
+                ConstructionKind.WoodenBox or ConstructionKind.WoodenChest or
+                ConstructionKind.WoodenBulkBin =>
                 anchor.Z == 0
                     ? World.IsSurfaceTraversable(anchor)
                     : World.IsTerrainTraversable(anchor),
@@ -3656,6 +4232,9 @@ public sealed partial class SimulationEngine
             case ConstructionKind.EquipmentStorage:
             case ConstructionKind.MaterialsStorage:
             case ConstructionKind.WaterBarrel:
+            case ConstructionKind.WoodenBox:
+            case ConstructionKind.WoodenChest:
+            case ConstructionKind.WoodenBulkBin:
                 var acceptedResource = site.Kind switch
                 {
                     ConstructionKind.FoodStorage => ResourceKind.Food,
@@ -3664,6 +4243,8 @@ public sealed partial class SimulationEngine
                     ConstructionKind.EquipmentStorage => ResourceKind.Equipment,
                     ConstructionKind.MaterialsStorage => ResourceKind.Materials,
                     ConstructionKind.WaterBarrel => ResourceKind.Water,
+                    ConstructionKind.WoodenBox or ConstructionKind.WoodenChest or
+                        ConstructionKind.WoodenBulkBin => ResourceKind.Any,
                     _ => throw new InvalidOperationException(),
                 };
                 var capacity = acceptedResource switch
@@ -3672,13 +4253,28 @@ public sealed partial class SimulationEngine
                     ResourceKind.Equipment => 32,
                     ResourceKind.Materials => 64,
                     ResourceKind.Water => 32,
+                    ResourceKind.Any when site.Kind == ConstructionKind.WoodenBox => 32,
+                    ResourceKind.Any when site.Kind == ConstructionKind.WoodenChest => 64,
+                    ResourceKind.Any when site.Kind == ConstructionKind.WoodenBulkBin => 64,
                     _ => 64,
+                };
+                var providerKind = site.Kind switch
+                {
+                    ConstructionKind.WaterBarrel => StorageProviderKind.WaterBarrel,
+                    ConstructionKind.WoodenBox => StorageProviderKind.WoodenBox,
+                    ConstructionKind.WoodenChest => StorageProviderKind.WoodenChest,
+                    ConstructionKind.WoodenBulkBin => StorageProviderKind.WoodenBulkBin,
+                    _ => StorageProviderKind.OpenPile,
                 };
                 completedTarget = AllocateStorageZone(
                     site.Anchor,
                     acceptedResource,
                     capacity,
-                    desiredQuantity: capacity).Id;
+                    desiredQuantity: capacity,
+                    slotPolicy: providerKind == StorageProviderKind.OpenPile
+                        ? null
+                        : CreateStorageProviderSlotPolicy(providerKind, capacity),
+                    providerKind: providerKind).Id;
                 break;
             case ConstructionKind.WoodenWalkway:
                 var cells = site.GetFootprint();
@@ -4287,6 +4883,13 @@ public sealed partial class SimulationEngine
             throw new ArgumentOutOfRangeException(nameof(command), $"Unsupported command kind {command.Kind}.");
         }
 
+        if (command.Kind is not (SimulationCommandKind.RenameLogisticsNetwork or
+                SimulationCommandKind.RenameStorageArea) &&
+            !string.IsNullOrEmpty(command.Text))
+        {
+            throw new ArgumentException("This command does not accept text.", nameof(command));
+        }
+
         switch (command.Kind)
         {
             case SimulationCommandKind.Forage:
@@ -4341,7 +4944,9 @@ public sealed partial class SimulationEngine
                             ConstructionKind.SmeltingFurnace or
                             ConstructionKind.CrucibleFurnace =>
                             ResourceKind.Stone,
-                        ConstructionKind.WaterBarrel => ResourceKind.Equipment,
+                        ConstructionKind.WaterBarrel or ConstructionKind.WoodenBox or
+                            ConstructionKind.WoodenChest or ConstructionKind.WoodenBulkBin =>
+                            ResourceKind.Equipment,
                         _ => ResourceKind.Wood,
                     }) ||
                     !IsPotentialConstructionPosition(command.Position) ||
@@ -4362,6 +4967,14 @@ public sealed partial class SimulationEngine
                     (command.Position != command.EndPosition || command.Amount != 1))
                 {
                     throw new ArgumentException("Water-barrel placement is invalid.", nameof(command));
+                }
+
+                if (command.Construction is ConstructionKind.WoodenBox or
+                        ConstructionKind.WoodenChest or ConstructionKind.WoodenBulkBin &&
+                    (command.Position != command.EndPosition || command.Amount != 1))
+                {
+                    throw new ArgumentException(
+                        "Storage-container placement is invalid.", nameof(command));
                 }
 
                 if ((command.Construction is ConstructionKind.WoodenWalkway or
@@ -4577,6 +5190,181 @@ public sealed partial class SimulationEngine
                 }
 
                 break;
+            case SimulationCommandKind.CreateLogisticsNetwork:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    command.Resource != ResourceKind.Any || command.Amount != 0)
+                {
+                    throw new ArgumentException(
+                        "Create-logistics-network command is invalid.",
+                        nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureLogisticsHauler:
+                if (command.Target == EntityId.None ||
+                    !_logisticsNetworks.ContainsKey(command.Target) ||
+                    !_actors.ContainsKey(command.Subject) ||
+                    command.Resource != ResourceKind.Any || command.Amount is not (0 or 1))
+                {
+                    throw new ArgumentException(
+                        "Logistics-hauler command is invalid.",
+                        nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureLogisticsSource:
+                if (command.Target == EntityId.None ||
+                    !_logisticsNetworks.ContainsKey(command.Target) ||
+                    !_storageZones.ContainsKey(command.Subject) ||
+                    command.Resource != ResourceKind.Any || command.Amount is not (0 or 1))
+                {
+                    throw new ArgumentException(
+                        "Logistics-source command is invalid.",
+                        nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureStorageNetwork:
+                if (!_storageZones.ContainsKey(command.Target) ||
+                    !_logisticsNetworks.ContainsKey(command.Subject) ||
+                    command.Resource != ResourceKind.Any || command.Amount != 0)
+                {
+                    throw new ArgumentException(
+                        "Storage-network command is invalid.",
+                        nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.CreateStorageArea:
+                if (command.Target != EntityId.None ||
+                    !_logisticsNetworks.ContainsKey(command.Subject) ||
+                    command.Resource != ResourceKind.Any || command.Amount != 0 ||
+                    !IsValidArea(command.Position, command.EndPosition))
+                {
+                    throw new ArgumentException(
+                        "Create-storage-area command is invalid.",
+                        nameof(command));
+                }
+
+                var storageAreaCells = EnumerateAreaCells(
+                    command.Position,
+                    command.EndPosition).ToArray();
+                if (storageAreaCells.Length > 256 ||
+                    storageAreaCells.Any(cell => !World.IsTerrainTraversable(cell)))
+                {
+                    throw new ArgumentException(
+                        "Storage area must contain at most 256 traversable cells.",
+                        nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureStorageAreaNetwork:
+                if (!_storageAreas.ContainsKey(command.Target) ||
+                    !_logisticsNetworks.ContainsKey(command.Subject) ||
+                    command.Resource != ResourceKind.Any || command.Amount != 0)
+                {
+                    throw new ArgumentException(
+                        "Storage-area-network command is invalid.",
+                        nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.RenameLogisticsNetwork:
+                if (command.Subject != EntityId.None || command.Target == EntityId.None ||
+                    !_logisticsNetworks.ContainsKey(command.Target) ||
+                    command.Resource != ResourceKind.Any || command.Amount != 0 ||
+                    !IsValidManagementName(command.Text))
+                {
+                    throw new ArgumentException(
+                        "Rename-logistics-network command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.RenameStorageArea:
+                if (command.Subject != EntityId.None ||
+                    !_storageAreas.ContainsKey(command.Target) ||
+                    command.Resource != ResourceKind.Any || command.Amount != 0 ||
+                    !IsValidManagementName(command.Text))
+                {
+                    throw new ArgumentException(
+                        "Rename-storage-area command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureStorageFilter:
+                if (command.Subject != EntityId.None ||
+                    !_storageZones.TryGetValue(command.Target, out var filterZone) ||
+                    filterZone.ProviderKind is not (StorageProviderKind.WoodenBox or
+                        StorageProviderKind.WoodenChest or StorageProviderKind.WoodenBulkBin) ||
+                    !IsSolidContainerFilter(command.Resource) || command.Amount != 0)
+                {
+                    throw new ArgumentException(
+                        "Storage-filter command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ConfigureStorageFilterResource:
+                if (command.Subject != EntityId.None ||
+                    !_storageZones.TryGetValue(command.Target, out var resourceFilterZone) ||
+                    resourceFilterZone.ProviderKind is not (StorageProviderKind.WoodenBox or
+                        StorageProviderKind.WoodenChest or StorageProviderKind.WoodenBulkBin) ||
+                    !IsSolidContainerFilter(command.Resource) ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Amount is not (0 or 1))
+                {
+                    throw new ArgumentException(
+                        "Storage-filter-resource command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.DeleteLogisticsNetwork:
+                if (command.Subject != EntityId.None || command.Target == EntityId.None ||
+                    !_logisticsNetworks.ContainsKey(command.Target) ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount != 0)
+                {
+                    throw new ArgumentException(
+                        "Delete-logistics-network command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.ResizeStorageArea:
+                if (command.Subject != EntityId.None ||
+                    !_storageAreas.TryGetValue(command.Target, out var resizedArea) ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount != 0 || !IsValidArea(command.Position, command.EndPosition) ||
+                    (resizedArea.Footprint.Length > 0 &&
+                     command.Position.Z != resizedArea.Footprint[0].Z))
+                {
+                    throw new ArgumentException(
+                        "Resize-storage-area command is invalid.", nameof(command));
+                }
+
+                var resizedAreaCells = EnumerateAreaCells(
+                    command.Position,
+                    command.EndPosition).ToArray();
+                if (resizedAreaCells.Length > 256 ||
+                    resizedAreaCells.Any(cell => !World.IsTerrainTraversable(cell)))
+                {
+                    throw new ArgumentException(
+                        "Storage area must contain at most 256 traversable cells.",
+                        nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.DissolveStorageArea:
+                if (command.Subject != EntityId.None ||
+                    !_storageAreas.ContainsKey(command.Target) ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount != 0)
+                {
+                    throw new ArgumentException(
+                        "Dissolve-storage-area command is invalid.", nameof(command));
+                }
+
+                break;
             case SimulationCommandKind.ConfigureResourcePriority:
                 if (command.Subject != EntityId.None || command.Target != EntityId.None ||
                     !_resourcePriorities.ContainsKey(command.Resource) ||
@@ -4759,9 +5547,22 @@ public sealed partial class SimulationEngine
         int desiredQuantity = 0,
         EntityId assignedHaulerId = default,
         EntityId sourceStorageZoneId = default,
-        StoragePriority priority = StoragePriority.Normal)
+        StoragePriority priority = StoragePriority.Normal,
+        StorageSlotPolicy? slotPolicy = null,
+        StorageProviderKind providerKind = StorageProviderKind.OpenPile)
     {
         var id = AllocateEntityId();
+        var area = _storageAreas.Values.FirstOrDefault(candidate =>
+            candidate.Footprint.Contains(position));
+        if (area is null)
+        {
+            area = new StorageAreaState(
+                id,
+                $"Storage {id.Value}",
+                [position],
+                EntityId.None);
+            _storageAreas.Add(area.Id, area);
+        }
         var zone = new StorageZoneState(
             id,
             position,
@@ -4771,7 +5572,11 @@ public sealed partial class SimulationEngine
             assignedHaulerId,
             sourceStorageZoneId,
             priority,
-            slotPolicy: CreateDefaultStorageSlotPolicy(acceptedResource, capacity));
+            slotPolicy: slotPolicy ?? CreateDefaultStorageSlotPolicy(acceptedResource, capacity),
+            logisticsNetworkId: area.LogisticsNetworkId,
+            storageAreaId: area.Id,
+            providerKind: providerKind,
+            resourceFilter: CreateStorageResourceFilter(acceptedResource));
         _storageZones.Add(id, zone);
         IndexStorageZone(zone);
         return zone;
@@ -5144,6 +5949,20 @@ public sealed partial class SimulationEngine
         (new GridPosition(Math.Min(first.X, second.X), Math.Min(first.Y, second.Y), first.Z),
          new GridPosition(Math.Max(first.X, second.X), Math.Max(first.Y, second.Y), first.Z));
 
+    private static IEnumerable<GridPosition> EnumerateAreaCells(
+        GridPosition first,
+        GridPosition second)
+    {
+        var (minimum, maximum) = NormalizeArea(first, second);
+        for (var y = minimum.Y; y <= maximum.Y; y++)
+        {
+            for (var x = minimum.X; x <= maximum.X; x++)
+            {
+                yield return new GridPosition(x, y, minimum.Z);
+            }
+        }
+    }
+
     private static bool IsInside(
         GridPosition position,
         GridPosition minimum,
@@ -5317,12 +6136,64 @@ public sealed partial class SimulationEngine
                 SeparatesItemTypes: false,
                 StorageCapability.SolidGoods);
 
+    private StorageSlotPolicy CreateStorageProviderSlotPolicy(
+        StorageProviderKind providerKind,
+        int capacity) => providerKind switch
+    {
+        StorageProviderKind.WaterBarrel => new(
+            SlotCount: 1,
+            StackCapacity: capacity,
+            SeparatesItemTypes: false,
+            StorageCapability.SealedLiquids),
+        StorageProviderKind.WoodenBox => new(
+            SlotCount: 4,
+            StackCapacity: 8,
+            SeparatesItemTypes: true,
+            StorageCapability.SolidGoods),
+        StorageProviderKind.WoodenChest => new(
+            SlotCount: 8,
+            StackCapacity: 8,
+            SeparatesItemTypes: true,
+            StorageCapability.SolidGoods),
+        StorageProviderKind.WoodenBulkBin => new(
+            SlotCount: 1,
+            StackCapacity: 64,
+            SeparatesItemTypes: true,
+            StorageCapability.SolidGoods),
+        _ => CreateDefaultStorageSlotPolicy(ResourceKind.Any, capacity),
+    };
+
     private static bool IsValidStorageSlotPolicy(StorageSlotPolicy policy, int capacity) =>
         policy.SlotCount > 0 &&
         policy.StackCapacity > 0 &&
         policy.TotalCapacity >= capacity &&
         policy.Capabilities != StorageCapability.None &&
         (policy.Capabilities & ~StorageCapability.All) == StorageCapability.None;
+
+    private static bool IsValidStorageProvider(
+        StorageProviderKind providerKind,
+        ResourceKind acceptedResource,
+        StorageResourceFilter resourceFilter,
+        int capacity,
+        StorageSlotPolicy policy) => providerKind switch
+    {
+        StorageProviderKind.OpenPile =>
+            resourceFilter == CreateStorageResourceFilter(acceptedResource),
+        StorageProviderKind.WaterBarrel =>
+            acceptedResource == ResourceKind.Water && capacity == 32 &&
+            resourceFilter == StorageResourceFilter.Water &&
+            policy == new StorageSlotPolicy(1, 32, false, StorageCapability.SealedLiquids),
+        StorageProviderKind.WoodenBox =>
+            IsValidSolidContainerResourceFilter(resourceFilter) && capacity == 32 &&
+            policy == new StorageSlotPolicy(4, 8, true, StorageCapability.SolidGoods),
+        StorageProviderKind.WoodenChest =>
+            IsValidSolidContainerResourceFilter(resourceFilter) && capacity == 64 &&
+            policy == new StorageSlotPolicy(8, 8, true, StorageCapability.SolidGoods),
+        StorageProviderKind.WoodenBulkBin =>
+            IsValidSolidContainerResourceFilter(resourceFilter) && capacity == 64 &&
+            policy == new StorageSlotPolicy(1, 64, true, StorageCapability.SolidGoods),
+        _ => false,
+    };
 
     private static bool IsValidFoodKind(ResourceKind resource, FoodKind foodKind) =>
         resource == ResourceKind.Food
@@ -5344,7 +6215,10 @@ public sealed partial class SimulationEngine
         ResourceKind.Equipment => variant is >= ResourceVariant.EquipmentPrimitiveSling and
                 <= ResourceVariant.EquipmentWoodenSpear or
             ResourceVariant.EquipmentReinforcedPickaxe or
-            ResourceVariant.EquipmentWoodenBarrel,
+            ResourceVariant.EquipmentWoodenBarrel or
+            ResourceVariant.EquipmentWoodenBox or
+            ResourceVariant.EquipmentWoodenChest or
+            ResourceVariant.EquipmentWoodenBulkBin,
         ResourceKind.Materials => variant is ResourceVariant.None or ResourceVariant.Ruby or
             ResourceVariant.Emerald or ResourceVariant.Diamond or ResourceVariant.IronBar or
             ResourceVariant.CopperBar or ResourceVariant.SilverBar or ResourceVariant.GoldBar,
@@ -5426,10 +6300,7 @@ public sealed partial class SimulationEngine
     }
 
     private static bool ZoneCategoryAccepts(StorageZoneState zone, ResourceKind resource) =>
-        zone.AcceptedResource is ResourceKind.Any ||
-        zone.AcceptedResource == resource ||
-        (zone.AcceptedResource == ResourceKind.Materials && IsBasicCraftingMaterial(resource)) ||
-        (zone.AcceptedResource == ResourceKind.Stone && IsMineralResource(resource));
+        zone.ResourceFilter.HasFlag(CreateStorageResourceFilter(resource, expandPreset: false));
 
     private static bool IsBasicCraftingMaterial(ResourceKind resource) =>
         resource is ResourceKind.Reeds or ResourceKind.Bone or ResourceKind.Hide;
@@ -5512,13 +6383,81 @@ public sealed partial class SimulationEngine
         out StorageZoneState source) =>
         _storageZones.TryGetValue(sourceId, out source!) &&
         source.Id != destination.Id &&
-        source.AcceptedResource == destination.AcceptedResource;
+        (source.ResourceFilter & destination.ResourceFilter) != StorageResourceFilter.None;
 
     private static bool IsStorableResource(ResourceKind resource) =>
         Enum.IsDefined(resource) && resource != ResourceKind.Any;
 
     private static bool IsStorageFilterResource(ResourceKind resource) =>
         Enum.IsDefined(resource);
+
+    private static bool IsSolidContainerFilter(ResourceKind resource) =>
+        IsStorageFilterResource(resource) &&
+        resource is not (ResourceKind.Water or ResourceKind.Vegetation);
+
+    private static StorageResourceFilter CreateStorageResourceFilter(
+        ResourceKind resource,
+        bool expandPreset = true)
+    {
+        if (resource == ResourceKind.Any)
+        {
+            return StorageResourceFilter.SolidGoods;
+        }
+        if (expandPreset && resource == ResourceKind.Materials)
+        {
+            return StorageResourceFilter.Materials | StorageResourceFilter.Reeds |
+                StorageResourceFilter.Bone | StorageResourceFilter.Hide;
+        }
+        if (expandPreset && resource == ResourceKind.Stone)
+        {
+            return StorageResourceFilter.Stone | StorageResourceFilter.Coal |
+                StorageResourceFilter.Ore;
+        }
+        if (!IsStorableResource(resource))
+        {
+            return StorageResourceFilter.None;
+        }
+
+        return (StorageResourceFilter)(1 << ((int)resource - 1));
+    }
+
+    private static ResourceKind GetStorageFilterDisplayResource(StorageResourceFilter filter)
+    {
+        if (filter == StorageResourceFilter.SolidGoods)
+        {
+            return ResourceKind.Any;
+        }
+        if (filter == CreateStorageResourceFilter(ResourceKind.Materials))
+        {
+            return ResourceKind.Materials;
+        }
+        if (filter == CreateStorageResourceFilter(ResourceKind.Stone))
+        {
+            return ResourceKind.Stone;
+        }
+
+        foreach (var resource in Enum.GetValues<ResourceKind>().Where(resource =>
+                     resource != ResourceKind.Any))
+        {
+            if (filter == CreateStorageResourceFilter(resource, expandPreset: false))
+            {
+                return resource;
+            }
+        }
+        return ResourceKind.Any;
+    }
+
+    private static bool IsValidStorageResourceFilter(StorageResourceFilter filter) =>
+        filter != StorageResourceFilter.None &&
+        (filter & ~StorageResourceFilter.All) == StorageResourceFilter.None;
+
+    private static bool IsValidSolidContainerResourceFilter(StorageResourceFilter filter) =>
+        filter != StorageResourceFilter.None &&
+        (filter & ~StorageResourceFilter.SolidGoods) == StorageResourceFilter.None;
+
+    private static bool IsValidManagementName(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 40 &&
+        name.All(character => !char.IsControl(character));
 
     private static bool IsInventoryResource(ResourceKind resource) =>
         IsStorableResource(resource) && resource != ResourceKind.Vegetation;
@@ -5753,6 +6692,31 @@ public sealed partial class SimulationEngine
         StackCapacity = zone.SlotPolicy.StackCapacity,
         SeparatesItemTypes = zone.SlotPolicy.SeparatesItemTypes,
         Capabilities = zone.SlotPolicy.Capabilities,
+        LogisticsNetworkId = zone.LogisticsNetworkId.Value,
+        StorageAreaId = zone.StorageAreaId.Value,
+        ProviderKind = zone.ProviderKind,
+        ResourceFilter = zone.ResourceFilter,
+    };
+
+    private static StorageAreaSaveModel ToSaveModel(StorageAreaState area) => new()
+    {
+        Id = area.Id.Value,
+        Name = area.Name,
+        LogisticsNetworkId = area.LogisticsNetworkId.Value,
+        Footprint = area.Footprint.Select(cell => new GridPositionSaveModel
+        {
+            X = cell.X,
+            Y = cell.Y,
+            Z = cell.Z,
+        }).ToList(),
+    };
+
+    private static LogisticsNetworkSaveModel ToSaveModel(LogisticsNetworkState network) => new()
+    {
+        Id = network.Id.Value,
+        Name = network.Name,
+        AssignedHaulerIds = network.AssignedHaulerIds.Select(id => id.Value).ToList(),
+        SourceStorageZoneIds = network.SourceStorageZoneIds.Select(id => id.Value).ToList(),
     };
 
     private static CommandSaveModel ToSaveModel(SimulationCommand command) => new()
@@ -5771,6 +6735,7 @@ public sealed partial class SimulationEngine
         Construction = command.Construction,
         Resource = command.Resource,
         Amount = command.Amount,
+        Text = command.Text,
     };
 
     private static EventSaveModel ToSaveModel(SimulationEvent simulationEvent) => new()
@@ -6028,13 +6993,17 @@ public sealed partial class SimulationEngine
         EntityId sourceStorageZoneId = default,
         StoragePriority priority = StoragePriority.Normal,
         MineralStorageFilter mineralFilter = MineralStorageFilter.All,
-        StorageSlotPolicy slotPolicy = default)
+        StorageSlotPolicy slotPolicy = default,
+        EntityId logisticsNetworkId = default,
+        EntityId storageAreaId = default,
+        StorageProviderKind providerKind = StorageProviderKind.OpenPile,
+        StorageResourceFilter resourceFilter = StorageResourceFilter.None)
     {
         public EntityId Id { get; } = id;
 
         public GridPosition Position { get; } = position;
 
-        public ResourceKind AcceptedResource { get; } = acceptedResource;
+        public ResourceKind AcceptedResource { get; set; } = acceptedResource;
 
         public int Capacity { get; } = capacity;
 
@@ -6049,6 +7018,52 @@ public sealed partial class SimulationEngine
         public MineralStorageFilter MineralFilter { get; set; } = mineralFilter;
 
         public StorageSlotPolicy SlotPolicy { get; } = slotPolicy;
+
+        public EntityId LogisticsNetworkId { get; set; } = logisticsNetworkId;
+
+        public EntityId StorageAreaId { get; set; } = storageAreaId;
+
+        public StorageProviderKind ProviderKind { get; } = providerKind;
+
+        public StorageResourceFilter ResourceFilter { get; set; } = resourceFilter ==
+            StorageResourceFilter.None
+                ? CreateStorageResourceFilter(acceptedResource)
+                : resourceFilter;
+    }
+
+    private sealed class StorageAreaState(
+        EntityId id,
+        string name,
+        IEnumerable<GridPosition> footprint,
+        EntityId logisticsNetworkId)
+    {
+        public EntityId Id { get; } = id;
+
+        public string Name { get; set; } = name;
+
+        public GridPosition[] Footprint { get; private set; } = SortFootprint(footprint);
+
+        public EntityId LogisticsNetworkId { get; set; } = logisticsNetworkId;
+
+        public void SetFootprint(IEnumerable<GridPosition> cells) =>
+            Footprint = SortFootprint(cells);
+
+        private static GridPosition[] SortFootprint(IEnumerable<GridPosition> cells) => cells
+            .OrderBy(cell => cell.Z)
+            .ThenBy(cell => cell.Y)
+            .ThenBy(cell => cell.X)
+            .ToArray();
+    }
+
+    private sealed class LogisticsNetworkState(EntityId id, string name)
+    {
+        public EntityId Id { get; } = id;
+
+        public string Name { get; set; } = name;
+
+        public SortedSet<EntityId> AssignedHaulerIds { get; } = [];
+
+        public SortedSet<EntityId> SourceStorageZoneIds { get; } = [];
     }
 
     private readonly record struct StorageTypeKey(

@@ -86,6 +86,10 @@ internal sealed class SimulationSaveModel
 
     public List<StorageZoneSaveModel> StorageZones { get; set; } = [];
 
+    public List<StorageAreaSaveModel> StorageAreas { get; set; } = [];
+
+    public List<LogisticsNetworkSaveModel> LogisticsNetworks { get; set; } = [];
+
     public List<ResourcePrioritySaveModel> ResourcePriorities { get; set; } = [];
 
     public List<ConstructionSiteSaveModel> ConstructionSites { get; set; } = [];
@@ -621,6 +625,36 @@ internal sealed class StorageZoneSaveModel
     public bool? SeparatesItemTypes { get; set; }
 
     public Resources.StorageCapability? Capabilities { get; set; }
+
+    public ulong LogisticsNetworkId { get; set; }
+
+    public ulong StorageAreaId { get; set; }
+
+    public Resources.StorageProviderKind ProviderKind { get; set; }
+
+    public Resources.StorageResourceFilter ResourceFilter { get; set; }
+}
+
+internal sealed class StorageAreaSaveModel
+{
+    public ulong Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public ulong LogisticsNetworkId { get; set; }
+
+    public List<GridPositionSaveModel> Footprint { get; set; } = [];
+}
+
+internal sealed class LogisticsNetworkSaveModel
+{
+    public ulong Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public List<ulong> AssignedHaulerIds { get; set; } = [];
+
+    public List<ulong> SourceStorageZoneIds { get; set; } = [];
 }
 
 internal sealed class WorkDesignationSaveModel
@@ -744,6 +778,8 @@ internal sealed class CommandSaveModel
     public Resources.ResourceKind Resource { get; set; }
 
     public int Amount { get; set; }
+
+    public string Text { get; set; } = string.Empty;
 }
 
 internal sealed class EventSaveModel

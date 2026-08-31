@@ -634,14 +634,20 @@ autowrap_mode = 2
 [node name="Detailed" type="CheckButton" parent="StoredResourcesWindow/Margin/Content" unique_id=1215984233]
 layout_mode = 2
 tooltip_text = "Rozdziela żywność, gatunki drewna i rodzaje kamienia."
+button_pressed = true
 text = "Pokaż konkretne rodzaje"
 
-[node name="Grid" type="GridContainer" parent="StoredResourcesWindow/Margin/Content" unique_id=957772829]
+[node name="Scroll" type="ScrollContainer" parent="StoredResourcesWindow/Margin/Content"]
 layout_mode = 2
 size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Grid" type="GridContainer" parent="StoredResourcesWindow/Margin/Content/Scroll" unique_id=957772829]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/h_separation = 10
 theme_override_constants/v_separation = 10
-columns = 5
+columns = 3
 
 [node name="LooseResourcesWindow" type="Window" parent="." unique_id=131620878]
 title = "Luźne towary"
@@ -673,14 +679,20 @@ autowrap_mode = 2
 [node name="Detailed" type="CheckButton" parent="LooseResourcesWindow/Margin/Content" unique_id=1072924780]
 layout_mode = 2
 tooltip_text = "Rozdziela żywność, gatunki drewna i rodzaje kamienia."
+button_pressed = true
 text = "Pokaż konkretne rodzaje"
 
-[node name="Grid" type="GridContainer" parent="LooseResourcesWindow/Margin/Content" unique_id=1242702497]
+[node name="Scroll" type="ScrollContainer" parent="LooseResourcesWindow/Margin/Content"]
 layout_mode = 2
 size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Grid" type="GridContainer" parent="LooseResourcesWindow/Margin/Content/Scroll" unique_id=1242702497]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/h_separation = 10
 theme_override_constants/v_separation = 10
-columns = 5
+columns = 3
 
 [node name="GoblinRosterWindow" type="Window" parent="." unique_id=295736424]
 title = "Plemię"
@@ -760,9 +772,9 @@ autowrap_mode = 2
 [node name="StorageDetails" type="Window" parent="." unique_id=225702360]
 title = "Ustawienia składu"
 initial_position = 1
-size = Vector2i(480, 570)
+size = Vector2i(500, 740)
 visible = false
-min_size = Vector2i(430, 510)
+min_size = Vector2i(460, 620)
 
 [node name="Margin" type="MarginContainer" parent="StorageDetails" unique_id=330984714]
 anchors_preset = 15
@@ -783,6 +795,16 @@ theme_override_constants/separation = 10
 layout_mode = 2
 text = "Skład"
 autowrap_mode = 2
+
+[node name="ContentsLabel" type="Label" parent="StorageDetails/Margin/Controls"]
+layout_mode = 2
+text = "Zawartość: pusty"
+
+[node name="ContentsGrid" type="GridContainer" parent="StorageDetails/Margin/Controls"]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 3
 
 [node name="MineralFilters" type="VBoxContainer" parent="StorageDetails/Margin/Controls" unique_id=1250907985]
 visible = false

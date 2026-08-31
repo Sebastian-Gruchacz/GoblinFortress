@@ -51,6 +51,27 @@ public sealed class CraftingRecipeCatalogTests
             barrel.Output);
     }
 
+    [Fact]
+    public void PrimitiveAxeUsesWoodStoneBindingAndProducesPhysicalAxe()
+    {
+        var axe = CraftingRecipeCatalog.Get(CraftingRecipeKind.PrimitiveAxe);
+
+        Assert.Equal(WorkshopKind.PrimitiveWorkshop, axe.Workshop);
+        Assert.Equal(
+            [
+                new CraftingMaterialRequirement(ResourceKind.Wood, ResourceVariant.None, 2),
+                new CraftingMaterialRequirement(ResourceKind.Stone, ResourceVariant.None, 1),
+                new CraftingMaterialRequirement(ResourceKind.Reeds, ResourceVariant.None, 1),
+            ],
+            axe.Materials);
+        Assert.Equal(
+            new CraftingOutputDefinition(
+                ResourceKind.Equipment,
+                ResourceVariant.EquipmentWoodenAxe,
+                1),
+            axe.Output);
+    }
+
     [Theory]
     [InlineData(CraftingRecipeKind.SmeltIronBar, WorkshopKind.Bloomery,
         ResourceVariant.IronOre, ResourceVariant.IronBar)]

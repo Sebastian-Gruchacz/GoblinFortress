@@ -3271,15 +3271,17 @@ public sealed partial class SimulationEngine
                 .Select(plant => (plant.Position, EntityId.None)),
             WorkDesignationKind.FellTree => World.CreateWorldObjectSnapshot()
                 .Where(worldObject =>
-                    worldObject.Kind is WorldObjectKind.Tree or WorldObjectKind.DeadTreeStump &&
-                    IsInside(worldObject.Anchor, minimum, maximum) &&
-                    Visibility.Get(worldObject.Anchor) != CellVisibility.Unknown)
-                .Select(worldObject => (worldObject.Anchor, EntityId.None)),
+                    worldObject.Kind is WorldObjectKind.Tree or WorldObjectKind.DeadTreeStump)
+                .Select(worldObject => World.GetNaturalObjectSurfacePosition(worldObject))
+                .Where(position => IsInside(position, minimum, maximum) &&
+                    Visibility.Get(position) != CellVisibility.Unknown)
+                .Select(position => (position, EntityId.None)),
             WorkDesignationKind.QuarryBoulder => World.CreateWorldObjectSnapshot()
-                .Where(worldObject => worldObject.Kind == WorldObjectKind.Boulder &&
-                    IsInside(worldObject.Anchor, minimum, maximum) &&
-                    Visibility.Get(worldObject.Anchor) != CellVisibility.Unknown)
-                .Select(worldObject => (worldObject.Anchor, EntityId.None)),
+                .Where(worldObject => worldObject.Kind == WorldObjectKind.Boulder)
+                .Select(worldObject => World.GetNaturalObjectSurfacePosition(worldObject))
+                .Where(position => IsInside(position, minimum, maximum) &&
+                    Visibility.Get(position) != CellVisibility.Unknown)
+                .Select(position => (position, EntityId.None)),
             WorkDesignationKind.MineRock =>
                 (from y in Enumerable.Range(minimum.Y, maximum.Y - minimum.Y + 1)
                  from x in Enumerable.Range(minimum.X, maximum.X - minimum.X + 1)

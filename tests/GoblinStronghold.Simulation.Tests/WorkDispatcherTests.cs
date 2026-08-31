@@ -330,6 +330,53 @@ public sealed class WorkDispatcherTests
     }
 
     [Fact]
+    public void FellingAreaTargetsStumpOnItsDisplayedDepressionLevel()
+    {
+        var engine = CreateEngine(goblinCount: 2);
+        var stump = engine.World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.DeadTreeStump)
+            .Select(worldObject => new
+            {
+                Stump = worldObject,
+                Target = engine.Map.GetTerrainSurfacePosition(worldObject.Anchor),
+            })
+            .Where(candidate => candidate.Target.Z < candidate.Stump.Anchor.Z)
+            .First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var visibilityIndex = checked(
+            (-stump.Target.Z * engine.Map.CellCount) +
+            (stump.Target.Y * engine.Map.Width) + stump.Target.X);
+        save["visibility"]!.AsArray()[visibilityIndex] = (int)CellVisibility.Explored;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        var targets = engine.QueryWorkDesignationTargets(
+            WorkDesignationKind.FellTree,
+            stump.Target,
+            stump.Target);
+        Assert.Equal(stump.Target, Assert.Single(targets));
+
+        engine.QueueCommand(SimulationCommand.DesignateTreeFelling(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            stump.Target,
+            stump.Target));
+        engine.AdvanceTicks(1);
+
+        Assert.Equal(stump.Target,
+            Assert.Single(engine.CreateSnapshot().WorkDesignations).Target);
+        Assert.Contains(engine.CreateSnapshot().Actors,
+            actor => actor.Job.Kind == ActorJobKind.FellTree);
+
+        engine.AdvanceTicks(2_000);
+
+        Assert.DoesNotContain(engine.World.GetWorldObjectsAt(stump.Stump.Anchor),
+            worldObject => worldObject.Kind == WorldObjectKind.DeadTreeStump);
+        Assert.Contains(engine.CreateSnapshot().ItemStacks, stack =>
+            stack.Resource == ResourceKind.Wood &&
+            stack.Location.Position.Z == stump.Target.Z);
+    }
+
+    [Fact]
     public void QuarryAreaRequiresPickaxeAndTurnsBoulderIntoLooseStone()
     {
         var engine = CreateEngine(goblinCount: 2);

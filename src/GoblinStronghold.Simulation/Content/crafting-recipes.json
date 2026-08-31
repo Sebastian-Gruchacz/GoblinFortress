@@ -11,6 +11,15 @@
       "output": { "resource": "Equipment", "variant": "EquipmentPrimitiveSling", "quantity": 1 }
     },
     {
+      "id": "primitive-axe",
+      "kind": "PrimitiveAxe",
+      "workshop": "PrimitiveWorkshop",
+      "level": 1,
+      "baseWorkTicks": 100,
+      "materials": [{ "resource": "Wood", "quantity": 2 }, { "resource": "Stone", "quantity": 1 }, { "resource": "Reeds", "quantity": 1 }],
+      "output": { "resource": "Equipment", "variant": "EquipmentWoodenAxe", "quantity": 1 }
+    },
+    {
       "id": "bone-knife",
       "kind": "BoneKnife",
       "workshop": "PrimitiveWorkshop",

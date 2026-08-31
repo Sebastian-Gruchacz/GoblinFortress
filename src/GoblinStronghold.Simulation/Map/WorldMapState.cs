@@ -350,14 +350,22 @@ public sealed class WorldMapState
         return workshop is not null;
     }
 
-    internal WorldObjectSnapshot? GetFellableWood(GridPosition anchor) =>
+    internal GridPosition GetNaturalObjectSurfacePosition(WorldObjectSnapshot worldObject) =>
+        worldObject.Anchor.Z == 0
+            ? Baseline.GetTerrainSurfacePosition(worldObject.Anchor)
+            : worldObject.Anchor;
+
+    internal WorldObjectSnapshot? GetFellableWood(GridPosition position) =>
         _worldObjects.Values.FirstOrDefault(worldObject =>
             worldObject.Kind is WorldObjectKind.Tree or WorldObjectKind.DeadTreeStump &&
-            worldObject.Anchor == anchor);
+            (worldObject.Anchor == position ||
+             GetNaturalObjectSurfacePosition(worldObject) == position));
 
-    internal WorldObjectSnapshot? GetQuarriableBoulder(GridPosition anchor) =>
+    internal WorldObjectSnapshot? GetQuarriableBoulder(GridPosition position) =>
         _worldObjects.Values.FirstOrDefault(worldObject =>
-            worldObject.Kind == WorldObjectKind.Boulder && worldObject.Anchor == anchor);
+            worldObject.Kind == WorldObjectKind.Boulder &&
+            (worldObject.Anchor == position ||
+             GetNaturalObjectSurfacePosition(worldObject) == position));
 
     public bool IsSurfaceTraversable(GridPosition position)
     {

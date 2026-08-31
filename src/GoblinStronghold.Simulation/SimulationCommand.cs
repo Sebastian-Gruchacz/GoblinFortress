@@ -98,6 +98,7 @@ public enum CraftingRecipeKind : byte
     WoodenBox = 15,
     WoodenChest = 16,
     WoodenBulkBin = 17,
+    PrimitiveAxe = 18,
 }
 
 public readonly record struct SimulationCommand(

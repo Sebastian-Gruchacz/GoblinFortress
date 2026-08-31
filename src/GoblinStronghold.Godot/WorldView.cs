@@ -2515,7 +2515,9 @@ public partial class WorldView : Node2D
         foreach (var stack in _snapshot.ItemStacks.Where(stack =>
                      stack.Location.Kind == ItemLocationKind.Ground &&
                      stack.Location.Position.Z == _visibleLevel &&
-                     _snapshot.GetVisibility(stack.Location.Position, _engine.Map.Width) == CellVisibility.Visible))
+                     _snapshot.GetVisibility(
+                         stack.Location.Position,
+                         _engine.Map.Width).IsDiscovered()))
         {
             var center = CellCenter(stack.Location.Position);
             var size = 11f + Math.Min(5f, stack.Quantity / 4f);

@@ -390,6 +390,7 @@ public sealed partial class SimulationEngine
             ResourceVariant.EquipmentReedClothes => PersonalEquipment.ReedClothes,
             ResourceVariant.EquipmentPrimitiveWaterskin =>
                 PersonalEquipment.PrimitiveWaterskin,
+            ResourceVariant.EquipmentWoodenAxe => PersonalEquipment.WoodenAxe,
             ResourceVariant.EquipmentReinforcedPickaxe =>
                 PersonalEquipment.ReinforcedPickaxe,
             ResourceVariant.EquipmentWoodenBucket => PersonalEquipment.WoodenBucket,

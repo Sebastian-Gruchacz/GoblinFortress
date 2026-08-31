@@ -21,7 +21,7 @@ public sealed class WorkshopCatalogTests
 
         var primitive = WorkshopCatalog.Get(WorkshopKind.PrimitiveWorkshop);
         Assert.All(Enum.GetValues<CraftingRecipeKind>().Where(recipe =>
-                recipe < CraftingRecipeKind.SmeltIronBar), recipe =>
+                CraftingRecipeCatalog.Get(recipe).Workshop == WorkshopKind.PrimitiveWorkshop), recipe =>
             Assert.True(primitive.SupportsRecipe(recipe, recipeLevel: 1)));
         Assert.False(primitive.SupportsRecipe(CraftingRecipeKind.SmeltIronBar, recipeLevel: 1));
     }

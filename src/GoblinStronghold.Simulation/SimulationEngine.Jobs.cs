@@ -2338,8 +2338,8 @@ public sealed partial class SimulationEngine
                 !designation.IsSuspended &&
                 !reservedDesignations.Contains(designation.Id) &&
                 World.GetFellableWood(designation.Target) is not null)
-            .SelectMany(designation => Map.GetCardinalNeighbors(designation.Target)
-                .Where(World.IsSurfaceTraversable)
+            .SelectMany(designation => World.GetCardinalWorldNeighbors(designation.Target)
+                .Where(World.IsTerrainTraversable)
                 .Select(position => new
                 {
                     Designation = designation,
@@ -2394,7 +2394,8 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        if (World.TryHarvestFellableWood(
+        var woodyObject = World.GetFellableWood(designation.Target);
+        if (woodyObject is not null && World.TryHarvestFellableWood(
                 designation.Target,
                 CurrentTick,
                 out var woodQuantity,
@@ -2405,7 +2406,7 @@ public sealed partial class SimulationEngine
                 actor.Position,
                 designation.Target,
                 woodQuantity,
-                WoodVariantFor(designation.Target));
+                WoodVariantFor(woodyObject.Anchor));
             GainBuildingExperience(actor, Math.Max(10, woodQuantity));
         }
 
@@ -2468,8 +2469,8 @@ public sealed partial class SimulationEngine
                 !designation.IsSuspended &&
                 !reservedDesignations.Contains(designation.Id) &&
                 World.GetQuarriableBoulder(designation.Target) is not null)
-            .SelectMany(designation => Map.GetCardinalNeighbors(designation.Target)
-                .Where(World.IsSurfaceTraversable)
+            .SelectMany(designation => World.GetCardinalWorldNeighbors(designation.Target)
+                .Where(World.IsTerrainTraversable)
                 .Select(position => new
                 {
                     Designation = designation,
@@ -2524,14 +2525,15 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        if (World.TryQuarryBoulder(
+        var boulder = World.GetQuarriableBoulder(designation.Target);
+        if (boulder is not null && World.TryQuarryBoulder(
                 designation.Target,
                 CurrentTick,
                 out var stoneQuantity,
                 out var change))
         {
             _undeliveredWorldChanges.Add(change);
-            var variant = StoneVariantFor(designation.Target);
+            var variant = StoneVariantFor(boulder.Anchor);
             var existing = FindMergeableGroundStack(
                 ResourceKind.Stone,
                 designation.Target,

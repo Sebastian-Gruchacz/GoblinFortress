@@ -386,21 +386,25 @@ public sealed class CraftingTests
         foreach (var actor in save["actors"]!.AsArray())
         {
             actor!["equipment"] = actor["equipment"]!.GetValue<int>() &
-                ~(int)PersonalEquipment.PrimitiveWaterskin;
+                ~((int)PersonalEquipment.PrimitiveWaterskin |
+                  (int)PersonalEquipment.WoodenAxe);
             actor["personalWater"] = 0;
         }
         engine = SimulationEngine.Load(save.ToJsonString(), definitions);
         Assert.DoesNotContain(engine.CreateSnapshot().Actors, actor =>
             actor.Equipment.HasFlag(PersonalEquipment.PrimitiveWaterskin));
+        Assert.DoesNotContain(engine.CreateSnapshot().Actors, actor =>
+            actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe));
         engine = AddCraftingMaterials(engine, definitions, engine.Map.GoblinSpawn,
             (ResourceKind.Bone, 1),
-            (ResourceKind.Wood, 8),
-            (ResourceKind.Stone, 1),
+            (ResourceKind.Wood, 10),
+            (ResourceKind.Stone, 2),
             (ResourceKind.Hide, 3),
-            (ResourceKind.Reeds, 6));
+            (ResourceKind.Reeds, 7));
         foreach (var recipe in new[]
                  {
                      CraftingRecipeKind.BoneKnife,
+                     CraftingRecipeKind.PrimitiveAxe,
                      CraftingRecipeKind.FightingStick,
                      CraftingRecipeKind.StoneClub,
                      CraftingRecipeKind.HideClothes,
@@ -432,6 +436,7 @@ public sealed class CraftingTests
             PersonalEquipment.None,
             (all, actor) => all | actor.Equipment);
         Assert.True(equipment.HasFlag(PersonalEquipment.BoneKnife));
+        Assert.True(equipment.HasFlag(PersonalEquipment.WoodenAxe));
         Assert.True(equipment.HasFlag(PersonalEquipment.FightingStick));
         Assert.True(equipment.HasFlag(PersonalEquipment.StoneClub));
         Assert.True(equipment.HasFlag(PersonalEquipment.HideClothes));

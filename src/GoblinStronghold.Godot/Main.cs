@@ -450,7 +450,8 @@ public partial class Main : Node
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.UprootBush,
             "Wykarcz krzaki\nTrwale usuwa źródła jagód", () => SelectWorkMode((long)WorkMode.UprootBerryBushes),
             GameShortcutId.UprootBushes);
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.FellTree,
+        CreateTextureTileButton(_workMenuGrid, _workMenu,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.WoodenAxe),
             "Wyrąb drzew i pni\nWymaga goblina z siekierą", () => SelectWorkMode((long)WorkMode.FellTrees),
             GameShortcutId.FellTrees);
         CreateTextureTileButton(_workMenuGrid, _workMenu,
@@ -3975,7 +3976,7 @@ public partial class Main : Node
             ResourceVariant.EquipmentReedClothes => "sitowiowy ubiór",
             ResourceVariant.EquipmentPrimitiveWaterskin => "prymitywny bukłak",
             ResourceVariant.EquipmentRagClothes => "łachmany",
-            ResourceVariant.EquipmentWoodenAxe => "drewniana siekiera",
+            ResourceVariant.EquipmentWoodenAxe => "prymitywna siekiera",
             ResourceVariant.EquipmentPrimitivePickaxe => "prymitywny kilof",
             ResourceVariant.EquipmentWoodenHoe => "drewniana motyka",
             ResourceVariant.EquipmentHumanWoodenAxe => "ludzka drewniana siekiera",
@@ -5438,7 +5439,7 @@ public partial class Main : Node
         }
         if (actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe))
         {
-            AddInventoryIcon(ItemIcon.WoodenAxe, "Drewniana siekiera • narzędzie do wyrębu");
+            AddInventoryIcon(ItemIcon.WoodenAxe, "Prymitywna siekiera • narzędzie do wyrębu");
         }
         if (actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe))
         {
@@ -5820,6 +5821,12 @@ public partial class Main : Node
             CreateSlingIcon(), "Proca",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.RagClothes), "Skóra", 1),
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Bone), "Kość", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.PrimitiveAxe,
+            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.WoodenAxe),
+            "Prymitywna siekiera",
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Kamień", 1),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 1));
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.BoneKnife,
             ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.BoneKnife), "Kościany nóż",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Bone), "Kość", 1));

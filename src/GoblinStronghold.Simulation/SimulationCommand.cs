@@ -27,7 +27,6 @@ public enum SimulationCommandKind
     ConfigureWorkPriority = 19,
     ClearWorkDesignationOrder = 20,
     ConfigureWorkSuspension = 21,
-    ConfigurePopulationTarget = 22,
     QueueCraftingOrder = 23,
     SuspendRaidPreparation = 24,
     LaunchRaid = 25,
@@ -1540,22 +1539,6 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: selected ? 1 : 0);
-
-    public static SimulationCommand ConfigurePopulationTarget(
-        SimulationTick executeAt,
-        ulong sequence,
-        int populationTarget) =>
-        new(
-            executeAt,
-            sequence,
-            SimulationCommandKind.ConfigurePopulationTarget,
-            EntityId.None,
-            EntityId.None,
-            default,
-            default,
-            default,
-            ResourceKind.Any,
-            Amount: populationTarget);
 
     public static SimulationCommand OrderPatrol(
         SimulationTick executeAt,

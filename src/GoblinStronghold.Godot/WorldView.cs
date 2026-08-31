@@ -10,6 +10,8 @@ public partial class WorldView : Node2D
     private const float TileSize = 20f;
     private const double WaterAnimationCycleSeconds = 4.0;
     private const double WaterAnimationRedrawSeconds = 1d / 20d;
+    private const double WorkAnimationCycleSeconds = 0.68;
+    private const double WorkAnimationRedrawSeconds = 1d / 20d;
     private const double CombatEffectDurationSeconds = 0.42;
     private const int MaximumCombatEffects = 32;
     private const int CombatAudioPlayerCount = 4;
@@ -48,6 +50,8 @@ public partial class WorldView : Node2D
     private int _visibleLevel;
     private double _waterAnimationElapsed;
     private double _waterAnimationRedrawElapsed;
+    private double _workAnimationElapsed;
+    private double _workAnimationRedrawElapsed;
     private ulong _snapshotTopologyVersion;
     private readonly Dictionary<int, (ulong TopologyVersion, HashSet<GridPosition> Solids)>
         _cachedCaveSolids = [];
@@ -241,10 +245,22 @@ public partial class WorldView : Node2D
             }
         }
 
+        var workAnimationChanged = false;
+        if (_simulationSpeed > 0)
+        {
+            _workAnimationElapsed = (_workAnimationElapsed + delta) % WorkAnimationCycleSeconds;
+            _workAnimationRedrawElapsed += delta;
+            if (_workAnimationRedrawElapsed >= WorkAnimationRedrawSeconds)
+            {
+                _workAnimationRedrawElapsed %= WorkAnimationRedrawSeconds;
+                workAnimationChanged = HasVisibleWorkAnimation();
+            }
+        }
+
         if (_simulationSpeed == 0 ||
             (_visualActorPositions.Count == 0 && _visualAnimalPositions.Count == 0))
         {
-            if (combatEffectsChanged)
+            if (combatEffectsChanged || workAnimationChanged)
             {
                 QueueRedraw();
             }
@@ -282,7 +298,7 @@ public partial class WorldView : Node2D
             }
         }
 
-        if (changed || combatEffectsChanged)
+        if (changed || combatEffectsChanged || workAnimationChanged)
         {
             QueueRedraw();
         }
@@ -2300,9 +2316,136 @@ public partial class WorldView : Node2D
                 DrawCircle(center + new Vector2(-1.2f, -0.6f), 0.65f, new Color("182117"));
                 DrawCircle(center + new Vector2(1.2f, -0.6f), 0.65f, new Color("182117"));
                 DrawCarriedResource(actors[index], center);
+                DrawWorkingTool(actors[index], center);
                 DrawActorIntent(actors[index], center);
             }
         }
+    }
+
+    private bool HasVisibleWorkAnimation() => _snapshot.Actors.Any(actor =>
+        actor.Position.Z == _visibleLevel &&
+        actor.Job.Phase == ActorJobPhase.Working &&
+        TryGetWorkTool(actor.Job.Kind, out _));
+
+    private void DrawWorkingTool(ActorSnapshot actor, Vector2 actorCenter)
+    {
+        if (actor.Job.Phase != ActorJobPhase.Working ||
+            !TryGetWorkTool(actor.Job.Kind, out var tool))
+        {
+            return;
+        }
+
+        var target = ResolveWorkAnimationTarget(actor);
+        if (target.Z != actor.Position.Z)
+        {
+            return;
+        }
+
+        var direction = CellCenter(target) - actorCenter;
+        if (direction.LengthSquared() < 1f)
+        {
+            var fallbackAngle = (actor.Id.Value % 8) * Mathf.Tau / 8f;
+            direction = Vector2.FromAngle(fallbackAngle);
+        }
+        else
+        {
+            direction = direction.Normalized();
+        }
+
+        var normal = new Vector2(-direction.Y, direction.X);
+        var phaseOffset = (actor.Id.Value % 7) / 7d;
+        var progress = (float)((_workAnimationElapsed / WorkAnimationCycleSeconds +
+            phaseOffset) % 1d);
+        var swing = Mathf.Sin(progress * Mathf.Pi);
+        var hand = actorCenter + direction * 2.8f;
+        var toolTip = hand + direction * (4.5f + swing * 2.5f) +
+            normal * (3.2f - swing * 6.4f);
+        var shaftDirection = (toolTip - hand).Normalized();
+        var headNormal = new Vector2(-shaftDirection.Y, shaftDirection.X);
+        var handleColor = new Color(0.68f, 0.43f, 0.2f);
+        DrawLine(hand, toolTip, new Color(0.12f, 0.08f, 0.045f), 2.8f, true);
+        DrawLine(hand, toolTip, handleColor, 1.25f, true);
+
+        switch (tool)
+        {
+            case WorkTool.Axe:
+                DrawLine(toolTip - headNormal * 0.8f, toolTip + headNormal * 3.2f,
+                    new Color(0.68f, 0.72f, 0.7f), 2.2f, true);
+                break;
+            case WorkTool.Pickaxe:
+                var pickaxeColor = actor.Equipment.HasFlag(PersonalEquipment.ReinforcedPickaxe)
+                    ? new Color(0.76f, 0.82f, 0.84f)
+                    : new Color(0.48f, 0.5f, 0.46f);
+                DrawLine(toolTip - headNormal * 3.4f, toolTip + headNormal * 3.4f,
+                    pickaxeColor, 1.7f, true);
+                DrawLine(toolTip - headNormal * 3.4f,
+                    toolTip - headNormal * 2.3f - shaftDirection * 1.2f,
+                    pickaxeColor, 1.2f, true);
+                break;
+            case WorkTool.Hammer:
+                DrawLine(toolTip - headNormal * 2.5f, toolTip + headNormal * 2.5f,
+                    new Color(0.52f, 0.54f, 0.5f), 3f, true);
+                break;
+            case WorkTool.GhostBroom:
+                var bristleColor = new Color(0.86f, 0.73f, 0.34f, 0.9f);
+                var broomEnd = toolTip + shaftDirection * 2.2f;
+                DrawLine(toolTip - headNormal * 2.8f, broomEnd, bristleColor, 1.5f, true);
+                DrawLine(toolTip, broomEnd, bristleColor, 1.8f, true);
+                DrawLine(toolTip + headNormal * 2.8f, broomEnd, bristleColor, 1.5f, true);
+                break;
+        }
+    }
+
+    private GridPosition ResolveWorkAnimationTarget(ActorSnapshot actor)
+    {
+        if (actor.Job.SourceStackId != EntityId.None)
+        {
+            var designation = _snapshot.WorkDesignations.FirstOrDefault(item =>
+                item.Id == actor.Job.SourceStackId);
+            if (designation.Id != EntityId.None)
+            {
+                return designation.Target;
+            }
+        }
+
+        if (actor.Job.Kind == ActorJobKind.BuildConstruction)
+        {
+            var site = _snapshot.ConstructionSites.FirstOrDefault(item =>
+                item.Id == actor.Job.DestinationZoneId);
+            if (site is not null && site.Footprint.Count > 0)
+            {
+                return site.Footprint
+                    .OrderBy(position => Math.Abs(position.X - actor.Position.X) +
+                        Math.Abs(position.Y - actor.Position.Y))
+                    .First();
+            }
+        }
+
+        if (actor.Job.Kind == ActorJobKind.Craft)
+        {
+            var order = _snapshot.CraftingOrders.FirstOrDefault(item =>
+                item.Id == actor.Job.DestinationZoneId);
+            if (order is not null)
+            {
+                return order.Workshop;
+            }
+        }
+
+        return actor.Job.Target;
+    }
+
+    private static bool TryGetWorkTool(ActorJobKind job, out WorkTool tool)
+    {
+        tool = job switch
+        {
+            ActorJobKind.FellTree or ActorJobKind.ClearVegetation => WorkTool.Axe,
+            ActorJobKind.QuarryBoulder or ActorJobKind.MineRock or ActorJobKind.CarveRamp =>
+                WorkTool.Pickaxe,
+            ActorJobKind.BuildConstruction or ActorJobKind.Craft => WorkTool.Hammer,
+            ActorJobKind.CleanBlood => WorkTool.GhostBroom,
+            _ => WorkTool.None,
+        };
+        return tool != WorkTool.None;
     }
 
     private void DrawCombatEffects()
@@ -2776,7 +2919,9 @@ public partial class WorldView : Node2D
                 new Color(0, 0, 0, 0.46f));
 
             if (stack.Resource is ResourceKind.Food or ResourceKind.Wood ||
-                ResourceThumbnails.UsesSpiderMaterialIcon(stack.Variant))
+                ResourceThumbnails.UsesDedicatedMaterialIcon(
+                    stack.Resource,
+                    stack.Variant))
             {
                 DrawTextureRect(
                     ResourceThumbnails.Create(
@@ -3333,6 +3478,15 @@ public partial class WorldView : Node2D
         WorldObjectSnapshot[] WallTorches,
         HashSet<GridPosition> ConnectedCells,
         WallEnclosureAnalysis? Enclosure);
+
+    private enum WorkTool : byte
+    {
+        None,
+        Axe,
+        Pickaxe,
+        Hammer,
+        GhostBroom,
+    }
 
     private static Rect2 CellRect(int x, int y) => new(
         x * TileSize,

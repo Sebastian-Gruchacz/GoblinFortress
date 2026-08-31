@@ -72,6 +72,9 @@ public sealed record ActorPlanningSettings(
 
 public sealed record GoblinReproductionSettings(
     int FoodCost,
+    int FoodReserveDays,
+    int MinimumAdultPopulation,
+    int AdultsPerJuvenile,
     int MinimumMoisture,
     int TendWorkTicks,
     int JuvenileSeasonCount,
@@ -600,6 +603,9 @@ public sealed class SimulationDefinitions
         ActorPlanning = actorPlanning;
         Reproduction = new(
             FoodCost: 4,
+            FoodReserveDays: 2,
+            MinimumAdultPopulation: 4,
+            AdultsPerJuvenile: 10,
             MinimumMoisture: 55,
             TendWorkTicks: 120,
             JuvenileSeasonCount: 1,

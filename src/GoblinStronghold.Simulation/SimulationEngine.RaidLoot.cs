@@ -303,7 +303,7 @@ public sealed partial class SimulationEngine
                 : item.SourceStackId)
             .ToHashSet();
         var corpse = _corpses.Values
-            .Where(item => item.Kind == CorpseKind.Human &&
+            .Where(item =>
                 (handlingMode == RaidCorpseHandlingMode.BudInPlace ||
                     item.Position != _raidRallyPoint) &&
                 Distance(item.Position, _raidTarget) <= _raidTargetRadius &&
@@ -413,7 +413,7 @@ public sealed partial class SimulationEngine
             if (!_corpses.TryGetValue(actor.SourceStackId, out var corpse) ||
                 corpse.Position != actor.Position ||
                 (!isGenericOrder &&
-                    (corpse.Kind != CorpseKind.Human || corpse.Contents.Any(IsRaidLootAllowed))))
+                    corpse.Contents.Any(IsRaidLootAllowed)))
             {
                 actor.ClearJob();
                 return;
@@ -651,7 +651,6 @@ public sealed partial class SimulationEngine
         GetRaidCorpseHandlingMode() != RaidCorpseHandlingMode.None &&
         (_actors.Values.Any(actor => actor.CarriedCorpseId != EntityId.None) ||
          _corpses.Values.Any(corpse =>
-             corpse.Kind == CorpseKind.Human &&
              (GetRaidCorpseHandlingMode() == RaidCorpseHandlingMode.BudInPlace ||
                  corpse.Position != _raidRallyPoint) &&
              !corpse.Contents.Any(IsRaidLootAllowed) &&

@@ -68,6 +68,26 @@ internal static class ResourceThumbnails
                 };
         }
 
+        if (resource == ResourceKind.Coal)
+        {
+            return paletteTextures.GetCoalIcon();
+        }
+
+        if (resource == ResourceKind.Ore && variant != ResourceVariant.None &&
+            MaterialCatalog.TryGet(variant, out _))
+        {
+            return paletteTextures.GetResourceIcon(
+                variant,
+                MaterialResourceIconShape.Ore);
+        }
+
+        if (resource == ResourceKind.Materials && IsMetalBar(variant))
+        {
+            return paletteTextures.GetResourceIcon(
+                variant,
+                MaterialResourceIconShape.Ingot);
+        }
+
         var spiderMaterialIcon = variant switch
         {
             ResourceVariant.SpiderVenom => ItemIcon.PrimitiveWaterskin,
@@ -110,6 +130,17 @@ internal static class ResourceThumbnails
     public static bool UsesSpiderMaterialIcon(ResourceVariant variant) => variant is
         ResourceVariant.SpiderVenom or ResourceVariant.SpiderSilk or
         ResourceVariant.SpiderChitin;
+
+    public static bool UsesDedicatedMaterialIcon(
+        ResourceKind resource,
+        ResourceVariant variant) =>
+        resource is ResourceKind.Coal or ResourceKind.Ore ||
+        IsMetalBar(variant) ||
+        UsesSpiderMaterialIcon(variant);
+
+    private static bool IsMetalBar(ResourceVariant variant) => variant is
+        ResourceVariant.IronBar or ResourceVariant.CopperBar or
+        ResourceVariant.SilverBar or ResourceVariant.GoldBar;
 
     private static Rect2 GetWoodRegion(Texture2D treePartAtlas)
     {

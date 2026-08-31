@@ -5,17 +5,6 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
-    private bool TryExecuteConfigurePopulationTarget(SimulationCommand command)
-    {
-        _populationTarget = command.Amount;
-        Publish(
-            SimulationEventKind.PopulationTargetConfigured,
-            EntityId.None,
-            EntityId.None,
-            _populationTarget);
-        return true;
-    }
-
     private void TryCreateGoblinBud()
     {
         var readiness = CreateReproductionReadinessSnapshot();
@@ -72,7 +61,7 @@ public sealed partial class SimulationEngine
             !_actors.TryGetValue(pollinatorId, out var pollinator) ||
             pollinator.Position != position ||
             !_corpses.TryGetValue(corpseId, out var corpse) ||
-            corpse.Kind != CorpseKind.Human || corpse.Position != position ||
+            corpse.Position != position ||
             !World.IsTerrainTraversable(position))
         {
             return false;
@@ -143,6 +132,16 @@ public sealed partial class SimulationEngine
     private GoblinReproductionReadinessSnapshot CreateReproductionReadinessSnapshot()
     {
         var availableFood = GetAvailableResourceQuantity(ResourceKind.Food);
+        var requiredFood = checked(
+            Definitions.Reproduction.FoodCost +
+            (_actors.Count + 1) * Definitions.PersonalFoodCapacity *
+            Definitions.Reproduction.FoodReserveDays);
+        var adultPopulation = _actors.Values.Count(actor => !IsJuvenile(actor));
+        var juvenilePopulation = _actors.Count - adultPopulation;
+        var juvenileCapacity = Math.Max(
+            1,
+            adultPopulation / Definitions.Reproduction.AdultsPerJuvenile);
+        var occupiedShelter = checked(_actors.Count + _goblinBuds.Count);
         var suitableSites = EnumerateSuitableBudSites(onlyVacant: true).Count();
         var eligibleParents = _actors.Values.Count(IsEligibleBudParent);
         var caredBudIds = _actors.Values
@@ -154,18 +153,24 @@ public sealed partial class SimulationEngine
             ? untendedBuds > 0
                 ? GoblinReproductionReadinessKind.BudWaitingForCare
                 : GoblinReproductionReadinessKind.BudBeingTended
-            : _actors.Count >= _populationTarget
-                ? GoblinReproductionReadinessKind.AtTarget
-                : availableFood < Definitions.Reproduction.FoodCost
-                    ? GoblinReproductionReadinessKind.InsufficientFood
-                    : suitableSites == 0
-                        ? GoblinReproductionReadinessKind.NoMoistSpace
-                        : eligibleParents == 0
-                            ? GoblinReproductionReadinessKind.NoEligibleParent
-                            : GoblinReproductionReadinessKind.Ready;
+            : _raidPhase != GoblinRaidPhase.None
+                ? GoblinReproductionReadinessKind.UnsafeConditions
+                : juvenilePopulation >= juvenileCapacity
+                    ? GoblinReproductionReadinessKind.JuvenileCapacityReached
+                    : adultPopulation < Definitions.Reproduction.MinimumAdultPopulation
+                        ? GoblinReproductionReadinessKind.InsufficientAdultPopulation
+                        : availableFood < requiredFood
+                            ? GoblinReproductionReadinessKind.InsufficientFood
+                            : occupiedShelter >= GetShelterCapacity()
+                                ? GoblinReproductionReadinessKind.InsufficientShelter
+                                : suitableSites == 0
+                                    ? GoblinReproductionReadinessKind.NoMoistSpace
+                                    : eligibleParents == 0
+                                        ? GoblinReproductionReadinessKind.NoEligibleParent
+                                        : GoblinReproductionReadinessKind.Ready;
         return new(
             kind,
-            Definitions.Reproduction.FoodCost,
+            requiredFood,
             availableFood,
             suitableSites,
             eligibleParents,
@@ -182,6 +187,30 @@ public sealed partial class SimulationEngine
                 stack.Location.Kind == ItemLocationKind.Ground &&
                 Visibility.Get(stack.Location.Position) != CellVisibility.Unknown)
             .Sum(stack => stack.Quantity);
+        var shelterCapacity = GetShelterCapacity();
+        var healthyWorkers = _actors.Values.Count(actor =>
+            !IsJuvenile(actor) &&
+            actor.Health >= Definitions.MaximumHealth / 2 &&
+            actor.Hunger < Definitions.CriticalHungerThreshold &&
+            actor.Thirst < Definitions.DehydrationThirstThreshold &&
+            actor.JobKind != ActorJobKind.Collapsed);
+        return new(
+            FoodUnits: GetTotalResourceQuantity(ResourceKind.Food),
+            ExpectedDailyFoodUnits: checked(_actors.Count * Definitions.PersonalFoodCapacity),
+            ShelterCapacity: shelterCapacity,
+            StorageCapacity: _storageZones.Values.Sum(zone => zone.Capacity),
+            StoredUnits: storedUnits,
+            KnownLooseUnits: knownLooseUnits,
+            SuitableMoistSites: EnumerateSuitableBudSites(onlyVacant: true).Count(),
+            HealthyWorkers: healthyWorkers,
+            WorkDemand: checked(
+                _workDesignations.Count + _constructionSites.Count + _goblinBuds.Count),
+            HumanHostility: _humanVillage.Hostility,
+            Reproduction: CreateReproductionReadinessSnapshot());
+    }
+
+    private int GetShelterCapacity()
+    {
         var hutCapacity = World.EnumerateWorldObjects()
             .Where(worldObject =>
                 worldObject.Kind == WorldObjectKind.GoblinHut &&
@@ -194,25 +223,7 @@ public sealed partial class SimulationEngine
         var fieldCampCapacity = World.EnumerateWorldObjects().Count(worldObject =>
             worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
             worldObject.Owner == WorldObjectOwner.GoblinTribe) * SimulationDefinitions.FieldCampCapacity;
-        var healthyWorkers = _actors.Values.Count(actor =>
-            !IsJuvenile(actor) &&
-            actor.Health >= Definitions.MaximumHealth / 2 &&
-            actor.Hunger < Definitions.CriticalHungerThreshold &&
-            actor.Thirst < Definitions.DehydrationThirstThreshold &&
-            actor.JobKind != ActorJobKind.Collapsed);
-        return new(
-            FoodUnits: GetTotalResourceQuantity(ResourceKind.Food),
-            ExpectedDailyFoodUnits: checked(_actors.Count * Definitions.PersonalFoodCapacity),
-            ShelterCapacity: checked(hutCapacity + fieldCampCapacity),
-            StorageCapacity: _storageZones.Values.Sum(zone => zone.Capacity),
-            StoredUnits: storedUnits,
-            KnownLooseUnits: knownLooseUnits,
-            SuitableMoistSites: EnumerateSuitableBudSites(onlyVacant: true).Count(),
-            HealthyWorkers: healthyWorkers,
-            WorkDemand: checked(
-                _workDesignations.Count + _constructionSites.Count + _goblinBuds.Count),
-            HumanHostility: _humanVillage.Hostility,
-            Reproduction: CreateReproductionReadinessSnapshot());
+        return checked(hutCapacity + fieldCampCapacity);
     }
 
     private bool TryPlanTendBudJob(ActorState actor)

@@ -9,6 +9,46 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class WorldMapStateTests
 {
     [Fact]
+    public void SharedNearestDestinationTreeServesSeveralStartsFromOneSearch()
+    {
+        var seed = new WorldSeed(0x7AEEUL);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            SwampMapGenerator.Generate(seed, 64, 64),
+            initialGoblinCount: 1,
+            initialFoodStock: 8);
+        var destination = engine.Map.GoblinSpawn;
+        var starts = engine.World.GetCardinalWorldNeighbors(destination)
+            .Where(engine.World.IsTerrainTraversable)
+            .Take(2)
+            .ToArray();
+        Assert.Equal(2, starts.Length);
+        IReadOnlySet<GridPosition> destinations = new HashSet<GridPosition> { destination };
+
+        foreach (var start in starts)
+        {
+            NavigationPathRequestResult request;
+            do
+            {
+                request = engine.Navigation.RequestSharedPathToNearest(
+                    start,
+                    destinations,
+                    maximumExpandedNodes: 1);
+            }
+            while (request.Status == NavigationPathRequestStatus.Pending);
+
+            Assert.Equal(NavigationPathRequestStatus.Complete, request.Status);
+            Assert.NotNull(request.Path);
+            Assert.Equal(destination, request.Path[^1]);
+        }
+
+        var metrics = engine.Navigation.GetMetrics();
+        Assert.Equal(1, metrics.Searches);
+        Assert.True(metrics.CacheHits > 0);
+    }
+
+    [Fact]
     public void AdjacentWalkableFloorsOnSameLevelConnectBothWays()
     {
         var seed = new WorldSeed(1);

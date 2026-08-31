@@ -54,7 +54,6 @@ public sealed partial class SimulationEngine
     private GridPosition _raidTarget;
     private int _raidTargetRadius = DefaultRaidTargetRadius;
     private RaidDirective _raidDirectives = DefaultRaidDirectives;
-    private int _populationTarget;
     private ulong _nextAnimalId = 1;
     private ulong _nextEntityId = 1;
     private ulong _nextEventSequence = 1;
@@ -228,7 +227,6 @@ public sealed partial class SimulationEngine
             }
         }
         engine.EnsureTribeHasStarterPickaxe();
-        engine._populationTarget = initialGoblinCount;
         engine.CreateInitialAnimals();
 
         if (initialFoodStock > 0)
@@ -395,13 +393,6 @@ public sealed partial class SimulationEngine
         engine.ValidateLoadedWorkDesignations();
         engine.LoadActors(save.Actors);
         engine.LoadTribeNavigationBeliefs(save.TribeNavigationBeliefs);
-        engine._populationTarget = save.PopulationTarget == 0
-            ? checked(engine._actors.Count + engine._goblinBuds.Count)
-            : save.PopulationTarget;
-        if (engine._populationTarget is < 0 or > 1_000)
-        {
-            throw new InvalidDataException("The save contains an invalid population target.");
-        }
         engine.RestoreLegacyRaidPartyIfNeeded();
         engine.ValidateLoadedRaidParty();
         engine.ValidateLoadedOwnership();
@@ -604,7 +595,6 @@ public sealed partial class SimulationEngine
             WorldSeed,
             CurrentTick,
             GetTotalResourceQuantity(ResourceKind.Food),
-            _populationTarget,
             actors,
             goblinBuds,
             CreateTribeNeedsSnapshot(),
@@ -1038,7 +1028,6 @@ public sealed partial class SimulationEngine
             NextEntityId = _nextEntityId,
             NextEventSequence = _nextEventSequence,
             WorldVersion = World.Version,
-            PopulationTarget = _populationTarget,
             GoblinBuds = _goblinBuds.Values.Select(bud => new GoblinBudSaveModel
             {
                 Id = bud.Id.Value,
@@ -1283,7 +1272,6 @@ public sealed partial class SimulationEngine
         {
             Append(canonical, actorId.Value);
         }
-        Append(canonical, _populationTarget);
         AppendNavigationKnowledge(canonical, _tribeNavigationKnowledge);
         Append(canonical, _nextAnimalId);
         Append(canonical, _animals.Count);
@@ -2892,8 +2880,6 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.OrderHuntArea => TryExecuteAreaOrder(
             command, ActorTacticalOrderKind.HuntArea),
         SimulationCommandKind.ToggleWoodenDoor => TryExecuteToggleWoodenDoor(command),
-        SimulationCommandKind.ConfigurePopulationTarget =>
-            TryExecuteConfigurePopulationTarget(command),
         SimulationCommandKind.QueueCraftingOrder => TryExecuteQueueCraftingOrder(command),
         _ => false,
     };
@@ -2983,12 +2969,6 @@ public sealed partial class SimulationEngine
         }
 
         _undeliveredWorldChanges.Add(World.DismantleWorldObject(id, CurrentTick));
-        if (worldObject.Kind == WorldObjectKind.GoblinHut)
-        {
-            _populationTarget = Math.Min(
-                _populationTarget,
-                CreateTribeNeedsSnapshot().ShelterCapacity);
-        }
         Publish(
             SimulationEventKind.ConstructionDismantled,
             EntityId.None,
@@ -3313,9 +3293,7 @@ public sealed partial class SimulationEngine
     {
         var directives = (CorpseDirective)command.Amount;
         if (!_corpses.TryGetValue(command.Target, out var corpse) ||
-            !AreValidCorpseDirectives(directives) ||
-            (corpse.Kind != CorpseKind.Human &&
-                (directives & CorpseBuddingDirectives) != 0))
+            !AreValidCorpseDirectives(directives))
         {
             return false;
         }
@@ -4573,18 +4551,6 @@ public sealed partial class SimulationEngine
                     site.Anchor,
                     CurrentTick,
                     site.DeliveredVariant));
-                var shelterCapacity = CreateTribeNeedsSnapshot().ShelterCapacity;
-                if (_populationTarget < shelterCapacity)
-                {
-                    _populationTarget = Math.Min(
-                        shelterCapacity,
-                        checked(_populationTarget + SimulationDefinitions.GoblinHutCapacity));
-                    Publish(
-                        SimulationEventKind.PopulationTargetConfigured,
-                        EntityId.None,
-                        EntityId.None,
-                        _populationTarget);
-                }
                 completedTarget = EntityId.None;
                 experience = 35;
                 break;
@@ -6035,12 +6001,10 @@ public sealed partial class SimulationEngine
                 break;
             case SimulationCommandKind.ConfigureCorpseDirectives:
                 if (command.Subject != EntityId.None ||
-                    !_corpses.TryGetValue(command.Target, out var corpse) ||
+                    !_corpses.ContainsKey(command.Target) ||
                     command.Position != default || command.EndPosition != default ||
                     command.Construction != default || command.Resource != ResourceKind.Any ||
-                    !AreValidCorpseDirectives((CorpseDirective)command.Amount) ||
-                    (corpse.Kind != CorpseKind.Human &&
-                        ((CorpseDirective)command.Amount & CorpseBuddingDirectives) != 0))
+                    !AreValidCorpseDirectives((CorpseDirective)command.Amount))
                 {
                     throw new ArgumentException("Corpse-directive command is invalid.", nameof(command));
                 }
@@ -6076,14 +6040,6 @@ public sealed partial class SimulationEngine
                     command.Amount != 0)
                 {
                     throw new ArgumentException("Wooden-door toggle command is invalid.", nameof(command));
-                }
-                break;
-            case SimulationCommandKind.ConfigurePopulationTarget:
-                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
-                    command.Position != default || command.EndPosition != default ||
-                    command.Resource != ResourceKind.Any || command.Amount is < 0 or > 1_000)
-                {
-                    throw new ArgumentException("Population-target command is invalid.", nameof(command));
                 }
                 break;
             case SimulationCommandKind.QueueCraftingOrder:

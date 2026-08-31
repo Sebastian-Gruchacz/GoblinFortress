@@ -13,6 +13,7 @@ public partial class Main : Node
     private const int MaximumSimulationTicksPerFrame = 8;
     private const double MaximumSimulationMillisecondsPerFrame = 8d;
     private const double PresentationRefreshIntervalSeconds = 1d / 5d;
+    private const double FpsRefreshIntervalSeconds = 0.25d;
     private const double MinimumAutosaveIntervalSeconds = 10d * 60d;
     private const string CameraPanLeftAction = "goblin_camera_left";
     private const string CameraPanRightAction = "goblin_camera_right";
@@ -25,6 +26,7 @@ public partial class Main : Node
     private WorldView3D _worldView3D = null!;
     private MinimapView _minimap = null!;
     private Camera2D _camera = null!;
+    private Label _fpsCounter = null!;
     private Label _status = null!;
     private Label _clock = null!;
     private Label _seasonName = null!;
@@ -72,8 +74,6 @@ public partial class Main : Node
     private string _goblinRosterSignature = string.Empty;
     private Window _statisticsWindow = null!;
     private Label _statisticsText = null!;
-    private Label _populationTargetText = null!;
-    private int _populationTargetDraft;
     private Window _raidWindow = null!;
     private Label _raidSummary = null!;
     private VBoxContainer _raidRows = null!;
@@ -115,6 +115,7 @@ public partial class Main : Node
     private int _visibleLevel;
     private double _accumulator;
     private double _presentationRefreshElapsed;
+    private double _fpsRefreshElapsed;
     private ulong _commandSequence = 1;
     private EntityId _selectedActorId = EntityId.None;
     private readonly HashSet<EntityId> _selectedActorIds = [];
@@ -342,6 +343,7 @@ public partial class Main : Node
         _worldView3D = GetNode<WorldView3D>("WorldView3D");
         _minimap = GetNode<MinimapView>("Interface/RightHud/MinimapFrame/Minimap");
         _camera = GetNode<Camera2D>("Camera2D");
+        _fpsCounter = GetNode<Label>("Interface/FpsPanel/FpsCounter");
         _status = GetNode<Label>("Interface/StatusBar/Status");
         _clock = GetNode<Label>("Interface/Calendar/Controls/Clock");
         _seasonName = GetNode<Label>("Interface/Calendar/Controls/SeasonName");
@@ -400,12 +402,6 @@ public partial class Main : Node
         _goblinRosterRows = GetNode<VBoxContainer>("GoblinRosterWindow/Scroll/Rows");
         _statisticsWindow = GetNode<Window>("StatisticsWindow");
         _statisticsText = GetNode<Label>("StatisticsWindow/Margin/Content/Text");
-        _populationTargetText = GetNode<Label>(
-            "StatisticsWindow/Margin/Content/Population/Target");
-        GetNode<Button>("StatisticsWindow/Margin/Content/Population/Decrease").Pressed +=
-            () => ChangePopulationTarget(-1);
-        GetNode<Button>("StatisticsWindow/Margin/Content/Population/Increase").Pressed +=
-            () => ChangePopulationTarget(1);
         GetViewport().GuiEmbedSubwindows = true;
         CreateTextureTileButton(
             _managementMenuGrid,
@@ -852,6 +848,7 @@ public partial class Main : Node
             return;
         }
 
+        UpdateFpsCounter(delta);
         MoveCamera(delta);
         if (_speed == 0)
         {
@@ -1731,6 +1728,18 @@ public partial class Main : Node
         }
     }
 
+    private void UpdateFpsCounter(double delta)
+    {
+        _fpsRefreshElapsed += delta;
+        if (_fpsRefreshElapsed < FpsRefreshIntervalSeconds)
+        {
+            return;
+        }
+
+        _fpsRefreshElapsed %= FpsRefreshIntervalSeconds;
+        _fpsCounter.Text = $"FPS: {Engine.GetFramesPerSecond():0}";
+    }
+
     private void RefreshShortcutTooltips()
     {
         foreach (var (shortcut, tile) in _shortcutTiles)
@@ -1942,6 +1951,10 @@ public partial class Main : Node
         _workshopDetails.Hide();
         _inspector.Text = "Zaznaczenie wyczyszczone. PPM przeciągnięty przesuwa mapę.";
     }
+
+    // Keep interaction aligned with the frame the player sees. Creating a full snapshot here
+    // would also hash every materialized level and noticeably stall clicks on deep maps.
+    private SimulationSnapshot GetDisplayedSnapshot() => _latestSnapshot;
 
     private void ShowBuildMenu()
     {
@@ -3891,7 +3904,7 @@ public partial class Main : Node
             return;
         }
 
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = GetDisplayedSnapshot();
         if (_visibleLevel != 0)
         {
             var levelPosition = cell with { Z = _visibleLevel };
@@ -4706,19 +4719,8 @@ public partial class Main : Node
     private void ShowStatistics()
     {
         var snapshot = _engine.CreateSnapshot();
-        _populationTargetDraft = snapshot.PopulationTarget;
         UpdateStatistics(snapshot);
         _statisticsWindow.Popup();
-    }
-
-    private void ChangePopulationTarget(int delta)
-    {
-        _populationTargetDraft = Math.Clamp(_populationTargetDraft + delta, 0, 1_000);
-        _populationTargetText.Text = $"Docelowa liczebność: {_populationTargetDraft}";
-        _engine.QueueCommand(SimulationCommand.ConfigurePopulationTarget(
-            _engine.CurrentTick.Next(),
-            _commandSequence++,
-            _populationTargetDraft));
     }
 
     private void UpdateOverviewWindows(SimulationSnapshot snapshot)
@@ -5050,8 +5052,6 @@ public partial class Main : Node
 
     private void UpdateStatistics(SimulationSnapshot snapshot)
     {
-        _populationTargetText.Text =
-            $"Docelowa liczebność: {_populationTargetDraft} • pąki: {snapshot.GoblinBuds.Count}";
         var needs = snapshot.TribeNeeds;
         var metrics = _engine.GetMetrics();
         var navigation = metrics.Navigation;
@@ -5067,8 +5067,7 @@ public partial class Main : Node
         var stored = snapshot.ResourceInventory.Sum(item => item.StoredQuantity);
         var loose = snapshot.ResourceInventory.Sum(item => item.KnownLooseQuantity);
         _statisticsText.Text =
-            $"Plemię: {snapshot.Actors.Count} • pąki {snapshot.GoblinBuds.Count} " +
-            $"• cel {snapshot.PopulationTarget}\n" +
+            $"Plemię: {snapshot.Actors.Count} • pąki {snapshot.GoblinBuds.Count}\n" +
             $"Żywność: {needs.FoodUnits}/{needs.ExpectedDailyFoodUnits} szt. " +
             $"(zapas / przewidywana doba)\n" +
             $"Miejsca do spania: {needs.ShelterCapacity}/{snapshot.Actors.Count}\n" +
@@ -5109,12 +5108,19 @@ public partial class Main : Node
     private static string DescribeReproductionReadiness(
         GoblinReproductionReadinessSnapshot readiness) => readiness.Kind switch
     {
-        GoblinReproductionReadinessKind.AtTarget => "osiągnięto docelową liczebność",
         GoblinReproductionReadinessKind.Ready =>
             $"gotowe ({readiness.AvailableFood}/{readiness.RequiredFood} żywności, " +
             $"rodzice {readiness.EligibleParents}, miejsca {readiness.SuitableMoistSites})",
         GoblinReproductionReadinessKind.InsufficientFood =>
             $"za mało dostępnej żywności ({readiness.AvailableFood}/{readiness.RequiredFood})",
+        GoblinReproductionReadinessKind.InsufficientShelter =>
+            "brak wolnego miejsca w schronieniu",
+        GoblinReproductionReadinessKind.InsufficientAdultPopulation =>
+            "za mało dorosłych goblinów do samoistnego pączkowania",
+        GoblinReproductionReadinessKind.UnsafeConditions =>
+            "trwa wyprawa — warunki nie są bezpieczne",
+        GoblinReproductionReadinessKind.JuvenileCapacityReached =>
+            "plemię wychowuje już maksymalną liczbę młodzików",
         GoblinReproductionReadinessKind.NoMoistSpace => "brak wolnego wilgotnego miejsca w chacie",
         GoblinReproductionReadinessKind.NoEligibleParent =>
             "brak wolnego, zdrowego, najedzonego i wypoczętego rodzica",
@@ -5193,7 +5199,7 @@ public partial class Main : Node
             return;
         }
 
-        UpdateGoblinDetails(_engine.CreateSnapshot());
+        UpdateGoblinDetails(GetDisplayedSnapshot());
         _storageDetails.Hide();
         PositionGoblinDetailsWindow();
         _goblinDetails.Show();
@@ -5248,7 +5254,7 @@ public partial class Main : Node
 
     private void UpdateStorageDetails(StorageZoneSnapshot zone)
     {
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = GetDisplayedSnapshot();
         UpdateStorageDetails(zone, snapshot);
     }
 
@@ -6337,21 +6343,29 @@ public partial class Main : Node
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 3),
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 2));
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltIronBar,
-            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka żelaza",
-            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda żelaza", 2),
-            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Węgiel", 1));
+            CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.IronBar),
+            "Sztabka żelaza",
+            (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.IronOre),
+                "Ruda żelaza", 2),
+            (CreateResourceThumbnail(ResourceKind.Coal), "Węgiel", 1));
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltCopperBar,
-            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka miedzi",
-            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda miedzi", 2),
-            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Węgiel", 1));
+            CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.CopperBar),
+            "Sztabka miedzi",
+            (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.CopperOre),
+                "Ruda miedzi", 2),
+            (CreateResourceThumbnail(ResourceKind.Coal), "Węgiel", 1));
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltSilverBar,
-            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka srebra",
-            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda srebra", 2),
-            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Węgiel", 1));
+            CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.SilverBar),
+            "Sztabka srebra",
+            (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.SilverOre),
+                "Ruda srebra", 2),
+            (CreateResourceThumbnail(ResourceKind.Coal), "Węgiel", 1));
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltGoldBar,
-            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Cargo), "Sztabka złota",
-            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Ruda złota", 2),
-            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Węgiel", 1));
+            CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.GoldBar),
+            "Sztabka złota",
+            (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.GoldOre),
+                "Ruda złota", 2),
+            (CreateResourceThumbnail(ResourceKind.Coal), "Węgiel", 1));
         var close = new Button
         {
             Text = "Zamknij",
@@ -6360,6 +6374,17 @@ public partial class Main : Node
         close.Pressed += _workshopDetails.Hide;
         content.AddChild(close);
     }
+
+    private Texture2D CreateResourceThumbnail(
+        ResourceKind resource,
+        ResourceVariant variant = ResourceVariant.None) => ResourceThumbnails.Create(
+            _itemIconAtlas,
+            _treePartAtlas,
+            _foodIconAtlas,
+            _resourceThumbnailTextures,
+            resource,
+            FoodKind.None,
+            variant);
 
     private void AddWorkshopRecipeButton(
         VBoxContainer recipes,
@@ -6447,7 +6472,7 @@ public partial class Main : Node
             "workshops",
             "names",
             WorkshopCatalog.Get(workshopKind).Id);
-        UpdateWorkshopDetails(_engine.CreateSnapshot());
+        UpdateWorkshopDetails(GetDisplayedSnapshot());
         _workshopDetails.PopupCentered();
     }
 
@@ -7335,7 +7360,7 @@ public partial class Main : Node
         }
 
         var clicked = ScreenToVisibleCell(screenPosition);
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = GetDisplayedSnapshot();
         if (!snapshot.GetVisibility(clicked, _engine.Map.Width).IsDiscovered())
         {
             return false;
@@ -7596,7 +7621,7 @@ public partial class Main : Node
                 _entitySelectorMenu.Hide();
                 ShowContextEntityActions(
                     selectedChoice.Target,
-                    _engine.CreateSnapshot(),
+                    GetDisplayedSnapshot(),
                     _contextMenuScreenPosition);
             };
             _entitySelectorRows.AddChild(button);
@@ -7913,8 +7938,6 @@ public partial class Main : Node
         var hasCamp = snapshot.WorldObjects.Any(item =>
             item.Kind == WorldObjectKind.GoblinFieldCamp &&
             item.Owner == WorldObjectOwner.GoblinTribe);
-        var canBud = corpse.Kind == CorpseKind.Human;
-
         _worldContextMenu.Clear();
         _worldContextMenu.AddItem($"{corpse.Name} • zwłoki");
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
@@ -7941,12 +7964,12 @@ public partial class Main : Node
             CorpseActionLabel("Zanieś i zapyl w obozie",
                 corpse.Directives.HasFlag(CorpseDirective.RecoverAndBudAtCamp)),
             WorldContextAction.RecoverAndBudCorpse,
-            canBud && hasCamp);
+            hasCamp);
         AddCorpseContextAction(
             CorpseActionLabel("Zapyl na miejscu",
                 corpse.Directives.HasFlag(CorpseDirective.BudInPlace)),
             WorldContextAction.BudCorpseInPlace,
-            canBud);
+            enabled: true);
         if (corpse.Directives != CorpseDirective.None)
         {
             _worldContextMenu.AddSeparator();
@@ -7955,13 +7978,7 @@ public partial class Main : Node
                 WorldContextAction.ClearCorpseDirectives,
                 enabled: true);
         }
-        if (!canBud)
-        {
-            _worldContextMenu.AddSeparator();
-            _worldContextMenu.AddItem("Zapylanie wymaga zwłok człowieka");
-            _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
-        }
-        else if (!hasCamp)
+        if (!hasCamp)
         {
             _worldContextMenu.AddSeparator();
             _worldContextMenu.AddItem("Przeniesienie wymaga obozowiska wypadowego");
@@ -8041,7 +8058,7 @@ public partial class Main : Node
             return;
         }
 
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = GetDisplayedSnapshot();
         var camp = snapshot.WorldObjects.FirstOrDefault(worldObject =>
             worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
             worldObject.Owner == WorldObjectOwner.GoblinTribe &&
@@ -8103,7 +8120,7 @@ public partial class Main : Node
     private void HandleContextEntityAction(WorldContextAction action)
     {
         var target = _contextEntityTarget;
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = GetDisplayedSnapshot();
         switch (action)
         {
             case WorldContextAction.OpenEntityDetails:
@@ -8301,7 +8318,7 @@ public partial class Main : Node
 
     private void HandleCorpseContextAction(WorldContextAction action)
     {
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = GetDisplayedSnapshot();
         var corpse = snapshot.Corpses.FirstOrDefault(item => item.Id == _contextCorpseId);
         if (corpse is null)
         {
@@ -8974,7 +8991,7 @@ public partial class Main : Node
                  snapshot.GetVisibility(stack.Location.Position, _engine.Map.Width) == CellVisibility.Visible))
             .Sum(stack => stack.Quantity);
         _status.Text = $"Tick {snapshot.Tick.Value:N0}  •  z={_visibleLevel}  •  plemię {snapshot.Actors.Count}" +
-            $" + {snapshot.GoblinBuds.Count} pąk. / cel {snapshot.PopulationTarget}" +
+            $" + {snapshot.GoblinBuds.Count} pąk." +
             $" / miejsca {snapshot.TribeNeeds.ShelterCapacity}" +
             $"  •  żywność {snapshot.FoodStock}" +
             $" (skł. {storedFood}, racje {personalFood}/{personalWater})" +

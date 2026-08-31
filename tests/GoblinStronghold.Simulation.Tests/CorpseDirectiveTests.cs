@@ -164,6 +164,36 @@ public sealed class CorpseDirectiveTests
             Assert.NotEqual(corpseId, actor.CarriedCorpseId));
     }
 
+    [Fact]
+    public void GoblinCorpseCanBeBuddedInPlaceWithoutActiveRaid()
+    {
+        var engine = CreateEngine();
+        var corpsePosition = engine.Map.GoblinSpawn;
+        var corpseId = AddGoblinCorpse(ref engine, corpsePosition);
+
+        engine.QueueCommand(SimulationCommand.ConfigureCorpseDirectives(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            corpseId,
+            CorpseDirective.BudInPlace));
+        engine.AdvanceTicks(1);
+        Assert.True(Assert.Single(engine.CreateSnapshot().Corpses).Directives.HasFlag(
+            CorpseDirective.BudInPlace));
+
+        for (var tick = 0; tick < 4_000 && engine.CreateSnapshot().GoblinBuds.Count == 0; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        var bud = Assert.Single(snapshot.GoblinBuds);
+        Assert.Equal(corpseId, bud.OriginCorpseId);
+        Assert.Equal(corpsePosition, bud.Position);
+        Assert.DoesNotContain(snapshot.Corpses, corpse => corpse.Id == corpseId);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
     private static SimulationEngine CreateEngine() => SimulationEngine.Create(
         new WorldSeed(0x434F52505345UL),
         SimulationDefinitions.Foundation,

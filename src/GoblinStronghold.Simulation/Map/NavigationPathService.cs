@@ -38,6 +38,8 @@ public sealed class NavigationPathService
     private readonly Dictionary<MultiPathKey, GridPosition[]?> _multiRouteCache = [];
     private readonly Dictionary<PathKey, IncrementalTerrainPathSearch> _pendingSearches = [];
     private readonly Dictionary<MultiPathKey, IncrementalTerrainPathSearch> _pendingMultiSearches = [];
+    private readonly Dictionary<SharedRouteTreeKey, IncrementalNearestDestinationTree>
+        _sharedRouteTrees = [];
     private ulong _cachedTopologyVersion;
     private long _requests;
     private long _searches;
@@ -218,6 +220,47 @@ public sealed class NavigationPathService
             maximumExpandedNodes,
             canOpenDoors);
 
+    public NavigationPathRequestResult RequestSharedPathToNearest(
+        GridPosition start,
+        IReadOnlySet<GridPosition> destinations,
+        int maximumExpandedNodes,
+        bool canOpenDoors = true)
+    {
+        ArgumentNullException.ThrowIfNull(destinations);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumExpandedNodes);
+        EnsureCurrentTopology();
+        _requests = checked(_requests + 1);
+        var key = new SharedRouteTreeKey(new DestinationSetKey(destinations), canOpenDoors);
+        if (!_sharedRouteTrees.TryGetValue(key, out var tree))
+        {
+            if (_routeCache.Count + _multiRouteCache.Count + _sharedRouteTrees.Count >=
+                MaximumCachedRoutes)
+            {
+                _routeCache.Clear();
+                _multiRouteCache.Clear();
+                _sharedRouteTrees.Clear();
+                _cacheInvalidations = checked(_cacheInvalidations + 1);
+            }
+
+            tree = new IncrementalNearestDestinationTree(
+                _world,
+                destinations,
+                canOpenDoors);
+            _sharedRouteTrees.Add(key, tree);
+            _searches = checked(_searches + 1);
+        }
+        else
+        {
+            _cacheHits = checked(_cacheHits + 1);
+        }
+
+        var expandedBefore = tree.ExpandedNodes;
+        var result = tree.RequestPath(start, maximumExpandedNodes);
+        _expandedNodes = checked(_expandedNodes + tree.ExpandedNodes - expandedBefore);
+        _maximumExpandedNodes = Math.Max(_maximumExpandedNodes, tree.ExpandedNodes);
+        return result;
+    }
+
     public NavigationPathRequestResult RequestPathToNearest(
         GridPosition start,
         IReadOnlySet<GridPosition> destinations,
@@ -276,8 +319,9 @@ public sealed class NavigationPathService
             _cacheInvalidations,
             _expandedNodes,
             _maximumExpandedNodes,
-            checked(_pendingSearches.Count + _pendingMultiSearches.Count),
-            checked(_routeCache.Count + _multiRouteCache.Count),
+            checked(_pendingSearches.Count + _pendingMultiSearches.Count +
+                _sharedRouteTrees.Values.Count(tree => !tree.IsExhausted)),
+            checked(_routeCache.Count + _multiRouteCache.Count + _sharedRouteTrees.Count),
             _cachedTopologyVersion);
     }
 
@@ -292,6 +336,7 @@ public sealed class NavigationPathService
         _multiRouteCache.Clear();
         _pendingSearches.Clear();
         _pendingMultiSearches.Clear();
+        _sharedRouteTrees.Clear();
         _cachedTopologyVersion = _world.TopologyVersion;
         _cacheInvalidations = checked(_cacheInvalidations + 1);
     }
@@ -464,6 +509,10 @@ public sealed class NavigationPathService
         DestinationSetKey Destinations,
         bool CanOpenDoors,
         NavigationPathContext Context);
+
+    private readonly record struct SharedRouteTreeKey(
+        DestinationSetKey Destinations,
+        bool CanOpenDoors);
 
     private sealed class DestinationSetKey : IEquatable<DestinationSetKey>
     {
@@ -642,5 +691,89 @@ public sealed class NavigationPathService
 
         private static int DistanceToRange(int value, int minimum, int maximum) =>
             value < minimum ? minimum - value : value > maximum ? value - maximum : 0;
+    }
+
+    private sealed class IncrementalNearestDestinationTree
+    {
+        private readonly WorldMapState _world;
+        private readonly bool _canOpenDoors;
+        private readonly HashSet<GridPosition> _destinations;
+        private readonly HashSet<GridPosition> _reached;
+        private readonly Dictionary<GridPosition, GridPosition> _nextSteps = [];
+        private readonly Queue<GridPosition> _frontier;
+
+        public IncrementalNearestDestinationTree(
+            WorldMapState world,
+            IEnumerable<GridPosition> destinations,
+            bool canOpenDoors)
+        {
+            _world = world;
+            _canOpenDoors = canOpenDoors;
+            Func<GridPosition, bool> canTraverse = canOpenDoors
+                ? world.IsTerrainReachable
+                : world.IsTerrainTraversable;
+            _destinations = destinations.Where(canTraverse).ToHashSet();
+            _reached = new HashSet<GridPosition>(_destinations);
+            _frontier = new Queue<GridPosition>(_destinations
+                .OrderBy(position => position.Z)
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X));
+        }
+
+        public int ExpandedNodes { get; private set; }
+
+        public bool IsExhausted => _frontier.Count == 0;
+
+        public NavigationPathRequestResult RequestPath(
+            GridPosition start,
+            int maximumExpandedNodes)
+        {
+            if (!_world.IsTerrainTraversable(start) || _destinations.Count == 0)
+            {
+                return new NavigationPathRequestResult(
+                    NavigationPathRequestStatus.Unreachable,
+                    null);
+            }
+
+            var expansionLimit = checked(ExpandedNodes + maximumExpandedNodes);
+            while (!_reached.Contains(start) &&
+                   ExpandedNodes < expansionLimit &&
+                   _frontier.TryDequeue(out var current))
+            {
+                ExpandedNodes++;
+                foreach (var candidate in _world.GetTerrainNeighbors(current, _canOpenDoors))
+                {
+                    if (_reached.Contains(candidate) ||
+                        !_world.CanTraverseTerrainEdge(candidate, current, _canOpenDoors))
+                    {
+                        continue;
+                    }
+
+                    _reached.Add(candidate);
+                    _nextSteps.Add(candidate, current);
+                    _frontier.Enqueue(candidate);
+                }
+            }
+
+            if (!_reached.Contains(start))
+            {
+                return new NavigationPathRequestResult(
+                    IsExhausted
+                        ? NavigationPathRequestStatus.Unreachable
+                        : NavigationPathRequestStatus.Pending,
+                    null);
+            }
+
+            var route = new List<GridPosition>();
+            var position = start;
+            while (!_destinations.Contains(position))
+            {
+                position = _nextSteps[position];
+                route.Add(position);
+            }
+            return new NavigationPathRequestResult(
+                NavigationPathRequestStatus.Complete,
+                route);
+        }
     }
 }

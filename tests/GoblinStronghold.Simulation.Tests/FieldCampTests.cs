@@ -514,7 +514,6 @@ public sealed class FieldCampTests
                 Math.Abs(cell.Y - engine.Map.GoblinSpawn.Y))
             .First();
         var before = engine.CreateSnapshot().TribeNeeds.ShelterCapacity;
-        var populationTargetBefore = engine.CreateSnapshot().PopulationTarget;
 
         engine.QueueCommand(SimulationCommand.BuildGoblinHut(
             new SimulationTick(1), sequence: 1, position));
@@ -526,9 +525,6 @@ public sealed class FieldCampTests
             item.Kind == WorldObjectKind.GoblinHut && item.Anchor == position);
         Assert.Equal(9, hut.Parts.Count(part => part.Kind == WorldObjectPartKind.Floor));
         Assert.Equal(before + 9, snapshot.TribeNeeds.ShelterCapacity);
-        Assert.Equal(
-            populationTargetBefore + SimulationDefinitions.GoblinHutCapacity,
-            snapshot.PopulationTarget);
     }
 
     [Fact]

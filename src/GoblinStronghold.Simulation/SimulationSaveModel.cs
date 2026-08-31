@@ -26,8 +26,6 @@ internal sealed class SimulationSaveModel
 
     public ulong WorldVersion { get; set; }
 
-    public int PopulationTarget { get; set; }
-
     public List<GoblinBudSaveModel> GoblinBuds { get; set; } = [];
 
     public List<CorpseSaveModel> Corpses { get; set; } = [];

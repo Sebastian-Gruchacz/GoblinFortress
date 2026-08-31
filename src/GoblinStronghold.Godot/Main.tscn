@@ -102,6 +102,21 @@ position = Vector2(640, 640)
 
 [node name="Interface" type="CanvasLayer" parent="." unique_id=547562144]
 
+[node name="FpsPanel" type="PanelContainer" parent="Interface"]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 92.0
+offset_bottom = 48.0
+mouse_filter = 2
+
+[node name="FpsCounter" type="Label" parent="Interface/FpsPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 13
+text = "FPS: —"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="StatusBar" type="PanelContainer" parent="Interface" unique_id=1751452914]
 anchors_preset = 10
 anchor_right = 1.0
@@ -759,27 +774,6 @@ grow_vertical = 2
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-
-[node name="Population" type="HBoxContainer" parent="StatisticsWindow/Margin/Content" unique_id=19668198]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="Decrease" type="Button" parent="StatisticsWindow/Margin/Content/Population" unique_id=1344120629]
-layout_mode = 2
-tooltip_text = "Zmniejsz docelową liczebność plemienia"
-text = "−"
-
-[node name="Target" type="Label" parent="StatisticsWindow/Margin/Content/Population" unique_id=510727630]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Docelowa liczebność: 0"
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="Increase" type="Button" parent="StatisticsWindow/Margin/Content/Population" unique_id=1699019556]
-layout_mode = 2
-tooltip_text = "Zaplanuj powiększenie plemienia o jednego goblina"
-text = "+"
 
 [node name="Text" type="Label" parent="StatisticsWindow/Margin/Content" unique_id=369480313]
 layout_mode = 2

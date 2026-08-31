@@ -179,8 +179,6 @@ public sealed partial class SimulationEngine
                 ediblePortions < 0 ||
                 ediblePortions > GetInitialCorpseEdiblePortions(model.Kind) ||
                 !AreValidCorpseDirectives(model.Directives) ||
-                (model.Kind != CorpseKind.Human &&
-                    (model.Directives & CorpseBuddingDirectives) != 0) ||
                 !HasOnlyKnownFlags(model.InheritableSkills, GoblinSkill.Building) ||
                 !HasOnlyKnownFlags(model.InheritableTraits, GoblinTrait.Fastidious) ||
                 model.InheritableForagingExperience < 0 ||
@@ -230,10 +228,6 @@ public sealed partial class SimulationEngine
 
     private const CorpseDirective CorpseHandlingDirectives =
         CorpseDirective.RecoverToCamp |
-        CorpseDirective.RecoverAndBudAtCamp |
-        CorpseDirective.BudInPlace;
-
-    private const CorpseDirective CorpseBuddingDirectives =
         CorpseDirective.RecoverAndBudAtCamp |
         CorpseDirective.BudInPlace;
 

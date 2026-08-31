@@ -208,7 +208,9 @@ public sealed class WorldMapState
 
         if (excavated.Any(position =>
                 !baseline.IsRockPosition(position) ||
-                baseline.GetRockCell(position).Kind != CaveCellKind.SolidRock) ||
+                baseline.GetRockCell(position) is not
+                    { Kind: CaveCellKind.SolidRock } and not
+                    { Kind: CaveCellKind.Floor, Fluid: CellFluidKind.None }) ||
             excavated.Distinct().Count() != excavated.Length)
         {
             throw new InvalidDataException("The save contains invalid excavated cave cells.");

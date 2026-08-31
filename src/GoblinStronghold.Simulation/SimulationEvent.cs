@@ -39,7 +39,6 @@ public enum SimulationEventKind
     ItemDropped = 35,
     RaidVictory = 36,
     RaidDefeated = 37,
-    PopulationTargetConfigured = 38,
     GoblinBudCreated = 39,
     GoblinBorn = 40,
     AnimalHitGoblin = 41,

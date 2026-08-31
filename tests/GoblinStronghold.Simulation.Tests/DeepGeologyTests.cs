@@ -8,6 +8,55 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class DeepGeologyTests
 {
     [Fact]
+    public void EveryDeepMiningLevelContainsNaturalCaves()
+    {
+        var map = MaterializeToDepth(new WorldSeed(0x43415645524E53UL), depth: 11);
+
+        for (var depth = 3; depth <= 11; depth++)
+        {
+            var caveFloorCount = ReadLevel(map, depth).Count(cell =>
+                cell.Kind == CaveCellKind.Floor && cell.Fluid == CellFluidKind.None);
+
+            Assert.InRange(caveFloorCount, map.CellCount / 50, map.CellCount * 3 / 5);
+        }
+    }
+
+    [Fact]
+    public void MiddleDepthsContainIronWithoutBeingDominatedByCoal()
+    {
+        var map = MaterializeToDepth(new WorldSeed(0x49524F4E5645494EUL), depth: 10);
+        var cells = ReadLevels(map, 6, 10)
+            .Where(cell => cell.Kind == CaveCellKind.SolidRock)
+            .ToArray();
+        var iron = cells.Count(cell => cell.Deposit == MineralDepositKind.IronOre);
+        var coal = cells.Count(cell => cell.Deposit == MineralDepositKind.Coal);
+
+        Assert.True(iron > 0);
+        Assert.True(coal <= iron * 3, $"iron={iron}, coal={coal}");
+    }
+
+    [Fact]
+    public void HistoricalExcavationMayOverlapNewNaturalCaveFloor()
+    {
+        var map = MaterializeToDepth(new WorldSeed(0x4F4C4454554E4E45UL), depth: 3);
+        var world = WorldMapState.CreateInitial(map);
+        var naturalFloor = FindCell(
+            map,
+            depth: 3,
+            cell => cell.Kind == CaveCellKind.Floor && cell.Fluid == CellFluidKind.None);
+
+        var restored = WorldMapState.Restore(
+            map,
+            world.Version,
+            world.CreatePlantSnapshot(),
+            world.CreateWorldObjectSnapshot(),
+            excavatedCaveCells: [naturalFloor]);
+
+        Assert.Contains(naturalFloor, restored.ExcavatedCaveCells);
+        Assert.True(restored.IsTerrainTraversable(naturalFloor));
+    }
+
+    [Fact]
     public void LavaBeginsAtTwelveAndBroadensAtSixteen()
     {
         var map = MaterializeToDepth(new WorldSeed(0x4C41564144454550UL), depth: 16);

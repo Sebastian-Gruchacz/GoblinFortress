@@ -47,13 +47,16 @@ public readonly record struct GoblinBudSnapshot(
 
 public enum GoblinReproductionReadinessKind : byte
 {
-    AtTarget = 0,
     Ready = 1,
     InsufficientFood = 2,
     NoMoistSpace = 3,
     NoEligibleParent = 4,
     BudWaitingForCare = 5,
     BudBeingTended = 6,
+    InsufficientShelter = 7,
+    InsufficientAdultPopulation = 8,
+    UnsafeConditions = 9,
+    JuvenileCapacityReached = 10,
 }
 
 public readonly record struct GoblinReproductionReadinessSnapshot(
@@ -498,7 +501,6 @@ public sealed class SimulationSnapshot
         WorldSeed worldSeed,
         SimulationTick tick,
         int foodStock,
-        int populationTarget,
         ActorSnapshot[] actors,
         GoblinBudSnapshot[] goblinBuds,
         TribeNeedsSnapshot tribeNeeds,
@@ -538,7 +540,6 @@ public sealed class SimulationSnapshot
         WorldSeed = worldSeed;
         Tick = tick;
         FoodStock = foodStock;
-        PopulationTarget = populationTarget;
         Actors = new ReadOnlyCollection<ActorSnapshot>(actors);
         GoblinBuds = new ReadOnlyCollection<GoblinBudSnapshot>(goblinBuds);
         TribeNeeds = tribeNeeds;
@@ -587,8 +588,6 @@ public sealed class SimulationSnapshot
     public SimulationTick Tick { get; }
 
     public int FoodStock { get; }
-
-    public int PopulationTarget { get; }
 
     public IReadOnlyList<ActorSnapshot> Actors { get; }
 

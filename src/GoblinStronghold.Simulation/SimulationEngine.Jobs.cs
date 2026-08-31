@@ -19,6 +19,7 @@ public sealed partial class SimulationEngine
     private const int FastidiousCleaningPreferenceBonus = SpecialistPublicWorkBonus;
     private long[] _lastActorJobStageStopwatchTicks = new long[6];
     private readonly List<ActorPlanningAttemptProfile> _lastPlanningAttempts = [];
+    private HashSet<GridPosition>? _shallowWaterSources;
     private int _burstPlannersThisTick;
 
     public ActorJobUpdateProfile GetLastActorJobUpdateProfile() => new(
@@ -2813,8 +2814,8 @@ public sealed partial class SimulationEngine
                 actor.Id,
                 CurrentTick,
                 sampleKey: designation.Id.Value,
-                minimumInclusive: 4,
-                maximumExclusive: 9);
+                minimumInclusive: 1,
+                maximumExclusive: 4);
             var variant = rock switch
             {
                 RockKind.Granite => ResourceVariant.Granite,
@@ -2863,8 +2864,8 @@ public sealed partial class SimulationEngine
                     actor.Id,
                     CurrentTick,
                     sampleKey: designation.Id.Value ^ 0x4F52454445504F53UL,
-                    minimumInclusive: deposit == MineralDepositKind.Coal ? 3 : 1,
-                    maximumExclusive: deposit == MineralDepositKind.Coal ? 9 : isGem ? 3 : 6);
+                    minimumInclusive: 1,
+                    maximumExclusive: deposit == MineralDepositKind.Coal ? 4 : isGem ? 2 : 3);
                 var depositStack = FindMergeableGroundStack(
                     depositResource,
                     outputPosition,
@@ -3756,6 +3757,18 @@ public sealed partial class SimulationEngine
             return true;
         }
 
+        var storedQuantities = _itemStacks.Values
+            .Where(stack => stack.Location.Kind == ItemLocationKind.StorageZone)
+            .GroupBy(stack => stack.Location.OwnerId)
+            .ToDictionary(group => group.Key, group => group.Sum(stack => stack.Quantity));
+        var storedTypeQuantities = _itemStacks.Values
+            .Where(stack => stack.Location.Kind == ItemLocationKind.StorageZone)
+            .GroupBy(stack => (stack.Location.OwnerId, Type: GetStorageTypeKey(stack)))
+            .ToDictionary(group => group.Key, group => group.Sum(stack => stack.Quantity));
+        var usedTypeSlots = storedTypeQuantities.Keys
+            .GroupBy(key => key.OwnerId)
+            .ToDictionary(group => group.Key, group => group.Count());
+
         var candidates = new List<HaulCandidate>();
         foreach (var source in _itemStacks.Values.Where(stack =>
                      stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
@@ -3764,7 +3777,15 @@ public sealed partial class SimulationEngine
                      (stack.Resource != ResourceKind.Water ||
                       actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))))
         {
-            var availableSource = GetAvailableSourceQuantity(source, sourceReservations);
+            var protectedAtSource = source.Location.Kind == ItemLocationKind.StorageZone &&
+                _storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone)
+                    ? Math.Max(0, sourceZone.DesiredQuantity -
+                        (GetStored(sourceZone.Id) - source.Quantity))
+                    : 0;
+            var availableSource = Math.Max(
+                0,
+                source.Quantity - protectedAtSource -
+                    sourceReservations.GetValueOrDefault(source.Id));
             if (availableSource <= 0)
             {
                 continue;
@@ -3785,12 +3806,12 @@ public sealed partial class SimulationEngine
                          ZoneAccepts(zone, source) &&
                          IsHaulerAllowedForZone(actor, zone) &&
                          IsSourceAllowedForZone(source, zone) &&
-                         CanStoreStack(zone, source, 1) &&
+                         CanStoreIndexed(zone, source, 1) &&
                          (requiredDestination is null || zone.Id == requiredDestination.Value) &&
                          (!assignedDestinationsOnly || IsExplicitHaulingDuty(actor, zone)))
                 .Where(zone =>
                 {
-                    var stored = GetStoredQuantity(zone.Id);
+                    var stored = GetStored(zone.Id);
                     var reservedDestination = destinationReservations.GetValueOrDefault(zone.Id);
                     return isDesignatedLooseResource || isPriorityHaul ||
                         zone.DesiredQuantity > stored + reservedDestination;
@@ -3808,7 +3829,7 @@ public sealed partial class SimulationEngine
                 {
                     continue;
                 }
-                var stored = GetStoredQuantity(zone.Id);
+                var stored = GetStored(zone.Id);
                 var reservedDestination = destinationReservations.GetValueOrDefault(zone.Id);
                 var isPulledByStorage = zone.DesiredQuantity > stored + reservedDestination;
                 var destinationLimit = isDesignatedLooseResource
@@ -3816,7 +3837,7 @@ public sealed partial class SimulationEngine
                     : Math.Min(zone.Capacity, zone.DesiredQuantity);
                 var availableDestination = Math.Min(
                     destinationLimit - stored - reservedDestination,
-                    GetAvailableStorageQuantity(zone, source));
+                    GetAvailableStorageIndexed(zone, source));
                 if (availableDestination <= 0)
                 {
                     continue;
@@ -3901,6 +3922,49 @@ public sealed partial class SimulationEngine
             return true;
         }
         return false;
+
+        int GetStored(EntityId zoneId) => storedQuantities.GetValueOrDefault(zoneId);
+
+        bool CanStoreIndexed(StorageZoneState zone, ItemStackState stack, int quantity)
+        {
+            if (!zone.SlotPolicy.Supports(GetStorageRequirement(stack)) ||
+                GetStored(zone.Id) + quantity > zone.Capacity)
+            {
+                return false;
+            }
+            if (!zone.SlotPolicy.SeparatesItemTypes)
+            {
+                return true;
+            }
+
+            var typeKey = GetStorageTypeKey(stack);
+            var storedOfKind = storedTypeQuantities.GetValueOrDefault((zone.Id, typeKey));
+            return storedOfKind + quantity <= zone.SlotPolicy.StackCapacity &&
+                (storedOfKind > 0 ||
+                 usedTypeSlots.GetValueOrDefault(zone.Id) < zone.SlotPolicy.SlotCount);
+        }
+
+        int GetAvailableStorageIndexed(StorageZoneState zone, ItemStackState stack)
+        {
+            var totalAvailable = Math.Max(0, zone.Capacity - GetStored(zone.Id));
+            if (!zone.SlotPolicy.Supports(GetStorageRequirement(stack)))
+            {
+                return 0;
+            }
+            if (!zone.SlotPolicy.SeparatesItemTypes)
+            {
+                return totalAvailable;
+            }
+
+            var typeKey = GetStorageTypeKey(stack);
+            var storedOfKind = storedTypeQuantities.GetValueOrDefault((zone.Id, typeKey));
+            if (storedOfKind == 0 &&
+                usedTypeSlots.GetValueOrDefault(zone.Id) >= zone.SlotPolicy.SlotCount)
+            {
+                return 0;
+            }
+            return Math.Min(totalAvailable, zone.SlotPolicy.StackCapacity - storedOfKind);
+        }
     }
 
     private bool TryPlanNaturalWaterHaul(
@@ -3915,13 +3979,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var routeToSource = FindNearestShallowWaterPath(actor.Position);
-        if (routeToSource is null)
-        {
-            return false;
-        }
-        var sourcePosition = routeToSource.Count == 0 ? actor.Position : routeToSource[^1];
-        var destination = _storageZones.Values
+        var destinations = _storageZones.Values
             .Where(zone => zone.AcceptedResource == ResourceKind.Water &&
                 zone.SourceStorageZoneId == EntityId.None &&
                 IsHaulerAllowedForZone(actor, zone) &&
@@ -3934,9 +3992,36 @@ public sealed partial class SimulationEngine
                 Missing = Math.Min(zone.Capacity, zone.DesiredQuantity) -
                     GetStoredQuantity(zone.Id) -
                     destinationReservations.GetValueOrDefault(zone.Id),
-                Route = FindActorPathFrom(actor, sourcePosition, zone.Position),
             })
-            .Where(candidate => candidate.Missing > 0 && candidate.Route is not null)
+            .Where(candidate => candidate.Missing > 0)
+            .ToArray();
+        if (destinations.Length == 0)
+        {
+            return false;
+        }
+
+        var waterSources = GetShallowWaterSources();
+        var routeRequest = !actor.NavigationKnowledge.HasBlockedBeliefs &&
+            !_tribeNavigationKnowledge.HasBlockedBeliefs
+                ? Navigation.RequestSharedPathToNearest(
+                    actor.Position,
+                    waterSources,
+                    Definitions.ActorPlanning.MaximumPathExpansionsPerSlice)
+                : RequestActorPathToNearest(actor, waterSources);
+        if (routeRequest.Status != NavigationPathRequestStatus.Complete ||
+            routeRequest.Path is not { } routeToSource)
+        {
+            return false;
+        }
+        var sourcePosition = routeToSource.Count == 0 ? actor.Position : routeToSource[^1];
+        var destination = destinations
+            .Select(candidate => new
+            {
+                candidate.Zone,
+                candidate.Missing,
+                Route = FindActorPathFrom(actor, sourcePosition, candidate.Zone.Position),
+            })
+            .Where(candidate => candidate.Route is not null)
             .OrderByDescending(candidate => candidate.Zone.Priority)
             .ThenBy(candidate => candidate.Route!.Count)
             .ThenBy(candidate => candidate.Zone.Id)
@@ -3957,6 +4042,22 @@ public sealed partial class SimulationEngine
         destinationReservations[destination.Zone.Id] = checked(
             destinationReservations.GetValueOrDefault(destination.Zone.Id) + quantity);
         return true;
+    }
+
+    private IReadOnlySet<GridPosition> GetShallowWaterSources()
+    {
+        if (_shallowWaterSources is not null)
+        {
+            return _shallowWaterSources;
+        }
+
+        _shallowWaterSources = (
+            from y in Enumerable.Range(0, Map.Height)
+            from x in Enumerable.Range(0, Map.Width)
+            let position = new GridPosition(x, y, 0)
+            where Map.GetCell(position).Terrain == TerrainKind.ShallowWater
+            select position).ToHashSet();
+        return _shallowWaterSources;
     }
 
     private bool HasAssignedStorageDuty(EntityId actorId) =>
@@ -4896,7 +4997,7 @@ public sealed partial class SimulationEngine
         {
             if (actor.CarriedCorpseId != EntityId.None ||
                 !_corpses.TryGetValue(actor.SourceStackId, out var corpse) ||
-                corpse.Position != actor.JobTarget || corpse.Kind != CorpseKind.Human)
+                corpse.Position != actor.JobTarget)
             {
                 throw new InvalidDataException("The save contains invalid corpse collection.");
             }

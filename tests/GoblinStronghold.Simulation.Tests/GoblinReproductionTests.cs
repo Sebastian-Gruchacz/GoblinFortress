@@ -6,36 +6,31 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class GoblinReproductionTests
 {
     [Fact]
-    public void PopulationTargetCreatesPersistentBudAndWeakensParent()
+    public void FoodAndShelterSurplusCreatesPersistentBudAndWeakensParent()
     {
         var engine = SimulationEngine.Create(
             new WorldSeed(0xB00DUL),
             SimulationDefinitions.Foundation,
             initialGoblinCount: 4,
-            initialFoodStock: 20);
+            initialFoodStock: 40);
         var before = engine.CreateSnapshot();
 
-        Assert.Equal(4, before.PopulationTarget);
         Assert.Empty(before.GoblinBuds);
-        Assert.Equal(GoblinReproductionReadinessKind.AtTarget,
+        Assert.Equal(GoblinReproductionReadinessKind.Ready,
             before.TribeNeeds.Reproduction.Kind);
-        Assert.Equal(20, before.TribeNeeds.FoodUnits);
+        Assert.Equal(24, before.TribeNeeds.Reproduction.RequiredFood);
+        Assert.Equal(40, before.TribeNeeds.FoodUnits);
         Assert.Equal(8, before.TribeNeeds.ExpectedDailyFoodUnits);
         Assert.True(before.TribeNeeds.ShelterCapacity >= before.Actors.Count);
         Assert.True(before.TribeNeeds.SuitableMoistSites > 0);
 
-        engine.QueueCommand(SimulationCommand.ConfigurePopulationTarget(
-            engine.CurrentTick.Next(),
-            engine.NextAvailableCommandSequence,
-            populationTarget: 5));
         engine.AdvanceTicks(1);
 
         var after = engine.CreateSnapshot();
         var bud = Assert.Single(after.GoblinBuds);
         var parentBefore = Assert.Single(before.Actors.Where(actor => actor.Id == bud.ParentId));
         var parentAfter = Assert.Single(after.Actors.Where(actor => actor.Id == bud.ParentId));
-        Assert.Equal(5, after.PopulationTarget);
-        Assert.Equal(16, after.FoodStock);
+        Assert.Equal(36, after.FoodStock);
         Assert.True(parentAfter.Health < parentBefore.Health);
         Assert.True(parentAfter.Hunger > parentBefore.Hunger);
         Assert.True(parentAfter.Fatigue > parentBefore.Fatigue);
@@ -49,18 +44,14 @@ public sealed class GoblinReproductionTests
     }
 
     [Fact]
-    public void CaredForBudBecomesOneNewGoblinAndStopsAtTarget()
+    public void CaredForBudBecomesOneNewGoblinAndFurtherGrowthNeedsAnotherSurplus()
     {
         var definitions = SimulationDefinitions.Foundation;
         var engine = SimulationEngine.Create(
             new WorldSeed(0xB00DUL),
             definitions,
             initialGoblinCount: 4,
-            initialFoodStock: 20);
-        engine.QueueCommand(SimulationCommand.ConfigurePopulationTarget(
-            engine.CurrentTick.Next(),
-            engine.NextAvailableCommandSequence,
-            populationTarget: 5));
+            initialFoodStock: 26);
 
         engine.AdvanceTicks(1);
         var bud = Assert.Single(engine.CreateSnapshot().GoblinBuds);
@@ -71,6 +62,9 @@ public sealed class GoblinReproductionTests
 
         Assert.Equal(5, completed.Actors.Count);
         Assert.Empty(completed.GoblinBuds);
+        Assert.Equal(
+            GoblinReproductionReadinessKind.JuvenileCapacityReached,
+            completed.TribeNeeds.Reproduction.Kind);
         var newborn = completed.Actors.MaxBy(actor => actor.Id.Value);
         Assert.Equal(0, newborn.Experience.Foraging);
         Assert.Equal(0, newborn.Experience.Hauling);
@@ -96,7 +90,7 @@ public sealed class GoblinReproductionTests
     }
 
     [Fact]
-    public void PopulationDoesNotGrowWithoutFoodOrRaisedTarget()
+    public void PopulationDoesNotGrowWithoutFoodSurplus()
     {
         var engine = SimulationEngine.Create(
             new WorldSeed(0xB00DUL),
@@ -108,10 +102,6 @@ public sealed class GoblinReproductionTests
         Assert.Equal(4, engine.CreateSnapshot().Actors.Count);
         Assert.Empty(engine.CreateSnapshot().GoblinBuds);
 
-        engine.QueueCommand(SimulationCommand.ConfigurePopulationTarget(
-            engine.CurrentTick.Next(),
-            engine.NextAvailableCommandSequence,
-            populationTarget: 5));
         engine.AdvanceTicks(300);
         Assert.Equal(4, engine.CreateSnapshot().Actors.Count);
         Assert.Empty(engine.CreateSnapshot().GoblinBuds);
@@ -128,19 +118,18 @@ public sealed class GoblinReproductionTests
             new WorldSeed(0xB00DUL),
             definitions,
             initialGoblinCount: 4,
-            initialFoodStock: 20,
+            initialFoodStock: 40,
             initialHealth: definitions.MaximumHealth / 2);
-        engine.QueueCommand(SimulationCommand.ConfigurePopulationTarget(
-            engine.CurrentTick.Next(),
-            engine.NextAvailableCommandSequence,
-            populationTarget: 5));
-
         engine.AdvanceTicks(1);
 
         var readiness = engine.InspectReproductionReadiness();
         Assert.Equal(GoblinReproductionReadinessKind.NoEligibleParent, readiness.Kind);
         Assert.Equal(0, readiness.EligibleParents);
         Assert.True(readiness.SuitableMoistSites > 0);
-        Assert.Equal(definitions.Reproduction.FoodCost, readiness.RequiredFood);
+        Assert.Equal(
+            definitions.Reproduction.FoodCost +
+            (engine.CreateSnapshot().Actors.Count + 1) * definitions.PersonalFoodCapacity *
+            definitions.Reproduction.FoodReserveDays,
+            readiness.RequiredFood);
     }
 }

@@ -9,9 +9,17 @@ internal enum MaterialPaletteTextureProfile
     IllustratedTimber,
 }
 
+internal enum MaterialResourceIconShape
+{
+    Ore,
+    Ingot,
+}
+
 internal sealed class MaterialPaletteTextureCache : IDisposable
 {
     private readonly Dictionary<CacheKey, ImageTexture> _textures = [];
+    private readonly Dictionary<MaterialResourceIconShape, ImageTexture> _resourceIconBases = [];
+    private ImageTexture? _coalIcon;
 
     public Texture2D Get(
         Texture2D atlas,
@@ -45,6 +53,30 @@ internal sealed class MaterialPaletteTextureCache : IDisposable
         return texture;
     }
 
+    public Texture2D GetResourceIcon(
+        ResourceVariant materialVariant,
+        MaterialResourceIconShape shape)
+    {
+        if (!_resourceIconBases.TryGetValue(shape, out var source))
+        {
+            source = CreateSvgTexture(shape switch
+            {
+                MaterialResourceIconShape.Ore => OreIconSvg,
+                MaterialResourceIconShape.Ingot => IngotIconSvg,
+                _ => throw new ArgumentOutOfRangeException(nameof(shape)),
+            });
+            _resourceIconBases.Add(shape, source);
+        }
+
+        return Get(
+            source,
+            new Rect2(Vector2.Zero, source.GetSize()),
+            materialVariant,
+            MaterialPaletteTextureProfile.CompleteSurface);
+    }
+
+    public Texture2D GetCoalIcon() => _coalIcon ??= CreateSvgTexture(CoalIconSvg);
+
     public void Dispose()
     {
         foreach (var texture in _textures.Values)
@@ -52,6 +84,23 @@ internal sealed class MaterialPaletteTextureCache : IDisposable
             texture.Dispose();
         }
         _textures.Clear();
+        foreach (var texture in _resourceIconBases.Values)
+        {
+            texture.Dispose();
+        }
+        _resourceIconBases.Clear();
+        _coalIcon?.Dispose();
+        _coalIcon = null;
+    }
+
+    private static ImageTexture CreateSvgTexture(string svg)
+    {
+        var image = new Image();
+        if (image.LoadSvgFromString(svg) != Error.Ok)
+        {
+            throw new InvalidOperationException("Cannot create a material resource icon.");
+        }
+        return ImageTexture.CreateFromImage(image);
     }
 
     private static void ApplyPalette(
@@ -153,4 +202,39 @@ internal sealed class MaterialPaletteTextureCache : IDisposable
         Rect2I Region,
         ResourceVariant MaterialVariant,
         MaterialPaletteTextureProfile Profile);
+
+    private const string OreIconSvg = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <ellipse cx="32" cy="53" rx="24" ry="5" fill="#252525" opacity=".42"/>
+          <path d="M8 47 L13 31 L25 25 L34 32 L31 49 L19 55 Z" fill="#686868" stroke="#171717" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M26 49 L29 27 L42 18 L54 27 L56 44 L45 54 Z" fill="#777777" stroke="#171717" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M17 31 L25 27 L30 33 L24 39 L13 39 Z" fill="#adadad"/>
+          <path d="M35 28 L42 21 L50 27 L46 34 L38 36 Z" fill="#c9c9c9"/>
+          <path d="M36 42 L45 35 L53 39 L48 49 L39 51 Z" fill="#999999"/>
+          <path d="M15 47 L22 40 L28 44 L25 51 Z" fill="#d5d5d5"/>
+        </svg>
+        """;
+
+    private const string IngotIconSvg = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <ellipse cx="32" cy="52" rx="25" ry="5" fill="#252525" opacity=".4"/>
+          <path d="M8 41 L15 29 L43 29 L51 41 L44 49 L16 49 Z" fill="#6f6f6f" stroke="#171717" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M15 29 L21 34 L45 34 L43 29 Z" fill="#cfcfcf"/>
+          <path d="M17 31 L22 20 L48 20 L56 31 L50 39 L23 39 Z" fill="#858585" stroke="#171717" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M22 20 L27 25 L50 25 L48 20 Z" fill="#e0e0e0"/>
+          <path d="M26 27 L45 27" fill="none" stroke="#b5b5b5" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        """;
+
+    private const string CoalIconSvg = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <ellipse cx="32" cy="53" rx="24" ry="5" fill="#050608" opacity=".6"/>
+          <path d="M8 46 L13 31 L24 24 L34 31 L31 49 L19 55 Z" fill="#181b20" stroke="#050608" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M27 49 L30 26 L42 17 L54 27 L56 44 L45 54 Z" fill="#20242a" stroke="#050608" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M16 32 L24 27 L29 33 L23 39 L13 39 Z" fill="#343a43"/>
+          <path d="M36 27 L42 21 L49 27 L45 33 L39 35 Z" fill="#4d5560"/>
+          <path d="M36 42 L45 35 L52 39 L47 48 L40 50 Z" fill="#2d323a"/>
+          <path d="M40 23 L44 21" fill="none" stroke="#727c88" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        """;
 }

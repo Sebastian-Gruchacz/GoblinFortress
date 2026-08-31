@@ -799,6 +799,12 @@ public static class SwampMapGenerator
                 CellFluidKind.Lava);
         }
 
+        if (generatorVersion >= 14 && depth >= 3 &&
+            IsNaturalDeepCaveCell(seed, width, height, x, y, depth))
+        {
+            return new CaveCell(rock, CaveCellKind.Floor);
+        }
+
         if (generatorVersion >= 14)
         {
             return new CaveCell(
@@ -852,6 +858,92 @@ public static class SwampMapGenerator
         return lakeNoise >= lakeThreshold || Math.Abs(streamNoise - 0.5d) <= streamHalfWidth;
     }
 
+    private static bool IsNaturalDeepCaveCell(
+        WorldSeed seed,
+        int width,
+        int height,
+        int x,
+        int y,
+        int depth)
+    {
+        if (x is 0 || y is 0 || x == width - 1 || y == height - 1)
+        {
+            return false;
+        }
+
+        var centerX = DeterministicRandom.NextInt(
+            seed,
+            RandomDomain.MapGeneration,
+            EntityId.None,
+            SimulationTick.Zero,
+            sampleKey: checked(31_000UL + ((ulong)depth * 4)),
+            minimumInclusive: 2,
+            maximumExclusive: width - 2);
+        var centerY = DeterministicRandom.NextInt(
+            seed,
+            RandomDomain.MapGeneration,
+            EntityId.None,
+            SimulationTick.Zero,
+            sampleKey: checked(31_001UL + ((ulong)depth * 4)),
+            minimumInclusive: 2,
+            maximumExclusive: height - 2);
+        var radiusX = Math.Max(3, width / 12);
+        var radiusY = Math.Max(3, height / 14);
+        if (IsInsideEllipse(x, y, centerX, centerY, radiusX, radiusY) ||
+            IsInsideEllipse(
+                x,
+                y,
+                width - 1 - centerX,
+                height - 1 - centerY,
+                radiusY,
+                radiusX))
+        {
+            return true;
+        }
+
+        var normalizedX = x / (double)(width - 1);
+        var normalizedY = y / (double)(height - 1);
+        var chamberNoise = FractalValueNoise(
+            seed,
+            normalizedX + (depth * 0.071d),
+            normalizedY - (depth * 0.053d),
+            sampleKey: checked(31_200UL + (ulong)depth));
+        var fissureNoise = FractalValueNoise(
+            seed,
+            (normalizedX * 1.8d) - (depth * 0.019d),
+            (normalizedY * 1.8d) + (depth * 0.023d),
+            sampleKey: checked(31_400UL + (ulong)depth));
+        var chamberThreshold = depth switch
+        {
+            <= 5 => 0.78d,
+            <= 9 => 0.70d,
+            <= 15 => 0.66d,
+            _ => 0.62d,
+        };
+        var fissureHalfWidth = depth switch
+        {
+            <= 5 => 0.018d,
+            <= 9 => 0.028d,
+            <= 15 => 0.038d,
+            _ => 0.045d,
+        };
+        return chamberNoise >= chamberThreshold ||
+            Math.Abs(fissureNoise - 0.5d) <= fissureHalfWidth;
+    }
+
+    private static bool IsInsideEllipse(
+        int x,
+        int y,
+        int centerX,
+        int centerY,
+        int radiusX,
+        int radiusY)
+    {
+        var offsetX = (x - centerX) / (double)radiusX;
+        var offsetY = (y - centerY) / (double)radiusY;
+        return (offsetX * offsetX) + (offsetY * offsetY) <= 1d;
+    }
+
     private static MineralDepositKind SelectDeepDeposit(
         WorldSeed seed,
         double x,
@@ -884,10 +976,14 @@ public static class SwampMapGenerator
 
         var coalNoise = FractalValueNoise(seed, x, y, sampleKey: 29_100UL);
         var ironNoise = FractalValueNoise(seed, x, y, sampleKey: 29_200UL);
-        var ironThreshold = Math.Max(0.54d, 0.7d - (depth * 0.012d));
-        return ironNoise >= ironThreshold && ironNoise - ironThreshold >= coalNoise - 0.62d
+        var coalThreshold = depth >= 3 ? 0.68d : 0.62d;
+        var ironThreshold = depth >= 3
+            ? Math.Max(0.56d, 0.68d - (depth * 0.015d))
+            : Math.Max(0.54d, 0.7d - (depth * 0.012d));
+        return ironNoise >= ironThreshold && ironNoise - ironThreshold >=
+            coalNoise - coalThreshold
             ? MineralDepositKind.IronOre
-            : coalNoise >= 0.62d
+            : coalNoise >= coalThreshold
                 ? MineralDepositKind.Coal
                 : MineralDepositKind.None;
     }

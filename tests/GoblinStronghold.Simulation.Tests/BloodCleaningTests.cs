@@ -93,7 +93,7 @@ public sealed class BloodCleaningTests
     }
 
     [Fact]
-    public void FastidiousGoblinPublishesIdleHousekeepingForTribalFloor()
+    public void IdleGoblinPublishesNearbyHousekeepingWithoutPlayerDesignation()
     {
         var seed = new WorldSeed(0xC1EA4UL);
         var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
@@ -127,17 +127,7 @@ public sealed class BloodCleaningTests
             actor!["knownTraits"] = (int)GoblinTrait.None;
         }
         engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
-
-        engine.AdvanceTicks(300);
-
-        Assert.Contains(engine.CreateSnapshot().BloodStains, stain => stain.Position == floor);
-        Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations, designation =>
-            designation.Kind == WorkDesignationKind.CleanBlood);
-
-        save = JsonNode.Parse(engine.Save())!.AsObject();
-        save["actors"]![0]!["knownTraits"] = (int)GoblinTrait.Fastidious;
-        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
-        var fastidiousGoblinId = engine.CreateSnapshot().Actors[0].Id;
+        var actorIds = engine.CreateSnapshot().Actors.Select(actor => actor.Id).ToHashSet();
 
         for (var index = 0; index < 5_000 && engine.CreateSnapshot().BloodStains.Count > 0; index++)
         {
@@ -147,12 +137,14 @@ public sealed class BloodCleaningTests
         Assert.Empty(engine.CreateSnapshot().BloodStains);
         Assert.Contains(engine.DrainEvents(), simulationEvent =>
             simulationEvent.Kind == SimulationEventKind.WorkDesignationCreated &&
-            simulationEvent.Subject == fastidiousGoblinId &&
+            actorIds.Contains(simulationEvent.Subject) &&
             simulationEvent.Amount == (int)WorkDesignationKind.CleanBlood);
     }
 
-    [Fact]
-    public void DesignatedConstructedFloorIsCleanedInResumableDeterministicCycles()
+    [Theory]
+    [InlineData(BloodSurfaceKind.ConstructedFloor)]
+    [InlineData(BloodSurfaceKind.AbsorbentGround)]
+    public void DesignatedStainIsCleanedInResumableDeterministicCycles(BloodSurfaceKind surface)
     {
         var seed = new WorldSeed(0xB100DUL);
         var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
@@ -178,7 +170,11 @@ public sealed class BloodCleaningTests
                 Math.Abs(position.Y - origin.Y))
             .First();
         var save = JsonNode.Parse(engine.Save())!.AsObject();
-        save["bloodStains"] = CreateBloodStains(floor, engine.CurrentTick, volume: 32);
+        save["bloodStains"] = CreateBloodStains(
+            floor,
+            engine.CurrentTick,
+            volume: 32,
+            surface: surface);
         engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
         engine.QueueCommand(SimulationCommand.DesignateBloodCleaning(
             engine.CurrentTick.Next(),

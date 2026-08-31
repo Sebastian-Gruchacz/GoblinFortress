@@ -92,7 +92,10 @@ public sealed record GoblinRangedCombatSettings(
 public sealed record GoblinPrimitiveEquipmentSettings(
     int BoneKnifeDamageBonus,
     int FightingStickDamageBonus,
-    int StoneClubDamageBonus);
+    int StoneClubDamageBonus,
+    int WoodenAxeDamageBonus,
+    int PrimitivePickaxeDamageBonus,
+    int ReinforcedPickaxeDamageBonus);
 
 public sealed record GoblinAgingSettings(
     int HealthyYears,
@@ -615,7 +618,10 @@ public sealed class SimulationDefinitions
         PrimitiveEquipment = new(
             BoneKnifeDamageBonus: 30,
             FightingStickDamageBonus: 80,
-            StoneClubDamageBonus: 140);
+            StoneClubDamageBonus: 140,
+            WoodenAxeDamageBonus: 100,
+            PrimitivePickaxeDamageBonus: 110,
+            ReinforcedPickaxeDamageBonus: 160);
         Aging = new(
             HealthyYears: 5,
             DeclineMinimumSeasons: 1,

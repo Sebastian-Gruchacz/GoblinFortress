@@ -72,6 +72,27 @@ public sealed class CraftingRecipeCatalogTests
             axe.Output);
     }
 
+    [Fact]
+    public void PrimitivePickaxeUsesWoodStoneBindingAndProducesPhysicalPickaxe()
+    {
+        var pickaxe = CraftingRecipeCatalog.Get(CraftingRecipeKind.PrimitivePickaxe);
+
+        Assert.Equal(WorkshopKind.PrimitiveWorkshop, pickaxe.Workshop);
+        Assert.Equal(
+            [
+                new CraftingMaterialRequirement(ResourceKind.Wood, ResourceVariant.None, 2),
+                new CraftingMaterialRequirement(ResourceKind.Stone, ResourceVariant.None, 2),
+                new CraftingMaterialRequirement(ResourceKind.Reeds, ResourceVariant.None, 1),
+            ],
+            pickaxe.Materials);
+        Assert.Equal(
+            new CraftingOutputDefinition(
+                ResourceKind.Equipment,
+                ResourceVariant.EquipmentPrimitivePickaxe,
+                1),
+            pickaxe.Output);
+    }
+
     [Theory]
     [InlineData(CraftingRecipeKind.SmeltIronBar, WorkshopKind.Bloomery,
         ResourceVariant.IronOre, ResourceVariant.IronBar)]

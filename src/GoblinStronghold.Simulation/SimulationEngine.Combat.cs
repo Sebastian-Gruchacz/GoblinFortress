@@ -91,13 +91,23 @@ public sealed partial class SimulationEngine
         {
             var isActiveRaider = _raidPhase == GoblinRaidPhase.Marching &&
                 _raidPartyIds.Contains(goblin.Id);
-            var humanTargets = _humanVillage.GetLivingVillagerSnapshots()
-                .Where(villager => isActiveRaider
-                    ? IsRaidCombatTarget(villager)
-                    : villager.Role == HumanCohortRole.Guards &&
-                      villager.Task == HumanCohortTask.Guard)
-                .OrderBy(villager => Distance(goblin.Position, villager.Position))
-                .ThenBy(villager => villager.Role == HumanCohortRole.Guards ? 0 : 1)
+            var isAreaAttack = goblin.TacticalOrderKind ==
+                ActorTacticalOrderKind.AttackArea;
+            var humanTargets = (isActiveRaider
+                    ? GetOrderedRaidCombatTargets()
+                    : _humanVillage.GetLivingVillagerSnapshots()
+                        .Where(villager => villager.Role == HumanCohortRole.Guards &&
+                            villager.Task == HumanCohortTask.Guard &&
+                            (!isAreaAttack || Distance(
+                                villager.Position,
+                                goblin.TacticalCenter) <= goblin.TacticalRadius))
+                        .OrderBy(villager => isAreaAttack
+                            ? villager.Health
+                            : Distance(goblin.Position, villager.Position))
+                        .ThenBy(villager => isAreaAttack
+                            ? Distance(villager.Position, goblin.TacticalCenter)
+                            : 0)
+                        .ThenBy(villager => villager.Id))
                 .ThenBy(villager => villager.Id)
                 .ToArray();
             if (humanTargets.Length == 0)
@@ -166,14 +176,18 @@ public sealed partial class SimulationEngine
         }
     }
 
-    private HumanVillagerSnapshot? GetRaidCombatTarget(ActorState actor) =>
-        _humanVillage.GetLivingVillagerSnapshots()
-            .Where(IsRaidCombatTarget)
-            .OrderBy(villager => Distance(actor.Position, villager.Position))
-            .ThenBy(villager => villager.Role == HumanCohortRole.Guards ? 0 : 1)
-            .ThenBy(villager => villager.Id)
+    private HumanVillagerSnapshot? GetRaidCombatTarget() =>
+        GetOrderedRaidCombatTargets()
             .Select(villager => (HumanVillagerSnapshot?)villager)
             .FirstOrDefault();
+
+    private IOrderedEnumerable<HumanVillagerSnapshot> GetOrderedRaidCombatTargets() =>
+        _humanVillage.GetLivingVillagerSnapshots()
+            .Where(IsRaidCombatTarget)
+            .OrderBy(villager => villager.Role == HumanCohortRole.Guards ? 0 : 1)
+            .ThenBy(villager => villager.Health)
+            .ThenBy(villager => Distance(villager.Position, _raidTarget))
+            .ThenBy(villager => villager.Id);
 
     private bool HasRemainingRaidCombatTargets() =>
         _humanVillage.GetLivingVillagerSnapshots().Any(IsRaidCombatTarget);
@@ -185,10 +199,15 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        return villager.Role == HumanCohortRole.Guards
-            ? _raidDirectives.HasFlag(RaidDirective.AttackGuards)
-            : _raidDirectives.HasFlag(RaidDirective.AttackNonFleeing) &&
-              villager.Task != HumanCohortTask.Flee;
+        var attacksAll = _raidDirectives.HasFlag(RaidDirective.AttackAll);
+        if (villager.Role == HumanCohortRole.Guards)
+        {
+            return attacksAll || _raidDirectives.HasFlag(RaidDirective.AttackGuards);
+        }
+
+        return attacksAll &&
+            (villager.Task != HumanCohortTask.Flee ||
+             _raidDirectives.HasFlag(RaidDirective.ContinueWhileTargetsVisible));
     }
 
     private static EntityId HumanVillagerEntityId(int villagerId) =>
@@ -196,9 +215,21 @@ public sealed partial class SimulationEngine
 
     private int GetMeleeEquipmentDamageBonus(PersonalEquipment equipment)
     {
+        if (equipment.HasFlag(PersonalEquipment.ReinforcedPickaxe))
+        {
+            return Definitions.PrimitiveEquipment.ReinforcedPickaxeDamageBonus;
+        }
         if (equipment.HasFlag(PersonalEquipment.StoneClub))
         {
             return Definitions.PrimitiveEquipment.StoneClubDamageBonus;
+        }
+        if (equipment.HasFlag(PersonalEquipment.PrimitivePickaxe))
+        {
+            return Definitions.PrimitiveEquipment.PrimitivePickaxeDamageBonus;
+        }
+        if (equipment.HasFlag(PersonalEquipment.WoodenAxe))
+        {
+            return Definitions.PrimitiveEquipment.WoodenAxeDamageBonus;
         }
         if (equipment.HasFlag(PersonalEquipment.FightingStick))
         {
@@ -221,6 +252,16 @@ public sealed partial class SimulationEngine
             !_actors.TryGetValue(id, out var actor) || actor.Health <= 0);
         var victory = !HasRemainingRaidCombatTargets();
         var defeated = _raidPartyIds.Count == 0;
+        if (_raidPhase == GoblinRaidPhase.Looting && !victory && !defeated)
+        {
+            _raidPhase = GoblinRaidPhase.Marching;
+            _humanVillage.OrderGoblinAttack();
+            foreach (var actor in GetRaidParty())
+            {
+                actor.ClearJob();
+            }
+            return;
+        }
         if (_raidPhase == GoblinRaidPhase.Marching && victory)
         {
             _humanVillage.EndGoblinAttack();

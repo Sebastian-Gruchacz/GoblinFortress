@@ -10,7 +10,7 @@
       "constructionRequirements": [
         { "quantity": 4, "allowedMaterialTypes": ["Wood", "PlantFiber"], "minimumStrength": 15, "minimumDurability": 20 }
       ],
-      "availableRecipes": ["PrimitiveSling", "PrimitiveAxe", "BoneKnife", "FightingStick", "StoneClub", "HideClothes", "ReedClothes", "PrimitiveWaterskin", "ReinforcedPickaxe", "WoodenBucket", "WoodenBarrel", "WoodenBox", "WoodenChest", "WoodenBulkBin"],
+      "availableRecipes": ["PrimitiveSling", "PrimitiveAxe", "PrimitivePickaxe", "BoneKnife", "FightingStick", "StoneClub", "HideClothes", "ReedClothes", "PrimitiveWaterskin", "ReinforcedPickaxe", "WoodenBucket", "WoodenBarrel", "WoodenBox", "WoodenChest", "WoodenBulkBin"],
       "servedMaterialTypes": ["Wood", "Stone", "PlantFiber", "Bone", "Hide"],
       "servedMaterialIds": []
     },

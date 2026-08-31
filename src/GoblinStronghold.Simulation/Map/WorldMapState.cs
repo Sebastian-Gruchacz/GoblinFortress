@@ -26,6 +26,7 @@ public enum WorldChangeKind : byte
     BoulderQuarried = 8,
     RockExcavated = 9,
     RampExcavated = 10,
+    StructureDismantled = 11,
 }
 
 public readonly record struct PlantPatchSnapshot(
@@ -325,6 +326,53 @@ public sealed class WorldMapState
             ids.Select(id => _worldObjects[id]).ToArray());
     }
 
+    public bool CanDismantleWorldObject(WorldObjectId id) =>
+        _worldObjects.TryGetValue(id, out var worldObject) &&
+        worldObject.Owner == WorldObjectOwner.GoblinTribe;
+
+    internal WorldChangeEvent DismantleWorldObject(
+        WorldObjectId id,
+        SimulationTick tick)
+    {
+        if (!CanDismantleWorldObject(id))
+        {
+            throw new InvalidOperationException("Only tribe constructions can be dismantled.");
+        }
+
+        var target = _worldObjects[id];
+        var removedIds = new HashSet<WorldObjectId> { id };
+        if (target.Kind is WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall or
+                WorldObjectKind.WoodenDoorFrame or WorldObjectKind.StoneDoorFrame)
+        {
+            foreach (var dependent in _worldObjects.Values.Where(candidate =>
+                         candidate.Owner == WorldObjectOwner.GoblinTribe &&
+                         candidate.Anchor == target.Anchor &&
+                         candidate.Kind is WorldObjectKind.WoodenDoorLeaf or
+                             WorldObjectKind.WallTorch))
+            {
+                removedIds.Add(dependent.Id);
+            }
+        }
+
+        foreach (var occupancyKey in _occupancy
+                     .Where(entry => removedIds.Contains(entry.Value.ObjectId))
+                     .Select(entry => entry.Key)
+                     .ToArray())
+        {
+            _occupancy.Remove(occupancyKey);
+        }
+        foreach (var removedId in removedIds)
+        {
+            _worldObjects.Remove(removedId);
+        }
+
+        return CreateChange(
+            tick,
+            WorldChangeKind.StructureDismantled,
+            target.Anchor,
+            removedIds.Count);
+    }
+
     public bool HasPrimitiveWorkshop(GridPosition position) =>
         HasWorkshop(position, WorkshopKind.PrimitiveWorkshop);
 
@@ -387,11 +435,11 @@ public sealed class WorldMapState
             return false;
         }
 
-        var hasWalkway = _occupancy.TryGetValue(
+        var hasConstructedSurface = _occupancy.TryGetValue(
             new SpatialOccupancyKey(position, SpatialOccupancyChannel.Surface),
             out var surfaceClaim) &&
-            surfaceClaim.PartKind == WorldObjectPartKind.Walkway;
-        if (!Baseline.GetCell(position).IsTraversable && !hasWalkway)
+            surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor;
+        if (!Baseline.GetCell(position).IsTraversable && !hasConstructedSurface)
         {
             return false;
         }
@@ -410,7 +458,7 @@ public sealed class WorldMapState
     }
 
     public bool IsTerrainReachable(GridPosition position) =>
-        HasWalkway(position)
+        HasConstructedSurface(position)
             ? IsMaterialSurfaceReachable(position)
             : Baseline.IsTerrainSurfacePosition(position)
             ? IsMaterialSurfaceReachable(position)
@@ -474,7 +522,7 @@ public sealed class WorldMapState
             return false;
         }
 
-        if (HasWalkway(position) ||
+        if (HasConstructedSurface(position) ||
             _excavatedCaveCells.Contains(position) ||
             _excavatedTerrainRamps.Contains(position))
         {
@@ -493,16 +541,17 @@ public sealed class WorldMapState
             return false;
         }
 
-        var hasWalkway = HasWalkway(position);
-        return (geometry.IsOccupiable || hasWalkway) && IsSpatiallyReachable(position);
+        var hasConstructedSurface = HasConstructedSurface(position);
+        return (geometry.IsOccupiable || hasConstructedSurface) && IsSpatiallyReachable(position);
     }
 
-    private bool HasWalkway(GridPosition position) =>
+    private bool HasConstructedSurface(GridPosition position) =>
         TryGetOccupancyClaim(
             position,
             SpatialOccupancyChannel.Surface,
             out var surfaceClaim) &&
-        surfaceClaim.PartKind == WorldObjectPartKind.Walkway;
+        surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor or
+            WorldObjectPartKind.ConstructedRamp;
 
     private bool IsSpatiallyReachable(GridPosition position)
     {
@@ -588,31 +637,18 @@ public sealed class WorldMapState
         var isMaterialSurface = Baseline.IsTerrainSurfacePosition(position);
         foreach (var adjacent in GetCardinalWorldNeighbors(position))
         {
-            if (HasWalkway(adjacent))
+            if (canTraverse(adjacent))
             {
-                if (canTraverse(adjacent))
-                {
-                    yield return adjacent;
-                }
+                yield return adjacent;
                 continue;
             }
 
             if (!isMaterialSurface)
             {
-                if (canTraverse(adjacent))
-                {
-                    yield return adjacent;
-                }
                 continue;
             }
 
             var surfaceNeighbor = Baseline.GetTerrainSurfacePosition(adjacent);
-            if (adjacent != surfaceNeighbor && IsExcavatedHillReachable(adjacent) &&
-                canTraverse(adjacent))
-            {
-                yield return adjacent;
-                continue;
-            }
             if (canTraverse(surfaceNeighbor) &&
                 CanTraverseMaterialSurfaceEdge(position, surfaceNeighbor))
             {
@@ -624,6 +660,24 @@ public sealed class WorldMapState
             canTraverse(passageDestination))
         {
             yield return passageDestination;
+        }
+
+        if (TryGetConstructedRampUpper(position, out var rampUpper) &&
+            canTraverse(rampUpper))
+        {
+            yield return rampUpper;
+        }
+        foreach (var rampLower in _worldObjects.Values
+                     .Where(worldObject =>
+                         worldObject.Kind is WorldObjectKind.WoodenRamp or
+                             WorldObjectKind.StoneRamp &&
+                         GetConstructedRampUpper(worldObject) == position)
+                     .Select(worldObject => worldObject.Anchor))
+        {
+            if (canTraverse(rampLower))
+            {
+                yield return rampLower;
+            }
         }
     }
 
@@ -877,6 +931,170 @@ public sealed class WorldMapState
         }
 
         return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, positions.Count);
+    }
+
+    public bool CanBuildFloors(IReadOnlyList<GridPosition> positions)
+    {
+        ArgumentNullException.ThrowIfNull(positions);
+        return positions.Count > 0 &&
+            positions.Distinct().Count() == positions.Count &&
+            positions.All(position =>
+                Baseline.TryGetInitialGeometry(position, out var geometry) &&
+                !geometry.IsSolid &&
+                geometry.Support != CellSupportKind.NaturalRamp &&
+                geometry.Fluid == CellFluidKind.None &&
+                !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Surface, out _) &&
+                !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _));
+    }
+
+    public bool TryInferBuildRamp(GridPosition lower, out GridPosition upper)
+    {
+        var candidates = GetCardinalWorldNeighbors(lower)
+            .Select(neighbor => neighbor with { Z = lower.Z + 1 })
+            .Where(candidate => CanBuildRamp(lower, candidate))
+            .OrderBy(candidate => IsTerrainTraversable(GetRampApproach(lower, candidate))
+                ? 0
+                : 1)
+            .ThenBy(candidate => DirectionFrom(lower, candidate))
+            .ToArray();
+        upper = candidates.FirstOrDefault();
+        return candidates.Length > 0;
+    }
+
+    public bool CanBuildRamp(GridPosition lower, GridPosition upper)
+    {
+        if (!Baseline.TryGetInitialGeometry(lower, out var lowerGeometry) ||
+            lowerGeometry.IsSolid || lowerGeometry.Fluid != CellFluidKind.None ||
+            lowerGeometry.Support == CellSupportKind.NaturalRamp ||
+            upper.Z != lower.Z + 1 ||
+            Math.Abs(upper.X - lower.X) + Math.Abs(upper.Y - lower.Y) != 1 ||
+            !IsTerrainTraversable(upper) ||
+            TryGetOccupancyClaim(lower, SpatialOccupancyChannel.Surface, out _) ||
+            TryGetOccupancyClaim(lower, SpatialOccupancyChannel.Solid, out _) ||
+            _worldObjects.Values.Any(worldObject =>
+                worldObject.Kind is WorldObjectKind.WoodenRamp or WorldObjectKind.StoneRamp &&
+                GetConstructedRampUpper(worldObject) == upper))
+        {
+            return false;
+        }
+
+        return IsTerrainTraversable(lower) ||
+            GetCardinalWorldNeighbors(lower).Any(IsTerrainTraversable);
+    }
+
+    internal WorldChangeEvent BuildRamp(
+        GridPosition lower,
+        GridPosition upper,
+        SimulationTick tick,
+        bool stone,
+        ResourceVariant materialVariant)
+    {
+        if (!CanBuildRamp(lower, upper))
+        {
+            throw new InvalidOperationException("The ramp placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            stone ? WorldObjectKind.StoneRamp : WorldObjectKind.WoodenRamp,
+            WorldObjectOwner.GoblinTribe,
+            lower,
+            DirectionFrom(lower, upper),
+            [new(default, SpatialOccupancyChannel.Surface,
+                WorldObjectPartKind.ConstructedRamp)],
+            materialVariant);
+        _worldObjects.Add(id, worldObject);
+        _occupancy.Add(
+            new SpatialOccupancyKey(lower, SpatialOccupancyChannel.Surface),
+            new SpatialOccupancyClaim(id, WorldObjectPartKind.ConstructedRamp));
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, lower, 1);
+    }
+
+    private bool TryGetConstructedRampUpper(
+        GridPosition lower,
+        out GridPosition upper)
+    {
+        var ramp = _worldObjects.Values.FirstOrDefault(worldObject =>
+            worldObject.Anchor == lower &&
+            worldObject.Kind is WorldObjectKind.WoodenRamp or WorldObjectKind.StoneRamp);
+        if (ramp is null)
+        {
+            upper = default;
+            return false;
+        }
+
+        upper = GetConstructedRampUpper(ramp);
+        return true;
+    }
+
+    private static GridPosition GetConstructedRampUpper(WorldObjectSnapshot ramp) =>
+        ramp.Orientation switch
+        {
+            CardinalOrientation.North => ramp.Anchor with
+                { Y = ramp.Anchor.Y - 1, Z = ramp.Anchor.Z + 1 },
+            CardinalOrientation.East => ramp.Anchor with
+                { X = ramp.Anchor.X + 1, Z = ramp.Anchor.Z + 1 },
+            CardinalOrientation.South => ramp.Anchor with
+                { Y = ramp.Anchor.Y + 1, Z = ramp.Anchor.Z + 1 },
+            CardinalOrientation.West => ramp.Anchor with
+                { X = ramp.Anchor.X - 1, Z = ramp.Anchor.Z + 1 },
+            _ => throw new InvalidOperationException("The constructed ramp has no orientation."),
+        };
+
+    private static CardinalOrientation DirectionFrom(
+        GridPosition lower,
+        GridPosition upper) => (upper.X - lower.X, upper.Y - lower.Y) switch
+        {
+            (0, -1) => CardinalOrientation.North,
+            (1, 0) => CardinalOrientation.East,
+            (0, 1) => CardinalOrientation.South,
+            (-1, 0) => CardinalOrientation.West,
+            _ => throw new ArgumentException("Ramp endpoints must be cardinal neighbors."),
+        };
+
+    private static GridPosition GetRampApproach(
+        GridPosition lower,
+        GridPosition upper) => lower with
+        {
+            X = lower.X - (upper.X - lower.X),
+            Y = lower.Y - (upper.Y - lower.Y),
+        };
+
+    internal WorldChangeEvent BuildFloor(
+        GridPosition position,
+        SimulationTick tick,
+        bool stone,
+        ResourceVariant materialVariant)
+    {
+        if (!CanBuildFloors([position]))
+        {
+            throw new InvalidOperationException("The floor placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            stone ? WorldObjectKind.StoneFloor : WorldObjectKind.WoodenFloor,
+            WorldObjectOwner.GoblinTribe,
+            position,
+            CardinalOrientation.North,
+            [new(default, SpatialOccupancyChannel.Surface, WorldObjectPartKind.Floor)],
+            materialVariant);
+        _worldObjects.Add(id, worldObject);
+        _occupancy.Add(
+            new SpatialOccupancyKey(position, SpatialOccupancyChannel.Surface),
+            new SpatialOccupancyClaim(id, WorldObjectPartKind.Floor));
+        if (position.Z == 0)
+        {
+            _plantPatches.Remove(GetIndex(Baseline, position));
+        }
+
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, position, 1);
     }
 
     public bool CanBuildWoodenBarrier(GridPosition anchor) =>
@@ -2328,7 +2546,7 @@ public sealed class WorldMapState
         if (kind is WorldChangeKind.StructureBuilt or WorldChangeKind.TreeFelled or
             WorldChangeKind.StumpHarvested or WorldChangeKind.DoorToggled or
             WorldChangeKind.BoulderQuarried or WorldChangeKind.RockExcavated or
-            WorldChangeKind.RampExcavated)
+            WorldChangeKind.RampExcavated or WorldChangeKind.StructureDismantled)
         {
             TopologyVersion = checked(TopologyVersion + 1);
         }
@@ -2367,6 +2585,10 @@ public sealed class WorldMapState
                     WorldObjectKind.GoblinHut or
                     WorldObjectKind.WoodenWalkway or
                     WorldObjectKind.BasaltWalkway or
+                    WorldObjectKind.WoodenFloor or
+                    WorldObjectKind.StoneFloor or
+                    WorldObjectKind.WoodenRamp or
+                    WorldObjectKind.StoneRamp or
                     WorldObjectKind.WoodenWall or
                     WorldObjectKind.StoneWall or
                     WorldObjectKind.WoodenDoorFrame or

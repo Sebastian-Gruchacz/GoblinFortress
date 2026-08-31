@@ -380,22 +380,7 @@ public sealed partial class SimulationEngine
     }
 
     private static PersonalEquipment GetEquipmentForVariant(ResourceVariant variant) =>
-        variant switch
-        {
-            ResourceVariant.EquipmentPrimitiveSling => PersonalEquipment.PrimitiveSling,
-            ResourceVariant.EquipmentBoneKnife => PersonalEquipment.BoneKnife,
-            ResourceVariant.EquipmentFightingStick => PersonalEquipment.FightingStick,
-            ResourceVariant.EquipmentStoneClub => PersonalEquipment.StoneClub,
-            ResourceVariant.EquipmentHideClothes => PersonalEquipment.HideClothes,
-            ResourceVariant.EquipmentReedClothes => PersonalEquipment.ReedClothes,
-            ResourceVariant.EquipmentPrimitiveWaterskin =>
-                PersonalEquipment.PrimitiveWaterskin,
-            ResourceVariant.EquipmentWoodenAxe => PersonalEquipment.WoodenAxe,
-            ResourceVariant.EquipmentReinforcedPickaxe =>
-                PersonalEquipment.ReinforcedPickaxe,
-            ResourceVariant.EquipmentWoodenBucket => PersonalEquipment.WoodenBucket,
-            _ => PersonalEquipment.None,
-        };
+        EquipmentCatalog.FindDefinition(variant)?.Equipment ?? PersonalEquipment.None;
 
     private NavigationPathRequestResult RequestWorkshopAccessPath(
         ActorState actor,

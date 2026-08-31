@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
@@ -69,7 +70,11 @@ public sealed class PersonalSupplyTests
         engine.AdvanceTicks(300);
         restored.AdvanceTicks(300);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
-        Assert.Equal(engine.CreateSnapshot().Actors, restored.CreateSnapshot().Actors);
+        var expectedActor = Assert.Single(engine.CreatePresentationSnapshot().Actors);
+        var actualActor = Assert.Single(restored.CreatePresentationSnapshot().Actors);
+        Assert.Equal(
+            JsonSerializer.Serialize(expectedActor),
+            JsonSerializer.Serialize(actualActor));
     }
 
     private static SimulationEngine CreateEngine(int goblinCount, int initialFood)

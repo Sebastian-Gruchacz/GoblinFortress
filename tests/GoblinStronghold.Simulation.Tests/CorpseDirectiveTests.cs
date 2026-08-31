@@ -40,6 +40,62 @@ public sealed class CorpseDirectiveTests
     }
 
     [Fact]
+    public void WeaponTakenFromCorpseRemainsCargoInsteadOfBeingEquipped()
+    {
+        var engine = CreateEngine();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        const PersonalEquipment mainHandEquipment =
+            PersonalEquipment.BoneKnife |
+            PersonalEquipment.WoodenAxe |
+            PersonalEquipment.PrimitivePickaxe |
+            PersonalEquipment.ReinforcedPickaxe |
+            PersonalEquipment.FightingStick |
+            PersonalEquipment.StoneClub;
+        foreach (var actor in save["actors"]!.AsArray())
+        {
+            actor!["equipment"] =
+                (actor["equipment"]!.GetValue<int>() & ~(int)mainHandEquipment) |
+                (int)PersonalEquipment.FightingStick;
+        }
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var corpseId = AddGoblinCorpse(
+            ref engine,
+            engine.Map.GoblinSpawn,
+            includeLoot: true,
+            Resources.ResourceKind.Equipment,
+            Resources.ResourceVariant.EquipmentStoneClub,
+            lootQuantity: 1);
+
+        engine.QueueCommand(SimulationCommand.ConfigureCorpseDirectives(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            corpseId,
+            CorpseDirective.LootContents));
+        engine.AdvanceTicks(1);
+        for (var tick = 0; tick < 2_000; tick++)
+        {
+            if (engine.CreateSnapshot().Corpses.Single().Contents.Count == 0)
+            {
+                break;
+            }
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.Empty(Assert.Single(snapshot.Corpses).Contents);
+        Assert.All(snapshot.Actors, actor =>
+        {
+            Assert.True(actor.Equipment.HasFlag(PersonalEquipment.FightingStick));
+            Assert.False(actor.Equipment.HasFlag(PersonalEquipment.StoneClub));
+        });
+        var carriedWeapon = Assert.Single(snapshot.ItemStacks, stack =>
+            stack.Resource == Resources.ResourceKind.Equipment &&
+            stack.Variant == Resources.ResourceVariant.EquipmentStoneClub);
+        Assert.Equal(Resources.ItemLocationKind.ActorInventory, carriedWeapon.Location.Kind);
+        Assert.Contains(snapshot.Actors, actor => actor.CarriedStackId == carriedWeapon.Id);
+    }
+
+    [Fact]
     public void GoblinCorpseCanBeConsumedWithoutActiveRaid()
     {
         var engine = CreateEngine();
@@ -118,7 +174,10 @@ public sealed class CorpseDirectiveTests
     private static EntityId AddGoblinCorpse(
         ref SimulationEngine engine,
         GridPosition position,
-        bool includeLoot = false)
+        bool includeLoot = false,
+        Resources.ResourceKind lootResource = Resources.ResourceKind.Stone,
+        Resources.ResourceVariant lootVariant = Resources.ResourceVariant.None,
+        int lootQuantity = 2)
     {
         var save = JsonNode.Parse(engine.Save())!.AsObject();
         var corpseId = save["nextEntityId"]!.GetValue<ulong>();
@@ -137,10 +196,10 @@ public sealed class CorpseDirectiveTests
             ["contents"] = includeLoot
                 ? new JsonArray(new JsonObject
                 {
-                    ["resource"] = (int)Resources.ResourceKind.Stone,
+                    ["resource"] = (int)lootResource,
                     ["foodKind"] = (int)Resources.FoodKind.None,
-                    ["variant"] = (int)Resources.ResourceVariant.None,
-                    ["quantity"] = 2,
+                    ["variant"] = (int)lootVariant,
+                    ["quantity"] = lootQuantity,
                     ["unitWeight"] = 1,
                 })
                 : new JsonArray(),

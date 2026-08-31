@@ -110,6 +110,17 @@ public sealed class ResourceSpatialIndex
         Version = checked(Version + 1);
     }
 
+    public bool RemoveStorageNode(EntityId zoneId)
+    {
+        if (!_storageNodes.Remove(zoneId))
+        {
+            return false;
+        }
+
+        Version = checked(Version + 1);
+        return true;
+    }
+
     public IReadOnlyList<EntityId> FindNearestStackIds(
         ResourceKind resource,
         GridPosition origin,

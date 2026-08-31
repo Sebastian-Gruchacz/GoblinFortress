@@ -307,6 +307,8 @@ public readonly record struct ActorSnapshot(
     public EntityId CarriedCorpseId { get; init; }
 
     public ActorTacticalOrderSnapshot TacticalOrder { get; init; }
+
+    public long DispatcherSuspendedUntilTick { get; init; }
 }
 
 public enum HumanCohortRole : byte

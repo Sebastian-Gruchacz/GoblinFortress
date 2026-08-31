@@ -9,6 +9,33 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class WorldMapStateTests
 {
     [Fact]
+    public void AdjacentWalkableFloorsOnSameLevelConnectBothWays()
+    {
+        var seed = new WorldSeed(1);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            SwampMapGenerator.Generate(seed, 64, 64),
+            initialGoblinCount: 1,
+            initialFoodStock: 8);
+        var surface = new GridPosition(26, 30, -1);
+        var cave = new GridPosition(26, 29, -1);
+
+        Assert.True(engine.Map.IsTerrainSurfacePosition(surface));
+        Assert.True(engine.World.IsTerrainTraversable(surface));
+        Assert.True(engine.World.IsSolidCaveRock(cave));
+        Assert.True(engine.World.TryExcavateRock(
+            cave,
+            engine.CurrentTick,
+            out _,
+            out _,
+            out _));
+        Assert.True(engine.World.IsTerrainTraversable(cave));
+        Assert.True(engine.World.CanTraverseTerrainEdge(surface, cave));
+        Assert.True(engine.World.CanTraverseTerrainEdge(cave, surface));
+    }
+
+    [Fact]
     public void ExcavatedTerrainRampStopsConnectingItsLevelsAndSurvivesSaveLoad()
     {
         SimulationEngine? engine = null;

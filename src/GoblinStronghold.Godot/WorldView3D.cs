@@ -321,7 +321,7 @@ public partial class WorldView3D : Node3D
     {
         var position = new GridPosition(x, y);
         var cell = _engine.Map.GetCell(position);
-        var heights = GetGroundCornerHeights(cell);
+        var heights = GetGroundCornerHeights(x, y, cell);
         var x0 = x * CellSize;
         var x1 = x0 + CellSize;
         var z0 = y * CellSize;
@@ -386,7 +386,10 @@ public partial class WorldView3D : Node3D
         float lowerB;
         if (_engine.Map.IsWithin(neighborPosition))
         {
-            var neighborHeights = GetGroundCornerHeights(_engine.Map.GetCell(neighborPosition));
+            var neighborHeights = GetGroundCornerHeights(
+                neighborPosition.X,
+                neighborPosition.Y,
+                _engine.Map.GetCell(neighborPosition));
             (lowerA, lowerB) = direction switch
             {
                 TerrainRampDirection.North => (neighborHeights[3], neighborHeights[2]),
@@ -412,12 +415,13 @@ public partial class WorldView3D : Node3D
         AddQuad(surface, upperA, upperB, bottomB, bottomA, sideColor);
     }
 
-    private float[] GetGroundCornerHeights(MapCell cell)
+    private float[] GetGroundCornerHeights(int x, int y, MapCell cell)
     {
         var level = cell.Terrain == TerrainKind.DeepWater ? cell.FloorLevel : cell.SurfaceLevel;
         var baseHeight = level * LevelHeight;
         var heights = new[] { baseHeight, baseHeight, baseHeight, baseHeight };
-        if (cell.Terrain == TerrainKind.DeepWater)
+        if (cell.Terrain == TerrainKind.DeepWater ||
+            !_engine.World.IsTerrainRampIntact(new GridPosition(x, y, cell.SurfaceLevel)))
         {
             return heights;
         }
@@ -494,6 +498,9 @@ public partial class WorldView3D : Node3D
                 AddBox(surface, center + Vector3.Up * 0.06f,
                     new Vector3(CellSize * 0.9f, 0.12f, CellSize * 0.9f), color);
                 break;
+            case WorldObjectPartKind.ConstructedRamp:
+                AddConstructedRamp(surface, center, worldObject.Orientation, color);
+                break;
             case WorldObjectPartKind.Wall:
                 AddBox(surface, center + Vector3.Up * (LevelHeight * 0.46f),
                     new Vector3(CellSize * 0.84f, LevelHeight * 0.92f, CellSize * 0.84f), color);
@@ -542,6 +549,37 @@ public partial class WorldView3D : Node3D
                 AddBox(surface, center + Vector3.Up * (LevelHeight * 0.32f),
                     new Vector3(CellSize * 0.78f, LevelHeight * 0.64f, CellSize * 0.78f), color);
                 break;
+        }
+    }
+
+    private static void AddConstructedRamp(
+        SurfaceTool surface,
+        Vector3 center,
+        CardinalOrientation orientation,
+        Color color)
+    {
+        var uphill = orientation switch
+        {
+            CardinalOrientation.North => Vector3.Forward,
+            CardinalOrientation.East => Vector3.Right,
+            CardinalOrientation.South => Vector3.Back,
+            CardinalOrientation.West => Vector3.Left,
+            _ => Vector3.Forward,
+        };
+        var runsAlongX = orientation is CardinalOrientation.East or CardinalOrientation.West;
+        const int stepCount = 4;
+        for (var index = 0; index < stepCount; index++)
+        {
+            var top = LevelHeight * (index + 1) / stepCount;
+            var offset = ((index + 0.5f) / stepCount - 0.5f) * CellSize;
+            AddBox(
+                surface,
+                center + (uphill * offset) + (Vector3.Up * (top * 0.5f)),
+                new Vector3(
+                    runsAlongX ? CellSize / stepCount : CellSize * 0.9f,
+                    top,
+                    runsAlongX ? CellSize * 0.9f : CellSize / stepCount),
+                color);
         }
     }
 
@@ -618,7 +656,7 @@ public partial class WorldView3D : Node3D
             return (cell.SurfaceLevel * LevelHeight) + 0.06f;
         }
 
-        var corners = GetGroundCornerHeights(cell);
+        var corners = GetGroundCornerHeights(x, y, cell);
         return (float)corners.Average();
     }
 

@@ -31,6 +31,9 @@ public sealed class MaterialCatalogTests
             ResourceVariant.CopperBar,
             ResourceVariant.SilverBar,
             ResourceVariant.GoldBar,
+            ResourceVariant.SpiderVenom,
+            ResourceVariant.SpiderSilk,
+            ResourceVariant.SpiderChitin,
         ];
 
         Assert.All(expected, variant =>
@@ -57,7 +60,11 @@ public sealed class MaterialCatalogTests
             Assert.InRange(material.Durability, 0, 100);
             Assert.InRange(material.Flexibility, 0, 100);
             Assert.InRange(material.AcquisitionDifficulty, 0, 100);
-            Assert.NotEmpty(material.Uses);
+            if (material.Uses.Count == 0)
+            {
+                Assert.Contains(material.MaterialType,
+                    new[] { MaterialType.Venom, MaterialType.Silk, MaterialType.Chitin });
+            }
             if (material.Occurrence is { } occurrence)
             {
                 Assert.True(occurrence.MinimumDepthBelowSurface >= 0);
@@ -109,5 +116,24 @@ public sealed class MaterialCatalogTests
         Assert.Contains(toolHeads, material => material.Id == "diamond");
         Assert.DoesNotContain(toolHeads, material => material.Id == "coal");
         Assert.Equal("reeds", MaterialCatalog.Get(ResourceKind.Reeds).Id);
+    }
+
+    [Fact]
+    public void SpiderByproductsAreFutureMaterialsWithoutCurrentUses()
+    {
+        ResourceVariant[] variants =
+        [
+            ResourceVariant.SpiderVenom,
+            ResourceVariant.SpiderSilk,
+            ResourceVariant.SpiderChitin,
+        ];
+
+        Assert.All(variants, variant =>
+        {
+            var material = MaterialCatalog.Get(variant);
+            Assert.Equal(ResourceKind.Materials, material.ResourceKind);
+            Assert.Equal(MaterialAcquisitionStrategy.Butchering, material.Acquisition.Strategy);
+            Assert.Empty(material.Uses);
+        });
     }
 }

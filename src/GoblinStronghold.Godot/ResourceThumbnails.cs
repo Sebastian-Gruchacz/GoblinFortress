@@ -68,6 +68,18 @@ internal static class ResourceThumbnails
                 };
         }
 
+        var spiderMaterialIcon = variant switch
+        {
+            ResourceVariant.SpiderVenom => ItemIcon.PrimitiveWaterskin,
+            ResourceVariant.SpiderSilk => ItemIcon.Reeds,
+            ResourceVariant.SpiderChitin => ItemIcon.Bone,
+            _ => (ItemIcon?)null,
+        };
+        if (spiderMaterialIcon is { } icon)
+        {
+            return ItemIcons.CreateTexture(itemAtlas, icon);
+        }
+
         if (variant != ResourceVariant.None &&
             resource is (ResourceKind.Stone or ResourceKind.Ore or ResourceKind.Materials) &&
             MaterialCatalog.TryGet(variant, out _))
@@ -94,6 +106,10 @@ internal static class ResourceThumbnails
         };
         return ItemIcons.CreateTexture(itemAtlas, equipmentIcon);
     }
+
+    public static bool UsesSpiderMaterialIcon(ResourceVariant variant) => variant is
+        ResourceVariant.SpiderVenom or ResourceVariant.SpiderSilk or
+        ResourceVariant.SpiderChitin;
 
     private static Rect2 GetWoodRegion(Texture2D treePartAtlas)
     {

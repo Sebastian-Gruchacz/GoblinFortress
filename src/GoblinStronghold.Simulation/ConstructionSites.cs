@@ -167,6 +167,8 @@ internal sealed class ConstructionSiteState(
             ConstructionKind.WoodenWall or
             ConstructionKind.StoneWall =>
             SimulationCommand.GetLinearCells(Anchor, End),
+        ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor =>
+            SimulationCommand.GetAreaCells(Anchor, End),
         ConstructionKind.GoblinFieldCamp =>
         [
             Anchor,
@@ -217,7 +219,8 @@ internal static class ConstructionBlueprintCatalog
         GridPosition anchor,
         GridPosition end,
         EntityId orderId = default,
-        int sequenceIndex = 0)
+        int sequenceIndex = 0,
+        ResourceVariant requiredVariantOverride = ResourceVariant.None)
     {
         var segmentCount = kind is ConstructionKind.WoodenWalkway or
             ConstructionKind.BasaltWalkway or ConstructionKind.WoodenWall or
@@ -227,6 +230,7 @@ internal static class ConstructionBlueprintCatalog
         var requiredResource = kind switch
         {
             ConstructionKind.BasaltWalkway or ConstructionKind.StoneWall or
+                ConstructionKind.StoneFloor or ConstructionKind.StoneRamp or
                 ConstructionKind.StoneDoorFrame or ConstructionKind.Bloomery or
                 ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace =>
                 ResourceKind.Stone,
@@ -235,7 +239,9 @@ internal static class ConstructionBlueprintCatalog
                 ResourceKind.Equipment,
             _ => ResourceKind.Wood,
         };
-        var requiredVariant = kind switch
+        var requiredVariant = requiredVariantOverride != ResourceVariant.None
+            ? requiredVariantOverride
+            : kind switch
         {
             ConstructionKind.WaterBarrel => ResourceVariant.EquipmentWoodenBarrel,
             ConstructionKind.WoodenBox => ResourceVariant.EquipmentWoodenBox,
@@ -258,6 +264,10 @@ internal static class ConstructionBlueprintCatalog
             ConstructionKind.GoblinHut => 8,
             ConstructionKind.WoodenWall => checked(segmentCount * 2),
             ConstructionKind.StoneWall => checked(segmentCount * 2),
+            ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor =>
+                SimulationCommand.GetAreaCells(anchor, end).Count,
+            ConstructionKind.WoodenRamp => 2,
+            ConstructionKind.StoneRamp => 3,
             ConstructionKind.WoodenDoorFrame => 1,
             ConstructionKind.StoneDoorFrame => 1,
             ConstructionKind.WoodenDoor => 1,
@@ -282,6 +292,12 @@ internal static class ConstructionBlueprintCatalog
             ConstructionKind.GoblinHut => 180,
             ConstructionKind.WoodenWall => checked(segmentCount * 45),
             ConstructionKind.StoneWall => checked(segmentCount * 60),
+            ConstructionKind.WoodenFloor => checked(
+                SimulationCommand.GetAreaCells(anchor, end).Count * 20),
+            ConstructionKind.StoneFloor => checked(
+                SimulationCommand.GetAreaCells(anchor, end).Count * 30),
+            ConstructionKind.WoodenRamp => 45,
+            ConstructionKind.StoneRamp => 65,
             ConstructionKind.WoodenDoorFrame => 30,
             ConstructionKind.StoneDoorFrame => 45,
             ConstructionKind.WoodenDoor => 35,
@@ -299,7 +315,8 @@ internal static class ConstructionBlueprintCatalog
                 MinimumBuildingLevel: kind == ConstructionKind.CrucibleFurnace ? 2 : 1,
                 RequiredEquipment: PersonalEquipment.PrimitivePickaxe)
             : kind is ConstructionKind.BasaltWalkway or
-            ConstructionKind.StoneWall or ConstructionKind.StoneDoorFrame
+            ConstructionKind.StoneWall or ConstructionKind.StoneFloor or
+            ConstructionKind.StoneDoorFrame or ConstructionKind.StoneRamp
             ? new ConstructionCapabilityRequirements(
                 RequiredSkills: GoblinSkill.Building,
                 MinimumBuildingLevel: kind == ConstructionKind.BasaltWalkway ? 2 : 0,

@@ -420,7 +420,7 @@ public sealed class HumanCombatTests
     }
 
     [Fact]
-    public void AttackNonFleeingRaidDoctrineCanStrikeCivilianInsideTargetArea()
+    public void AttackAllRaidDoctrineCanChaseAndStrikeFleeingCivilianInsideTargetArea()
     {
         var engine = CreateEncounterEngine(orderRaid: true);
         var snapshot = engine.CreateSnapshot();
@@ -431,7 +431,7 @@ public sealed class HumanCombatTests
                     .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
                         .Select(x => new GridPosition(x, y)))
                     .Where(engine.World.IsTerrainTraversable)
-                    .Where(position => Distance(position, target.Position) == 5)
+                    .Where(position => Distance(position, target.Position) == 4)
                     .Where(position => living
                         .OrderBy(candidate => Distance(position, candidate.Position))
                         .ThenBy(candidate => candidate.Role == HumanCohortRole.Guards ? 0 : 1)
@@ -451,7 +451,8 @@ public sealed class HumanCombatTests
         save["raidTargetY"] = firingPair.Target.Position.Y;
         save["raidTargetZ"] = firingPair.Target.Position.Z;
         save["raidTargetRadius"] = SimulationEngine.MinimumRaidTargetRadius;
-        save["raidDirectives"] = (int)RaidDirective.AttackNonFleeing;
+        save["raidDirectives"] = (int)(RaidDirective.AttackAll |
+            RaidDirective.ContinueWhileTargetsVisible);
         save["humanVillage"]!["goblinAttackOrdered"] = true;
         save["humanVillage"]!["hostility"] = 100;
         save["humanVillage"]!["lastIntruderSeenTick"] = combatTick.Value - 1;
@@ -459,6 +460,7 @@ public sealed class HumanCombatTests
             .Select(item => item!.AsObject())
             .Single(item => item["id"]!.GetValue<int>() == firingPair.Target.Id);
         targetModel["health"] = 1;
+        targetModel["task"] = (int)HumanCohortTask.Flee;
         var raiderId = save["raidPartyIds"]!.AsArray()[0]!.GetValue<ulong>();
         var actor = save["actors"]!.AsArray()
             .Select(item => item!.AsObject())
@@ -485,6 +487,212 @@ public sealed class HumanCombatTests
         static int Distance(GridPosition left, GridPosition right) =>
             Math.Abs(left.X - right.X) + Math.Abs(left.Y - right.Y) +
             Math.Abs(left.Z - right.Z);
+    }
+
+    [Fact]
+    public void AttackAllRaidStopsWhenFleeingVillagersLeaveTargetArea()
+    {
+        var engine = CreateEncounterEngine(orderRaid: true);
+        var snapshot = engine.CreateSnapshot();
+        var living = snapshot.HumanVillage.Villagers.Where(item => item.Health > 0).ToArray();
+        var safeCenter = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.IsTerrainTraversable)
+            .Where(position => living.All(villager =>
+                Distance(position, villager.Position) >
+                SimulationEngine.MinimumRaidTargetRadius + 2))
+            .OrderBy(position => living.Min(villager =>
+                Distance(position, villager.Position)))
+            .First();
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["raidPhase"] = (int)GoblinRaidPhase.Marching;
+        save["raidTargetX"] = safeCenter.X;
+        save["raidTargetY"] = safeCenter.Y;
+        save["raidTargetZ"] = safeCenter.Z;
+        save["raidTargetRadius"] = SimulationEngine.MinimumRaidTargetRadius;
+        save["raidDirectives"] = (int)(RaidDirective.AttackAll |
+            RaidDirective.ContinueWhileTargetsVisible);
+        save["humanVillage"]!["goblinAttackOrdered"] = true;
+        foreach (var villager in save["humanVillage"]!["villagers"]!.AsArray()
+                     .Select(item => item!.AsObject())
+                     .Where(item => item["health"]!.GetValue<int>() > 0))
+        {
+            villager["task"] = (int)HumanCohortTask.Flee;
+        }
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(1);
+
+        snapshot = engine.CreateSnapshot();
+        Assert.Equal(GoblinRaidPhase.Returning, snapshot.RaidPhase);
+        Assert.False(snapshot.HumanVillage.GoblinAttackOrdered);
+
+        static int Distance(GridPosition left, GridPosition right) =>
+            Math.Abs(left.X - right.X) + Math.Abs(left.Y - right.Y) +
+            Math.Abs(left.Z - right.Z);
+    }
+
+    [Fact]
+    public void ActiveRaidPartyFocusesItsAttacksOnTheSameWoundedGuard()
+    {
+        var engine = CreateEncounterEngine(orderRaid: true);
+        var snapshot = engine.CreateSnapshot();
+        var combatTick = Enumerable.Range(1,
+                engine.Definitions.Clock.Climate.Seasons.Max(item => item.TicksPerDay) * 2)
+            .Select(offset => new SimulationTick(snapshot.Tick.Value + offset))
+            .First(tick => tick.Value % engine.Definitions.CombatIntervalTicks == 0 &&
+                tick.Value % engine.Definitions.HumanCohortMovementIntervalTicks != 0 &&
+                SimulationCalendar.At(tick, engine.Definitions.Clock).IsNight);
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["currentTick"] = combatTick.Value - 1;
+        save["raidPhase"] = (int)GoblinRaidPhase.Marching;
+        save["raidTargetRadius"] = SimulationEngine.MaximumRaidTargetRadius;
+        save["raidDirectives"] = (int)RaidDirective.AttackAll;
+        save["humanVillage"]!["goblinAttackOrdered"] = true;
+        save["humanVillage"]!["hostility"] = 100;
+        save["humanVillage"]!["lastIntruderSeenTick"] = combatTick.Value - 1;
+        var guards = save["humanVillage"]!["villagers"]!.AsArray()
+            .Select(item => item!.AsObject())
+            .Where(item => item["role"]!.GetValue<int>() == (int)HumanCohortRole.Guards)
+            .OrderBy(item => item["id"]!.GetValue<int>())
+            .ToArray();
+        var expectedTarget = guards[0];
+        expectedTarget["health"] = 3_000;
+        foreach (var guard in guards)
+        {
+            guard["task"] = (int)HumanCohortTask.Guard;
+        }
+        save["humanVillage"]!["guardHitPoints"] = guards.Sum(item =>
+            item["health"]!.GetValue<int>());
+        var targetPosition = new GridPosition(
+            expectedTarget["x"]!.GetValue<int>(),
+            expectedTarget["y"]!.GetValue<int>(),
+            expectedTarget["z"]!.GetValue<int>());
+        var partyIds = save["raidPartyIds"]!.AsArray()
+            .Select(item => item!.GetValue<ulong>())
+            .ToHashSet();
+        foreach (var actor in save["actors"]!.AsArray()
+                     .Select(item => item!.AsObject())
+                     .Where(item => partyIds.Contains(item["id"]!.GetValue<ulong>())))
+        {
+            actor["x"] = targetPosition.X;
+            actor["y"] = targetPosition.Y;
+            actor["z"] = targetPosition.Z;
+            actor["jobKind"] = (int)ActorJobKind.None;
+            actor["jobPhase"] = (int)ActorJobPhase.None;
+        }
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(1);
+
+        var hits = engine.DrainEvents()
+            .Where(item => item.Kind == SimulationEventKind.GoblinHitHumanGuard)
+            .ToArray();
+        Assert.Equal(partyIds.Count, hits.Length);
+        Assert.All(hits, hit => Assert.Equal(
+            0x8000000000000000UL | (uint)expectedTarget["id"]!.GetValue<int>(),
+            hit.Target.Value));
+    }
+
+    [Fact]
+    public void CiviliansFleeAwayFromRaidersAtNight()
+    {
+        var engine = CreateEncounterEngine(orderRaid: true);
+        var snapshot = engine.CreateSnapshot();
+        var occupied = snapshot.HumanVillage.Villagers
+            .Where(item => item.Health > 0)
+            .Select(item => item.Position)
+            .ToHashSet();
+        var fleeSetup = snapshot.HumanVillage.Villagers
+            .Where(item => item.Health > 0 && item.Role != HumanCohortRole.Guards)
+            .SelectMany(civilian => engine.World.GetCardinalWorldNeighbors(civilian.Position)
+                .Where(attackerPosition => engine.World.IsTerrainTraversable(attackerPosition))
+                .SelectMany(attackerPosition =>
+                    engine.World.GetCardinalWorldNeighbors(civilian.Position)
+                        .Where(escapePosition =>
+                            engine.World.IsTerrainTraversable(escapePosition) &&
+                            !occupied.Contains(escapePosition) &&
+                            Distance(escapePosition, attackerPosition) >
+                            Distance(civilian.Position, attackerPosition))
+                        .Select(escapePosition => new
+                        {
+                            Civilian = civilian,
+                            AttackerPosition = attackerPosition,
+                        })))
+            .OrderBy(item => item.Civilian.Id)
+            .First();
+        var civilian = fleeSetup.Civilian;
+        var movementTick = Enumerable.Range(1,
+                engine.Definitions.Clock.Climate.Seasons.Max(item => item.TicksPerDay) * 2)
+            .Select(offset => new SimulationTick(snapshot.Tick.Value + offset))
+            .First(tick =>
+                tick.Value % engine.Definitions.HumanCohortMovementIntervalTicks == 0 &&
+                SimulationCalendar.At(tick, engine.Definitions.Clock).IsNight);
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["currentTick"] = movementTick.Value - 1;
+        save["raidPhase"] = (int)GoblinRaidPhase.Marching;
+        save["raidTargetX"] = civilian.Position.X;
+        save["raidTargetY"] = civilian.Position.Y;
+        save["raidTargetZ"] = civilian.Position.Z;
+        save["raidTargetRadius"] = SimulationEngine.MaximumRaidTargetRadius;
+        save["raidDirectives"] = (int)(RaidDirective.AttackAll |
+            RaidDirective.ContinueWhileTargetsVisible);
+        save["humanVillage"]!["goblinAttackOrdered"] = true;
+        save["humanVillage"]!["hostility"] = 100;
+        save["humanVillage"]!["lastIntruderSeenTick"] = movementTick.Value - 1;
+        var partyIds = save["raidPartyIds"]!.AsArray()
+            .Select(item => item!.GetValue<ulong>())
+            .ToHashSet();
+        foreach (var actor in save["actors"]!.AsArray()
+                     .Select(item => item!.AsObject())
+                     .Where(item => partyIds.Contains(item["id"]!.GetValue<ulong>())))
+        {
+            actor["x"] = fleeSetup.AttackerPosition.X;
+            actor["y"] = fleeSetup.AttackerPosition.Y;
+            actor["z"] = fleeSetup.AttackerPosition.Z;
+            actor["jobKind"] = (int)ActorJobKind.None;
+            actor["jobPhase"] = (int)ActorJobPhase.None;
+        }
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(1);
+
+        var fleeing = engine.CreateSnapshot().HumanVillage.Villagers.Single(item =>
+            item.Id == civilian.Id);
+        Assert.Equal(HumanCohortTask.Flee, fleeing.Task);
+        Assert.True(
+            Distance(fleeing.Position, fleeSetup.AttackerPosition) >
+            Distance(civilian.Position, fleeSetup.AttackerPosition),
+            $"Civilian {civilian.Id} remained at {civilian.Position} during a night raid.");
+
+        static int Distance(GridPosition left, GridPosition right) =>
+            Math.Abs(left.X - right.X) + Math.Abs(left.Y - right.Y) +
+            Math.Abs(left.Z - right.Z);
+    }
+
+    [Fact]
+    public void LootingRaidResumesCombatWhenAttackAllTargetsRemain()
+    {
+        var engine = CreateEncounterEngine(orderRaid: true);
+        var save = JsonNode.Parse(engine.Save())?.AsObject()
+            ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
+        save["raidPhase"] = (int)GoblinRaidPhase.Looting;
+        save["raidTargetRadius"] = SimulationEngine.MaximumRaidTargetRadius;
+        save["raidDirectives"] = (int)RaidDirective.AttackAll;
+        save["humanVillage"]!["goblinAttackOrdered"] = false;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(1);
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.Equal(GoblinRaidPhase.Marching, snapshot.RaidPhase);
+        Assert.True(snapshot.HumanVillage.GoblinAttackOrdered);
+        Assert.All(snapshot.Actors.Where(actor => snapshot.RaidPartyIds.Contains(actor.Id)),
+            actor => Assert.Equal(ActorJobKind.None, actor.Job.Kind));
     }
 
     [Fact]

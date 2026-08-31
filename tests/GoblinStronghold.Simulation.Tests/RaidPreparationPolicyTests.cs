@@ -26,7 +26,7 @@ public sealed class RaidPreparationPolicyTests
     public void ExtendedDemolitionRaidUsesFullSuppliesAndRecommendsPickaxe()
     {
         var definitions = SimulationDefinitions.Foundation;
-        var directives = RaidDirective.AttackNonFleeing |
+        var directives = RaidDirective.AttackAll |
             RaidDirective.LootSupplies |
             RaidDirective.DemolishBuildings |
             RaidDirective.ContinueWhileTargetsVisible;

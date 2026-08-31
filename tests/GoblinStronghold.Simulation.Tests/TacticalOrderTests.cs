@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Map;
 using Xunit;
 
@@ -55,6 +56,56 @@ public sealed class TacticalOrderTests
     }
 
     [Fact]
+    public void TacticalHuntPartyFocusesTheSameDangerousAnimal()
+    {
+        var engine = CreateEngine(initialGoblinCount: 2);
+        var snapshot = engine.CreateSnapshot();
+        var actors = snapshot.Actors.ToArray();
+        var cluster = snapshot.Animals
+            .Select(center => new
+            {
+                Center = center.Position,
+                Animals = snapshot.Animals.Where(animal =>
+                    Distance(animal.Position, center.Position) <=
+                    SimulationEngine.MaximumRaidTargetRadius).ToArray(),
+            })
+            .Where(candidate => candidate.Animals.Length >= 2)
+            .Where(candidate => candidate.Animals.All(animal => actors.All(actor =>
+                engine.Navigation.FindPath(actor.Position, animal.Position) is not null)))
+            .First();
+        var expected = cluster.Animals
+            .OrderByDescending(animal =>
+                AnimalCombatPolicy.GetAttackDamage(animal.Kind, animal.Position))
+            .ThenByDescending(animal => animal.Health)
+            .ThenBy(animal => Distance(animal.Position, cluster.Center))
+            .ThenBy(animal => animal.Id)
+            .First();
+        ulong sequence = 1;
+        foreach (var actor in actors)
+        {
+            engine.QueueCommand(SimulationCommand.OrderHuntArea(
+                new SimulationTick(1),
+                sequence++,
+                actor.Id,
+                cluster.Center,
+                SimulationEngine.MaximumRaidTargetRadius));
+        }
+
+        engine.AdvanceTicks(1);
+
+        var hunters = engine.CreateSnapshot().Actors;
+        Assert.All(hunters, actor => Assert.Equal(ActorJobKind.HuntAnimal, actor.Job.Kind));
+        var targetIds = JsonNode.Parse(engine.Save())!["actors"]!.AsArray()
+            .Select(item => item!["tacticalTargetEntityId"]!.GetValue<ulong>())
+            .ToArray();
+        Assert.All(targetIds, targetId => Assert.Equal(expected.Id, targetId));
+
+        static int Distance(GridPosition left, GridPosition right) =>
+            Math.Abs(left.X - right.X) + Math.Abs(left.Y - right.Y) +
+            Math.Abs(left.Z - right.Z);
+    }
+
+    [Fact]
     public void EmptyAttackAreaClearsOrderAndReturnsGoblinToSettlementWork()
     {
         var engine = CreateEngine();
@@ -69,10 +120,11 @@ public sealed class TacticalOrderTests
         Assert.NotEqual(ActorJobKind.HuntAnimal, returned.Job.Kind);
     }
 
-    private static SimulationEngine CreateEngine() => SimulationEngine.Create(
+    private static SimulationEngine CreateEngine(int initialGoblinCount = 1) =>
+        SimulationEngine.Create(
         new WorldSeed(0x544143544943414CUL),
         SimulationDefinitions.Foundation,
-        initialGoblinCount: 1,
+        initialGoblinCount: initialGoblinCount,
         initialFoodStock: 20,
         initialWoodStock: 10);
 

@@ -50,6 +50,20 @@ public enum SimulationCommandKind
     ResizeStorageArea = 42,
     DissolveStorageArea = 43,
     ConfigureStorageFilterResource = 44,
+    CancelConstruction = 45,
+    DismantleConstruction = 46,
+    OrderActorFlee = 47,
+    OrderActorSleep = 48,
+    SuspendActorDispatcher = 49,
+    EquipItem = 50,
+    PrioritizeItemHauling = 51,
+    OrderItemPickup = 52,
+}
+
+public enum DismantleTargetKind : byte
+{
+    WorldObject = 1,
+    StorageZone = 2,
 }
 
 public enum ConstructionKind : byte
@@ -77,6 +91,10 @@ public enum ConstructionKind : byte
     WoodenBox = 21,
     WoodenChest = 22,
     WoodenBulkBin = 23,
+    WoodenFloor = 24,
+    StoneFloor = 25,
+    WoodenRamp = 26,
+    StoneRamp = 27,
 }
 
 public enum CraftingRecipeKind : byte
@@ -99,6 +117,7 @@ public enum CraftingRecipeKind : byte
     WoodenChest = 16,
     WoodenBulkBin = 17,
     PrimitiveAxe = 18,
+    PrimitivePickaxe = 19,
 }
 
 public readonly record struct SimulationCommand(
@@ -112,7 +131,8 @@ public readonly record struct SimulationCommand(
     ConstructionKind Construction,
     ResourceKind Resource,
     int Amount,
-    string Text = "")
+    string Text = "",
+    ResourceVariant MaterialVariant = ResourceVariant.None)
 {
     public static IReadOnlyList<GridPosition> GetLinearCells(
         GridPosition start,
@@ -142,6 +162,25 @@ public readonly record struct SimulationCommand(
         GridPosition start,
         GridPosition end) =>
         GetLinearCells(start, end);
+
+    public static IReadOnlyList<GridPosition> GetAreaCells(
+        GridPosition first,
+        GridPosition second)
+    {
+        if (first.Z != second.Z)
+        {
+            throw new ArgumentException("An area construction must remain on one height level.");
+        }
+
+        var minimumX = Math.Min(first.X, second.X);
+        var maximumX = Math.Max(first.X, second.X);
+        var minimumY = Math.Min(first.Y, second.Y);
+        var maximumY = Math.Max(first.Y, second.Y);
+        return Enumerable.Range(minimumY, checked(maximumY - minimumY + 1))
+            .SelectMany(y => Enumerable.Range(minimumX, checked(maximumX - minimumX + 1))
+                .Select(x => new GridPosition(x, y, first.Z)))
+            .ToArray();
+    }
 
     public static SimulationCommand Forage(
         SimulationTick executeAt,
@@ -230,6 +269,104 @@ public readonly record struct SimulationCommand(
             ResourceKind.Any,
             Amount: 0);
 
+    public static SimulationCommand OrderActorFlee(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.OrderActorFlee,
+            actor,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand OrderActorSleep(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.OrderActorSleep,
+            actor,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand SuspendActorDispatcher(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.SuspendActorDispatcher,
+            actor,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand EquipItem(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor,
+        EntityId itemStack) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.EquipItem,
+            actor,
+            itemStack,
+            default,
+            default,
+            default,
+            ResourceKind.Equipment,
+            Amount: 1);
+
+    public static SimulationCommand PrioritizeItemHauling(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId itemStack) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.PrioritizeItemHauling,
+            EntityId.None,
+            itemStack,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: (int)StoragePriority.Urgent);
+
+    public static SimulationCommand OrderItemPickup(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId actor,
+        EntityId itemStack) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.OrderItemPickup,
+            actor,
+            itemStack,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
     public static SimulationCommand BuildFoodStorage(
         SimulationTick executeAt,
         ulong sequence,
@@ -250,7 +387,8 @@ public readonly record struct SimulationCommand(
         SimulationTick executeAt,
         ulong sequence,
         GridPosition start,
-        GridPosition end) =>
+        GridPosition end,
+        ResourceVariant materialVariant = ResourceVariant.None) =>
         new(
             executeAt,
             sequence,
@@ -261,7 +399,8 @@ public readonly record struct SimulationCommand(
             end,
             ConstructionKind.WoodenWalkway,
             ResourceKind.Wood,
-            Amount: 1);
+            Amount: 1,
+            MaterialVariant: materialVariant);
 
     public static SimulationCommand BuildBasaltWalkway(
         SimulationTick executeAt,
@@ -440,7 +579,8 @@ public readonly record struct SimulationCommand(
         SimulationTick executeAt,
         ulong sequence,
         GridPosition start,
-        GridPosition end) =>
+        GridPosition end,
+        ResourceVariant materialVariant = ResourceVariant.None) =>
         new(
             executeAt,
             sequence,
@@ -451,7 +591,8 @@ public readonly record struct SimulationCommand(
             end,
             ConstructionKind.WoodenWall,
             ResourceKind.Wood,
-            Amount: 2);
+            Amount: 2,
+            MaterialVariant: materialVariant);
 
     public static SimulationCommand BuildWoodenDoorFrame(
         SimulationTick executeAt,
@@ -479,7 +620,8 @@ public readonly record struct SimulationCommand(
         SimulationTick executeAt,
         ulong sequence,
         GridPosition start,
-        GridPosition end) =>
+        GridPosition end,
+        ResourceVariant materialVariant = ResourceVariant.None) =>
         new(
             executeAt,
             sequence,
@@ -490,7 +632,84 @@ public readonly record struct SimulationCommand(
             end,
             ConstructionKind.StoneWall,
             ResourceKind.Stone,
-            Amount: 2);
+            Amount: 2,
+            MaterialVariant: materialVariant);
+
+    public static SimulationCommand BuildWoodenFloor(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition first,
+        GridPosition second,
+        ResourceVariant materialVariant) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            first,
+            second,
+            ConstructionKind.WoodenFloor,
+            ResourceKind.Wood,
+            Amount: 1,
+            MaterialVariant: materialVariant);
+
+    public static SimulationCommand BuildStoneFloor(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition first,
+        GridPosition second,
+        ResourceVariant materialVariant) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            first,
+            second,
+            ConstructionKind.StoneFloor,
+            ResourceKind.Stone,
+            Amount: 1,
+            MaterialVariant: materialVariant);
+
+    public static SimulationCommand BuildWoodenRamp(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition lower,
+        GridPosition upper,
+        ResourceVariant materialVariant) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            lower,
+            upper,
+            ConstructionKind.WoodenRamp,
+            ResourceKind.Wood,
+            Amount: 2,
+            MaterialVariant: materialVariant);
+
+    public static SimulationCommand BuildStoneRamp(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition lower,
+        GridPosition upper,
+        ResourceVariant materialVariant) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            lower,
+            upper,
+            ConstructionKind.StoneRamp,
+            ResourceKind.Stone,
+            Amount: 3,
+            MaterialVariant: materialVariant);
 
     public static SimulationCommand BuildStoneDoorFrame(
         SimulationTick executeAt,
@@ -1391,6 +1610,56 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: radius);
+
+    public static SimulationCommand CancelConstruction(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId constructionSiteId) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.CancelConstruction,
+            EntityId.None,
+            constructionSiteId,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: 0);
+
+    public static SimulationCommand DismantleWorldObject(
+        SimulationTick executeAt,
+        ulong sequence,
+        WorldObjectId worldObjectId,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DismantleConstruction,
+            EntityId.None,
+            new EntityId(worldObjectId.Value),
+            position,
+            position,
+            default,
+            ResourceKind.Any,
+            Amount: (int)DismantleTargetKind.WorldObject);
+
+    public static SimulationCommand DismantleStorageZone(
+        SimulationTick executeAt,
+        ulong sequence,
+        EntityId storageZoneId,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DismantleConstruction,
+            EntityId.None,
+            storageZoneId,
+            position,
+            position,
+            default,
+            ResourceKind.Any,
+            Amount: (int)DismantleTargetKind.StorageZone);
 }
 
 internal readonly record struct CommandKey(SimulationTick Tick, ulong Sequence) : IComparable<CommandKey>

@@ -168,6 +168,15 @@ public sealed partial class SimulationEngine
         {
             DropAnimalMaterial(animal.Position, ResourceKind.Bone, harvest.Bone);
         }
+        if (animal.Kind == AnimalKind.CaveSpider)
+        {
+            DropAnimalMaterial(
+                animal.Position, ResourceKind.Materials, 1, ResourceVariant.SpiderVenom);
+            DropAnimalMaterial(
+                animal.Position, ResourceKind.Materials, 2, ResourceVariant.SpiderSilk);
+            DropAnimalMaterial(
+                animal.Position, ResourceKind.Materials, 3, ResourceVariant.SpiderChitin);
+        }
         if (hasDesignation)
         {
             _workDesignations.Remove(designation.Id);
@@ -220,12 +229,17 @@ public sealed partial class SimulationEngine
     private void DropAnimalMaterial(
         GridPosition position,
         ResourceKind resource,
-        int quantity)
+        int quantity,
+        ResourceVariant variant = ResourceVariant.None)
     {
-        var existing = FindMergeableGroundStack(resource, position);
+        var existing = FindMergeableGroundStack(resource, position, variant: variant);
         if (existing is null)
         {
-            AllocateItemStack(resource, quantity, ItemLocation.OnGround(position));
+            AllocateItemStack(
+                resource,
+                quantity,
+                ItemLocation.OnGround(position),
+                variant: variant);
         }
         else
         {

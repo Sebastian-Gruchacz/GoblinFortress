@@ -1142,6 +1142,66 @@ public sealed class SimulationEngineTests
     }
 
     [Fact]
+    public void ConstructionClearanceReservesEachBlockingStackForOneGoblin()
+    {
+        var definitions = SimulationDefinitions.Foundation;
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x53494E474C45UL),
+            definitions,
+            initialGoblinCount: 4,
+            initialFoodStock: 20,
+            initialWoodStock: 8);
+        var snapshot = engine.CreateSnapshot();
+        var occupiedByStack = snapshot.ItemStacks
+            .Where(stack => stack.Location.Kind == ItemLocationKind.Ground)
+            .Select(stack => stack.Location.Position)
+            .ToHashSet();
+        var storagePositions = snapshot.StorageZones.Select(zone => zone.Position).ToHashSet();
+        var workshop = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.CanBuildPrimitiveWorkshop)
+            .Where(position => !occupiedByStack.Contains(position) &&
+                !storagePositions.Contains(position) &&
+                engine.Navigation.HasSurfacePath(engine.Map.GoblinSpawn, position))
+            .OrderBy(position => Math.Abs(position.X - engine.Map.GoblinSpawn.X) +
+                Math.Abs(position.Y - engine.Map.GoblinSpawn.Y))
+            .First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var blockingStack = save["itemStacks"]!.AsArray()
+            .First(item => item!["resource"]!.GetValue<int>() == (int)ResourceKind.Food)!
+            .AsObject();
+        var blockingStackId = new EntityId(blockingStack["id"]!.GetValue<ulong>());
+        blockingStack["quantity"] = definitions.ActorCarryCapacity * 3;
+        blockingStack["locationKind"] = (int)ItemLocationKind.Ground;
+        blockingStack["x"] = workshop.X;
+        blockingStack["y"] = workshop.Y;
+        blockingStack["z"] = workshop.Z;
+        blockingStack["ownerId"] = EntityId.None.Value;
+        engine = SimulationEngine.Load(save.ToJsonString(), definitions);
+        engine.QueueCommand(SimulationCommand.BuildPrimitiveWorkshop(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            workshop));
+
+        var observedClearance = false;
+        for (var tick = 0; tick < 1_000 && !engine.World.HasPrimitiveWorkshop(workshop); tick++)
+        {
+            engine.AdvanceTicks(1);
+            var collectors = engine.CreateSnapshot().Actors
+                .Where(actor =>
+                    actor.Job.Kind == ActorJobKind.ClearConstructionSite &&
+                    actor.Job.Stage == ActorJobStage.Collecting &&
+                    actor.Job.SourceStackId == blockingStackId)
+                .ToArray();
+            observedClearance |= collectors.Length == 1;
+            Assert.InRange(collectors.Length, 0, 1);
+        }
+
+        Assert.True(observedClearance);
+    }
+
+    [Fact]
     public void UndergroundStorageBlueprintKeepsItsLevelAndUsesThreeDimensionalAccess()
     {
         var seed = new WorldSeed(0x554E444552UL);

@@ -509,11 +509,15 @@ public sealed partial class SimulationEngine
                     actor.TacticalRadius,
                     actor.PatrolPoints.ToArray(),
                     actor.PatrolPointIndex),
+                DispatcherSuspendedUntilTick = actor.DispatcherSuspendedUntilTick,
             })
             .ToArray();
         var itemStacks = _itemStacks.Values
             .Select(stack => new ItemStackSnapshot(
-                stack.Id, stack.Resource, stack.FoodKind, stack.Variant, stack.Quantity, stack.Location))
+                stack.Id, stack.Resource, stack.FoodKind, stack.Variant, stack.Quantity, stack.Location)
+            {
+                HaulPriority = stack.HaulPriority,
+            })
             .ToArray();
         var goblinBuds = _goblinBuds.Values
             .Select(bud => new GoblinBudSnapshot(
@@ -1579,6 +1583,7 @@ public sealed partial class SimulationEngine
             Append(canonical, actor.TacticalRadius);
             Append(canonical, actor.PatrolPointIndex);
             Append(canonical, actor.TacticalTargetEntityId.Value);
+            Append(canonical, actor.DispatcherSuspendedUntilTick);
             Append(canonical, actor.PatrolPoints.Count);
             foreach (var point in actor.PatrolPoints)
             {
@@ -1597,6 +1602,7 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)stack.Location.Kind);
             Append(canonical, stack.Location.Position);
             Append(canonical, stack.Location.OwnerId.Value);
+            Append(canonical, (int)stack.HaulPriority);
         }
 
         Append(canonical, _resourcePriorities.Count);
@@ -1722,6 +1728,7 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)command.Resource);
             Append(canonical, command.Amount);
             Append(canonical, command.Text);
+            Append(canonical, (int)command.MaterialVariant);
         }
 
         var bytes = Encoding.UTF8.GetBytes(canonical.ToString());
@@ -1831,6 +1838,7 @@ public sealed partial class SimulationEngine
                 actorModel.BirthTick is < 0 ||
                 actorModel.MaturesAtTick is < 0 ||
                 actorModel.AgeOffsetTicks is < 0 ||
+                actorModel.DispatcherSuspendedUntilTick < 0 ||
                 (actorModel.BirthTick.HasValue != actorModel.MaturesAtTick.HasValue) ||
                 (actorModel.BirthTick.HasValue &&
                  (actorModel.MaturesAtTick <= actorModel.BirthTick ||
@@ -1902,6 +1910,7 @@ public sealed partial class SimulationEngine
                 TacticalRadius = actorModel.TacticalRadius,
                 PatrolPointIndex = actorModel.PatrolPointIndex,
                 TacticalTargetEntityId = new EntityId(actorModel.TacticalTargetEntityId),
+                DispatcherSuspendedUntilTick = actorModel.DispatcherSuspendedUntilTick,
             };
             actor.PersonalFoodKinds.AddRange(personalFoodKinds);
 
@@ -2208,6 +2217,13 @@ public sealed partial class SimulationEngine
                 !Enum.IsDefined(model.Kind) ||
                 requiredResource is not (ResourceKind.Wood or ResourceKind.Stone or
                     ResourceKind.Equipment) ||
+                requiredVariant != ResourceVariant.None &&
+                    requiredResource is ResourceKind.Wood or ResourceKind.Stone &&
+                    (!MaterialCatalog.TryGet(requiredVariant, out var requiredMaterial) ||
+                     requiredMaterial.ResourceKind != requiredResource ||
+                     !requiredMaterial.Uses.Contains(MaterialUse.Construction)) ||
+                model.Kind == ConstructionKind.BasaltWalkway &&
+                    requiredVariant != ResourceVariant.Basalt ||
                 !IsPotentialConstructionPosition(anchor) ||
                 !IsPotentialConstructionPosition(end) ||
                 model.RequiredWood <= 0 ||
@@ -2234,7 +2250,9 @@ public sealed partial class SimulationEngine
                 throw new InvalidDataException("The save contains an invalid construction site.");
             }
 
-            var expected = ConstructionBlueprintCatalog.CreateSite(id, model.Kind, anchor, end);
+            var expected = ConstructionBlueprintCatalog.CreateSite(
+                id, model.Kind, anchor, end,
+                requiredVariantOverride: requiredVariant);
             var priority = model.Priority ?? StoragePriority.Normal;
             var orderId = model.OrderId == 0 ? id : new EntityId(model.OrderId);
             if (expected.RequiredResource != requiredResource ||
@@ -2276,7 +2294,7 @@ public sealed partial class SimulationEngine
                         site,
                         site.RequiredResource,
                         site.DeliveredVariant) ||
-                !CanPlaceConstruction(site.Kind, site.Anchor, site.GetFootprint()) ||
+                !CanPlaceConstruction(site.Kind, site.Anchor, site.End, site.GetFootprint()) ||
                 _constructionSites.Values.Any(other =>
                     other.GetFootprint().Intersect(site.GetFootprint()).Any()) ||
                 !_constructionSites.TryAdd(id, site))
@@ -2375,6 +2393,7 @@ public sealed partial class SimulationEngine
                 !IsStorableResource(stackModel.Resource) ||
                 !IsValidFoodKind(stackModel.Resource, stackModel.FoodKind) ||
                 !IsValidResourceVariant(stackModel.Resource, stackModel.Variant, allowLegacyDefault: true) ||
+                (stackModel.HaulPriority is { } haulPriority && !Enum.IsDefined(haulPriority)) ||
                 stackModel.Quantity <= 0)
             {
                 throw new InvalidDataException("The save contains an invalid item stack.");
@@ -2386,7 +2405,10 @@ public sealed partial class SimulationEngine
                 stackModel.FoodKind,
                 NormalizeResourceVariant(stackModel.Resource, stackModel.Variant),
                 stackModel.Quantity,
-                location);
+                location)
+            {
+                HaulPriority = stackModel.HaulPriority ?? StoragePriority.Normal,
+            };
             if (!_itemStacks.TryAdd(id, stack))
             {
                 throw new InvalidDataException($"The save contains duplicate item stack {id}.");
@@ -2576,7 +2598,8 @@ public sealed partial class SimulationEngine
                 model.Construction,
                 model.Resource,
                 model.Amount,
-                model.Text ?? string.Empty);
+                model.Text ?? string.Empty,
+                model.MaterialVariant);
 
             ValidateCommandForQueue(command);
             var key = new CommandKey(command.ExecuteAt, command.Sequence);
@@ -2808,6 +2831,14 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.PickUp => TryExecutePickUp(command),
         SimulationCommandKind.StoreCarried => TryExecuteStoreCarried(command),
         SimulationCommandKind.Move => TryExecuteMove(command),
+        SimulationCommandKind.OrderActorFlee => TryExecuteActorFlee(command),
+        SimulationCommandKind.OrderActorSleep => TryExecuteActorSleep(command),
+        SimulationCommandKind.SuspendActorDispatcher =>
+            TryExecuteSuspendActorDispatcher(command),
+        SimulationCommandKind.EquipItem => TryExecuteEquipItem(command),
+        SimulationCommandKind.PrioritizeItemHauling =>
+            TryExecutePrioritizeItemHauling(command),
+        SimulationCommandKind.OrderItemPickup => TryExecuteOrderItemPickup(command),
         SimulationCommandKind.Build => TryExecuteBuild(command),
         SimulationCommandKind.DesignateWork => TryExecuteDesignateWork(command),
         SimulationCommandKind.ClearWorkDesignations => TryExecuteClearWork(command),
@@ -2845,6 +2876,8 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.DissolveStorageArea => TryExecuteDissolveStorageArea(command),
         SimulationCommandKind.ConfigureStorageFilterResource =>
             TryExecuteConfigureStorageFilterResource(command),
+        SimulationCommandKind.CancelConstruction => TryExecuteCancelConstruction(command),
+        SimulationCommandKind.DismantleConstruction => TryExecuteDismantleConstruction(command),
         SimulationCommandKind.AttackHumanVillage => TryExecuteAttackHumanVillage(command),
         SimulationCommandKind.ConfigureRaidMember => TryExecuteConfigureRaidMember(command),
         SimulationCommandKind.SuspendRaidPreparation => TryExecuteSuspendRaidPreparation(),
@@ -2864,6 +2897,206 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.QueueCraftingOrder => TryExecuteQueueCraftingOrder(command),
         _ => false,
     };
+
+    private bool TryExecuteCancelConstruction(SimulationCommand command)
+    {
+        if (!_constructionSites.TryGetValue(command.Target, out var selectedSite))
+        {
+            return false;
+        }
+
+        var sites = _constructionSites.Values
+            .Where(site => site.OrderId == selectedSite.OrderId)
+            .OrderBy(site => site.SequenceIndex)
+            .ToArray();
+        var siteIds = sites.Select(site => site.Id).ToHashSet();
+        foreach (var actor in _actors.Values.Where(actor =>
+                     actor.JobKind is ActorJobKind.SupplyConstruction or
+                         ActorJobKind.BuildConstruction or ActorJobKind.ClearConstructionSite &&
+                     siteIds.Contains(actor.DestinationZoneId)))
+        {
+            if (actor.CarriedStackId != EntityId.None)
+            {
+                DropCarriedStack(actor);
+            }
+            actor.ClearJob();
+        }
+
+        foreach (var site in sites)
+        {
+            if (site.DeliveredQuantity > 0)
+            {
+                AddGroundStack(
+                    site.RequiredResource,
+                    site.DeliveredQuantity,
+                    site.Anchor,
+                    site.DeliveredVariant != ResourceVariant.None
+                        ? site.DeliveredVariant
+                        : site.RequiredVariant);
+            }
+            _constructionSites.Remove(site.Id);
+        }
+
+        Publish(
+            SimulationEventKind.ConstructionCancelled,
+            EntityId.None,
+            selectedSite.OrderId,
+            sites.Length,
+            selectedSite.Kind);
+        return true;
+    }
+
+    private bool TryExecuteDismantleConstruction(SimulationCommand command)
+    {
+        var targetKind = (DismantleTargetKind)command.Amount;
+        if (targetKind == DismantleTargetKind.StorageZone)
+        {
+            return TryDismantleStorageZone(command.Target, publishEvent: true);
+        }
+
+        if (targetKind != DismantleTargetKind.WorldObject)
+        {
+            return false;
+        }
+
+        var id = new WorldObjectId(command.Target.Value);
+        var worldObject = World.CreateWorldObjectSnapshot()
+            .FirstOrDefault(candidate => candidate.Id == id);
+        if (worldObject is null || !World.CanDismantleWorldObject(id) ||
+            (worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+             _raidRallyPoint == worldObject.Anchor &&
+             _raidPhase != GoblinRaidPhase.None))
+        {
+            return false;
+        }
+
+        CancelCraftingOrdersAt(worldObject.Anchor);
+        if (worldObject.Kind == WorldObjectKind.GoblinFieldCamp)
+        {
+            var campStorage = _storageZones.Values.FirstOrDefault(zone =>
+                zone.Position == worldObject.Anchor &&
+                zone.AcceptedResource == ResourceKind.Food);
+            if (campStorage is not null)
+            {
+                TryDismantleStorageZone(campStorage.Id, publishEvent: false);
+            }
+        }
+
+        _undeliveredWorldChanges.Add(World.DismantleWorldObject(id, CurrentTick));
+        if (worldObject.Kind == WorldObjectKind.GoblinHut)
+        {
+            _populationTarget = Math.Min(
+                _populationTarget,
+                CreateTribeNeedsSnapshot().ShelterCapacity);
+        }
+        Publish(
+            SimulationEventKind.ConstructionDismantled,
+            EntityId.None,
+            command.Target,
+            1);
+        return true;
+    }
+
+    private bool TryDismantleStorageZone(EntityId zoneId, bool publishEvent)
+    {
+        if (!_storageZones.TryGetValue(zoneId, out var zone))
+        {
+            return false;
+        }
+
+        var storedStackIds = _itemStacks.Values
+            .Where(stack => stack.Location.Kind == ItemLocationKind.StorageZone &&
+                stack.Location.OwnerId == zone.Id)
+            .Select(stack => stack.Id)
+            .ToHashSet();
+        foreach (var actor in _actors.Values.Where(actor =>
+                     actor.DestinationZoneId == zone.Id ||
+                     storedStackIds.Contains(actor.SourceStackId)))
+        {
+            if (actor.CarriedStackId != EntityId.None)
+            {
+                DropCarriedStack(actor);
+            }
+            actor.ClearJob();
+        }
+        foreach (var stackId in storedStackIds)
+        {
+            MoveItemStack(_itemStacks[stackId], ItemLocation.OnGround(zone.Position));
+        }
+
+        foreach (var dependent in _storageZones.Values.Where(candidate =>
+                     candidate.SourceStorageZoneId == zone.Id))
+        {
+            dependent.SourceStorageZoneId = EntityId.None;
+            IndexStorageZone(dependent);
+        }
+        foreach (var network in _logisticsNetworks.Values)
+        {
+            network.SourceStorageZoneIds.Remove(zone.Id);
+        }
+
+        _storageZones.Remove(zone.Id);
+        _resourceSpatialIndex.RemoveStorageNode(zone.Id);
+        if (zone.StorageAreaId == zone.Id &&
+            !_storageZones.Values.Any(candidate => candidate.StorageAreaId == zone.StorageAreaId))
+        {
+            _storageAreas.Remove(zone.StorageAreaId);
+        }
+        if (publishEvent)
+        {
+            Publish(
+                SimulationEventKind.ConstructionDismantled,
+                EntityId.None,
+                zone.Id,
+                1);
+        }
+        return true;
+    }
+
+    private void CancelCraftingOrdersAt(GridPosition workshop)
+    {
+        var orders = _craftingOrders.Values
+            .Where(order => order.Workshop == workshop)
+            .ToArray();
+        var orderIds = orders.Select(order => order.Id).ToHashSet();
+        foreach (var actor in _actors.Values.Where(actor =>
+                     actor.JobKind is ActorJobKind.SupplyCrafting or ActorJobKind.Craft &&
+                     orderIds.Contains(actor.DestinationZoneId)))
+        {
+            if (actor.CarriedStackId != EntityId.None)
+            {
+                DropCarriedStack(actor);
+            }
+            actor.ClearJob();
+        }
+        foreach (var order in orders)
+        {
+            foreach (var material in order.DeliveredMaterials)
+            {
+                AddGroundStack(
+                    material.Resource,
+                    material.Quantity,
+                    workshop,
+                    material.Variant);
+            }
+            _craftingOrders.Remove(order.Id);
+        }
+    }
+
+    private void AddGroundStack(
+        ResourceKind resource,
+        int quantity,
+        GridPosition position,
+        ResourceVariant variant)
+    {
+        var existing = FindMergeableGroundStack(resource, position, variant: variant);
+        if (existing is not null)
+        {
+            existing.Quantity = checked(existing.Quantity + quantity);
+            return;
+        }
+        AllocateItemStack(resource, quantity, ItemLocation.OnGround(position), variant: variant);
+    }
 
     private bool TryExecuteQueueCraftingOrder(SimulationCommand command)
     {
@@ -3166,7 +3399,7 @@ public sealed partial class SimulationEngine
     private static bool AreValidRaidDirectives(RaidDirective directives)
     {
         const RaidDirective all = RaidDirective.AttackGuards |
-            RaidDirective.AttackNonFleeing |
+            RaidDirective.AttackAll |
             RaidDirective.LootEquipment |
             RaidDirective.LootSupplies |
             RaidDirective.LootFood |
@@ -3179,12 +3412,12 @@ public sealed partial class SimulationEngine
             RaidDirective.RecoverCorpses |
             RaidDirective.BudCorpsesInPlace;
         var engagement = directives &
-            (RaidDirective.AttackGuards | RaidDirective.AttackNonFleeing);
+            (RaidDirective.AttackGuards | RaidDirective.AttackAll);
         var corpseHandling = directives &
             (RaidDirective.RecoverCorpses | RaidDirective.BudCorpses |
                 RaidDirective.BudCorpsesInPlace);
         return (directives & ~all) == 0 &&
-            engagement is RaidDirective.AttackGuards or RaidDirective.AttackNonFleeing &&
+            engagement is RaidDirective.AttackGuards or RaidDirective.AttackAll &&
             corpseHandling is RaidDirective.None or RaidDirective.RecoverCorpses or
                 RaidDirective.BudCorpses or RaidDirective.BudCorpsesInPlace;
     }
@@ -3315,7 +3548,7 @@ public sealed partial class SimulationEngine
                     Visibility.Get(animal.Position) != CellVisibility.Unknown)
                 .Select(animal => (animal.Position, new EntityId(animal.Id))),
             WorkDesignationKind.CleanBlood => _bloodStains.Values
-                .Where(stain => stain.Surface == BloodSurfaceKind.ConstructedFloor &&
+                .Where(stain => stain.Volume > 0 &&
                     IsInside(stain.Position, minimum, maximum) &&
                     Visibility.Get(stain.Position) != CellVisibility.Unknown)
                 .Select(stain => (stain.Position, EntityId.None)),
@@ -4081,7 +4314,11 @@ public sealed partial class SimulationEngine
             command.Construction,
             command.Position,
             command.EndPosition);
-        if (!CanPlaceConstruction(command.Construction, command.Position, footprint) ||
+        if (!CanPlaceConstruction(
+                command.Construction,
+                command.Position,
+                command.EndPosition,
+                footprint) ||
             _constructionSites.Values.Any(site =>
                 site.GetFootprint().Intersect(footprint).Any()))
         {
@@ -4090,18 +4327,29 @@ public sealed partial class SimulationEngine
 
         if (command.Construction is ConstructionKind.WoodenWalkway or
             ConstructionKind.BasaltWalkway or
-            ConstructionKind.WoodenWall or ConstructionKind.StoneWall)
+            ConstructionKind.WoodenWall or ConstructionKind.StoneWall or
+            ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor)
         {
             var orderId = AllocateEntityId();
             for (var index = 0; index < footprint.Count; index++)
             {
                 var position = footprint[index];
-                AddConstructionSite(command.Construction, position, position, orderId, index);
+                AddConstructionSite(
+                    command.Construction,
+                    position,
+                    position,
+                    orderId,
+                    index,
+                    command.MaterialVariant);
             }
         }
         else
         {
-            AddConstructionSite(command.Construction, command.Position, command.EndPosition);
+            AddConstructionSite(
+                command.Construction,
+                command.Position,
+                command.EndPosition,
+                requiredVariant: command.MaterialVariant);
         }
 
         _lastConstructionCommandExecutionTick = CurrentTick.Value;
@@ -4113,11 +4361,12 @@ public sealed partial class SimulationEngine
         GridPosition anchor,
         GridPosition end,
         EntityId orderId = default,
-        int sequenceIndex = 0)
+        int sequenceIndex = 0,
+        ResourceVariant requiredVariant = ResourceVariant.None)
     {
         var id = AllocateEntityId();
         var site = ConstructionBlueprintCatalog.CreateSite(
-            id, kind, anchor, end, orderId, sequenceIndex);
+            id, kind, anchor, end, orderId, sequenceIndex, requiredVariant);
         _constructionSites.Add(id, site);
         Publish(
             SimulationEventKind.ConstructionOrdered,
@@ -4135,6 +4384,8 @@ public sealed partial class SimulationEngine
             ConstructionKind.WoodenWall or
             ConstructionKind.StoneWall =>
             SimulationCommand.GetLinearCells(anchor, end),
+        ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor =>
+            SimulationCommand.GetAreaCells(anchor, end),
         ConstructionKind.GoblinFieldCamp =>
         [
             anchor,
@@ -4152,6 +4403,7 @@ public sealed partial class SimulationEngine
     private bool CanPlaceConstruction(
         ConstructionKind kind,
         GridPosition anchor,
+        GridPosition end,
         IReadOnlyList<GridPosition> footprint)
     {
         if (footprint.Any(position => !IsPotentialConstructionPosition(position)) ||
@@ -4176,6 +4428,10 @@ public sealed partial class SimulationEngine
             ConstructionKind.GoblinHut => World.CanBuildGoblinHut(anchor),
             ConstructionKind.WoodenWall => World.CanBuildWoodenWalls(footprint),
             ConstructionKind.StoneWall => World.CanBuildStoneWalls(footprint),
+            ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor =>
+                World.CanBuildFloors(footprint),
+            ConstructionKind.WoodenRamp or ConstructionKind.StoneRamp =>
+                World.CanBuildRamp(anchor, end),
             ConstructionKind.WoodenDoorFrame => World.CanBuildWoodenDoorFrame(anchor),
             ConstructionKind.StoneDoorFrame => World.CanBuildStoneDoorFrame(anchor),
             ConstructionKind.WoodenDoor => World.CanBuildWoodenDoor(anchor),
@@ -4219,7 +4475,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        if (!CanPlaceConstruction(site.Kind, site.Anchor, site.GetFootprint()))
+        if (!CanPlaceConstruction(site.Kind, site.Anchor, site.End, site.GetFootprint()))
         {
             return false;
         }
@@ -4350,6 +4606,27 @@ public sealed partial class SimulationEngine
                 completedTarget = EntityId.None;
                 experience = Math.Max(12, stoneWallCells.Count * 16);
                 break;
+            case ConstructionKind.WoodenFloor:
+            case ConstructionKind.StoneFloor:
+                _undeliveredWorldChanges.Add(World.BuildFloor(
+                    site.Anchor,
+                    CurrentTick,
+                    stone: site.Kind == ConstructionKind.StoneFloor,
+                    site.DeliveredVariant));
+                completedTarget = EntityId.None;
+                experience = site.Kind == ConstructionKind.StoneFloor ? 8 : 5;
+                break;
+            case ConstructionKind.WoodenRamp:
+            case ConstructionKind.StoneRamp:
+                _undeliveredWorldChanges.Add(World.BuildRamp(
+                    site.Anchor,
+                    site.End,
+                    CurrentTick,
+                    stone: site.Kind == ConstructionKind.StoneRamp,
+                    site.DeliveredVariant));
+                completedTarget = EntityId.None;
+                experience = site.Kind == ConstructionKind.StoneRamp ? 14 : 10;
+                break;
             case ConstructionKind.WoodenDoorFrame:
                 _undeliveredWorldChanges.Add(World.BuildWoodenDoorFrame(
                     site.Anchor,
@@ -4445,6 +4722,206 @@ public sealed partial class SimulationEngine
         actor.JobPhase = ActorJobPhase.Traveling;
         actor.JobTarget = command.Position;
         actor.RemainingRoute.AddRange(route);
+        return true;
+    }
+
+    private bool TryExecuteActorFlee(SimulationCommand command) => TryExecuteMove(
+        command with
+        {
+            Kind = SimulationCommandKind.Move,
+            Position = Map.GoblinSpawn,
+            EndPosition = Map.GoblinSpawn,
+        });
+
+    private bool TryExecuteActorSleep(SimulationCommand command)
+    {
+        if (!_actors.TryGetValue(command.Subject, out var actor) ||
+            actor.Health <= 0 || actor.CarriedStackId != EntityId.None)
+        {
+            return false;
+        }
+
+        var shelters = World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .ToArray();
+        var destinations = shelters
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut)
+            .SelectMany(GetShelterFloorCells)
+            .Concat(shelters
+                .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+                    CanReserveFieldCampBed(actor, worldObject))
+                .SelectMany(GetShelterFloorCells))
+            .Where(World.IsTerrainTraversable)
+            .Distinct()
+            .ToHashSet();
+        var route = FindActorPathToNearest(actor, destinations);
+        if (route is null)
+        {
+            return false;
+        }
+
+        actor.ClearJob();
+        actor.ClearSuspendedJob();
+        actor.ClearTacticalOrder();
+        actor.JobKind = ActorJobKind.Rest;
+        actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+        BeginJobLeg(actor, route, GetRestWorkTicks(actor));
+
+        Publish(SimulationEventKind.ActorOrderedToRest, actor.Id, EntityId.None, 0);
+        return true;
+    }
+
+    private bool TryExecuteSuspendActorDispatcher(SimulationCommand command)
+    {
+        if (!_actors.TryGetValue(command.Subject, out var actor) || actor.Health <= 0)
+        {
+            return false;
+        }
+
+        var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
+        var ticksPerDay = Definitions.Clock.Climate.GetSeason(calendar.Season).TicksPerDay;
+        var gameHourTicks = Math.Max(1, (ticksPerDay + 23) / 24);
+        actor.DispatcherSuspendedUntilTick = checked(CurrentTick.Value + gameHourTicks);
+        if (actor.TacticalOrderKind == ActorTacticalOrderKind.None &&
+            actor.JobKind is not (ActorJobKind.None or ActorJobKind.Move or ActorJobKind.Rest or
+                ActorJobKind.Eat or ActorJobKind.Resupply or ActorJobKind.Collapsed or
+                ActorJobKind.LootRaid or ActorJobKind.RecoverRaidCorpse or
+                ActorJobKind.ConsumeRaidCorpse))
+        {
+            actor.ClearJob();
+            actor.ClearSuspendedJob();
+        }
+        Publish(
+            SimulationEventKind.ActorDispatcherSuspended,
+            actor.Id,
+            EntityId.None,
+            gameHourTicks);
+        return true;
+    }
+
+    private bool TryExecuteEquipItem(SimulationCommand command)
+    {
+        if (!_actors.TryGetValue(command.Subject, out var actor) || actor.Health <= 0 ||
+            actor.CarriedStackId != EntityId.None ||
+            !_itemStacks.TryGetValue(command.Target, out var source) ||
+            source.Resource != ResourceKind.Equipment || source.Quantity <= 0 ||
+            source.Location.Kind is not (ItemLocationKind.Ground or ItemLocationKind.StorageZone) ||
+            EquipmentCatalog.FindDefinition(source.Variant) is not { } selected ||
+            actor.Equipment.HasFlag(selected.Equipment) ||
+            FindActorPath(actor, source.Location.Position) is null)
+        {
+            return false;
+        }
+
+        var sourceLocation = source.Location;
+        var replaced = EquipmentCatalog.GetReplacedDefinitions(
+            actor.Equipment,
+            selected.Equipment);
+        actor.ClearJob();
+        actor.ClearSuspendedJob();
+        MoveActor(actor, sourceLocation.Position);
+        foreach (var previous in replaced)
+        {
+            actor.Equipment &= ~previous.Equipment;
+        }
+        actor.Equipment |= selected.Equipment;
+        source.Quantity--;
+        Publish(SimulationEventKind.ActorEquippedItem, actor.Id, source.Id, 1);
+        if (source.Quantity == 0)
+        {
+            RemoveItemStack(source.Id);
+            Publish(SimulationEventKind.ItemStackDepleted, actor.Id, source.Id, 0);
+        }
+
+        foreach (var previous in replaced)
+        {
+            var returned = _itemStacks.Values.FirstOrDefault(stack =>
+                stack.Resource == ResourceKind.Equipment &&
+                stack.Variant == previous.Variant &&
+                stack.Location == sourceLocation);
+            returned ??= AllocateItemStack(
+                ResourceKind.Equipment,
+                quantity: 0,
+                location: sourceLocation,
+                variant: previous.Variant);
+            returned.Quantity++;
+            Publish(
+                sourceLocation.Kind == ItemLocationKind.StorageZone
+                    ? SimulationEventKind.ItemStored
+                    : SimulationEventKind.ItemDropped,
+                actor.Id,
+                returned.Id,
+                1);
+        }
+        return true;
+    }
+
+    private bool TryExecutePrioritizeItemHauling(SimulationCommand command)
+    {
+        if (!_itemStacks.TryGetValue(command.Target, out var source) ||
+            source.Location.Kind is not (ItemLocationKind.Ground or ItemLocationKind.StorageZone) ||
+            !_storageZones.Values.Any(zone =>
+                (source.Location.Kind != ItemLocationKind.StorageZone ||
+                 source.Location.OwnerId != zone.Id) &&
+                ZoneAccepts(zone, source) && CanStoreStack(zone, source, 1)))
+        {
+            return false;
+        }
+
+        source.HaulPriority = StoragePriority.Urgent;
+        Publish(SimulationEventKind.ItemHaulPrioritized, EntityId.None, source.Id, source.Quantity);
+        return true;
+    }
+
+    private bool TryExecuteOrderItemPickup(SimulationCommand command)
+    {
+        if (!_actors.TryGetValue(command.Subject, out var actor) || actor.Health <= 0 ||
+            actor.CarriedStackId != EntityId.None ||
+            !_itemStacks.TryGetValue(command.Target, out var source) ||
+            !CanActorHaulStack(actor, source) ||
+            source.Location.Kind is not (ItemLocationKind.Ground or ItemLocationKind.StorageZone))
+        {
+            return false;
+        }
+
+        var routeToSource = FindActorPath(actor, source.Location.Position);
+        if (routeToSource is null)
+        {
+            return false;
+        }
+        var destination = _storageZones.Values
+            .Where(zone =>
+                (source.Location.Kind != ItemLocationKind.StorageZone ||
+                 source.Location.OwnerId != zone.Id) &&
+                ZoneAccepts(zone, source) && CanStoreStack(zone, source, 1))
+            .Select(zone => new
+            {
+                Zone = zone,
+                Capacity = GetAvailableStorageQuantity(zone, source),
+                Route = FindActorPathFrom(actor, source.Location.Position, zone.Position),
+            })
+            .Where(candidate => candidate.Capacity > 0 && candidate.Route is not null)
+            .OrderByDescending(candidate => candidate.Zone.Priority)
+            .ThenBy(candidate => candidate.Route!.Count)
+            .ThenBy(candidate => candidate.Zone.Id)
+            .FirstOrDefault();
+        if (destination is null)
+        {
+            return false;
+        }
+
+        actor.ClearJob();
+        actor.ClearSuspendedJob();
+        actor.JobKind = ActorJobKind.Haul;
+        actor.JobStage = ActorJobStage.Collecting;
+        actor.SourceStackId = source.Id;
+        actor.DestinationZoneId = destination.Zone.Id;
+        actor.ReservedQuantity = Math.Min(
+            Math.Min(source.Quantity, GetActorHaulQuantityLimit(actor, source)),
+            destination.Capacity);
+        actor.JobTarget = source.Location.Position;
+        BeginJobLeg(actor, routeToSource, Definitions.HaulHandlingTicks);
+        Publish(SimulationEventKind.MoveOrdered, actor.Id, source.Id, routeToSource.Count);
         return true;
     }
 
@@ -4631,9 +5108,15 @@ public sealed partial class SimulationEngine
             if (actor.JobKind is not (ActorJobKind.Rest or ActorJobKind.Collapsed) ||
                 actor.JobPhase != ActorJobPhase.Working)
             {
+                var fatiguePerTick = Definitions.FatiguePerTick;
+                if (IsJuvenile(actor) && actor.JobKind == ActorJobKind.Haul)
+                {
+                    fatiguePerTick = checked(
+                        fatiguePerTick * JuvenileHaulFatigueMultiplier);
+                }
                 actor.Fatigue = Math.Min(
                     Definitions.MaximumFatigue,
-                    checked(actor.Fatigue + Definitions.FatiguePerTick));
+                    checked(actor.Fatigue + fatiguePerTick));
             }
 
             if (actor.Fatigue >= Definitions.MaximumFatigue &&
@@ -4892,6 +5375,12 @@ public sealed partial class SimulationEngine
             throw new ArgumentException("This command does not accept text.", nameof(command));
         }
 
+        if (command.Kind != SimulationCommandKind.Build &&
+            command.MaterialVariant != ResourceVariant.None)
+        {
+            throw new ArgumentException("This command does not accept a material.", nameof(command));
+        }
+
         switch (command.Kind)
         {
             case SimulationCommandKind.Forage:
@@ -4937,11 +5426,51 @@ public sealed partial class SimulationEngine
                 }
 
                 break;
+            case SimulationCommandKind.OrderActorFlee:
+            case SimulationCommandKind.OrderActorSleep:
+            case SimulationCommandKind.SuspendActorDispatcher:
+                ValidateActor(command.Subject, command);
+                if (command.Target != EntityId.None || command.Resource != ResourceKind.Any ||
+                    command.Amount != 0)
+                {
+                    throw new ArgumentException("Actor context command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.EquipItem:
+                ValidateActor(command.Subject, command);
+                if (!_itemStacks.TryGetValue(command.Target, out var equipmentStack) ||
+                    equipmentStack.Resource != ResourceKind.Equipment ||
+                    command.Resource != ResourceKind.Equipment || command.Amount != 1)
+                {
+                    throw new ArgumentException("Equip-item command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.PrioritizeItemHauling:
+                if (!_itemStacks.ContainsKey(command.Target) ||
+                    command.Subject != EntityId.None || command.Resource != ResourceKind.Any ||
+                    command.Amount != (int)StoragePriority.Urgent)
+                {
+                    throw new ArgumentException("Item-hauling priority command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.OrderItemPickup:
+                ValidateActor(command.Subject, command);
+                if (!_itemStacks.ContainsKey(command.Target) ||
+                    command.Resource != ResourceKind.Any || command.Amount != 0)
+                {
+                    throw new ArgumentException("Ordered item pick-up command is invalid.", nameof(command));
+                }
+
+                break;
             case SimulationCommandKind.Build:
                 if (!Enum.IsDefined(command.Construction) ||
                     command.Resource != (command.Construction switch
                     {
                         ConstructionKind.BasaltWalkway or ConstructionKind.StoneWall or
+                            ConstructionKind.StoneFloor or ConstructionKind.StoneRamp or
                             ConstructionKind.StoneDoorFrame or ConstructionKind.Bloomery or
                             ConstructionKind.SmeltingFurnace or
                             ConstructionKind.CrucibleFurnace =>
@@ -4955,6 +5484,22 @@ public sealed partial class SimulationEngine
                     !IsPotentialConstructionPosition(command.EndPosition))
                 {
                     throw new ArgumentException("Construction command is invalid.", nameof(command));
+                }
+
+                if (command.MaterialVariant != ResourceVariant.None &&
+                    (!MaterialCatalog.TryGet(command.MaterialVariant, out var material) ||
+                     material.ResourceKind != command.Resource ||
+                     !material.Uses.Contains(MaterialUse.Construction)))
+                {
+                    throw new ArgumentException(
+                        "The selected construction material is invalid.", nameof(command));
+                }
+
+                if (command.Construction == ConstructionKind.BasaltWalkway &&
+                    command.MaterialVariant is not (ResourceVariant.None or ResourceVariant.Basalt))
+                {
+                    throw new ArgumentException(
+                        "A basalt walkway requires basalt.", nameof(command));
                 }
 
                 if ((command.Construction is ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
@@ -5022,6 +5567,27 @@ public sealed partial class SimulationEngine
                      command.Amount != 2))
                 {
                     throw new ArgumentException("Stone-wall construction is invalid.", nameof(command));
+                }
+
+                if (command.Construction is ConstructionKind.WoodenFloor or
+                        ConstructionKind.StoneFloor &&
+                    (command.Amount != 1 ||
+                     command.Position.Z != command.EndPosition.Z ||
+                     command.MaterialVariant == ResourceVariant.None ||
+                     SimulationCommand.GetAreaCells(command.Position, command.EndPosition).Count > 256))
+                {
+                    throw new ArgumentException("Floor construction is invalid.", nameof(command));
+                }
+
+                if (command.Construction is ConstructionKind.WoodenRamp or
+                        ConstructionKind.StoneRamp &&
+                    (command.Amount != (command.Construction == ConstructionKind.StoneRamp ? 3 : 2) ||
+                     command.MaterialVariant == ResourceVariant.None ||
+                     command.EndPosition.Z != command.Position.Z + 1 ||
+                     Math.Abs(command.EndPosition.X - command.Position.X) +
+                         Math.Abs(command.EndPosition.Y - command.Position.Y) != 1))
+                {
+                    throw new ArgumentException("Ramp construction is invalid.", nameof(command));
                 }
 
                 if (command.Construction == ConstructionKind.WoodenDoorFrame &&
@@ -5367,6 +5933,45 @@ public sealed partial class SimulationEngine
                 }
 
                 break;
+            case SimulationCommandKind.CancelConstruction:
+                if (command.Subject != EntityId.None || command.Target == EntityId.None ||
+                    !_constructionSites.ContainsKey(command.Target) ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount != 0)
+                {
+                    throw new ArgumentException(
+                        "Cancel-construction command is invalid.", nameof(command));
+                }
+
+                break;
+            case SimulationCommandKind.DismantleConstruction:
+                var dismantleKind = (DismantleTargetKind)command.Amount;
+                var dismantleWorldObject = dismantleKind == DismantleTargetKind.WorldObject
+                    ? World.CreateWorldObjectSnapshot().FirstOrDefault(candidate =>
+                        candidate.Id.Value == command.Target.Value)
+                    : null;
+                var validDismantleTarget = dismantleKind switch
+                {
+                    DismantleTargetKind.WorldObject =>
+                        dismantleWorldObject is not null &&
+                        dismantleWorldObject.Owner == WorldObjectOwner.GoblinTribe &&
+                        dismantleWorldObject.Anchor == command.Position,
+                    DismantleTargetKind.StorageZone =>
+                        _storageZones.TryGetValue(command.Target, out var dismantleZone) &&
+                        dismantleZone.Position == command.Position,
+                    _ => false,
+                };
+                if (command.Subject != EntityId.None || command.Target == EntityId.None ||
+                    command.Position != command.EndPosition ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    !validDismantleTarget)
+                {
+                    throw new ArgumentException(
+                        "Dismantle-construction command is invalid.", nameof(command));
+                }
+
+                break;
             case SimulationCommandKind.ConfigureResourcePriority:
                 if (command.Subject != EntityId.None || command.Target != EntityId.None ||
                     !_resourcePriorities.ContainsKey(command.Resource) ||
@@ -5587,6 +6192,10 @@ public sealed partial class SimulationEngine
     private void MoveItemStack(ItemStackState stack, ItemLocation location)
     {
         stack.Location = location;
+        if (location.Kind == ItemLocationKind.ActorInventory)
+        {
+            stack.HaulPriority = StoragePriority.Normal;
+        }
         IndexItemStack(stack);
     }
 
@@ -5750,15 +6359,26 @@ public sealed partial class SimulationEngine
 
     private void EnsureTribeHasStarterPickaxe()
     {
-        if (_actors.Count == 0 || _actors.Values.Any(actor =>
-                actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe)))
+        const int starterPickaxeTarget = 3;
+        var missing = Math.Min(starterPickaxeTarget, _actors.Count) -
+            _actors.Values.Count(actor =>
+                actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe));
+        if (missing <= 0)
         {
             return;
         }
 
-        var miner = _actors.Values.Skip(1).FirstOrDefault() ?? _actors.Values.First();
-        miner.Equipment |= PersonalEquipment.PrimitivePickaxe;
-        miner.KnownSkills |= GoblinSkill.Building;
+        foreach (var miner in _actors.Values
+                     .Where(actor =>
+                         !actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe))
+                     .OrderBy(actor =>
+                         actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) ? 1 : 0)
+                     .ThenBy(actor => actor.Id)
+                     .Take(missing))
+        {
+            miner.Equipment |= PersonalEquipment.PrimitivePickaxe;
+            miner.KnownSkills |= GoblinSkill.Building;
+        }
     }
 
     private void ScatterInitialBrushwood()
@@ -6223,7 +6843,9 @@ public sealed partial class SimulationEngine
             ResourceVariant.EquipmentWoodenBulkBin,
         ResourceKind.Materials => variant is ResourceVariant.None or ResourceVariant.Ruby or
             ResourceVariant.Emerald or ResourceVariant.Diamond or ResourceVariant.IronBar or
-            ResourceVariant.CopperBar or ResourceVariant.SilverBar or ResourceVariant.GoldBar,
+            ResourceVariant.CopperBar or ResourceVariant.SilverBar or ResourceVariant.GoldBar or
+            ResourceVariant.SpiderVenom or ResourceVariant.SpiderSilk or
+            ResourceVariant.SpiderChitin,
         ResourceKind.Water => variant == ResourceVariant.None,
         _ => variant == ResourceVariant.None,
     };
@@ -6617,6 +7239,7 @@ public sealed partial class SimulationEngine
         TacticalRadius = actor.TacticalRadius,
         PatrolPointIndex = actor.PatrolPointIndex,
         TacticalTargetEntityId = actor.TacticalTargetEntityId.Value,
+        DispatcherSuspendedUntilTick = actor.DispatcherSuspendedUntilTick,
         PatrolPoints = actor.PatrolPoints.Select(point => new GridPositionSaveModel
         {
             X = point.X,
@@ -6675,6 +7298,7 @@ public sealed partial class SimulationEngine
         Y = stack.Location.Position.Y,
         Z = stack.Location.Position.Z,
         OwnerId = stack.Location.OwnerId.Value,
+        HaulPriority = stack.HaulPriority,
     };
 
     private static StorageZoneSaveModel ToSaveModel(StorageZoneState zone) => new()
@@ -6738,6 +7362,7 @@ public sealed partial class SimulationEngine
         Resource = command.Resource,
         Amount = command.Amount,
         Text = command.Text,
+        MaterialVariant = command.MaterialVariant,
     };
 
     private static EventSaveModel ToSaveModel(SimulationEvent simulationEvent) => new()
@@ -6899,6 +7524,8 @@ public sealed partial class SimulationEngine
 
         public EntityId TacticalTargetEntityId { get; set; }
 
+        public long DispatcherSuspendedUntilTick { get; set; }
+
         public void SuspendCurrentJob()
         {
             if (JobKind is ActorJobKind.Move or ActorJobKind.Explore or ActorJobKind.Forage or
@@ -6983,6 +7610,8 @@ public sealed partial class SimulationEngine
         public int Quantity { get; set; } = quantity;
 
         public ItemLocation Location { get; set; } = location;
+
+        public StoragePriority HaulPriority { get; set; } = StoragePriority.Normal;
     }
 
     private sealed class StorageZoneState(

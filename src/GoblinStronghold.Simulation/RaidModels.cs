@@ -7,7 +7,7 @@ public enum RaidDirective : ushort
 {
     None = 0,
     AttackGuards = 1 << 0,
-    AttackNonFleeing = 1 << 1,
+    AttackAll = 1 << 1,
     LootEquipment = 1 << 2,
     LootSupplies = 1 << 3,
     LootFood = 1 << 4,
@@ -69,7 +69,7 @@ public static class RaidPreparationPolicy
             directives.HasFlag(RaidDirective.BurnBuildings) ||
             directives.HasFlag(RaidDirective.DemolishBuildings) ||
             directives.HasFlag(RaidDirective.ContinueWhileTargetsVisible);
-        var expectsBroadCombat = directives.HasFlag(RaidDirective.AttackNonFleeing) ||
+        var expectsBroadCombat = directives.HasFlag(RaidDirective.AttackAll) ||
             directives.HasFlag(RaidDirective.ContinueWhileTargetsVisible);
         var ammoCapacity = equipment.HasFlag(PersonalEquipment.PrimitiveSling)
             ? definitions.RangedCombat.SlingAmmoCapacity

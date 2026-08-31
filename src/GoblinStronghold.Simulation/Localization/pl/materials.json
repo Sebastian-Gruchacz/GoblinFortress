@@ -28,7 +28,10 @@
       "iron-bar": "sztaba żelaza",
       "copper-bar": "sztaba miedzi",
       "silver-bar": "sztaba srebra",
-      "gold-bar": "sztaba złota"
+      "gold-bar": "sztaba złota",
+      "spider-venom": "jad pająka",
+      "spider-silk": "pajęczy jedwab",
+      "spider-chitin": "pajęcza chityna"
     }
   }
 }

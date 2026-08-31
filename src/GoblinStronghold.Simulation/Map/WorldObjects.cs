@@ -35,6 +35,10 @@ public enum WorldObjectKind : byte
     Bloomery = 19,
     SmeltingFurnace = 20,
     CrucibleFurnace = 21,
+    WoodenFloor = 22,
+    StoneFloor = 23,
+    WoodenRamp = 24,
+    StoneRamp = 25,
 }
 
 public enum WorldObjectOwner : byte
@@ -83,6 +87,7 @@ public enum WorldObjectPartKind : byte
     Bloomery = 18,
     SmeltingFurnace = 19,
     CrucibleFurnace = 20,
+    ConstructedRamp = 21,
 }
 
 public readonly record struct WorldObjectPartSnapshot(

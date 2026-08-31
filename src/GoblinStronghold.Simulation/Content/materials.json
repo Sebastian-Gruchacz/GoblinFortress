@@ -248,6 +248,33 @@
       "processing": { "strategy": "Smelting", "processor": "CrucibleFurnace", "minimumProcessorLevel": 2, "inputs": [{ "materialId": "gold-ore", "quantity": 2 }, { "materialId": "coal", "quantity": 1 }], "outputQuantity": 1 },
       "uses": ["Furniture", "ToolHead", "Weapon", "Armor", "Container", "Decoration", "Sculpture"],
       "palette": { "edge": "#6B4D12", "keyColors": ["#A67818", "#D9A927", "#F5D45B"] }
+    },
+    {
+      "id": "spider-venom", "resourceKind": "Materials", "variant": "SpiderVenom",
+      "materialType": "Venom",
+      "unitWeight": 0.15, "strength": 0, "hardness": 0, "durability": 15,
+      "flexibility": 100, "value": 70, "acquisitionDifficulty": 65,
+      "acquisition": { "strategy": "Butchering", "requiredTool": "Knife", "minimumToolLevel": 1, "minimumSkillLevel": 0, "workMultiplier": 1 },
+      "uses": [],
+      "palette": { "edge": "#24301A", "keyColors": ["#405B29", "#6D9138", "#A7D957"] }
+    },
+    {
+      "id": "spider-silk", "resourceKind": "Materials", "variant": "SpiderSilk",
+      "materialType": "Silk",
+      "unitWeight": 0.08, "strength": 55, "hardness": 2, "durability": 60,
+      "flexibility": 100, "value": 65, "acquisitionDifficulty": 58,
+      "acquisition": { "strategy": "Butchering", "requiredTool": "Knife", "minimumToolLevel": 1, "minimumSkillLevel": 0, "workMultiplier": 1 },
+      "uses": [],
+      "palette": { "edge": "#6C7080", "keyColors": ["#9CA2B3", "#CDD2DE", "#F2F4FA"] }
+    },
+    {
+      "id": "spider-chitin", "resourceKind": "Materials", "variant": "SpiderChitin",
+      "materialType": "Chitin",
+      "unitWeight": 0.45, "strength": 68, "hardness": 65, "durability": 70,
+      "flexibility": 18, "value": 55, "acquisitionDifficulty": 52,
+      "acquisition": { "strategy": "Butchering", "requiredTool": "Knife", "minimumToolLevel": 1, "minimumSkillLevel": 0, "workMultiplier": 1 },
+      "uses": [],
+      "palette": { "edge": "#241B2C", "keyColors": ["#453653", "#705B7E", "#A68DB1"] }
     }
   ]
 }

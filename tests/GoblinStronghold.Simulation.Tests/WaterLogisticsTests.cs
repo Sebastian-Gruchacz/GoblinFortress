@@ -110,7 +110,7 @@ public sealed class WaterLogisticsTests
                 stack.Location.Kind == ItemLocationKind.StorageZone &&
                 stack.Location.OwnerId == barrel.Id)
             .Sum(stack => stack.Quantity);
-        Assert.InRange(delivered, 1, 4);
+        Assert.Equal(4, delivered);
         engine.QueueCommand(SimulationCommand.ConfigureStoragePull(
             engine.CurrentTick.Next(),
             engine.NextAvailableCommandSequence,
@@ -120,15 +120,21 @@ public sealed class WaterLogisticsTests
 
         var save = JsonNode.Parse(engine.Save())!.AsObject();
         save["actors"]!.AsArray()[0]!["personalWater"] = 0;
+        save["actors"]!.AsArray()[0]!["thirst"] = definitions.DrinkThreshold;
         engine = SimulationEngine.Load(save.ToJsonString(), definitions);
         for (var tick = 0; tick < 1_000 &&
-             Assert.Single(engine.CreateSnapshot().Actors).PersonalWater == 0; tick++)
+             Assert.Single(engine.CreateSnapshot().Actors).PersonalWater <
+                 definitions.PersonalWaterCapacity; tick++)
         {
             engine.AdvanceTicks(1);
         }
 
-        Assert.True(Assert.Single(engine.CreateSnapshot().Actors).PersonalWater > 0);
-        Assert.Equal(delivered - 1, engine.CreateSnapshot().ItemStacks
+        var provisioned = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(definitions.PersonalWaterCapacity, provisioned.PersonalWater);
+        Assert.True(provisioned.Thirst < definitions.DrinkThreshold);
+        Assert.Equal(
+            delivered - definitions.PersonalWaterCapacity - 1,
+            engine.CreateSnapshot().ItemStacks
             .Where(stack => stack.Resource == ResourceKind.Water)
             .Sum(stack => stack.Quantity));
         var restored = SimulationEngine.Load(engine.Save(), definitions);

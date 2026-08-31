@@ -73,6 +73,9 @@ public enum ResourceVariant : byte
     EquipmentWoodenBox = 38,
     EquipmentWoodenChest = 39,
     EquipmentWoodenBulkBin = 40,
+    SpiderVenom = 41,
+    SpiderSilk = 42,
+    SpiderChitin = 43,
 }
 
 public enum ItemLocationKind : byte
@@ -226,7 +229,10 @@ public readonly record struct ItemStackSnapshot(
     FoodKind FoodKind,
     ResourceVariant Variant,
     int Quantity,
-    ItemLocation Location);
+    ItemLocation Location)
+{
+    public StoragePriority HaulPriority { get; init; } = StoragePriority.Normal;
+}
 
 public readonly record struct StorageZoneSnapshot(
     EntityId Id,

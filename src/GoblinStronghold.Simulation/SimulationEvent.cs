@@ -65,6 +65,12 @@ public enum SimulationEventKind
     StorageAreaResized = 61,
     StorageAreaDissolved = 62,
     StorageFilterResourceConfigured = 63,
+    ConstructionCancelled = 64,
+    ConstructionDismantled = 65,
+    ActorOrderedToRest = 66,
+    ActorDispatcherSuspended = 67,
+    ActorEquippedItem = 68,
+    ItemHaulPrioritized = 69,
 }
 
 public readonly record struct SimulationEvent(

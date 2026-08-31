@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d99a4e"/>
+      <stop offset="0.52" stop-color="#a6602f"/>
+      <stop offset="1" stop-color="#6d391f"/>
+    </linearGradient>
+    <linearGradient id="iron" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9a39a"/>
+      <stop offset="1" stop-color="#4d4b49"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#24170f" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M54 57 Q128 25 202 57 L190 202 Q128 232 66 202 Z"
+          fill="url(#wood)" stroke-width="12"/>
+    <ellipse cx="128" cy="57" rx="74" ry="29" fill="#b87137" stroke-width="12"/>
+    <ellipse cx="128" cy="57" rx="55" ry="17" fill="#7d4728" stroke-width="7"/>
+    <path d="M91 47 Q128 36 165 47 Q151 64 128 65 Q105 64 91 47 Z"
+          fill="#d99a4e" stroke="none" opacity="0.72"/>
+    <path d="M75 69 L86 198 M106 80 L111 214 M150 80 L145 214 M181 69 L170 198"
+          fill="none" stroke="#e4ad66" stroke-width="7" opacity="0.62"/>
+    <path d="M59 91 Q128 117 197 91 M64 168 Q128 194 192 168"
+          fill="none" stroke="url(#iron)" stroke-width="15"/>
+    <path d="M60 91 Q128 113 196 91 M65 168 Q128 190 191 168"
+          fill="none" stroke="#c0b6a5" stroke-width="4" opacity="0.55"/>
+    <ellipse cx="128" cy="202" rx="62" ry="23" fill="none" stroke-width="10"/>
+  </g>
+</svg>

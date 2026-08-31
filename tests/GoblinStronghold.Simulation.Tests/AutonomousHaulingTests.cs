@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -112,6 +113,90 @@ public sealed class AutonomousHaulingTests
 
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void JuvenileHaulsOnlyAWeightLimitedFoodStackAndTiresTwiceAsFast()
+    {
+        var seed = new WorldSeed(0x4A5556454E494C45UL);
+        var map = SwampMapGenerator.Generate(seed, width: 32, height: 32);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 10);
+        engine = MakeOnlyActorJuvenile(engine);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            map.GoblinSpawn,
+            ResourceKind.Food,
+            capacity: 10));
+
+        engine.AdvanceTicks(1);
+
+        var juvenile = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.True(juvenile.IsJuvenile);
+        Assert.Equal(ActorJobKind.Haul, juvenile.Job.Kind);
+        Assert.Equal(6, juvenile.Job.ReservedQuantity);
+        Assert.Equal(
+            2 * SimulationDefinitions.Foundation.FatiguePerTick,
+            juvenile.Fatigue);
+    }
+
+    [Fact]
+    public void JuvenileDoesNotAcceptHeavyStoneHauling()
+    {
+        var seed = new WorldSeed(0x4A555653544F4E45UL);
+        var map = SwampMapGenerator.Generate(seed, width: 32, height: 32);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+        engine = MakeOnlyActorJuvenile(engine);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var stackId = save["nextEntityId"]!.GetValue<ulong>();
+        save["nextEntityId"] = stackId + 1;
+        save["itemStacks"]!.AsArray().Add(new JsonObject
+        {
+            ["id"] = stackId,
+            ["resource"] = (int)ResourceKind.Stone,
+            ["foodKind"] = (int)FoodKind.None,
+            ["variant"] = (int)ResourceVariant.Sandstone,
+            ["quantity"] = 4,
+            ["locationKind"] = (int)ItemLocationKind.Ground,
+            ["x"] = map.GoblinSpawn.X,
+            ["y"] = map.GoblinSpawn.Y,
+            ["z"] = map.GoblinSpawn.Z,
+            ["ownerId"] = 0,
+        });
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            map.GoblinSpawn,
+            ResourceKind.Stone,
+            capacity: 4));
+
+        engine.AdvanceTicks(1);
+
+        var juvenile = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.True(juvenile.IsJuvenile);
+        Assert.Equal(ActorJobKind.None, juvenile.Job.Kind);
+    }
+
+    private static SimulationEngine MakeOnlyActorJuvenile(SimulationEngine engine)
+    {
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var actor = save["actors"]!.AsArray().Single()!.AsObject();
+        actor["birthTick"] = engine.CurrentTick.Value;
+        actor["maturesAtTick"] = checked(engine.CurrentTick.Value + 10_000);
+        actor["ageOffsetTicks"] = 0;
+        actor["fatigue"] = 0;
+        return SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
     }
 
     private static SimulationEngine CreateEngine(

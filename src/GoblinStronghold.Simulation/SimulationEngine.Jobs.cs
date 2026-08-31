@@ -9,7 +9,11 @@ public sealed partial class SimulationEngine
     private const int MaximumHaulRouteCandidatesPerPlanningTick = 1;
     private const int MaximumPublicWorkRouteCandidatesPerPlanningTick = 1;
     private const int MaximumPersonalSupplyRouteCandidates = 8;
+    private const int IdleHousekeepingMaximumRouteLength = 8;
     private const int WoodenBucketWaterCapacity = 4;
+    private const double JuvenileMaximumHaulUnitWeight = 1.2;
+    private const double JuvenileHaulWeightCapacity = 3.0;
+    private const int JuvenileHaulFatigueMultiplier = 2;
     private const int SpecialistPublicWorkBonus =
         GoblinWorkPreferences.Maximum - GoblinWorkPreferences.Minimum + 1;
     private const int FastidiousCleaningPreferenceBonus = SpecialistPublicWorkBonus;
@@ -154,7 +158,15 @@ public sealed partial class SimulationEngine
                 }
                 else if (IsJuvenile(actor))
                 {
-                    // Young goblins eat, drink, sleep and observe for one local season.
+                    if (CurrentTick.Value >= actor.DispatcherSuspendedUntilTick &&
+                        shouldPlanBackgroundWork)
+                    {
+                        TryPlanHaulCollection(
+                            actor,
+                            reservedSourceQuantities,
+                            reservedDestinationQuantities);
+                    }
+                    // Young goblins only help with light transport during their first local season.
                 }
                 else if (TryPlanCorpseDirective(actor))
                 {
@@ -173,6 +185,10 @@ public sealed partial class SimulationEngine
                 else if (TryPlanTacticalOrder(actor))
                 {
                     // A persistent personal order resumes after food, water and rest interruptions.
+                }
+                else if (CurrentTick.Value < actor.DispatcherSuspendedUntilTick)
+                {
+                    // Personal needs and direct orders remain active while public work is paused.
                 }
                 else if (!shouldPlanBackgroundWork)
                 {
@@ -234,6 +250,14 @@ public sealed partial class SimulationEngine
                 else if (TryPlanStoneAmmoResupply(actor, reservedSourceQuantities))
                 {
                     // A few physical stones become personal thrown ammunition.
+                }
+                else if (TryPlanIdleHousekeeping(
+                             actor,
+                             reservedFellingDesignations,
+                             reservedSourceQuantities,
+                             reservedDestinationQuantities))
+                {
+                    // With no useful work left, tidy a nearby stain or loose stack.
                 }
                 else if (activeExplorers < Definitions.MaximumExplorers &&
                          TryPlanExploreJob(actor))
@@ -481,7 +505,7 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanRaidMarch(ActorState actor)
     {
-        var combatTarget = GetRaidCombatTarget(actor);
+        var combatTarget = GetRaidCombatTarget();
         if (combatTarget is { } villager)
         {
             var distance = Distance(actor.Position, villager.Position);
@@ -708,7 +732,10 @@ public sealed partial class SimulationEngine
         {
             var navigationBefore = Navigation.GetMetrics();
             var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
-            var assigned = option.TryPlan();
+            // Incremental path planners can report progress before they have assigned a job.
+            // Keep trying fallback categories unless the actor received concrete work.
+            var plannerReportedSuccess = option.TryPlan();
+            var assigned = plannerReportedSuccess && actor.JobKind != ActorJobKind.None;
             var duration = System.Diagnostics.Stopwatch.GetTimestamp() - startedAt;
             var navigationAfter = Navigation.GetMetrics();
             if (duration > System.Diagnostics.Stopwatch.Frequency / 1_000 ||
@@ -1666,7 +1693,8 @@ public sealed partial class SimulationEngine
         int? desiredQuantity = null)
     {
         var target = desiredQuantity ?? Definitions.PersonalWaterCapacity;
-        if (actor.PersonalWater >= target)
+        var missing = target - actor.PersonalWater;
+        if (missing <= 0)
         {
             return false;
         }
@@ -1687,10 +1715,21 @@ public sealed partial class SimulationEngine
         // walking back to a natural source even when the latter happens to be closer.
         var useStored = stored is not null;
         var route = useStored ? stored!.Value.Route : naturalRoute!;
+        var projectedThirst = Math.Min(
+            Definitions.MaximumThirst,
+            checked(actor.Thirst +
+                (route.Count + Definitions.ResupplyWorkTicks) * Definitions.ThirstPerTick));
+        var requestedQuantity = checked(missing + GetWaterDrinksNeeded(projectedThirst));
+        var quantity = useStored
+            ? Math.Min(
+                requestedQuantity,
+                stored!.Value.Stack.Quantity -
+                    itemReservations.GetValueOrDefault(stored.Value.Stack.Id))
+            : requestedQuantity;
 
         actor.JobKind = ActorJobKind.Resupply;
         actor.JobStage = ActorJobStage.ProvisioningWater;
-        actor.ReservedQuantity = 1;
+        actor.ReservedQuantity = quantity;
         actor.SourceStackId = useStored ? stored!.Value.Stack.Id : EntityId.None;
         actor.JobTarget = useStored
             ? stored!.Value.Stack.Location.Position
@@ -1699,7 +1738,7 @@ public sealed partial class SimulationEngine
         if (useStored)
         {
             itemReservations[actor.SourceStackId] = checked(
-                itemReservations.GetValueOrDefault(actor.SourceStackId) + 1);
+                itemReservations.GetValueOrDefault(actor.SourceStackId) + quantity);
         }
         return true;
     }
@@ -1776,8 +1815,7 @@ public sealed partial class SimulationEngine
             filter: stack =>
             {
                 var equipment = GetEquipmentForVariant(stack.Variant);
-                return equipment != PersonalEquipment.None &&
-                    !actor.Equipment.HasFlag(equipment);
+                return EquipmentCatalog.IsUpgrade(actor.Equipment, equipment);
             });
         if (best is not { } source)
         {
@@ -1897,7 +1935,7 @@ public sealed partial class SimulationEngine
             food.Quantity >= actor.ReservedQuantity,
         ActorJobStage.ProvisioningWater =>
             actor.CarriedStackId == EntityId.None &&
-            actor.PersonalWater < Definitions.PersonalWaterCapacity &&
+            actor.ReservedQuantity > 0 &&
             (actor.SourceStackId == EntityId.None
                 ? actor.JobTarget.Z == 0 &&
                   Map.GetCell(actor.JobTarget).Terrain == TerrainKind.ShallowWater
@@ -1923,8 +1961,7 @@ public sealed partial class SimulationEngine
             equipment.Location.Position == actor.JobTarget &&
             equipment.Quantity >= 1 &&
             GetEquipmentForVariant(equipment.Variant) is var item &&
-            item != PersonalEquipment.None &&
-            !actor.Equipment.HasFlag(item),
+            EquipmentCatalog.IsUpgrade(actor.Equipment, item),
         _ => false,
     };
 
@@ -1945,29 +1982,71 @@ public sealed partial class SimulationEngine
         else if (actor.JobStage == ActorJobStage.ProvisioningWater)
         {
             var sourceId = actor.SourceStackId;
+            var drinks = Math.Min(
+                actor.ReservedQuantity,
+                GetWaterDrinksNeeded(actor.Thirst));
+            var carried = Math.Min(
+                actor.ReservedQuantity - drinks,
+                Definitions.PersonalWaterCapacity - actor.PersonalWater);
+            var collected = checked(drinks + carried);
             if (sourceId != EntityId.None)
             {
                 var water = _itemStacks[sourceId];
-                water.Quantity--;
+                water.Quantity -= collected;
                 if (water.Quantity == 0)
                 {
                     RemoveItemStack(water.Id);
                     Publish(SimulationEventKind.ItemStackDepleted, actor.Id, water.Id, 0);
                 }
             }
-            actor.PersonalWater++;
-            Publish(SimulationEventKind.ActorCollectedWater, actor.Id, sourceId, 1);
+            if (drinks > 0)
+            {
+                actor.Thirst = Math.Max(
+                    0,
+                    actor.Thirst - checked(drinks * Definitions.WaterHydration));
+                Publish(SimulationEventKind.ActorDrank, actor.Id, sourceId, drinks);
+            }
+            actor.PersonalWater = checked(actor.PersonalWater + carried);
+            Publish(
+                SimulationEventKind.ActorCollectedWater,
+                actor.Id,
+                sourceId,
+                collected);
         }
         else if (actor.JobStage == ActorJobStage.ProvisioningEquipment)
         {
             var equipment = _itemStacks[actor.SourceStackId];
-            actor.Equipment |= GetEquipmentForVariant(equipment.Variant);
+            var item = GetEquipmentForVariant(equipment.Variant);
+            var replaced = EquipmentCatalog.GetReplacedDefinitions(actor.Equipment, item);
+            var storageLocation = equipment.Location;
+            foreach (var previous in replaced)
+            {
+                actor.Equipment &= ~previous.Equipment;
+            }
+            actor.Equipment |= item;
             equipment.Quantity--;
             Publish(SimulationEventKind.ItemPickedUp, actor.Id, equipment.Id, 1);
             if (equipment.Quantity == 0)
             {
                 RemoveItemStack(equipment.Id);
                 Publish(SimulationEventKind.ItemStackDepleted, actor.Id, equipment.Id, 0);
+            }
+            foreach (var previous in replaced)
+            {
+                var returned = _itemStacks.Values.FirstOrDefault(stack =>
+                    stack.Resource == ResourceKind.Equipment &&
+                    stack.Variant == previous.Variant &&
+                    stack.Location == storageLocation);
+                if (returned is null)
+                {
+                    returned = AllocateItemStack(
+                        ResourceKind.Equipment,
+                        quantity: 0,
+                        location: storageLocation,
+                        variant: previous.Variant);
+                }
+                returned.Quantity++;
+                Publish(SimulationEventKind.ItemStored, actor.Id, returned.Id, 1);
             }
         }
         else
@@ -1991,6 +2070,11 @@ public sealed partial class SimulationEngine
         actor.ClearJob();
         TryResumeSuspendedJob(actor);
     }
+
+    private int GetWaterDrinksNeeded(int thirst) =>
+        thirst < Definitions.DrinkThreshold
+            ? 0
+            : (thirst - Definitions.DrinkThreshold) / Definitions.WaterHydration + 1;
 
     private bool TryPlanEatJob(
         ActorState actor,
@@ -2241,6 +2325,80 @@ public sealed partial class SimulationEngine
                 Route = FindActorPath(actor, stain.Position),
             })
             .Where(candidate => candidate.Route is not null)
+            .OrderBy(candidate => candidate.Route!.Count)
+            .ThenBy(candidate => candidate.Position.Z)
+            .ThenBy(candidate => candidate.Position.Y)
+            .ThenBy(candidate => candidate.Position.X)
+            .FirstOrDefault();
+        if (best is null)
+        {
+            return false;
+        }
+
+        var orderId = AllocateEntityId();
+        var designationId = AllocateEntityId();
+        _workDesignations.Add(
+            designationId,
+            new WorkDesignationSnapshot(
+                designationId,
+                WorkDesignationKind.CleanBlood,
+                best.Position,
+                EntityId.None)
+            {
+                OrderId = orderId,
+                Priority = StoragePriority.Low,
+            });
+        Publish(
+            SimulationEventKind.WorkDesignationCreated,
+            actor.Id,
+            designationId,
+            (int)WorkDesignationKind.CleanBlood);
+
+        actor.JobKind = ActorJobKind.CleanBlood;
+        actor.JobTarget = best.Position;
+        actor.SourceStackId = designationId;
+        BeginJobLeg(actor, best.Route!, BloodCleaningWorkTicks);
+        reservedDesignations.Add(designationId);
+        return true;
+    }
+
+    private bool TryPlanIdleHousekeeping(
+        ActorState actor,
+        ISet<EntityId> reservedDesignations,
+        Dictionary<EntityId, int> sourceReservations,
+        Dictionary<EntityId, int> destinationReservations)
+    {
+        if (_raidPhase != GoblinRaidPhase.None && _raidPartyIds.Contains(actor.Id))
+        {
+            return false;
+        }
+
+        return TryPlanNearbyCleaning(actor, reservedDesignations) ||
+            TryPlanHaulCollection(
+                actor,
+                sourceReservations,
+                destinationReservations,
+                maximumEstimatedDistance: IdleHousekeepingMaximumRouteLength);
+    }
+
+    private bool TryPlanNearbyCleaning(
+        ActorState actor,
+        ISet<EntityId> reservedDesignations)
+    {
+        var best = _bloodStains.Values
+            .Where(stain => stain.Volume > 0 &&
+                ManhattanDistance(actor.Position, stain.Position) <=
+                    IdleHousekeepingMaximumRouteLength &&
+                Visibility.Get(stain.Position).IsDiscovered() &&
+                !_workDesignations.Values.Any(designation =>
+                    designation.Kind == WorkDesignationKind.CleanBlood &&
+                    designation.Target == stain.Position))
+            .Select(stain => new
+            {
+                stain.Position,
+                Route = FindActorPath(actor, stain.Position),
+            })
+            .Where(candidate => candidate.Route is { Count: <= IdleHousekeepingMaximumRouteLength })
             .OrderBy(candidate => candidate.Route!.Count)
             .ThenBy(candidate => candidate.Position.Z)
             .ThenBy(candidate => candidate.Position.Y)
@@ -2873,7 +3031,8 @@ public sealed partial class SimulationEngine
                 return _itemStacks.Values.Where(stack =>
                         stack.Location.Kind == ItemLocationKind.Ground &&
                         footprint.Contains(stack.Location.Position) &&
-                        stack.Quantity > sourceReservations.GetValueOrDefault(stack.Id))
+                        stack.Quantity > 0 &&
+                        sourceReservations.GetValueOrDefault(stack.Id) == 0)
                     .Select(stack => new
                     {
                         Site = site,
@@ -3585,7 +3744,8 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> sourceReservations,
         Dictionary<EntityId, int> destinationReservations,
         EntityId? requiredDestination = null,
-        bool assignedDestinationsOnly = false)
+        bool assignedDestinationsOnly = false,
+        int? maximumEstimatedDistance = null)
     {
         if (TryPlanNaturalWaterHaul(
                 actor,
@@ -3600,6 +3760,7 @@ public sealed partial class SimulationEngine
         foreach (var source in _itemStacks.Values.Where(stack =>
                      stack.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
                      Visibility.Get(stack.Location.Position) != CellVisibility.Unknown &&
+                     CanActorHaulStack(actor, stack) &&
                      (stack.Resource != ResourceKind.Water ||
                       actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))))
         {
@@ -3619,6 +3780,7 @@ public sealed partial class SimulationEngine
             var isDesignatedLooseResource = designationKind != default &&
                 source.Location.Kind == ItemLocationKind.Ground &&
                 IsWorkDesignated(designationKind, source.Id, source.Location.Position);
+            var isPriorityHaul = source.HaulPriority > StoragePriority.Normal;
             var candidateZones = _storageZones.Values.Where(zone =>
                          ZoneAccepts(zone, source) &&
                          IsHaulerAllowedForZone(actor, zone) &&
@@ -3630,7 +3792,7 @@ public sealed partial class SimulationEngine
                 {
                     var stored = GetStoredQuantity(zone.Id);
                     var reservedDestination = destinationReservations.GetValueOrDefault(zone.Id);
-                    return isDesignatedLooseResource ||
+                    return isDesignatedLooseResource || isPriorityHaul ||
                         zone.DesiredQuantity > stored + reservedDestination;
                 })
                 .ToArray();
@@ -3662,21 +3824,29 @@ public sealed partial class SimulationEngine
 
                 var carryLimit = source.Resource == ResourceKind.Water
                     ? WoodenBucketWaterCapacity
-                    : Definitions.ActorCarryCapacity;
+                    : GetActorHaulQuantityLimit(actor, source);
                 var quantity = Math.Min(
                     carryLimit,
                     Math.Min(availableSource, availableDestination));
+                var estimatedDistance = checked(
+                    ManhattanDistance(actor.Position, source.Location.Position) +
+                    ManhattanDistance(source.Location.Position, zone.Position));
+                if (maximumEstimatedDistance is { } maximumDistance &&
+                    estimatedDistance > maximumDistance)
+                {
+                    continue;
+                }
                 candidates.Add(new HaulCandidate(
                     source.Id,
                     zone.Id,
                     quantity,
-                    GetResourcePriority(source.Resource),
+                    (StoragePriority)Math.Max(
+                        (int)GetResourcePriority(source.Resource),
+                        (int)source.HaulPriority),
                     zone.Priority,
                     source.Location.Position,
                     zone.Position,
-                    checked(
-                        ManhattanDistance(actor.Position, source.Location.Position) +
-                        ManhattanDistance(source.Location.Position, zone.Position))));
+                    estimatedDistance));
             }
         }
 
@@ -3739,7 +3909,8 @@ public sealed partial class SimulationEngine
         EntityId? requiredDestination,
         bool assignedDestinationsOnly)
     {
-        if (!actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))
+        if (IsJuvenile(actor) ||
+            !actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))
         {
             return false;
         }
@@ -3979,6 +4150,8 @@ public sealed partial class SimulationEngine
 
             if (actor.CarriedStackId != EntityId.None ||
                 !_itemStacks.TryGetValue(actor.SourceStackId, out var source) ||
+                !CanActorHaulStack(actor, source) ||
+                actor.ReservedQuantity > GetActorHaulQuantityLimit(actor, source) ||
                 source.Location.Kind is not (ItemLocationKind.Ground or
                     ItemLocationKind.StorageZone) ||
                 !IsSourceAllowedForZone(source, zone) ||
@@ -4001,6 +4174,8 @@ public sealed partial class SimulationEngine
             actor.SourceStackId == EntityId.None &&
             actor.CarriedStackId != EntityId.None &&
             _itemStacks.TryGetValue(actor.CarriedStackId, out var carried) &&
+            CanActorHaulStack(actor, carried) &&
+            actor.ReservedQuantity <= GetActorHaulQuantityLimit(actor, carried) &&
             carried.Location == ItemLocation.CarriedBy(actor.Id) &&
             carried.Quantity == actor.ReservedQuantity &&
             CanStoreStack(zone, carried, actor.ReservedQuantity);
@@ -4148,6 +4323,54 @@ public sealed partial class SimulationEngine
 
         return !_logisticsNetworks.Values.Any(network =>
             network.Id != EntityId.None && network.AssignedHaulerIds.Contains(actor.Id));
+    }
+
+    private bool CanActorHaulStack(ActorState actor, ItemStackState stack) =>
+        !IsJuvenile(actor) ||
+        stack.Resource != ResourceKind.Water &&
+        GetHaulUnitWeight(stack) <= JuvenileMaximumHaulUnitWeight;
+
+    private int GetActorHaulQuantityLimit(ActorState actor, ItemStackState stack)
+    {
+        if (!IsJuvenile(actor))
+        {
+            return Definitions.ActorCarryCapacity;
+        }
+
+        return Math.Max(
+            1,
+            Math.Min(
+                Definitions.ActorCarryCapacity,
+                (int)Math.Floor(JuvenileHaulWeightCapacity / GetHaulUnitWeight(stack))));
+    }
+
+    private static double GetHaulUnitWeight(ItemStackState stack)
+    {
+        if (MaterialCatalog.TryGet(stack.Resource, stack.Variant, out var material))
+        {
+            return material.UnitWeight;
+        }
+        if (stack.Resource == ResourceKind.Equipment &&
+            EquipmentCatalog.FindDefinition(stack.Variant) is { } equipment)
+        {
+            return equipment.Weight;
+        }
+
+        return stack.Resource switch
+        {
+            ResourceKind.Food => 0.5,
+            ResourceKind.Wood => 1.0,
+            ResourceKind.Reeds => 0.18,
+            ResourceKind.Bone => 0.85,
+            ResourceKind.Vegetation => 0.25,
+            ResourceKind.Coal => 1.3,
+            ResourceKind.Stone or ResourceKind.Ore => 3.0,
+            ResourceKind.Hide => 0.55,
+            ResourceKind.Equipment => 2.0,
+            ResourceKind.Materials => 1.0,
+            ResourceKind.Water => 1.0,
+            _ => 1.0,
+        };
     }
 
     private bool IsExplicitHaulingDuty(ActorState actor, StorageZoneState zone) =>

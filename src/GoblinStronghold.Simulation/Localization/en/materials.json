@@ -28,7 +28,10 @@
       "iron-bar": "iron bar",
       "copper-bar": "copper bar",
       "silver-bar": "silver bar",
-      "gold-bar": "gold bar"
+      "gold-bar": "gold bar",
+      "spider-venom": "spider venom",
+      "spider-silk": "spider silk",
+      "spider-chitin": "spider chitin"
     }
   }
 }

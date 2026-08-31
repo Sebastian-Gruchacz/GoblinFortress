@@ -9,6 +9,26 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class CraftingTests
 {
     [Fact]
+    public void StartingTribeReceivesUpToThreePrimitivePickaxes()
+    {
+        var largeTribe = SimulationEngine.Create(
+            new WorldSeed(0x5049434B415845UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 5,
+            initialFoodStock: 12);
+        var smallTribe = SimulationEngine.Create(
+            new WorldSeed(0x5049434B415846UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 2,
+            initialFoodStock: 12);
+
+        Assert.Equal(3, largeTribe.CreateSnapshot().Actors.Count(actor =>
+            actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe)));
+        Assert.All(smallTribe.CreateSnapshot().Actors, actor => Assert.True(
+            actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe)));
+    }
+
+    [Fact]
     public void BuiltEquipmentStorageUsesSharedCapacityAcrossGearKinds()
     {
         var engine = SimulationEngine.Create(
@@ -354,6 +374,59 @@ public sealed class CraftingTests
     }
 
     [Fact]
+    public void BetterMainHandEquipmentReplacesAndStoresPreviousWeapon()
+    {
+        var definitions = SimulationDefinitions.Foundation;
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x55504752414445UL),
+            definitions,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            engine.Map.GoblinSpawn,
+            ResourceKind.Equipment,
+            capacity: 8));
+        engine.AdvanceTicks(1);
+        var zone = Assert.Single(engine.CreateSnapshot().StorageZones);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var actor = save["actors"]!.AsArray()[0]!.AsObject();
+        actor["equipment"] = (int)(PersonalEquipment.RagClothes |
+            PersonalEquipment.PrimitiveWaterskin |
+            PersonalEquipment.FightingStick);
+        var nextId = save["nextEntityId"]!.GetValue<ulong>();
+        save["itemStacks"]!.AsArray().Add(CreateStack(
+            nextId,
+            ResourceKind.Equipment,
+            zone.Position,
+            storageZoneId: zone.Id,
+            variant: ResourceVariant.EquipmentStoneClub));
+        save["nextEntityId"] = nextId + 1;
+        engine = SimulationEngine.Load(save.ToJsonString(), definitions);
+
+        for (var tick = 0; tick < 1_000 &&
+             !Assert.Single(engine.CreateSnapshot().Actors).Equipment
+                 .HasFlag(PersonalEquipment.StoneClub); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        var equipped = Assert.Single(snapshot.Actors).Equipment;
+        Assert.True(equipped.HasFlag(PersonalEquipment.StoneClub));
+        Assert.False(equipped.HasFlag(PersonalEquipment.FightingStick));
+        Assert.Single(EquipmentCatalog.GetDefinitions(equipped), item =>
+            item.Slot == EquipmentSlot.MainHand);
+        Assert.Contains(snapshot.ItemStacks, stack =>
+            stack.Resource == ResourceKind.Equipment &&
+            stack.Variant == ResourceVariant.EquipmentFightingStick &&
+            stack.Location.Kind == ItemLocationKind.StorageZone &&
+            stack.Location.OwnerId == zone.Id &&
+            stack.Quantity == 1);
+    }
+
+    [Fact]
     public void PrimitiveWorkshopCraftsBasicToolsWeaponsClothesAndContainers()
     {
         var definitions = SimulationDefinitions.Foundation;
@@ -387,7 +460,8 @@ public sealed class CraftingTests
         {
             actor!["equipment"] = actor["equipment"]!.GetValue<int>() &
                 ~((int)PersonalEquipment.PrimitiveWaterskin |
-                  (int)PersonalEquipment.WoodenAxe);
+                  (int)PersonalEquipment.WoodenAxe |
+                  (int)PersonalEquipment.PrimitivePickaxe);
             actor["personalWater"] = 0;
         }
         engine = SimulationEngine.Load(save.ToJsonString(), definitions);
@@ -395,16 +469,19 @@ public sealed class CraftingTests
             actor.Equipment.HasFlag(PersonalEquipment.PrimitiveWaterskin));
         Assert.DoesNotContain(engine.CreateSnapshot().Actors, actor =>
             actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe));
+        Assert.DoesNotContain(engine.CreateSnapshot().Actors, actor =>
+            actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe));
         engine = AddCraftingMaterials(engine, definitions, engine.Map.GoblinSpawn,
             (ResourceKind.Bone, 1),
-            (ResourceKind.Wood, 10),
-            (ResourceKind.Stone, 2),
+            (ResourceKind.Wood, 12),
+            (ResourceKind.Stone, 4),
             (ResourceKind.Hide, 3),
-            (ResourceKind.Reeds, 7));
+            (ResourceKind.Reeds, 8));
         foreach (var recipe in new[]
                  {
                      CraftingRecipeKind.BoneKnife,
                      CraftingRecipeKind.PrimitiveAxe,
+                     CraftingRecipeKind.PrimitivePickaxe,
                      CraftingRecipeKind.FightingStick,
                      CraftingRecipeKind.StoneClub,
                      CraftingRecipeKind.HideClothes,
@@ -423,8 +500,7 @@ public sealed class CraftingTests
               (current.CraftingOrders.Count > 0 ||
                current.ItemStacks.Any(stack =>
                    stack.Resource == ResourceKind.Equipment &&
-                   (stack.Variant != ResourceVariant.EquipmentWoodenBarrel ||
-                    stack.Location.Kind == ItemLocationKind.Ground)) ||
+                   stack.Location.Kind == ItemLocationKind.Ground) ||
                index == 0)); index++)
         {
             engine.AdvanceTicks(1);
@@ -432,17 +508,34 @@ public sealed class CraftingTests
 
         var snapshot = engine.CreateSnapshot();
         Assert.Empty(snapshot.CraftingOrders);
-        var equipment = snapshot.Actors.Aggregate(
-            PersonalEquipment.None,
-            (all, actor) => all | actor.Equipment);
-        Assert.True(equipment.HasFlag(PersonalEquipment.BoneKnife));
-        Assert.True(equipment.HasFlag(PersonalEquipment.WoodenAxe));
-        Assert.True(equipment.HasFlag(PersonalEquipment.FightingStick));
-        Assert.True(equipment.HasFlag(PersonalEquipment.StoneClub));
-        Assert.True(equipment.HasFlag(PersonalEquipment.HideClothes));
-        Assert.True(equipment.HasFlag(PersonalEquipment.ReedClothes));
-        Assert.True(equipment.HasFlag(PersonalEquipment.PrimitiveWaterskin));
-        Assert.True(equipment.HasFlag(PersonalEquipment.WoodenBucket));
+        Assert.All(snapshot.Actors, actor =>
+        {
+            Assert.All(
+                EquipmentCatalog.GetDefinitions(actor.Equipment).GroupBy(item => item.Slot),
+                group => Assert.Single(group));
+        });
+        foreach (var variant in new[]
+                 {
+                     ResourceVariant.EquipmentBoneKnife,
+                     ResourceVariant.EquipmentWoodenAxe,
+                     ResourceVariant.EquipmentPrimitivePickaxe,
+                     ResourceVariant.EquipmentFightingStick,
+                     ResourceVariant.EquipmentStoneClub,
+                     ResourceVariant.EquipmentHideClothes,
+                     ResourceVariant.EquipmentReedClothes,
+                     ResourceVariant.EquipmentPrimitiveWaterskin,
+                     ResourceVariant.EquipmentWoodenBucket,
+                 })
+        {
+            var definition = Assert.IsType<EquipmentItemDefinition>(
+                EquipmentCatalog.FindDefinition(variant));
+            Assert.True(
+                snapshot.Actors.Any(actor => actor.Equipment.HasFlag(definition.Equipment)) ||
+                snapshot.ItemStacks.Any(stack =>
+                    stack.Resource == ResourceKind.Equipment &&
+                    stack.Variant == variant &&
+                    stack.Quantity > 0));
+        }
         Assert.Contains(snapshot.ItemStacks, stack =>
             stack.Resource == ResourceKind.Equipment &&
             stack.Variant == ResourceVariant.EquipmentWoodenBarrel &&

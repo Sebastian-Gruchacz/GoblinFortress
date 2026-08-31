@@ -240,6 +240,62 @@ public sealed class AnimalEcologyTests
     }
 
     [Fact]
+    public void HuntedCaveSpiderDropsStorableAdvancedByproducts()
+    {
+        var seed = new WorldSeed(0x56454E4F4DUL);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            SwampMapGenerator.Generate(seed, 64, 64),
+            initialGoblinCount: 1,
+            initialFoodStock: 8,
+            debugSettings: new SimulationDebugSettings(RevealFogFromNonPlayerUnits: true));
+        var spider = engine.CreateSnapshot().Animals.First(animal =>
+            animal.Kind == AnimalKind.CaveSpider);
+        var approach = engine.World.GetCardinalWorldNeighbors(spider.Position)
+            .First(engine.World.IsTerrainTraversable);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["actors"]![0]!["x"] = approach.X;
+        save["actors"]![0]!["y"] = approach.Y;
+        save["actors"]![0]!["z"] = approach.Z;
+        var savedSpider = save["animals"]!.AsArray().Single(animal =>
+            animal!["id"]!.GetValue<ulong>() == spider.Id)!.AsObject();
+        savedSpider["health"] = 1;
+        savedSpider["fatigue"] = spider.MaximumFatigue;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateAnimalHunting(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            spider.Position,
+            spider.Position));
+
+        for (var tick = 0; tick < 2_000 && engine.CreateSnapshot().Animals.Any(animal =>
+                 animal.Id == spider.Id); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.DoesNotContain(snapshot.Animals, animal => animal.Id == spider.Id);
+        AssertSpiderDrop(snapshot, ResourceVariant.SpiderVenom, expectedQuantity: 1);
+        AssertSpiderDrop(snapshot, ResourceVariant.SpiderSilk, expectedQuantity: 2);
+        AssertSpiderDrop(snapshot, ResourceVariant.SpiderChitin, expectedQuantity: 3);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    private static void AssertSpiderDrop(
+        SimulationSnapshot snapshot,
+        ResourceVariant variant,
+        int expectedQuantity)
+    {
+        var stack = Assert.Single(snapshot.ItemStacks.Where(item =>
+            item.Resource == ResourceKind.Materials && item.Variant == variant));
+        Assert.Equal(expectedQuantity, stack.Quantity);
+        Assert.Equal(ItemLocationKind.Ground, stack.Location.Kind);
+    }
+
+    [Fact]
     public void DesignatedHareIsPursuedAndProducesPhysicalRawMeat()
     {
         var seed = new WorldSeed(0xA11A1UL);

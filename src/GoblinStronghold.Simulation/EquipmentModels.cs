@@ -19,13 +19,15 @@ public enum EquipmentSlot : byte
     Belt4 = 12,
     Waterskin = 13,
     Backpack = 14,
+    Utility = 15,
 }
 
 public readonly record struct EquipmentItemDefinition(
     PersonalEquipment Equipment,
     EquipmentSlot Slot,
     ResourceVariant Variant,
-    int Weight);
+    int Weight,
+    int Quality);
 
 public readonly record struct EquippedItemSnapshot(
     PersonalEquipment Equipment,
@@ -91,33 +93,75 @@ public static class EquipmentCatalog
     private static readonly EquipmentItemDefinition[] Definitions =
     [
         new(PersonalEquipment.RagClothes, EquipmentSlot.Torso,
-            ResourceVariant.EquipmentRagClothes, 1),
+            ResourceVariant.EquipmentRagClothes, 1, 1),
         new(PersonalEquipment.HideClothes, EquipmentSlot.Torso,
-            ResourceVariant.EquipmentHideClothes, 2),
+            ResourceVariant.EquipmentHideClothes, 2, 3),
         new(PersonalEquipment.ReedClothes, EquipmentSlot.Torso,
-            ResourceVariant.EquipmentReedClothes, 1),
-        new(PersonalEquipment.BoneKnife, EquipmentSlot.Belt1,
-            ResourceVariant.EquipmentBoneKnife, 1),
+            ResourceVariant.EquipmentReedClothes, 1, 2),
+        new(PersonalEquipment.BoneKnife, EquipmentSlot.MainHand,
+            ResourceVariant.EquipmentBoneKnife, 1, 30),
         new(PersonalEquipment.WoodenAxe, EquipmentSlot.MainHand,
-            ResourceVariant.EquipmentWoodenAxe, 3),
+            ResourceVariant.EquipmentWoodenAxe, 3, 100),
         new(PersonalEquipment.PrimitivePickaxe, EquipmentSlot.MainHand,
-            ResourceVariant.EquipmentPrimitivePickaxe, 4),
+            ResourceVariant.EquipmentPrimitivePickaxe, 4, 110),
         new(PersonalEquipment.ReinforcedPickaxe, EquipmentSlot.MainHand,
-            ResourceVariant.EquipmentReinforcedPickaxe, 5),
+            ResourceVariant.EquipmentReinforcedPickaxe, 5, 160),
         new(PersonalEquipment.FightingStick, EquipmentSlot.MainHand,
-            ResourceVariant.EquipmentFightingStick, 2),
+            ResourceVariant.EquipmentFightingStick, 2, 80),
         new(PersonalEquipment.StoneClub, EquipmentSlot.MainHand,
-            ResourceVariant.EquipmentStoneClub, 4),
+            ResourceVariant.EquipmentStoneClub, 4, 140),
         new(PersonalEquipment.PrimitiveSling, EquipmentSlot.RangedWeapon,
-            ResourceVariant.EquipmentPrimitiveSling, 1),
+            ResourceVariant.EquipmentPrimitiveSling, 1, 1),
         new(PersonalEquipment.PrimitiveWaterskin, EquipmentSlot.Waterskin,
-            ResourceVariant.EquipmentPrimitiveWaterskin, 1),
-        new(PersonalEquipment.WoodenBucket, EquipmentSlot.MainHand,
-            ResourceVariant.EquipmentWoodenBucket, 2),
+            ResourceVariant.EquipmentPrimitiveWaterskin, 1, 1),
+        new(PersonalEquipment.WoodenBucket, EquipmentSlot.Utility,
+            ResourceVariant.EquipmentWoodenBucket, 2, 1),
     ];
 
     public static IReadOnlyList<EquipmentItemDefinition> GetDefinitions(
         PersonalEquipment equipment) => Definitions
         .Where(definition => equipment.HasFlag(definition.Equipment))
         .ToArray();
+
+    public static EquipmentItemDefinition? FindDefinition(PersonalEquipment equipment)
+    {
+        var definition = Definitions.FirstOrDefault(item => item.Equipment == equipment);
+        return definition.Equipment == PersonalEquipment.None ? null : definition;
+    }
+
+    public static EquipmentItemDefinition? FindDefinition(ResourceVariant variant)
+    {
+        var definition = Definitions.FirstOrDefault(item => item.Variant == variant);
+        return definition.Equipment == PersonalEquipment.None ? null : definition;
+    }
+
+    public static bool IsUpgrade(
+        PersonalEquipment currentEquipment,
+        PersonalEquipment candidateEquipment)
+    {
+        if (FindDefinition(candidateEquipment) is not { } candidate)
+        {
+            return false;
+        }
+
+        var current = GetDefinitions(currentEquipment)
+            .Where(item => item.Slot == candidate.Slot)
+            .ToArray();
+        return current.Length == 0 || current.All(item => candidate.Quality > item.Quality);
+    }
+
+    public static IReadOnlyList<EquipmentItemDefinition> GetReplacedDefinitions(
+        PersonalEquipment currentEquipment,
+        PersonalEquipment candidateEquipment)
+    {
+        if (FindDefinition(candidateEquipment) is not { } candidate)
+        {
+            return [];
+        }
+
+        return GetDefinitions(currentEquipment)
+            .Where(item => item.Slot == candidate.Slot &&
+                item.Equipment != candidateEquipment)
+            .ToArray();
+    }
 }

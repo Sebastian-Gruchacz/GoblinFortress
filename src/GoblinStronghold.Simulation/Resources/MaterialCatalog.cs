@@ -16,6 +16,9 @@ public enum MaterialType : byte
     PlantFiber = 7,
     Bone = 8,
     Hide = 9,
+    Venom = 10,
+    Silk = 11,
+    Chitin = 12,
 }
 
 public enum MaterialAcquisitionStrategy : byte
@@ -139,6 +142,12 @@ public static class MaterialCatalog
         [NotNullWhen(true)] out MaterialDefinition? material) =>
         State.Value.ByVariant.TryGetValue(variant, out material);
 
+    public static bool TryGet(
+        ResourceKind resource,
+        ResourceVariant variant,
+        [NotNullWhen(true)] out MaterialDefinition? material) =>
+        State.Value.ByResourceIdentity.TryGetValue((resource, variant), out material);
+
     public static IReadOnlyList<MaterialDefinition> Supporting(MaterialUse use) =>
         Array.AsReadOnly(All.Where(material => material.Uses.Contains(use)).ToArray());
 
@@ -251,12 +260,12 @@ public static class MaterialCatalog
         var occurrence = ToOccurrence(source.Id, source.Occurrence);
         var acquisition = ToAcquisition(source.Id, source.Acquisition, occurrence);
         var processing = ToProcessing(source.Id, source.Processing, acquisition.Strategy);
-        if (source.Uses is null || source.Uses.Count == 0 ||
+        if (source.Uses is null ||
             source.Uses.Any(use => !Enum.IsDefined(use)) ||
             source.Uses.Distinct().Count() != source.Uses.Count)
         {
             throw new InvalidOperationException(
-                $"Material '{source.Id}' must define unique supported uses.");
+                $"Material '{source.Id}' must define only unique supported uses.");
         }
         if (source.Palette is null || source.Palette.KeyColors is null ||
             source.Palette.KeyColors.Count != 3)
@@ -396,6 +405,8 @@ public static class MaterialCatalog
         MaterialType.PlantFiber => resource == ResourceKind.Reeds,
         MaterialType.Bone => resource == ResourceKind.Bone,
         MaterialType.Hide => resource == ResourceKind.Hide,
+        MaterialType.Venom or MaterialType.Silk or MaterialType.Chitin =>
+            resource == ResourceKind.Materials,
         _ => false,
     };
 

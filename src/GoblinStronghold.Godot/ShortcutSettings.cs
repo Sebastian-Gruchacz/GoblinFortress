@@ -37,6 +37,16 @@ internal enum GameShortcutId
     Scout,
     CleanBlood,
     ClearOrders,
+    CameraLevelUp,
+    CameraLevelDown,
+    CameraPanUp,
+    CameraPanDown,
+    CameraPanLeft,
+    CameraPanRight,
+    MoveSelectedUnits,
+    AttackArea,
+    HuntArea,
+    Patrol,
 }
 
 internal readonly record struct ShortcutStroke(Key Key, bool Ctrl = false, bool Alt = false, bool Shift = false)
@@ -82,10 +92,22 @@ internal sealed class ShortcutSettings
         new(GameShortcutId.OpenManagement, "Menu główne", "Zarządzanie", null, new(Key.J)),
         new(GameShortcutId.OpenConstruction, "Menu główne", "Konstrukcje", null, new(Key.B)),
         new(GameShortcutId.OpenWork, "Menu główne", "Prace i obszary", null, new(Key.R)),
-        new(GameShortcutId.OpenStatistics, "Menu główne", "Statystyki", null, new(Key.S)),
+        new(GameShortcutId.OpenStatistics, "Menu główne", "Statystyki", null, new(Key.I)),
         new(GameShortcutId.OpenUnitOrders, "Menu główne", "Rozkazy jednostek", null, new(Key.O)),
 
+        new(GameShortcutId.CameraLevelUp, "Kamera", "Poziom wyżej", null, new(Key.Pageup)),
+        new(GameShortcutId.CameraLevelDown, "Kamera", "Poziom niżej", null, new(Key.Pagedown)),
+        new(GameShortcutId.CameraPanUp, "Kamera", "Przesuń mapę w górę", null, new(Key.W)),
+        new(GameShortcutId.CameraPanDown, "Kamera", "Przesuń mapę w dół", null, new(Key.S)),
+        new(GameShortcutId.CameraPanLeft, "Kamera", "Przesuń mapę w lewo", null, new(Key.A)),
+        new(GameShortcutId.CameraPanRight, "Kamera", "Przesuń mapę w prawo", null, new(Key.D)),
+
         new(GameShortcutId.ShowPlanner, "Zarządzanie", "Planer plemienia", GameShortcutId.OpenManagement, new(Key.P)),
+
+        new(GameShortcutId.MoveSelectedUnits, "Rozkazy jednostek", "Przenieś zaznaczone", GameShortcutId.OpenUnitOrders, new(Key.M)),
+        new(GameShortcutId.AttackArea, "Rozkazy jednostek", "Atakuj obszar", GameShortcutId.OpenUnitOrders, new(Key.A)),
+        new(GameShortcutId.HuntArea, "Rozkazy jednostek", "Poluj w obszarze", GameShortcutId.OpenUnitOrders, new(Key.H)),
+        new(GameShortcutId.Patrol, "Rozkazy jednostek", "Patroluj", GameShortcutId.OpenUnitOrders, new(Key.P)),
 
         new(GameShortcutId.BuildFoodStorage, "Konstrukcje", "Skład żywności", GameShortcutId.OpenConstruction, new(Key.F)),
         new(GameShortcutId.BuildWoodStorage, "Konstrukcje", "Skład drewna", GameShortcutId.OpenConstruction, new(Key.D)),
@@ -147,6 +169,9 @@ internal sealed class ShortcutSettings
                 return;
             }
 
+            var usesLegacyCameraBindings =
+                !stored.ContainsKey(nameof(GameShortcutId.CameraPanDown));
+
             foreach (var (name, stroke) in stored)
             {
                 if (Enum.TryParse<GameShortcutId>(name, out var id) &&
@@ -158,6 +183,12 @@ internal sealed class ShortcutSettings
                         stroke.Alt,
                         stroke.Shift);
                 }
+            }
+
+            if (usesLegacyCameraBindings &&
+                _bindings[GameShortcutId.OpenStatistics] == new ShortcutStroke(Key.S))
+            {
+                _bindings[GameShortcutId.OpenStatistics] = new ShortcutStroke(Key.I);
             }
         }
         catch (Exception exception)

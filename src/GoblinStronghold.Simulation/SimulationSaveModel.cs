@@ -515,6 +515,8 @@ internal sealed class ActorSaveModel
 
     public ulong TacticalTargetEntityId { get; set; }
 
+    public long DispatcherSuspendedUntilTick { get; set; }
+
     public List<NavigationBeliefSaveModel> NavigationBeliefs { get; set; } = [];
 
     public List<NavigationEdgeSaveModel> PendingNavigationReports { get; set; } = [];
@@ -592,6 +594,8 @@ internal sealed class ItemStackSaveModel
     public int Z { get; set; }
 
     public ulong OwnerId { get; set; }
+
+    public Resources.StoragePriority? HaulPriority { get; set; }
 }
 
 internal sealed class StorageZoneSaveModel
@@ -780,6 +784,8 @@ internal sealed class CommandSaveModel
     public int Amount { get; set; }
 
     public string Text { get; set; } = string.Empty;
+
+    public Resources.ResourceVariant MaterialVariant { get; set; }
 }
 
 internal sealed class EventSaveModel

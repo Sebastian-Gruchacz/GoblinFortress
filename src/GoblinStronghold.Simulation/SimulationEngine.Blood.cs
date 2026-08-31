@@ -171,12 +171,11 @@ public sealed partial class SimulationEngine
 
     private bool HasCleanableBlood(GridPosition position) =>
         _bloodStains.TryGetValue(position, out var stain) &&
-        stain.Surface == BloodSurfaceKind.ConstructedFloor && stain.Volume > 0;
+        stain.Volume > 0;
 
     private int CleanBlood(GridPosition position)
     {
-        if (!_bloodStains.TryGetValue(position, out var stain) ||
-            stain.Surface != BloodSurfaceKind.ConstructedFloor)
+        if (!_bloodStains.TryGetValue(position, out var stain) || stain.Volume <= 0)
         {
             return 0;
         }
@@ -187,6 +186,7 @@ public sealed partial class SimulationEngine
         if (stain.Volume == 0)
         {
             _bloodStains.Remove(position);
+            RemoveBloodCleaningDesignations(position);
         }
 
         return cleaned;
@@ -209,7 +209,27 @@ public sealed partial class SimulationEngine
             if (stain.Volume <= 0)
             {
                 _bloodStains.Remove(stain.Position);
+                RemoveBloodCleaningDesignations(stain.Position);
             }
+        }
+    }
+
+    private void RemoveBloodCleaningDesignations(GridPosition position)
+    {
+        var removed = _workDesignations.Values
+            .Where(designation =>
+                designation.Kind == WorkDesignationKind.CleanBlood &&
+                designation.Target == position)
+            .ToArray();
+        CancelActorsForDesignations(removed);
+        foreach (var designation in removed)
+        {
+            _workDesignations.Remove(designation.Id);
+            Publish(
+                SimulationEventKind.WorkDesignationRemoved,
+                EntityId.None,
+                designation.Id,
+                0);
         }
     }
 

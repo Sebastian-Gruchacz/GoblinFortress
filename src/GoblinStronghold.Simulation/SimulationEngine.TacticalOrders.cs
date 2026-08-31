@@ -34,7 +34,8 @@ public sealed partial class SimulationEngine
             .Where(candidate =>
                 candidate.Task == HumanCohortTask.Guard &&
                 Distance(candidate.Position, actor.TacticalCenter) <= actor.TacticalRadius)
-            .OrderBy(candidate => Distance(candidate.Position, actor.Position))
+            .OrderBy(candidate => candidate.Health)
+            .ThenBy(candidate => Distance(candidate.Position, actor.TacticalCenter))
             .ThenBy(candidate => candidate.Id)
             .FirstOrDefault();
         if (guard.Id == 0)
@@ -74,34 +75,34 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanHuntAreaOrder(ActorState actor)
     {
-        var candidates = _animals.Values
+        var animals = _animals.Values
             .Where(animal =>
                 Distance(animal.Position, actor.TacticalCenter) <= actor.TacticalRadius)
-            .SelectMany(animal => GetHuntApproachPositions(actor, animal)
-                .Select(position => new
-                {
-                    Animal = animal,
-                    Position = position,
-                }))
+            .OrderByDescending(animal =>
+                AnimalCombatPolicy.GetAttackDamage(animal.Kind, animal.Position))
+            .ThenByDescending(animal => animal.Health)
+            .ThenBy(animal => Distance(animal.Position, actor.TacticalCenter))
+            .ThenBy(animal => animal.Id)
             .ToArray();
-        var destinations = candidates.Select(candidate => candidate.Position).ToHashSet();
-        var route = FindActorPathToNearest(actor, destinations);
-        if (route is null)
+        foreach (var animal in animals)
         {
-            CompleteTacticalOrderAndReturn(actor);
+            var destinations = GetHuntApproachPositions(actor, animal).ToHashSet();
+            var route = FindActorPathToNearest(actor, destinations);
+            if (route is null)
+            {
+                continue;
+            }
+
+            var destination = route.Count == 0 ? actor.Position : route[^1];
+            actor.TacticalTargetEntityId = new EntityId(animal.Id);
+            actor.JobKind = ActorJobKind.HuntAnimal;
+            actor.SourceStackId = EntityId.None;
+            actor.JobTarget = destination;
+            BeginJobLeg(actor, route, GetHuntWorkTicks());
             return true;
         }
 
-        var destination = route.Count == 0 ? actor.Position : route[^1];
-        var best = candidates
-            .Where(candidate => candidate.Position == destination)
-            .OrderBy(candidate => candidate.Animal.Id)
-            .First();
-        actor.TacticalTargetEntityId = new EntityId(best.Animal.Id);
-        actor.JobKind = ActorJobKind.HuntAnimal;
-        actor.SourceStackId = EntityId.None;
-        actor.JobTarget = destination;
-        BeginJobLeg(actor, route, GetHuntWorkTicks());
+        CompleteTacticalOrderAndReturn(actor);
         return true;
     }
 

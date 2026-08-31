@@ -354,7 +354,7 @@ internal sealed class HumanVillageState
                 navigation,
                 definitions.HumanVillageActivityRadius,
                 definitions.ActorPlanning.MaximumPathExpansionsPerSlice,
-                nearby.FirstOrDefault(),
+                nearby,
                 calendar.IsNight,
                 worldChanges);
         }
@@ -694,6 +694,12 @@ internal sealed class HumanVillageState
         foreach (var villager in _villagers.Values.Where(item => item.Health > 0))
         {
             var assignedTask = GetCohort(villager.Role).Task;
+            if (assignedTask == HumanCohortTask.Flee)
+            {
+                villager.Task = HumanCohortTask.Flee;
+                continue;
+            }
+
             villager.Task = isNight || villager.Fatigue >= _needs.RestThreshold ||
                 assignedTask == HumanCohortTask.DrawWater &&
                 !villager.Tools.HasFlag(HumanTool.WoodenBucket) ||
@@ -714,7 +720,7 @@ internal sealed class HumanVillageState
         NavigationPathService navigation,
         int activityRadius,
         int maximumPathExpansions,
-        HumanIntruderSnapshot intruder,
+        IReadOnlyList<HumanIntruderSnapshot> intruders,
         bool isNight,
         ICollection<WorldChangeEvent> worldChanges)
     {
@@ -725,9 +731,22 @@ internal sealed class HumanVillageState
         foreach (var villager in livingVillagers)
         {
             occupied.Remove(villager.Position);
-            var target = GetTaskTarget(villager, world, intruder);
+            var intruder = intruders
+                .OrderBy(candidate => Distance(candidate.Position, villager.Position))
+                .ThenBy(candidate => candidate.Id)
+                .FirstOrDefault();
+            var target = GetTaskTarget(villager, world, intruder, activityRadius);
             var villagerRadius = activityRadius +
                 (villager.Task == HumanCohortTask.GatherBerries ? 4 : 0);
+            if (villager.Task == HumanCohortTask.Flee &&
+                TryTakeImmediateFleeStep(villager, intruder, world, occupied, villagerRadius))
+            {
+                villager.Fatigue = Math.Min(
+                    _needs.MaximumFatigue,
+                    villager.Fatigue + _needs.WorkFatiguePerMove);
+                occupied.Add(villager.Position);
+                continue;
+            }
             var request = navigation.RequestPath(
                 villager.Position,
                 target,
@@ -873,6 +892,40 @@ internal sealed class HumanVillageState
         SynchronizeCohortsFromVillagers();
     }
 
+    private bool TryTakeImmediateFleeStep(
+        HumanVillagerState villager,
+        HumanIntruderSnapshot intruder,
+        WorldMapState world,
+        ISet<GridPosition> occupied,
+        int activityRadius)
+    {
+        if (intruder.Id == EntityId.None)
+        {
+            return false;
+        }
+
+        var currentDistance = Distance(villager.Position, intruder.Position);
+        var destination = world.Baseline.GetCardinalNeighbors(villager.Position)
+            .Where(position => Distance(position, Anchor) <= activityRadius &&
+                Distance(position, intruder.Position) > currentDistance &&
+                world.IsSurfaceTraversable(position) &&
+                world.Baseline.CanTraverseSurfaceEdge(villager.Position, position) &&
+                !occupied.Contains(position))
+            .OrderByDescending(position => Distance(position, intruder.Position))
+            .ThenByDescending(position => Distance(position, Anchor))
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .Select(position => (GridPosition?)position)
+            .FirstOrDefault();
+        if (destination is not { } next)
+        {
+            return false;
+        }
+
+        villager.Position = next;
+        return true;
+    }
+
     private static bool CanWanderWhileWorking(HumanCohortTask task) => task is
         HumanCohortTask.WorkFields or
         HumanCohortTask.ClearLand or
@@ -882,7 +935,8 @@ internal sealed class HumanVillageState
     private GridPosition GetTaskTarget(
         HumanVillagerState villager,
         WorldMapState world,
-        HumanIntruderSnapshot intruder)
+        HumanIntruderSnapshot intruder,
+        int activityRadius)
     {
         var position = villager.Position;
         var task = villager.Task;
@@ -904,7 +958,7 @@ internal sealed class HumanVillageState
         }
         if (task == HumanCohortTask.Flee)
         {
-            return Anchor;
+            return GetFleeTarget(villager, world, intruder, activityRadius);
         }
         if (task == HumanCohortTask.Guard && intruder.Id != EntityId.None)
         {
@@ -949,6 +1003,33 @@ internal sealed class HumanVillageState
             }
         }
         return Anchor;
+    }
+
+    private GridPosition GetFleeTarget(
+        HumanVillagerState villager,
+        WorldMapState world,
+        HumanIntruderSnapshot intruder,
+        int activityRadius)
+    {
+        if (intruder.Id == EntityId.None)
+        {
+            return Anchor;
+        }
+
+        var escapePositions = Enumerable.Range(0, world.Baseline.Height)
+            .SelectMany(y => Enumerable.Range(0, world.Baseline.Width)
+                .Select(x => new GridPosition(x, y, villager.Position.Z)))
+            .Where(position => Distance(position, Anchor) <= activityRadius &&
+                world.IsSurfaceTraversable(position))
+            .OrderByDescending(position => Distance(position, intruder.Position))
+            .ThenByDescending(position => Distance(position, Anchor))
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .Take(16)
+            .ToArray();
+        return escapePositions.Length == 0
+            ? Anchor
+            : escapePositions[(villager.Id - 1) % escapePositions.Length];
     }
 
     private GridPosition? FindNextFieldPosition(WorldMapState world, int radius)

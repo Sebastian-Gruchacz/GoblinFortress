@@ -6,10 +6,5 @@ public readonly record struct SimulationDebugSettings(
     public static SimulationDebugSettings Disabled { get; } = new(
         RevealFogFromNonPlayerUnits: false);
 
-    public static SimulationDebugSettings ForCurrentBuild { get; } = new(
-#if DEBUG
-        RevealFogFromNonPlayerUnits: true);
-#else
-        RevealFogFromNonPlayerUnits: false);
-#endif
+    public static SimulationDebugSettings ForCurrentBuild { get; } = Disabled;
 }

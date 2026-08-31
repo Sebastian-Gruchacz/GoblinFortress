@@ -196,6 +196,17 @@ public sealed class BloodCleaningTests
         }
 
         Assert.True(observedCleaning);
+        var cleaner = Assert.Single(engine.CreateSnapshot().Actors, actor =>
+            actor.Job.Kind == ActorJobKind.CleanBlood &&
+            actor.Job.Phase == ActorJobPhase.Working);
+        Assert.InRange(
+            cleaner.Job.RemainingWorkTicks,
+            1,
+            surface == BloodSurfaceKind.ConstructedFloor ? 20 : 40);
+        if (surface == BloodSurfaceKind.AbsorbentGround)
+        {
+            Assert.True(cleaner.Job.RemainingWorkTicks > 20);
+        }
         var restoredDuringWork = SimulationEngine.Load(
             engine.Save(),
             SimulationDefinitions.Foundation);

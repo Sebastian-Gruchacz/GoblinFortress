@@ -162,6 +162,8 @@ public partial class Main : Node
     private Label _workshopSummary = null!;
     private GridPosition? _selectedWorkshop;
     private readonly Dictionary<CraftingRecipeKind, Control> _workshopRecipeRows = [];
+    private readonly Dictionary<CraftingRecipeKind, Button> _workshopRepeatButtons = [];
+    private bool _updatingWorkshopRepeatButtons;
     private GameSaveStore _saveStore = null!;
     private SimulationTick _nextAutosaveTick;
     private double _autosaveElapsedRealSeconds;
@@ -637,12 +639,12 @@ public partial class Main : Node
         _storedResourcesDetailed.Toggled += _ =>
         {
             _storedResourcesSignature = string.Empty;
-            UpdateStoredResources(_engine.CreateSnapshot(), force: true);
+            UpdateStoredResources(_latestSnapshot, force: true);
         };
         _looseResourcesDetailed.Toggled += _ =>
         {
             _looseResourcesSignature = string.Empty;
-            UpdateLooseResources(_engine.CreateSnapshot(), force: true);
+            UpdateLooseResources(_latestSnapshot, force: true);
         };
         _storageDetails = GetNode<Window>("StorageDetails");
         _storageSummary = GetNode<Label>("StorageDetails/Margin/Controls/Summary");
@@ -2047,7 +2049,7 @@ public partial class Main : Node
     {
         _pendingMaterialBuildMode = mode;
         _constructionMaterialMenu.Clear();
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = _latestSnapshot;
         foreach (var material in MaterialCatalog.Supporting(MaterialUse.Construction)
                      .Where(material => material.MaterialType == materialType &&
                          material.Variant is not null)
@@ -3271,9 +3273,15 @@ public partial class Main : Node
             _inspector.Text = _workMode switch
             {
                 WorkMode.MineRock => $"Planowany obszar tunelu: {cells.Count} pól; nieznane komórki będą rozstrzygane wraz z odsłanianiem.",
+                WorkMode.CarveRampDown or WorkMode.CarveRampUp
+                    when cells.Count == 0 && _engine.World.TryGetRampDestinationFluid(
+                        candidates[0],
+                        _workMode == WorkMode.CarveRampDown,
+                        out var fluid) =>
+                    $"Nie można wykopać pochylni: po drugiej stronie jest {DescribeFluid(fluid)}.",
                 WorkMode.CarveRampDown or WorkMode.CarveRampUp => cells.Count == 1
                     ? "Pochylnia połączy tę komórkę z sąsiednim poziomem."
-                    : "Tu nie można wykopać pochylni: potrzebna jest wolna podłoga i pełna skała po drugiej stronie.",
+                    : "Tu nie można wykopać pochylni: potrzebna jest wolna podłoga oraz skała albo sucha jaskinia po drugiej stronie.",
                 _ when behavior == WorkAreaSelectionBehavior.FilterTargets =>
                     $"Zaznaczanie pracy: filtr znalazł {cells.Count} pasujących celów.",
                 _ => $"Zaznaczanie pracy: {cells.Count} pasujących pól.",
@@ -3662,6 +3670,7 @@ public partial class Main : Node
         var workEvent = events.LastOrDefault(item =>
             item.Kind is SimulationEventKind.WorkDesignationCreated or
                 SimulationEventKind.WorkDesignationRemoved or
+                SimulationEventKind.MiningHazardDiscovered or
                 SimulationEventKind.StoragePullConfigured or
                 SimulationEventKind.StorageHaulerConfigured or
                 SimulationEventKind.StorageSourceConfigured or
@@ -3691,6 +3700,11 @@ public partial class Main : Node
         else if (workEvent.Kind == SimulationEventKind.WorkDesignationRemoved)
         {
             _inspector.Text = "Cel pracy został zakończony lub usunięty.";
+        }
+        else if (workEvent.Kind == SimulationEventKind.MiningHazardDiscovered)
+        {
+            _inspector.Text =
+                $"Wstrzymano front tunelu: za ścianą odkryto {DescribeFluid((CellFluidKind)workEvent.Amount)}.";
         }
         else if (workEvent.Kind is SimulationEventKind.StoragePullConfigured or
                  SimulationEventKind.StorageHaulerConfigured or
@@ -4258,7 +4272,8 @@ public partial class Main : Node
                     FoodKind.None,
                     material.Variant))} " +
             $"{material.DeliveredQuantity}/{material.RequiredQuantity}"));
-        return $"{DescribeCraftingRecipe(order.Recipe)} • {materials} • praca " +
+        return $"{(order.IsRepeating ? "∞ " : string.Empty)}" +
+            $"{DescribeCraftingRecipe(order.Recipe)} • {materials} • praca " +
             $"{order.TotalWorkTicks - order.RemainingWorkTicks}/" +
             order.TotalWorkTicks;
     }
@@ -4700,26 +4715,25 @@ public partial class Main : Node
 
     private void ShowStoredResources()
     {
-        UpdateStoredResources(_engine.CreateSnapshot(), force: true);
+        UpdateStoredResources(_latestSnapshot);
         _storedResourcesWindow.Popup();
     }
 
     private void ShowLooseResources()
     {
-        UpdateLooseResources(_engine.CreateSnapshot(), force: true);
+        UpdateLooseResources(_latestSnapshot);
         _looseResourcesWindow.Popup();
     }
 
     private void ShowGoblinRoster()
     {
-        UpdateGoblinRoster(_engine.CreateSnapshot(), force: true);
+        UpdateGoblinRoster(_latestSnapshot, force: true);
         _goblinRosterWindow.Popup();
     }
 
     private void ShowStatistics()
     {
-        var snapshot = _engine.CreateSnapshot();
-        UpdateStatistics(snapshot);
+        UpdateStatistics(_latestSnapshot);
         _statisticsWindow.Popup();
     }
 
@@ -4753,9 +4767,10 @@ public partial class Main : Node
 
     private void UpdateStoredResources(SimulationSnapshot snapshot, bool force = false)
     {
+        var breakdown = CreateResourceBreakdown(snapshot, ItemLocationKind.StorageZone);
         var signature = string.Join('|', snapshot.ResourceInventory.Select(item =>
             $"{(int)item.Resource}:{item.StoredQuantity}")) +
-            CreateResourceBreakdownSignature(snapshot, ItemLocationKind.StorageZone) +
+            CreateResourceBreakdownSignature(breakdown) +
             $"|detailed:{_storedResourcesDetailed.ButtonPressed}";
         if (!force && signature == _storedResourcesSignature)
         {
@@ -4770,16 +4785,17 @@ public partial class Main : Node
             _storedResourcesGrid,
             snapshot,
             item => item.StoredQuantity,
-            ItemLocationKind.StorageZone,
+            breakdown,
             "w magazynach",
             _storedResourcesDetailed.ButtonPressed);
     }
 
     private void UpdateLooseResources(SimulationSnapshot snapshot, bool force = false)
     {
+        var breakdown = CreateResourceBreakdown(snapshot, ItemLocationKind.Ground);
         var signature = string.Join('|', snapshot.ResourceInventory.Select(item =>
             $"{(int)item.Resource}:{item.KnownLooseQuantity}")) +
-            CreateResourceBreakdownSignature(snapshot, ItemLocationKind.Ground) +
+            CreateResourceBreakdownSignature(breakdown) +
             $"|detailed:{_looseResourcesDetailed.ButtonPressed}";
         if (!force && signature == _looseResourcesSignature)
         {
@@ -4794,7 +4810,7 @@ public partial class Main : Node
             _looseResourcesGrid,
             snapshot,
             item => item.KnownLooseQuantity,
-            ItemLocationKind.Ground,
+            breakdown,
             "na ziemi",
             _looseResourcesDetailed.ButtonPressed);
     }
@@ -4803,7 +4819,7 @@ public partial class Main : Node
         GridContainer grid,
         SimulationSnapshot snapshot,
         Func<ResourceInventorySnapshot, int> quantitySelector,
-        ItemLocationKind locationKind,
+        IReadOnlyList<ResourceBreakdownTotal> breakdown,
         string location,
         bool detailed)
     {
@@ -4861,24 +4877,19 @@ public partial class Main : Node
 
         if (detailed)
         {
-            foreach (var group in GetVisibleResourceStacks(snapshot, locationKind)
-                .GroupBy(stack => (stack.Resource, stack.FoodKind, stack.Variant))
-                .OrderBy(group => group.Key.Resource)
-                .ThenBy(group => group.Key.FoodKind)
-                .ThenBy(group => group.Key.Variant))
+            foreach (var total in breakdown)
             {
-                var quantity = group.Sum(stack => stack.Quantity);
-                var name = group.Key.Resource == ResourceKind.Food
-                    ? DescribeFood(group.Key.FoodKind)
-                    : group.Key.Variant != ResourceVariant.None
-                        ? DescribeResourceVariant(group.Key.Variant)
-                        : DescribeResource(group.Key.Resource);
+                var name = total.Resource == ResourceKind.Food
+                    ? DescribeFood(total.FoodKind)
+                    : total.Variant != ResourceVariant.None
+                        ? DescribeResourceVariant(total.Variant)
+                        : DescribeResource(total.Resource);
                 AddTile(
-                    group.Key.Resource,
-                    group.Key.FoodKind,
-                    group.Key.Variant,
-                    quantity,
-                    $"{name}: {quantity:N0} szt. {location}");
+                    total.Resource,
+                    total.FoodKind,
+                    total.Variant,
+                    total.Quantity,
+                    $"{name}: {total.Quantity:N0} szt. {location}");
             }
             return;
         }
@@ -4892,60 +4903,78 @@ public partial class Main : Node
                 ResourceVariant.None,
                 quantity,
                 DescribeResourceOverviewTooltip(
-                    snapshot,
                     item,
                     quantity,
-                    locationKind,
+                    breakdown,
                     location));
         }
     }
 
-    private string CreateResourceBreakdownSignature(
+    private ResourceBreakdownTotal[] CreateResourceBreakdown(
         SimulationSnapshot snapshot,
-        ItemLocationKind locationKind) =>
-        string.Concat(
-            "|types:",
-            string.Join(',', GetVisibleResourceStacks(snapshot, locationKind)
-                .GroupBy(stack => (stack.Resource, stack.FoodKind, stack.Variant))
-                .OrderBy(group => group.Key)
-                .Select(group =>
-                    $"{(int)group.Key.Resource}:{(int)group.Key.FoodKind}:" +
-                    $"{(int)group.Key.Variant}:{group.Sum(stack => stack.Quantity)}")));
+        ItemLocationKind locationKind)
+    {
+        var totals = new Dictionary<(ResourceKind Resource, FoodKind FoodKind, ResourceVariant Variant), int>();
+        foreach (var stack in snapshot.ItemStacks)
+        {
+            if (stack.Location.Kind != locationKind ||
+                (locationKind == ItemLocationKind.Ground &&
+                 !snapshot.GetVisibility(stack.Location.Position, _engine.Map.Width).IsDiscovered()))
+            {
+                continue;
+            }
+
+            var key = (stack.Resource, stack.FoodKind, stack.Variant);
+            totals[key] = totals.GetValueOrDefault(key) + stack.Quantity;
+        }
+
+        return totals
+            .OrderBy(pair => pair.Key.Resource)
+            .ThenBy(pair => pair.Key.FoodKind)
+            .ThenBy(pair => pair.Key.Variant)
+            .Select(pair => new ResourceBreakdownTotal(
+                pair.Key.Resource,
+                pair.Key.FoodKind,
+                pair.Key.Variant,
+                pair.Value))
+            .ToArray();
+    }
+
+    private static string CreateResourceBreakdownSignature(
+        IReadOnlyList<ResourceBreakdownTotal> breakdown) =>
+        string.Concat("|types:", string.Join(',', breakdown.Select(total =>
+            $"{(int)total.Resource}:{(int)total.FoodKind}:" +
+            $"{(int)total.Variant}:{total.Quantity}")));
 
     private string DescribeResourceOverviewTooltip(
-        SimulationSnapshot snapshot,
         ResourceInventorySnapshot item,
         int quantity,
-        ItemLocationKind locationKind,
+        IReadOnlyList<ResourceBreakdownTotal> breakdown,
         string location)
     {
         var tooltip = $"{DescribeResource(item.Resource)}: {quantity:N0} szt. {location}";
-        var breakdown = GetVisibleResourceStacks(snapshot, locationKind)
-            .Where(stack => stack.Resource == item.Resource)
-            .GroupBy(stack => (stack.FoodKind, stack.Variant))
-            .OrderBy(group => group.Key)
-            .Select(group =>
+        var details = breakdown
+            .Where(total => total.Resource == item.Resource)
+            .Select(total =>
             {
                 var name = item.Resource == ResourceKind.Food
-                    ? DescribeFood(group.Key.FoodKind)
-                    : group.Key.Variant != ResourceVariant.None
-                        ? DescribeResourceVariant(group.Key.Variant)
+                    ? DescribeFood(total.FoodKind)
+                    : total.Variant != ResourceVariant.None
+                        ? DescribeResourceVariant(total.Variant)
                         : DescribeResource(item.Resource);
-                return $"{name}: {group.Sum(stack => stack.Quantity):N0}";
+                return $"{name}: {total.Quantity:N0}";
             })
             .ToArray();
-        return breakdown.Length == 0
+        return details.Length == 0
             ? tooltip
-            : $"{tooltip}\n{string.Join(", ", breakdown)}";
+            : $"{tooltip}\n{string.Join(", ", details)}";
     }
 
-    private IEnumerable<ItemStackSnapshot> GetVisibleResourceStacks(
-        SimulationSnapshot snapshot,
-        ItemLocationKind locationKind) =>
-        snapshot.ItemStacks.Where(stack =>
-            stack.Location.Kind == locationKind &&
-            (locationKind != ItemLocationKind.Ground ||
-             snapshot.GetVisibility(stack.Location.Position, _engine.Map.Width).IsDiscovered()));
+    private readonly record struct ResourceBreakdownTotal(
+        ResourceKind Resource,
+        FoodKind FoodKind,
+        ResourceVariant Variant,
+        int Quantity);
 
     private void UpdateGoblinRoster(SimulationSnapshot snapshot, bool force = false)
     {
@@ -5002,7 +5031,7 @@ public partial class Main : Node
 
     private void FocusGoblinFromRoster(EntityId actorId)
     {
-        var actor = _engine.CreateSnapshot().Actors.FirstOrDefault(actor => actor.Id == actorId);
+        var actor = _latestSnapshot.Actors.FirstOrDefault(actor => actor.Id == actorId);
         if (actor.Id == EntityId.None)
         {
             return;
@@ -5492,7 +5521,7 @@ public partial class Main : Node
 
     private void ApplyStorageSettings()
     {
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = _latestSnapshot;
         var zone = snapshot.StorageZones.FirstOrDefault(item => item.Id == _selectedStorageId);
         if (zone.Id == EntityId.None)
         {
@@ -5633,7 +5662,7 @@ public partial class Main : Node
 
     private void ApplyConstructionSettings()
     {
-        var site = _engine.CreateSnapshot().ConstructionSites
+        var site = _latestSnapshot.ConstructionSites
             .FirstOrDefault(item => item.Id == _selectedConstructionId);
         if (site is null)
         {
@@ -6029,7 +6058,7 @@ public partial class Main : Node
             _visibleLevel = 0;
             _worldView.SetVisibleLevel(0);
             _minimap.SetVisibleLevel(0);
-            _worldView3D.Refresh(_engine.CreateSnapshot());
+            _worldView3D.Refresh(_latestSnapshot);
             _viewModeButton.Text = "2D";
             _viewModeButton.TooltipText = "Wróć do stabilnego renderera 2D • F3";
             Update3DCameraControls();
@@ -6039,7 +6068,7 @@ public partial class Main : Node
         }
         else
         {
-            _worldView.Refresh(_engine.CreateSnapshot());
+            _worldView.Refresh(_latestSnapshot);
             _viewModeButton.Text = "3D";
             _viewModeButton.TooltipText = "Włącz prototypowy renderer 3D • F3";
             _inspector.Text = "Renderer 2D przywrócony.";
@@ -6342,25 +6371,25 @@ public partial class Main : Node
             "Drewniany zasobnik masowy",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 3),
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 2));
-        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltIronBar,
+        AddRepeatableWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltIronBar,
             CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.IronBar),
             "Sztabka żelaza",
             (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.IronOre),
                 "Ruda żelaza", 2),
             (CreateResourceThumbnail(ResourceKind.Coal), "Węgiel", 1));
-        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltCopperBar,
+        AddRepeatableWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltCopperBar,
             CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.CopperBar),
             "Sztabka miedzi",
             (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.CopperOre),
                 "Ruda miedzi", 2),
             (CreateResourceThumbnail(ResourceKind.Coal), "Węgiel", 1));
-        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltSilverBar,
+        AddRepeatableWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltSilverBar,
             CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.SilverBar),
             "Sztabka srebra",
             (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.SilverOre),
                 "Ruda srebra", 2),
             (CreateResourceThumbnail(ResourceKind.Coal), "Węgiel", 1));
-        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltGoldBar,
+        AddRepeatableWorkshopRecipeButton(recipes, CraftingRecipeKind.SmeltGoldBar,
             CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.GoldBar),
             "Sztabka złota",
             (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.GoldOre),
@@ -6391,7 +6420,36 @@ public partial class Main : Node
         CraftingRecipeKind recipe,
         Texture2D productIcon,
         string name,
-        params (Texture2D Icon, string Name, int Quantity)[] ingredients)
+        params (Texture2D Icon, string Name, int Quantity)[] ingredients) =>
+        AddWorkshopRecipeRow(
+            recipes,
+            recipe,
+            productIcon,
+            name,
+            supportsRepeating: false,
+            ingredients);
+
+    private void AddRepeatableWorkshopRecipeButton(
+        VBoxContainer recipes,
+        CraftingRecipeKind recipe,
+        Texture2D productIcon,
+        string name,
+        params (Texture2D Icon, string Name, int Quantity)[] ingredients) =>
+        AddWorkshopRecipeRow(
+            recipes,
+            recipe,
+            productIcon,
+            name,
+            supportsRepeating: true,
+            ingredients);
+
+    private void AddWorkshopRecipeRow(
+        VBoxContainer recipes,
+        CraftingRecipeKind recipe,
+        Texture2D productIcon,
+        string name,
+        bool supportsRepeating,
+        IReadOnlyList<(Texture2D Icon, string Name, int Quantity)> ingredients)
     {
         var row = new HBoxContainer
         {
@@ -6409,6 +6467,20 @@ public partial class Main : Node
         };
         button.Pressed += () => QueueWorkshopRecipe(recipe);
         row.AddChild(button);
+        if (supportsRepeating)
+        {
+            var repeat = new Button
+            {
+                Text = "∞",
+                ToggleMode = true,
+                FocusMode = Control.FocusModeEnum.None,
+                CustomMinimumSize = new Vector2(38, 38),
+                TooltipText = $"Powtarzaj bez końca: {name.ToLowerInvariant()}",
+            };
+            repeat.Toggled += enabled => ConfigureWorkshopRecipeRepeat(recipe, enabled);
+            row.AddChild(repeat);
+            _workshopRepeatButtons.Add(recipe, repeat);
+        }
         var productName = new Label
         {
             Text = name,
@@ -6501,6 +6573,34 @@ public partial class Main : Node
             (_speed == 0 ? " • zlecenie ruszy po wznowieniu czasu." : ".");
     }
 
+    private void ConfigureWorkshopRecipeRepeat(CraftingRecipeKind recipe, bool enabled)
+    {
+        if (_updatingWorkshopRepeatButtons)
+        {
+            return;
+        }
+        if (_selectedWorkshop is not { } workshop ||
+            !_engine.World.TryGetWorkshopKind(workshop, out var workshopKind) ||
+            !WorkshopCatalog.Get(workshopKind).SupportsRecipe(
+                recipe,
+                CraftingRecipeCatalog.GetRecipeLevel(recipe)))
+        {
+            return;
+        }
+
+        _engine.QueueCommand(SimulationCommand.ConfigureRepeatingCraftingRecipe(
+            _engine.CurrentTick.Next(),
+            _commandSequence++,
+            workshop,
+            recipe,
+            enabled));
+        _inspector.Text = enabled
+            ? $"Warsztat {workshop}: włączono ciągłe wykonywanie: " +
+              $"{DescribeCraftingRecipe(recipe)}."
+            : $"Warsztat {workshop}: wyłączono ciągłe wykonywanie: " +
+              $"{DescribeCraftingRecipe(recipe)}.";
+    }
+
     private void UpdateWorkshopDetails(SimulationSnapshot snapshot)
     {
         if (_selectedWorkshop is not { } workshop ||
@@ -6523,6 +6623,16 @@ public partial class Main : Node
             .Where(order => order.Workshop == workshop)
             .OrderBy(order => order.Id)
             .ToArray();
+        var repeatingRecipes = orders
+            .Where(order => order.IsRepeating)
+            .Select(order => order.Recipe)
+            .ToHashSet();
+        _updatingWorkshopRepeatButtons = true;
+        foreach (var (recipe, button) in _workshopRepeatButtons)
+        {
+            button.ButtonPressed = repeatingRecipes.Contains(recipe);
+        }
+        _updatingWorkshopRepeatButtons = false;
         var stocks = new[]
         {
             ResourceKind.Wood, ResourceKind.Stone, ResourceKind.Reeds,
@@ -6601,7 +6711,7 @@ public partial class Main : Node
     private void ShowLogistics()
     {
         _managementMenu.Hide();
-        UpdateLogisticsWindow(_engine.CreateSnapshot(), force: true);
+        UpdateLogisticsWindow(_latestSnapshot, force: true);
         _logisticsWindow.PopupCentered();
     }
 
@@ -6942,7 +7052,7 @@ public partial class Main : Node
 
     private void ShowPlanner()
     {
-        UpdatePlanner(_engine.CreateSnapshot(), force: true);
+        UpdatePlanner(_latestSnapshot, force: true);
         _plannerWindow.PopupCentered();
     }
 
@@ -7313,6 +7423,13 @@ public partial class Main : Node
         WorkDesignationKind.HuntAnimal => "polowanie",
         WorkDesignationKind.CleanBlood => "sprzątanie krwi",
         _ => "praca",
+    };
+
+    private static string DescribeFluid(CellFluidKind fluid) => fluid switch
+    {
+        CellFluidKind.Water => "wodę",
+        CellFluidKind.Lava => "lawę",
+        _ => "niebezpieczny płyn",
     };
 
     private void CreateWorldContextMenu()
@@ -8510,7 +8627,7 @@ public partial class Main : Node
 
     private void ShowRaidWindow(GridPosition? rallyPoint)
     {
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = _latestSnapshot;
         _raidDraftRallyPoint = rallyPoint;
         _raidEngagement.Select(snapshot.RaidPlan.Has(RaidDirective.AttackAll) ? 1 : 0);
         _raidCorpseHandling.Select(snapshot.RaidPlan.Has(RaidDirective.BudCorpsesInPlace)
@@ -8604,7 +8721,7 @@ public partial class Main : Node
 
     private void AutoAssignRaidDraft()
     {
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = _latestSnapshot;
         var selected = RaidAutoAssignmentPolicy.Select(
             snapshot.Actors,
             SimulationDefinitions.FieldCampCapacity);
@@ -8648,7 +8765,7 @@ public partial class Main : Node
         {
             _raidDraftIds.Remove(actorId);
         }
-        UpdateRaidWindowSummary(_engine.CreateSnapshot());
+        UpdateRaidWindowSummary(_latestSnapshot);
     }
 
     private void UpdateRaidWindowSummary(SimulationSnapshot snapshot)
@@ -8741,7 +8858,7 @@ public partial class Main : Node
 
     private void StartSelectedRaid()
     {
-        var snapshot = _engine.CreateSnapshot();
+        var snapshot = _latestSnapshot;
         if (snapshot.RaidPhase is GoblinRaidPhase.Marching or
             GoblinRaidPhase.Looting or GoblinRaidPhase.Returning ||
             snapshot.HumanVillage.GoblinAttackOrdered)
@@ -8843,7 +8960,7 @@ public partial class Main : Node
             return;
         }
 
-        var snapshot = _engine.CreatePresentationSnapshot();
+        var snapshot = _latestSnapshot;
         var minimumSurfaceFloor = Enumerable.Range(0, _engine.Map.CellCount)
             .Select(index => _engine.Map.GetCell(new GridPosition(
                 index % _engine.Map.Width,
@@ -8959,7 +9076,7 @@ public partial class Main : Node
 
     private void UpdateStatus(SimulationSnapshot? currentSnapshot = null)
     {
-        var snapshot = currentSnapshot ?? _engine.CreatePresentationSnapshot();
+        var snapshot = currentSnapshot ?? _latestSnapshot;
         UpdateCalendar(snapshot);
         UpdateOverviewWindows(snapshot);
         if (_selectedActorId != EntityId.None &&

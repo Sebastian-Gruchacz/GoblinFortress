@@ -740,6 +740,8 @@ internal sealed class CraftingOrderSaveModel
     public List<CraftingDeliveredMaterialSaveModel> DeliveredMaterials { get; set; } = [];
 
     public int RemainingWorkTicks { get; set; }
+
+    public bool IsRepeating { get; set; }
 }
 
 internal sealed class CraftingDeliveredMaterialSaveModel

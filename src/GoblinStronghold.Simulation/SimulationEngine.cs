@@ -1219,6 +1219,7 @@ public sealed partial class SimulationEngine
                             Quantity = material.Quantity,
                         }).ToList(),
                     RemainingWorkTicks = order.RemainingWorkTicks,
+                    IsRepeating = order.IsRepeating,
                 }).ToList(),
             WorkDesignations = _workDesignations.Values.Select(designation =>
                 new WorkDesignationSaveModel
@@ -1700,6 +1701,7 @@ public sealed partial class SimulationEngine
                 Append(canonical, material.Quantity);
             }
             Append(canonical, order.RemainingWorkTicks);
+            Append(canonical, order.IsRepeating ? 1 : 0);
         }
 
         Append(canonical, _pendingCommands.Count);
@@ -2321,7 +2323,8 @@ public sealed partial class SimulationEngine
                         model.Recipe,
                         workshop,
                         deliveredMaterials,
-                        model.RemainingWorkTicks)))
+                        model.RemainingWorkTicks,
+                        model.IsRepeating)))
             {
                 throw new InvalidDataException("The save contains an invalid crafting order.");
             }
@@ -2429,7 +2432,8 @@ public sealed partial class SimulationEngine
                 WorkDesignationKind.MineRock =>
                     Visibility.Get(designation.Target) == CellVisibility.Unknown ||
                     World.IsSolidRock(designation.Target) ||
-                    World.IsTerrainRampIntact(designation.Target),
+                    World.IsTerrainRampIntact(designation.Target) ||
+                    World.TryGetFluid(designation.Target, out _, out _),
                 WorkDesignationKind.CarveRampDown => World.CanCarveRampDown(designation.Target),
                 WorkDesignationKind.CarveRampUp => World.CanCarveRampUp(designation.Target),
                 WorkDesignationKind.Scout => designation.Target.Z == 0 &&
@@ -2774,11 +2778,37 @@ public sealed partial class SimulationEngine
         }
 
         Visibility.Reveal(observers, World.IsSolidHillRock);
+        RemoveMiningDesignationsBlockedByRevealedFluid();
         foreach (var actor in _actors.Values.Where(actor =>
                      actor.JobKind == ActorJobKind.Explore &&
                      Visibility.Get(actor.JobTarget) != CellVisibility.Unknown))
         {
             actor.ClearJob();
+        }
+    }
+
+    private void RemoveMiningDesignationsBlockedByRevealedFluid()
+    {
+        var blocked = _workDesignations.Values
+            .Where(designation =>
+                designation.Kind == WorkDesignationKind.MineRock &&
+                Visibility.Get(designation.Target).IsDiscovered() &&
+                !World.IsSolidRock(designation.Target) &&
+                !World.IsTerrainRampIntact(designation.Target) &&
+                World.TryGetFluid(designation.Target, out _, out _) &&
+                World.GetCardinalWorldNeighbors(designation.Target)
+                    .Any(World.IsTerrainTraversable))
+            .ToArray();
+        CancelActorsForDesignations(blocked);
+        foreach (var designation in blocked)
+        {
+            World.TryGetFluid(designation.Target, out var fluid, out _);
+            _workDesignations.Remove(designation.Id);
+            Publish(
+                SimulationEventKind.MiningHazardDiscovered,
+                EntityId.None,
+                designation.Id,
+                (int)fluid);
         }
     }
 
@@ -2881,6 +2911,8 @@ public sealed partial class SimulationEngine
             command, ActorTacticalOrderKind.HuntArea),
         SimulationCommandKind.ToggleWoodenDoor => TryExecuteToggleWoodenDoor(command),
         SimulationCommandKind.QueueCraftingOrder => TryExecuteQueueCraftingOrder(command),
+        SimulationCommandKind.ConfigureRepeatingCraftingOrder =>
+            TryExecuteConfigureRepeatingCraftingOrder(command),
         _ => false,
     };
 
@@ -3081,15 +3113,48 @@ public sealed partial class SimulationEngine
     private bool TryExecuteQueueCraftingOrder(SimulationCommand command)
     {
         var recipe = (CraftingRecipeKind)command.Amount;
+        return Enum.IsDefined(recipe) && TryCreateCraftingOrder(
+            command.Position,
+            recipe,
+            isRepeating: false);
+    }
+
+    private bool TryExecuteConfigureRepeatingCraftingOrder(SimulationCommand command)
+    {
+        var enabled = command.Amount > 0;
+        var recipe = (CraftingRecipeKind)Math.Abs(command.Amount);
         if (!Enum.IsDefined(recipe))
         {
             return false;
         }
 
+        var existing = _craftingOrders.Values.FirstOrDefault(order =>
+            order.Workshop == command.Position &&
+            order.Recipe == recipe &&
+            order.IsRepeating);
+        if (!enabled)
+        {
+            if (existing is not null)
+            {
+                CancelCraftingOrder(existing);
+            }
+            return true;
+        }
+        return existing is not null || TryCreateCraftingOrder(
+            command.Position,
+            recipe,
+            isRepeating: true);
+    }
+
+    private bool TryCreateCraftingOrder(
+        GridPosition position,
+        CraftingRecipeKind recipe,
+        bool isRepeating)
+    {
         var recipeDefinition = CraftingRecipeCatalog.Get(recipe);
         var workshop = WorkshopCatalog.Get(recipeDefinition.Workshop);
         if (!workshop.SupportsRecipe(recipe, CraftingRecipeCatalog.GetRecipeLevel(recipe)) ||
-            !World.HasWorkshop(command.Position, recipeDefinition.Workshop))
+            !World.HasWorkshop(position, recipeDefinition.Workshop))
         {
             return false;
         }
@@ -3098,12 +3163,36 @@ public sealed partial class SimulationEngine
         var order = new CraftingOrderState(
             id,
             recipe,
-            command.Position,
+            position,
             deliveredMaterials: [],
-            CraftingRecipeCatalog.GetWorkTicks(recipe));
+            CraftingRecipeCatalog.GetWorkTicks(recipe),
+            isRepeating);
         _craftingOrders.Add(id, order);
-        Publish(SimulationEventKind.CraftingOrdered, EntityId.None, id, command.Amount);
+        Publish(SimulationEventKind.CraftingOrdered, EntityId.None, id, (int)recipe);
         return true;
+    }
+
+    private void CancelCraftingOrder(CraftingOrderState order)
+    {
+        foreach (var actor in _actors.Values.Where(actor =>
+                     actor.DestinationZoneId == order.Id &&
+                     actor.JobKind is ActorJobKind.SupplyCrafting or ActorJobKind.Craft))
+        {
+            if (actor.CarriedStackId != EntityId.None)
+            {
+                DropCarriedStack(actor);
+            }
+            actor.ClearJob();
+        }
+        foreach (var material in order.DeliveredMaterials)
+        {
+            AddGroundStack(
+                material.Resource,
+                material.Quantity,
+                order.Workshop,
+                material.Variant);
+        }
+        _craftingOrders.Remove(order.Id);
     }
 
     private bool TryExecuteToggleWoodenDoor(SimulationCommand command)
@@ -6049,6 +6138,16 @@ public sealed partial class SimulationEngine
                     !Enum.IsDefined((CraftingRecipeKind)command.Amount))
                 {
                     throw new ArgumentException("Crafting-order command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.ConfigureRepeatingCraftingOrder:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    command.Position != command.EndPosition ||
+                    command.Resource != ResourceKind.Any || command.Amount == 0 ||
+                    !Enum.IsDefined((CraftingRecipeKind)Math.Abs(command.Amount)))
+                {
+                    throw new ArgumentException(
+                        "Repeating crafting-order command is invalid.", nameof(command));
                 }
                 break;
         }

@@ -647,11 +647,34 @@ public sealed class SimulationSnapshot
 
     public int VisibilityNegativeLevelCount { get; }
 
-    public CellVisibility GetVisibility(GridPosition position, int mapWidth) =>
-        Visibility[checked(
-            ((position.Z <= 0 ? -position.Z : VisibilityNegativeLevelCount + position.Z) *
-             VisibilityLayerCellCount) +
+    public CellVisibility GetVisibility(GridPosition position, int mapWidth)
+    {
+        if (mapWidth <= 0 || VisibilityLayerCellCount <= 0 ||
+            VisibilityLayerCellCount % mapWidth != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(mapWidth));
+        }
+
+        var mapHeight = VisibilityLayerCellCount / mapWidth;
+        if (position.X < 0 || position.X >= mapWidth ||
+            position.Y < 0 || position.Y >= mapHeight)
+        {
+            throw new ArgumentOutOfRangeException(nameof(position));
+        }
+
+        var layerIndex = position.Z <= 0
+            ? -(long)position.Z
+            : (long)VisibilityNegativeLevelCount + position.Z;
+        var layerCount = Visibility.Count / VisibilityLayerCellCount;
+        if (layerIndex < 0 || layerIndex >= layerCount)
+        {
+            return CellVisibility.Unknown;
+        }
+
+        return Visibility[checked(
+            ((int)layerIndex * VisibilityLayerCellCount) +
             (position.Y * mapWidth) + position.X)];
+    }
 
     public ulong WorldVersion { get; }
 

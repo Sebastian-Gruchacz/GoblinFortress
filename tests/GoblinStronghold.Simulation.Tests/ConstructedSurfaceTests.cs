@@ -27,6 +27,84 @@ public sealed class ConstructedSurfaceTests
     }
 
     [Fact]
+    public void FloorCanCoverNaturalAndExcavatedCaveGround()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var natural = EnumerateWorldPositions(engine)
+            .First(position =>
+                engine.Map.TryGetInitialGeometry(position, out var geometry) &&
+                geometry.Support == CellSupportKind.NaturalFlat &&
+                geometry.Fluid == CellFluidKind.None &&
+                engine.World.IsTerrainTraversable(position) &&
+                engine.World.CanBuildFloors([position]));
+        engine.World.BuildFloor(
+            natural,
+            new SimulationTick(1),
+            stone: false,
+            ResourceVariant.OakWood);
+
+        var excavated = EnumerateWorldPositions(engine)
+            .First(engine.World.CanExcavateRock);
+        Assert.True(engine.World.TryExcavateRock(
+            excavated,
+            new SimulationTick(2),
+            out _,
+            out _,
+            out _));
+        Assert.True(engine.World.CanBuildFloors([excavated]));
+        engine.World.BuildFloor(
+            excavated,
+            new SimulationTick(3),
+            stone: true,
+            ResourceVariant.Sandstone);
+
+        Assert.Contains(engine.World.GetWorldObjectsAt(natural), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenFloor);
+        Assert.Contains(engine.World.GetWorldObjectsAt(excavated), worldObject =>
+            worldObject.Kind == WorldObjectKind.StoneFloor);
+        Assert.True(engine.World.IsTerrainTraversable(excavated));
+    }
+
+    [Fact]
+    public void ConstructedFloorLetsGoblinTakeItsNextStepSooner()
+    {
+        var floored = CreateEngine(initialWoodStock: 0);
+        var actor = Assert.Single(floored.CreateSnapshot().Actors);
+        var target = EnumerateWorldPositions(floored)
+            .Select(position => new
+            {
+                Position = position,
+                Route = floored.Navigation.FindPath(actor.Position, position),
+            })
+            .First(candidate => candidate.Route is { Count: > 0 } &&
+                floored.World.CanBuildFloors([candidate.Route[0]]));
+        var raw = SimulationEngine.Load(
+            floored.Save(),
+            SimulationDefinitions.Foundation);
+        floored.World.BuildFloor(
+            target.Route![0],
+            new SimulationTick(1),
+            stone: false,
+            ResourceVariant.OakWood);
+        floored.QueueCommand(SimulationCommand.Move(
+            floored.CurrentTick.Next(),
+            floored.NextAvailableCommandSequence,
+            actor.Id,
+            target.Position));
+        raw.QueueCommand(SimulationCommand.Move(
+            raw.CurrentTick.Next(),
+            raw.NextAvailableCommandSequence,
+            actor.Id,
+            target.Position));
+
+        floored.AdvanceTicks(8);
+        raw.AdvanceTicks(8);
+
+        Assert.Equal(target.Route[0], Assert.Single(floored.CreateSnapshot().Actors).Position);
+        Assert.Equal(actor.Position, Assert.Single(raw.CreateSnapshot().Actors).Position);
+    }
+
+    [Fact]
     public void ConstructedRampConnectsLowerAndUpperLevelsAndSurvivesSaveLoad()
     {
         var engine = CreateEngine(initialWoodStock: 0);

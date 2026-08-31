@@ -20,11 +20,7 @@ public sealed class VisibilityTests
     [Fact]
     public void CurrentBuildVisibilityAidIsDisabledForRelease()
     {
-#if DEBUG
-        Assert.True(SimulationDebugSettings.ForCurrentBuild.RevealFogFromNonPlayerUnits);
-#else
         Assert.False(SimulationDebugSettings.ForCurrentBuild.RevealFogFromNonPlayerUnits);
-#endif
     }
 
     [Fact]
@@ -39,6 +35,24 @@ public sealed class VisibilityTests
             snapshot.Visibility.Count(state => state == CellVisibility.Visible),
             1,
             snapshot.Visibility.Count - 1);
+    }
+
+    [Fact]
+    public void OlderSnapshotTreatsNewlyMaterializedLevelAsUnknown()
+    {
+        var engine = CreateEngine();
+        var snapshot = engine.CreateSnapshot();
+        var newLevel = engine.Map.DeepestCaveLevel - 1;
+
+        engine.Map.MaterializeCaveLevel(newLevel);
+
+        var position = engine.Map.GoblinSpawn with { Z = newLevel };
+        Assert.Equal(CellVisibility.Unknown, snapshot.GetVisibility(position, engine.Map.Width));
+        Assert.Equal(
+            CellVisibility.Unknown,
+            engine.CreateSnapshot().GetVisibility(position, engine.Map.Width));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            snapshot.GetVisibility(position with { X = -1 }, engine.Map.Width));
     }
 
     [Fact]

@@ -57,6 +57,7 @@ public enum SimulationCommandKind
     EquipItem = 50,
     PrioritizeItemHauling = 51,
     OrderItemPickup = 52,
+    ConfigureRepeatingCraftingOrder = 53,
 }
 
 public enum DismantleTargetKind : byte
@@ -830,6 +831,24 @@ public readonly record struct SimulationCommand(
             ConstructionKind.PrimitiveWorkshop,
             ResourceKind.Any,
             Amount: (int)recipe);
+
+    public static SimulationCommand ConfigureRepeatingCraftingRecipe(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition workshop,
+        CraftingRecipeKind recipe,
+        bool enabled) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureRepeatingCraftingOrder,
+            EntityId.None,
+            EntityId.None,
+            workshop,
+            workshop,
+            ConstructionKind.PrimitiveWorkshop,
+            ResourceKind.Any,
+            Amount: enabled ? (int)recipe : -(int)recipe);
 
     public static SimulationCommand ToggleWoodenDoor(
         SimulationTick executeAt,

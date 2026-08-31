@@ -21,7 +21,8 @@ public sealed class CraftingOrderSnapshot
         GridPosition workshop,
         IReadOnlyList<CraftingMaterialSnapshot> materials,
         int remainingWorkTicks,
-        int totalWorkTicks)
+        int totalWorkTicks,
+        bool isRepeating)
     {
         Id = id;
         Recipe = recipe;
@@ -29,6 +30,7 @@ public sealed class CraftingOrderSnapshot
         Materials = new ReadOnlyCollection<CraftingMaterialSnapshot>(materials.ToArray());
         RemainingWorkTicks = remainingWorkTicks;
         TotalWorkTicks = totalWorkTicks;
+        IsRepeating = isRepeating;
     }
 
     public EntityId Id { get; }
@@ -43,6 +45,8 @@ public sealed class CraftingOrderSnapshot
 
     public int TotalWorkTicks { get; }
 
+    public bool IsRepeating { get; }
+
     public bool HasAllMaterials => Materials.All(material => material.MissingQuantity == 0);
 }
 
@@ -51,7 +55,8 @@ internal sealed class CraftingOrderState(
     CraftingRecipeKind recipe,
     GridPosition workshop,
     IEnumerable<CraftingDeliveredMaterialState> deliveredMaterials,
-    int remainingWorkTicks)
+    int remainingWorkTicks,
+    bool isRepeating = false)
 {
     private readonly SortedDictionary<(ResourceKind Resource, ResourceVariant Variant), int>
         _deliveredMaterials = CreateDeliveredMaterials(deliveredMaterials);
@@ -63,6 +68,8 @@ internal sealed class CraftingOrderState(
     public GridPosition Workshop { get; } = workshop;
 
     public int RemainingWorkTicks { get; set; } = remainingWorkTicks;
+
+    public bool IsRepeating { get; } = isRepeating;
 
     public int TotalWorkTicks => CraftingRecipeCatalog.GetWorkTicks(Recipe);
 
@@ -107,6 +114,12 @@ internal sealed class CraftingOrderState(
     public bool HasAllMaterials => CraftingRecipeCatalog.Get(Recipe).Materials
         .All(material => GetMissing(material) == 0);
 
+    public void ResetForNextCycle()
+    {
+        _deliveredMaterials.Clear();
+        RemainingWorkTicks = TotalWorkTicks;
+    }
+
     public CraftingOrderSnapshot ToSnapshot() => new(
         Id,
         Recipe,
@@ -119,7 +132,8 @@ internal sealed class CraftingOrderState(
                 GetDelivered(material)))
             .ToArray(),
         RemainingWorkTicks,
-        TotalWorkTicks);
+        TotalWorkTicks,
+        IsRepeating);
 
     private static SortedDictionary<(ResourceKind, ResourceVariant), int>
         CreateDeliveredMaterials(IEnumerable<CraftingDeliveredMaterialState> materials)

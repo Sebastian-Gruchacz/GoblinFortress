@@ -131,6 +131,50 @@ public sealed class DeepGeologyTests
     }
 
     [Fact]
+    public void RevealedLavaStopsOnlyItsMiningSegmentAndRaisesWarning()
+    {
+        var seed = new WorldSeed(0x4C4156415741524EUL);
+        var map = MaterializeToDepth(seed, depth: 12);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 30);
+        var lava =
+            (from y in Enumerable.Range(0, map.Height)
+             from x in Enumerable.Range(0, map.Width)
+             let position = new GridPosition(x, y, -12)
+             where map.GetCaveCell(position).Fluid == CellFluidKind.Lava &&
+                   engine.World.GetCardinalWorldNeighbors(position)
+                       .Any(engine.World.IsTerrainTraversable)
+             select position).First();
+        var dryRock = FindCell(map, depth: 12, cell =>
+            cell.Kind == CaveCellKind.SolidRock && cell.Fluid == CellFluidKind.None);
+
+        engine.ApplyCommandImmediately(SimulationCommand.DesignateRockMining(
+            engine.CurrentTick,
+            sequence: 1,
+            lava,
+            lava));
+        engine.ApplyCommandImmediately(SimulationCommand.DesignateRockMining(
+            engine.CurrentTick,
+            sequence: 2,
+            dryRock,
+            dryRock));
+        Assert.Equal(2, engine.CreateSnapshot().WorkDesignations.Count);
+
+        engine.Visibility.Reveal([lava], radius: 1);
+        engine.AdvanceTicks(1);
+
+        var remaining = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(dryRock, remaining.Target);
+        var warning = Assert.Single(engine.DrainEvents().Where(item =>
+            item.Kind == SimulationEventKind.MiningHazardDiscovered));
+        Assert.Equal((int)CellFluidKind.Lava, warning.Amount);
+    }
+
+    [Fact]
     public void DeepLayersContainHardRockPreciousOreAndGemsDeterministically()
     {
         var seed = new WorldSeed(0x47454F4C4F4759UL);

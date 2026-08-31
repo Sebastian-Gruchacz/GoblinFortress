@@ -942,12 +942,21 @@ public sealed class WorldMapState
             positions.Distinct().Count() == positions.Count &&
             positions.All(position =>
                 Baseline.TryGetInitialGeometry(position, out var geometry) &&
-                !geometry.IsSolid &&
-                geometry.Support != CellSupportKind.NaturalRamp &&
-                geometry.Fluid == CellFluidKind.None &&
+                !IsSolidRock(position) &&
+                !IsTerrainRampIntact(position) &&
+                (geometry.Support != CellSupportKind.NaturalRamp ||
+                 _excavatedTerrainRamps.Contains(position)) &&
+                !TryGetFluid(position, out _, out _) &&
                 !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Surface, out _) &&
                 !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _));
     }
+
+    public bool HasConstructedFloorSurface(GridPosition position) =>
+        TryGetOccupancyClaim(
+            position,
+            SpatialOccupancyChannel.Surface,
+            out var surfaceClaim) &&
+        surfaceClaim.PartKind == WorldObjectPartKind.Floor;
 
     public bool TryInferBuildRamp(GridPosition lower, out GridPosition upper)
     {
@@ -2218,15 +2227,12 @@ public sealed class WorldMapState
     public bool CanCarveRampDown(GridPosition upper)
     {
         var lower = upper with { Z = upper.Z - 1 };
-        var lowerIsSolidRock = Baseline.IsCavePosition(lower)
-            ? IsSolidCaveRock(lower)
-            : lower.Z == Baseline.DeepestCaveLevel - 1 &&
-              Baseline.GetNextCaveLevelCell(lower).Kind == CaveCellKind.SolidRock;
         return IsTerrainTraversable(upper) &&
-            lowerIsSolidRock &&
+            CanOpenCaveLevelForRamp(lower) &&
             !HasVerticalPassageAt(upper) &&
             !HasVerticalPassageAt(lower) &&
-            GetWorldObjectsAt(upper).Count == 0;
+            GetWorldObjectsAt(upper).Count == 0 &&
+            GetWorldObjectsAt(lower).Count == 0;
     }
 
     public bool CanCarveRampUp(GridPosition lower)
@@ -2234,7 +2240,7 @@ public sealed class WorldMapState
         var upper = lower with { Z = lower.Z + 1 };
         var upperCanBeOpened = upper.Z == 0
             ? IsTerrainTraversable(upper)
-            : IsSolidCaveRock(upper);
+            : CanOpenCaveLevelForRamp(upper);
         return lower.Z < 0 &&
             IsTerrainTraversable(lower) &&
             upperCanBeOpened &&
@@ -2242,6 +2248,52 @@ public sealed class WorldMapState
             !HasVerticalPassageAt(upper) &&
             GetWorldObjectsAt(lower).Count == 0 &&
             (upper.Z < 0 || GetWorldObjectsAt(upper).Count == 0);
+    }
+
+    private bool CanOpenCaveLevelForRamp(GridPosition position)
+    {
+        if (Baseline.IsCavePosition(position))
+        {
+            return IsSolidCaveRock(position) || IsTerrainTraversable(position);
+        }
+
+        if (position.Z != Baseline.DeepestCaveLevel - 1 || !Baseline.IsColumnWithin(position))
+        {
+            return false;
+        }
+
+        var cell = Baseline.GetNextCaveLevelCell(position);
+        return cell.Kind == CaveCellKind.SolidRock ||
+            cell.IsOpen && cell.Fluid == CellFluidKind.None;
+    }
+
+    public bool TryGetRampDestinationFluid(
+        GridPosition origin,
+        bool carveDown,
+        out CellFluidKind fluid)
+    {
+        var destination = origin with { Z = origin.Z + (carveDown ? -1 : 1) };
+        if (Baseline.IsCavePosition(destination))
+        {
+            fluid = Baseline.GetCaveCell(destination).Fluid;
+            return fluid != CellFluidKind.None;
+        }
+
+        if (destination.Z == Baseline.DeepestCaveLevel - 1 &&
+            Baseline.IsColumnWithin(destination))
+        {
+            fluid = Baseline.GetNextCaveLevelCell(destination).Fluid;
+            return fluid != CellFluidKind.None;
+        }
+
+        if (Baseline.TryGetInitialGeometry(destination, out var geometry))
+        {
+            fluid = geometry.Fluid;
+            return fluid != CellFluidKind.None;
+        }
+
+        fluid = CellFluidKind.None;
+        return false;
     }
 
     public CaveCell GetRampExcavationCell(GridPosition origin, bool carveDown)

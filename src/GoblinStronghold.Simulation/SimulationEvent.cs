@@ -70,6 +70,7 @@ public enum SimulationEventKind
     ActorDispatcherSuspended = 67,
     ActorEquippedItem = 68,
     ItemHaulPrioritized = 69,
+    MiningHazardDiscovered = 70,
 }
 
 public readonly record struct SimulationEvent(

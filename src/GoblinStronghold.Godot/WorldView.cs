@@ -3135,6 +3135,11 @@ public partial class WorldView : Node2D
         var visibility = TryGetSnapshotVisibility(position, out var directVisibility)
             ? directVisibility
             : CellVisibility.Unknown;
+        if (position.Z < 0)
+        {
+            return visibility;
+        }
+
         var surfaceLevel = _engine.Map.GetColumnCell(position).SurfaceLevel;
         if (surfaceLevel != position.Z &&
             TryGetSnapshotVisibility(

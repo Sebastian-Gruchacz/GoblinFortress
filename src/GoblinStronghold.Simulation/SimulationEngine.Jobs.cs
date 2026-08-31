@@ -1493,7 +1493,7 @@ public sealed partial class SimulationEngine
                 actor.JobKind = kind;
                 actor.JobTarget = target;
                 actor.SourceStackId = cleaningDesignation.Id;
-                BeginJobLeg(actor, route, BloodCleaningWorkTicks);
+                BeginJobLeg(actor, route, GetBloodCleaningWorkTicks(target));
                 return true;
             case ActorJobKind.FellTree:
                 if (!actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe))
@@ -2297,7 +2297,7 @@ public sealed partial class SimulationEngine
         actor.JobKind = ActorJobKind.CleanBlood;
         actor.JobTarget = best.Designation.Target;
         actor.SourceStackId = best.Designation.Id;
-        BeginJobLeg(actor, best.Route!, BloodCleaningWorkTicks);
+        BeginJobLeg(actor, best.Route!, GetBloodCleaningWorkTicks(best.Designation.Target));
         reservedDesignations.Add(best.Designation.Id);
         return true;
     }
@@ -2358,7 +2358,7 @@ public sealed partial class SimulationEngine
         actor.JobKind = ActorJobKind.CleanBlood;
         actor.JobTarget = best.Position;
         actor.SourceStackId = designationId;
-        BeginJobLeg(actor, best.Route!, BloodCleaningWorkTicks);
+        BeginJobLeg(actor, best.Route!, GetBloodCleaningWorkTicks(best.Position));
         reservedDesignations.Add(designationId);
         return true;
     }
@@ -2432,7 +2432,7 @@ public sealed partial class SimulationEngine
         actor.JobKind = ActorJobKind.CleanBlood;
         actor.JobTarget = best.Position;
         actor.SourceStackId = designationId;
-        BeginJobLeg(actor, best.Route!, BloodCleaningWorkTicks);
+        BeginJobLeg(actor, best.Route!, GetBloodCleaningWorkTicks(best.Position));
         reservedDesignations.Add(designationId);
         return true;
     }
@@ -4516,11 +4516,6 @@ public sealed partial class SimulationEngine
 
     private void AdvanceTravel(ActorState actor)
     {
-        if (CurrentTick.Value % Definitions.ActorMovementIntervalTicks != 0)
-        {
-            return;
-        }
-
         if (actor.RemainingRoute.Count == 0)
         {
             actor.ClearJob();
@@ -4528,6 +4523,14 @@ public sealed partial class SimulationEngine
         }
 
         var next = actor.RemainingRoute[0];
+        var movementInterval = World.HasConstructedFloorSurface(next)
+            ? Math.Max(1, Definitions.ActorMovementIntervalTicks * 4 / 5)
+            : Definitions.ActorMovementIntervalTicks;
+        if (CurrentTick.Value % movementInterval != 0)
+        {
+            return;
+        }
+
         if (!World.CanTraverseTerrainEdge(actor.Position, next, canOpenDoors: true))
         {
             ObserveNavigationEdge(actor, next, NavigationBeliefStatus.Blocked);
@@ -5542,7 +5545,7 @@ public sealed partial class SimulationEngine
         ActorJobKind.Craft when
             _craftingOrders.TryGetValue(actor.DestinationZoneId, out var craftingOrder) =>
             craftingOrder.RemainingWorkTicks,
-        ActorJobKind.CleanBlood => BloodCleaningWorkTicks,
+        ActorJobKind.CleanBlood => GetBloodCleaningWorkTicks(actor.JobTarget),
         ActorJobKind.LootRaid => Definitions.HaulHandlingTicks,
         ActorJobKind.RecoverRaidCorpse => Definitions.HaulHandlingTicks,
         ActorJobKind.ConsumeRaidCorpse => Definitions.EatWorkTicks,

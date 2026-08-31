@@ -373,7 +373,14 @@ public sealed partial class SimulationEngine
             output.Quantity,
             ItemLocation.OnGround(actor.Position),
             variant: output.Variant);
-        _craftingOrders.Remove(order.Id);
+        if (order.IsRepeating)
+        {
+            order.ResetForNextCycle();
+        }
+        else
+        {
+            _craftingOrders.Remove(order.Id);
+        }
         GainBuildingExperience(actor, 16);
         Publish(SimulationEventKind.CraftingCompleted, actor.Id, order.Id, (int)order.Recipe);
         actor.ClearJob();

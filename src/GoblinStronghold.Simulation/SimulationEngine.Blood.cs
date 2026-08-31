@@ -173,6 +173,12 @@ public sealed partial class SimulationEngine
         _bloodStains.TryGetValue(position, out var stain) &&
         stain.Volume > 0;
 
+    private int GetBloodCleaningWorkTicks(GridPosition position) =>
+        _bloodStains.TryGetValue(position, out var stain) &&
+        stain.Surface == BloodSurfaceKind.ConstructedFloor
+            ? BloodCleaningWorkTicks / 2
+            : BloodCleaningWorkTicks;
+
     private int CleanBlood(GridPosition position)
     {
         if (!_bloodStains.TryGetValue(position, out var stain) || stain.Volume <= 0)

@@ -328,6 +328,57 @@ public sealed class CraftingTests
         Assert.DoesNotContain(snapshot.ItemStacks, stack => stack.Resource == ResourceKind.Coal);
         Assert.Equal(engine.ComputeStateHash(),
             SimulationEngine.Load(engine.Save(), definitions).ComputeStateHash());
+
+        engine = AddStack(
+            engine,
+            definitions,
+            storagePosition,
+            ResourceKind.Ore,
+            quantity: 4,
+            storageZoneId: storage.Id,
+            equipSling: false,
+            variant: ResourceVariant.IronOre);
+        engine = AddStack(
+            engine,
+            definitions,
+            storagePosition,
+            ResourceKind.Coal,
+            quantity: 2,
+            storageZoneId: storage.Id,
+            equipSling: false);
+        engine.QueueCommand(SimulationCommand.ConfigureRepeatingCraftingRecipe(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            furnacePosition,
+            CraftingRecipeKind.SmeltIronBar,
+            enabled: true));
+        for (var tick = 0; tick < 20_000 && engine.CreateSnapshot().ItemStacks
+                 .Where(stack => stack.Variant == ResourceVariant.IronBar)
+                 .Sum(stack => stack.Quantity) < 3; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        snapshot = engine.CreateSnapshot();
+        var repeating = Assert.Single(snapshot.CraftingOrders);
+        Assert.True(repeating.IsRepeating);
+        Assert.Equal(CraftingRecipeKind.SmeltIronBar, repeating.Recipe);
+        Assert.Equal(3, snapshot.ItemStacks
+            .Where(stack => stack.Variant == ResourceVariant.IronBar)
+            .Sum(stack => stack.Quantity));
+        Assert.All(repeating.Materials, material =>
+            Assert.Equal(0, material.DeliveredQuantity));
+
+        engine = SimulationEngine.Load(engine.Save(), definitions);
+        Assert.True(Assert.Single(engine.CreateSnapshot().CraftingOrders).IsRepeating);
+        engine.QueueCommand(SimulationCommand.ConfigureRepeatingCraftingRecipe(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            furnacePosition,
+            CraftingRecipeKind.SmeltIronBar,
+            enabled: false));
+        engine.AdvanceTicks(1);
+        Assert.Empty(engine.CreateSnapshot().CraftingOrders);
     }
 
     [Fact]
@@ -617,7 +668,8 @@ public sealed class CraftingTests
         ResourceKind resource,
         int quantity,
         EntityId storageZoneId = default,
-        bool equipSling = true)
+        bool equipSling = true,
+        ResourceVariant variant = ResourceVariant.None)
     {
         var save = JsonNode.Parse(engine.Save())!.AsObject();
         var actor = save["actors"]!.AsArray()[0]!.AsObject();
@@ -632,7 +684,8 @@ public sealed class CraftingTests
             resource,
             position,
             quantity,
-            storageZoneId));
+            storageZoneId,
+            variant));
         save["nextEntityId"] = nextId + 1;
         return SimulationEngine.Load(save.ToJsonString(), definitions);
     }

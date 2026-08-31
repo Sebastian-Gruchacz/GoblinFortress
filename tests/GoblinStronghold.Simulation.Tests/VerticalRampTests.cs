@@ -66,6 +66,60 @@ public sealed class VerticalRampTests
     }
 
     [Fact]
+    public void RampDownCanBeDesignatedAtLevelMinusTenAboveANaturalCave()
+    {
+        var seed = new WorldSeed(0x4445455043415645UL);
+        var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
+        while (map.DeepestCaveLevel > -10)
+        {
+            map.MaterializeCaveLevel(map.DeepestCaveLevel - 1);
+        }
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 30);
+        var target =
+            (from y in Enumerable.Range(0, map.Height)
+             from x in Enumerable.Range(0, map.Width)
+             let upper = new GridPosition(x, y, -10)
+             let lower = upper with { Z = -11 }
+             where map.GetCaveCell(upper).IsOpen &&
+                   map.GetCaveCell(upper).Fluid == CellFluidKind.None &&
+                   map.GetNextCaveLevelCell(lower).IsOpen &&
+                   map.GetNextCaveLevelCell(lower).Fluid == CellFluidKind.None
+             select upper).First();
+        engine.Visibility.Reveal([target], radius: 1);
+
+        Assert.True(engine.World.CanCarveRampDown(target));
+        Assert.Equal(
+            new[] { target },
+            engine.QueryWorkDesignationTargets(
+                WorkDesignationKind.CarveRampDown,
+                target,
+                target));
+
+        engine.ApplyCommandImmediately(SimulationCommand.DesignateRampDown(
+            engine.CurrentTick,
+            sequence: 1,
+            target));
+
+        var designation = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(WorkDesignationKind.CarveRampDown, designation.Kind);
+        Assert.Equal(target, designation.Target);
+        Assert.True(engine.World.TryCarveVerticalRamp(
+            target,
+            carveDown: true,
+            engine.CurrentTick,
+            out _,
+            out _));
+        Assert.Equal(-11, map.DeepestCaveLevel);
+        Assert.Contains(engine.World.ExcavatedVerticalPassages, passage =>
+            passage.Upper == target && passage.Lower == target with { Z = -11 });
+    }
+
+    [Fact]
     public void GoblinCarvesRampDownAndTheNewRouteSurvivesSaveLoad()
     {
         var seed = new WorldSeed(0x52414D50444F574EUL);

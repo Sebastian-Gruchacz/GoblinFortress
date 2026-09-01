@@ -18,6 +18,8 @@ public enum WorkDesignationKind : byte
     CarveRampDown = 11,
     CarveRampUp = 12,
     CleanBlood = 13,
+    DismantleWorldObject = 14,
+    DismantleStorageZone = 15,
 }
 
 public readonly record struct WorkDesignationSnapshot(

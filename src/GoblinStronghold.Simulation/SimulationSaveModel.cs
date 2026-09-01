@@ -8,9 +8,15 @@ internal sealed class SimulationSaveModel
 
     public string ClimateProfileId { get; set; } = string.Empty;
 
+    public string PlayerPolityId { get; set; } = string.Empty;
+
     public ulong WorldSeed { get; set; }
 
     public int MapGeneratorVersion { get; set; }
+
+    public string MapProfileId { get; set; } = string.Empty;
+
+    public Map.Generation.RiverGenerationMode MapRiverMode { get; set; }
 
     public int MapWidth { get; set; }
 
@@ -266,6 +272,8 @@ internal sealed class ResourcePrioritySaveModel
 
 internal sealed class HumanVillageSaveModel
 {
+    public string PolityId { get; set; } = string.Empty;
+
     public int Population { get; set; }
 
     public int FoodStock { get; set; }
@@ -316,6 +324,8 @@ internal sealed class HumanVillageSaveModel
 internal sealed class HumanVillagerSaveModel
 {
     public int Id { get; set; }
+
+    public ActorSex Sex { get; set; }
 
     public HumanCohortRole Role { get; set; }
 
@@ -430,6 +440,8 @@ internal sealed class ActorSaveModel
     public ulong Id { get; set; }
 
     public string Name { get; set; } = string.Empty;
+
+    public ActorSex Sex { get; set; }
 
     public GoblinSkill KnownSkills { get; set; }
 

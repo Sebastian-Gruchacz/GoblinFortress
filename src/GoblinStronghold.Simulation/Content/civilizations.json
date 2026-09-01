@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 7,
   "civilizations": [
     {
       "id": "core:goblin-tribe",
@@ -8,7 +8,50 @@
       "identity": {
         "speciesId": "core:goblin",
         "controllerId": "core:player-tribe",
-        "nameGeneratorId": "core:numeric-placeholder"
+        "nameGeneratorId": "core:goblin-syllables"
+      },
+      "vitals": {
+        "maximumHealth": 10000
+      },
+      "combat": {
+        "minimumMeleeDamage": 260,
+        "meleeDamageVariance": 160
+      },
+      "perception": {
+        "dayVisionRadius": 4,
+        "nightVisionRadius": 3,
+        "structureVisionRadius": 3
+      },
+      "spatialBehavior": {
+        "movementIntervalTicks": 10,
+        "activityRadius": 0,
+        "maximumExplorers": 1
+      },
+      "needs": {
+        "maximumHunger": 114000,
+        "hungerPerTick": 1,
+        "eatThreshold": 5700,
+        "foodSeekThreshold": 5000,
+        "criticalHungerThreshold": 85500,
+        "starvationHungerThreshold": 104000,
+        "starvationDamagePerTick": 1,
+        "maximumThirst": 34200,
+        "thirstPerTick": 1,
+        "drinkThreshold": 5700,
+        "dehydrationThirstThreshold": 24200,
+        "dehydrationDamagePerTick": 1,
+        "maximumFatigue": 17100,
+        "fatiguePerTick": 1,
+        "restThreshold": 10000
+      },
+      "populationNeeds": null,
+      "aging": {
+        "healthyYears": 5,
+        "declineMinimumSeasons": 1,
+        "declineMaximumSeasons": 2,
+        "terminalHealthPermille": 150,
+        "initialMinimumAgeYears": 1,
+        "initialMaximumAgeYearsExclusive": 5
       },
       "undergroundGeneration": null,
       "undergroundBehavior": null
@@ -20,8 +63,41 @@
       "identity": {
         "speciesId": "core:human",
         "controllerId": "core:surface-village",
-        "nameGeneratorId": "core:numeric-placeholder"
+        "nameGeneratorId": "core:human-frontier-names"
       },
+      "vitals": {
+        "maximumHealth": 6000
+      },
+      "combat": {
+        "minimumMeleeDamage": 320,
+        "meleeDamageVariance": 180
+      },
+      "perception": {
+        "dayVisionRadius": 4,
+        "nightVisionRadius": 3,
+        "structureVisionRadius": 0
+      },
+      "spatialBehavior": {
+        "movementIntervalTicks": 20,
+        "activityRadius": 8,
+        "maximumExplorers": 0
+      },
+      "needs": null,
+      "populationNeeds": {
+        "maximumNeed": 1000,
+        "dailyHungerIncrease": 100,
+        "dailyThirstIncrease": 340,
+        "mealRelief": 500,
+        "drinkRelief": 700,
+        "maximumFatigue": 1000,
+        "restThreshold": 750,
+        "workFatiguePerMove": 2,
+        "dayRestRecoveryPerMove": 4,
+        "nightRestRecoveryPerMove": 5,
+        "hungerDamageDivisor": 10,
+        "thirstDamageDivisor": 3
+      },
+      "aging": null,
       "undergroundGeneration": null,
       "undergroundBehavior": null
     },
@@ -34,6 +110,13 @@
         "controllerId": "core:underground-clan",
         "nameGeneratorId": "core:numeric-placeholder"
       },
+      "vitals": null,
+      "combat": null,
+      "perception": null,
+      "spatialBehavior": null,
+      "needs": null,
+      "populationNeeds": null,
+      "aging": null,
       "undergroundGeneration": {
         "legacyKind": "DarkDwarves",
         "firstLevel": -6,

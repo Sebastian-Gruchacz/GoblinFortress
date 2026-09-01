@@ -1,5 +1,8 @@
 using System.Collections.ObjectModel;
+using GoblinStronghold.Simulation.Civilizations.Polities;
+using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.Simulation;
@@ -31,6 +34,7 @@ public enum ActorJobKind : byte
     LootRaid = 22,
     RecoverRaidCorpse = 23,
     ConsumeRaidCorpse = 24,
+    DismantleConstruction = 25,
 }
 
 public readonly record struct GoblinBudSnapshot(
@@ -279,6 +283,13 @@ public sealed class PersonalFoodContentsSnapshot : IReadOnlyList<FoodKind>,
         _items.GetEnumerator();
 }
 
+public enum ActorSex : byte
+{
+    Sexless = 0,
+    Female = 1,
+    Male = 2,
+}
+
 public readonly record struct ActorSnapshot(
     EntityId Id,
     string Name,
@@ -307,6 +318,8 @@ public readonly record struct ActorSnapshot(
     ActorJobSnapshot Job,
     IReadOnlyList<ActorPlanEntrySnapshot> Plan)
 {
+    public ActorSex Sex { get; init; }
+
     public EquipmentLoadoutSnapshot Loadout { get; init; } = new([], 0, 0, 0);
 
     public EntityId CarriedCorpseId { get; init; }
@@ -387,6 +400,8 @@ public readonly record struct HumanVillagerSnapshot(
     int MaximumNeed,
     int WorkProgress)
 {
+    public ActorSex Sex { get; init; }
+
     public int CarriedGrime { get; init; }
 }
 
@@ -443,6 +458,8 @@ public sealed class HumanVillageSnapshot
     }
 
     public GridPosition Anchor { get; }
+
+    public PolityId PolityId { get; init; }
 
     public int Population { get; }
 
@@ -540,6 +557,8 @@ public sealed class SimulationSnapshot
         int visibilityNegativeLevelCount,
         ulong worldVersion,
         int mapGeneratorVersion,
+        ContentId mapProfileId,
+        RiverGenerationMode mapRiverMode,
         string mapFingerprint,
         string stateHash)
     {
@@ -586,11 +605,15 @@ public sealed class SimulationSnapshot
         VisibilityNegativeLevelCount = visibilityNegativeLevelCount;
         WorldVersion = worldVersion;
         MapGeneratorVersion = mapGeneratorVersion;
+        MapProfileId = mapProfileId;
+        MapRiverMode = mapRiverMode;
         MapFingerprint = mapFingerprint;
         StateHash = stateHash;
     }
 
     public WorldSeed WorldSeed { get; }
+
+    public PolityId PlayerPolityId { get; init; }
 
     public SimulationTick Tick { get; }
 
@@ -688,6 +711,10 @@ public sealed class SimulationSnapshot
     public ulong WorldVersion { get; }
 
     public int MapGeneratorVersion { get; }
+
+    public ContentId MapProfileId { get; }
+
+    public RiverGenerationMode MapRiverMode { get; }
 
     public string MapFingerprint { get; }
 

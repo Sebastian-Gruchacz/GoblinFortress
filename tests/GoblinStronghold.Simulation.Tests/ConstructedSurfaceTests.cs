@@ -159,7 +159,7 @@ public sealed class ConstructedSurfaceTests
     }
 
     [Fact]
-    public void FloorConstructionSkipsBothEndsOfAVerticalPassage()
+    public void FloorConstructionAllowsBothEndsOfAVerticalPassage()
     {
         var engine = CreateEngine(initialWoodStock: 0);
         var upper = EnumerateWorldPositions(engine)
@@ -174,18 +174,43 @@ public sealed class ConstructedSurfaceTests
             out _,
             out _));
 
-        Assert.False(engine.World.CanPlanFloorConstruction([upper]));
-        Assert.False(engine.World.CanPlanFloorConstruction([lower]));
+        Assert.True(engine.World.CanPlanFloorConstruction([upper]));
+        Assert.True(engine.World.CanPlanFloorConstruction([lower]));
         engine.QueueCommand(SimulationCommand.BuildWoodenFloor(
             new SimulationTick(1),
             sequence: 1,
-            upper,
-            upper,
+            lower,
+            lower,
             ResourceVariant.OakWood));
 
         engine.AdvanceTicks(1);
 
-        Assert.Empty(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(lower, Assert.Single(engine.CreateSnapshot().ConstructionSites).Anchor);
+    }
+
+    [Fact]
+    public void StandaloneFloorCanBePlacedBelowAnExistingBuilding()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var anchor = EnumerateWorldPositions(engine)
+            .First(engine.World.CanBuildGoblinHut);
+        engine.World.BuildGoblinHut(
+            anchor,
+            SimulationTick.Zero,
+            ResourceVariant.OakWood);
+
+        Assert.True(engine.World.CanBuildFloors([anchor]));
+
+        engine.World.BuildFloor(
+            anchor,
+            SimulationTick.Zero,
+            stone: false,
+            ResourceVariant.OakWood);
+
+        Assert.Contains(engine.World.GetWorldObjectsAt(anchor), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenFloor);
+        Assert.Contains(engine.World.GetWorldObjectsAt(anchor), worldObject =>
+            worldObject.Kind == WorldObjectKind.GoblinHut);
     }
 
     [Fact]

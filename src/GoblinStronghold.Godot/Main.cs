@@ -1,8 +1,10 @@
 using Godot;
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Civilizations;
 using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Localization;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Workshops;
@@ -1021,14 +1023,11 @@ public partial class Main : Node
             : "Pełny ekran w aktualnej rozdzielczości monitora • Alt+Enter wraca do okna.";
     }
 
-    private SimulationEngine CreateNewEngine(WorldSeed seed, int mapDimension)
+    private SimulationEngine CreateNewEngine(LocationGenerationRequest request)
     {
-        var map = SwampMapGenerator.Generate(
-            seed,
-            mapDimension,
-            mapDimension);
+        var map = SwampMapGenerator.Generate(request);
         var engine = SimulationEngine.Create(
-            seed,
+            request.Seed,
             SimulationDefinitions.Foundation,
             map,
             initialGoblinCount: 8,
@@ -1058,7 +1057,7 @@ public partial class Main : Node
             }
 
             _sessionPreferences = new GameSessionPreferences(setup.ProfileName);
-            ReplaceEngine(CreateNewEngine(setup.Seed, setup.MapDimension));
+            ReplaceEngine(CreateNewEngine(setup.Map));
             _hasActiveSession = true;
             _newGameSetupWindow.Hide();
             CloseMainMenu();
@@ -1066,8 +1065,8 @@ public partial class Main : Node
                 "new-game",
                 protectedPreviousSession ? "started-autosaved" : "started",
                 setup.ProfileName,
-                setup.Seed.Value,
-                setup.MapDimension);
+                setup.Map.Seed.Value,
+                setup.Map.Width);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -2203,13 +2202,15 @@ public partial class Main : Node
             {
                 Material = material,
                 Variant = material.Variant!.Value,
+                DisplayName = DescribeResourceVariant(material.Variant.Value),
                 StoredQuantity = snapshot.ItemStacks
                     .Where(stack => stack.Location.Kind == ItemLocationKind.StorageZone &&
                         stack.Resource == material.ResourceKind &&
                         stack.Variant == material.Variant.Value)
                     .Sum(stack => stack.Quantity),
             })
-            .OrderBy(item => DescribeResourceVariant(item.Variant),
+            .OrderBy(item => Array.IndexOf(allowedTypes, item.Material.MaterialType))
+            .ThenBy(item => item.DisplayName,
                 StringComparer.CurrentCulture)
             .ToArray();
         if (options.Length == 0)
@@ -2223,22 +2224,28 @@ public partial class Main : Node
             options.Any(item => item.Variant == remembered)
                 ? remembered
                 : options.OrderByDescending(item => item.StoredQuantity)
-                    .ThenBy(item => DescribeResourceVariant(item.Variant),
+                    .ThenBy(item => item.DisplayName,
                         StringComparer.CurrentCulture)
                     .First().Variant;
         _selectedConstructionMaterial = selected;
+        MaterialType? previousType = null;
         foreach (var option in options)
         {
+            if (previousType is not null && previousType != option.Material.MaterialType)
+            {
+                _constructionMaterialMenu.AddSeparator();
+            }
             _constructionMaterialMenu.AddItem(
                 UiFormat(
                     "material-selection",
                     "option",
-                    DescribeResourceVariant(option.Variant),
+                    option.DisplayName,
                     option.StoredQuantity),
                 (int)option.Variant);
             var index = _constructionMaterialMenu.ItemCount - 1;
             _constructionMaterialMenu.SetItemAsRadioCheckable(index, true);
             _constructionMaterialMenu.SetItemChecked(index, option.Variant == selected);
+            previousType = option.Material.MaterialType;
         }
 
         SelectBuildMode((long)ResolveMaterialBuildMode(group, selected));
@@ -2889,16 +2896,18 @@ public partial class Main : Node
 
     private void CreateNeedIndicators()
     {
-        var definitions = SimulationDefinitions.Foundation;
+        var goblinCivilization = CivilizationCatalog.Current.Get(
+            CivilizationLegacyRole.PlayerGoblins);
+        var goblinNeeds = goblinCivilization.Needs!;
         var grid = GetNode<GridContainer>("GoblinDetails/Scroll/Content/Needs");
         _healthBar = CreateNeedIndicator(
-            grid, UiIcon.Health, "Zdrowie", definitions.MaximumHealth);
+            grid, UiIcon.Health, "Zdrowie", goblinCivilization.Vitals!.MaximumHealth);
         _hungerBar = CreateNeedIndicator(
-            grid, UiIcon.Hunger, "Nasycenie", definitions.MaximumHunger);
+            grid, UiIcon.Hunger, "Nasycenie", goblinNeeds.MaximumHunger);
         _thirstBar = CreateNeedIndicator(
-            grid, UiIcon.Thirst, "Nawodnienie", definitions.MaximumThirst);
+            grid, UiIcon.Thirst, "Nawodnienie", goblinNeeds.MaximumThirst);
         _fatigueBar = CreateNeedIndicator(
-            grid, UiIcon.FieldCamp, "Wytrzymałość", definitions.MaximumFatigue);
+            grid, UiIcon.FieldCamp, "Wytrzymałość", goblinNeeds.MaximumFatigue);
     }
 
     private ProgressBar CreateNeedIndicator(
@@ -4442,12 +4451,12 @@ public partial class Main : Node
             (actors.Length == 0
                 ? string.Empty
                 : $" • gobliny ×{actors.Length}, nasycenie " +
-                  $"{actors.Min(actor => _engine.Definitions.MaximumHunger - actor.Hunger)}–" +
-                  $"{actors.Max(actor => _engine.Definitions.MaximumHunger - actor.Hunger)}" +
-                  $", wytrzymałość {actors.Min(actor => _engine.Definitions.MaximumFatigue - actor.Fatigue)}–" +
-                  $"{actors.Max(actor => _engine.Definitions.MaximumFatigue - actor.Fatigue)}" +
-                  $", nawodnienie {actors.Min(actor => _engine.Definitions.MaximumThirst - actor.Thirst)}–" +
-                  $"{actors.Max(actor => _engine.Definitions.MaximumThirst - actor.Thirst)}" +
+                  $"{actors.Min(actor => _engine.MaximumGoblinHunger - actor.Hunger)}–" +
+                  $"{actors.Max(actor => _engine.MaximumGoblinHunger - actor.Hunger)}" +
+                  $", wytrzymałość {actors.Min(actor => _engine.MaximumGoblinFatigue - actor.Fatigue)}–" +
+                  $"{actors.Max(actor => _engine.MaximumGoblinFatigue - actor.Fatigue)}" +
+                  $", nawodnienie {actors.Min(actor => _engine.MaximumGoblinThirst - actor.Thirst)}–" +
+                  $"{actors.Max(actor => _engine.MaximumGoblinThirst - actor.Thirst)}" +
                   $", zdrowie {actors.Min(actor => actor.Health)}–{actors.Max(actor => actor.Health)}" +
                   $", racje {actors.Sum(actor => actor.PersonalFood)} jedz./{actors.Sum(actor => actor.PersonalWater)} wody" +
                   $" • {string.Join(", ", actors.Select(actor => DescribeJob(actor.Job)))}") +
@@ -5162,6 +5171,7 @@ public partial class Main : Node
         ActorJobKind.ClearVegetation => "×",
         ActorJobKind.SupplyConstruction => "⇥",
         ActorJobKind.BuildConstruction => "⚒",
+        ActorJobKind.DismantleConstruction => "⚒",
         ActorJobKind.Collapsed => "!",
         ActorJobKind.FellTree => "♣",
         ActorJobKind.QuarryBoulder => "◆",
@@ -5771,21 +5781,21 @@ public partial class Main : Node
         UpdateNeedBar(_healthBar, actor.Health, actor.EffectiveMaximumHealth, "Zdrowie");
         UpdateNeedBar(
             _hungerBar,
-            _engine.Definitions.MaximumHunger - actor.Hunger,
-            _engine.Definitions.MaximumHunger,
+            _engine.MaximumGoblinHunger - actor.Hunger,
+            _engine.MaximumGoblinHunger,
             "Nasycenie");
         UpdateNeedBar(
             _thirstBar,
-            _engine.Definitions.MaximumThirst - actor.Thirst,
-            _engine.Definitions.MaximumThirst,
+            _engine.MaximumGoblinThirst - actor.Thirst,
+            _engine.MaximumGoblinThirst,
             "Nawodnienie");
         UpdateNeedBar(
             _fatigueBar,
-            _engine.Definitions.MaximumFatigue - actor.Fatigue,
-            _engine.Definitions.MaximumFatigue,
+            _engine.MaximumGoblinFatigue - actor.Fatigue,
+            _engine.MaximumGoblinFatigue,
             "Wytrzymałość");
         _healthBar.TooltipText += $" • aktualna wydolność maksymalna: " +
-            $"{actor.EffectiveMaximumHealth:N0}/{_engine.Definitions.MaximumHealth:N0}";
+            $"{actor.EffectiveMaximumHealth:N0}/{_engine.MaximumGoblinHealth:N0}";
         _hungerBar.TooltipText += " • obrażenia z głodu zaczynają się poniżej 500";
         _thirstBar.TooltipText += " • obrażenia z odwodnienia zaczynają się poniżej 500";
 
@@ -5810,7 +5820,7 @@ public partial class Main : Node
                     ? $"Wiek: {actor.AgeDays} dni " +
                       $"({(double)actor.AgeDays / _engine.Definitions.Clock.Climate.DaysPerYear:0.0} lat) • " +
                       $"starość {actor.SenescenceProgress:P0}, wydolność " +
-                      $"{actor.EffectiveMaximumHealth:N0}/{_engine.Definitions.MaximumHealth:N0}"
+                      $"{actor.EffectiveMaximumHealth:N0}/{_engine.MaximumGoblinHealth:N0}"
                     : $"Wiek: {actor.AgeDays} dni " +
                       $"({(double)actor.AgeDays / _engine.Definitions.Clock.Climate.DaysPerYear:0.0} lat) • dorosły")
             .AppendLine(actor.BleedingTicksRemaining > 0
@@ -5869,7 +5879,7 @@ public partial class Main : Node
             _ => "brak",
         };
 
-    private static string DescribePlanEntry(ActorPlanEntrySnapshot entry)
+    private string DescribePlanEntry(ActorPlanEntrySnapshot entry)
     {
         var action = entry.Kind switch
         {
@@ -5889,7 +5899,7 @@ public partial class Main : Node
         return $"{action}  [nacisk {entry.Priority}]";
     }
 
-    private static string DescribeJobKind(ActorJobKind kind) => kind switch
+    private string DescribeJobKind(ActorJobKind kind) => kind switch
     {
         ActorJobKind.Forage => "zbierania",
         ActorJobKind.Haul => "transportu",
@@ -5904,6 +5914,7 @@ public partial class Main : Node
         ActorJobKind.ClearVegetation => "karczowania",
         ActorJobKind.SupplyConstruction => "dostawy na budowę",
         ActorJobKind.BuildConstruction => "budowy",
+        ActorJobKind.DismantleConstruction => Ui("actor-job-kinds", "dismantling"),
         ActorJobKind.Collapsed => "przymusowego snu",
         ActorJobKind.FellTree => "wyrębu",
         ActorJobKind.QuarryBoulder => "wydobycia kamienia",
@@ -7181,6 +7192,7 @@ public partial class Main : Node
             var readiness = isSuspended
                 ? "wstrzymane przez gracza"
                 : DescribeWorkOrderReadiness(snapshot, kind, active, targets);
+            var canEditArea = ToWorkMode(kind) != WorkMode.None;
             AddPlannerRow(
                 $"{DescribeWorkDesignation(kind)} • {targets.Length} celów • " +
                 $"zasięg {minimum}–{maximum} • {DescribeStoragePriority(priority)}" +
@@ -7189,8 +7201,10 @@ public partial class Main : Node
                 value => SetWorkPriority(group.Key, kind, value),
                 isSuspended,
                 () => SetWorkSuspension(group.Key, kind, !isSuspended),
-                () => BeginPlannerAreaEdit(
-                    group.Key, kind, priority, isSuspended, targets[0].Target),
+                canEditArea
+                    ? () => BeginPlannerAreaEdit(
+                        group.Key, kind, priority, isSuspended, targets[0].Target)
+                    : null,
                 () => CancelWorkGroup(group.Key, kind),
                 () => FocusPlannerTarget(targets[0].Target));
         }
@@ -7370,6 +7384,10 @@ public partial class Main : Node
             targets.Any(target => target.Id == actor.Job.SourceStackId),
         WorkDesignationKind.CleanBlood => actor.Job.Kind == ActorJobKind.CleanBlood &&
             targets.Any(target => target.Id == actor.Job.SourceStackId),
+        WorkDesignationKind.DismantleWorldObject or
+            WorkDesignationKind.DismantleStorageZone =>
+            actor.Job.Kind == ActorJobKind.DismantleConstruction &&
+            targets.Any(target => target.Id == actor.Job.SourceStackId),
         _ => false,
     };
 
@@ -7484,7 +7502,7 @@ public partial class Main : Node
         return available ? _engine.World.GetRampExcavationCell(target, carveDown) : null;
     }
 
-    private static string DescribeWorkDesignation(WorkDesignationKind kind) => kind switch
+    private string DescribeWorkDesignation(WorkDesignationKind kind) => kind switch
     {
         WorkDesignationKind.GatherFood => "zbieranie żywności",
         WorkDesignationKind.GatherReeds => "zbieranie sitowia",
@@ -7499,6 +7517,10 @@ public partial class Main : Node
         WorkDesignationKind.Scout => "zwiad",
         WorkDesignationKind.HuntAnimal => "polowanie",
         WorkDesignationKind.CleanBlood => "sprzątanie krwi",
+        WorkDesignationKind.DismantleWorldObject =>
+            Ui("work-order-kinds", "dismantle-structure"),
+        WorkDesignationKind.DismantleStorageZone =>
+            Ui("work-order-kinds", "dismantle-storage"),
         _ => "praca",
     };
 
@@ -8930,15 +8952,15 @@ public partial class Main : Node
                 {
                     reasons.Add("napełnia bukłak");
                 }
-                if (actor.Hunger >= _engine.Definitions.FoodSeekThreshold)
+                if (actor.Hunger >= _engine.GoblinNeeds.FoodSeekThreshold)
                 {
                     reasons.Add("je");
                 }
-                if (actor.Thirst >= _engine.Definitions.DrinkThreshold)
+                if (actor.Thirst >= _engine.GoblinNeeds.DrinkThreshold)
                 {
                     reasons.Add("pije");
                 }
-                if (actor.Fatigue >= _engine.Definitions.RestThreshold)
+                if (actor.Fatigue >= _engine.GoblinNeeds.RestThreshold)
                 {
                     reasons.Add("odpoczywa");
                 }

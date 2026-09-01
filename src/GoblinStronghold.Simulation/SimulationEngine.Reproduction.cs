@@ -9,7 +9,7 @@ public sealed partial class SimulationEngine
     {
         var readiness = CreateReproductionReadinessSnapshot();
         if (readiness.Kind != GoblinReproductionReadinessKind.Ready ||
-            CurrentTick.Value % Definitions.ActorMovementIntervalTicks != 1)
+            CurrentTick.Value % GoblinSpatialBehavior.MovementIntervalTicks != 1)
         {
             return;
         }
@@ -37,13 +37,13 @@ public sealed partial class SimulationEngine
             Definitions.Reproduction.TendWorkTicks));
         parent.Health = Math.Max(1, parent.Health - Definitions.Reproduction.ParentHealthCost);
         parent.Hunger = Math.Min(
-            Definitions.MaximumHunger,
+            GoblinNeeds.MaximumHunger,
             parent.Hunger + Definitions.Reproduction.ParentHungerCost);
         parent.Thirst = Math.Min(
-            Definitions.MaximumThirst,
+            GoblinNeeds.MaximumThirst,
             parent.Thirst + Definitions.Reproduction.ParentThirstCost);
         parent.Fatigue = Math.Min(
-            Definitions.MaximumFatigue,
+            GoblinNeeds.MaximumFatigue,
             parent.Fatigue + Definitions.Reproduction.ParentFatigueCost);
         Publish(
             SimulationEventKind.GoblinBudCreated,
@@ -86,10 +86,10 @@ public sealed partial class SimulationEngine
 
     private bool IsEligibleBudParent(ActorState actor) =>
         !IsJuvenile(actor) &&
-        actor.Health >= Definitions.MaximumHealth * 3 / 4 &&
-        actor.Hunger < Definitions.FoodSeekThreshold &&
-        actor.Thirst < Definitions.DrinkThreshold &&
-        actor.Fatigue < Definitions.RestThreshold / 2 &&
+        actor.Health >= GoblinVitals.MaximumHealth * 3 / 4 &&
+        actor.Hunger < GoblinNeeds.FoodSeekThreshold &&
+        actor.Thirst < GoblinNeeds.DrinkThreshold &&
+        actor.Fatigue < GoblinNeeds.RestThreshold / 2 &&
         actor.JobKind == ActorJobKind.None &&
         actor.CarriedStackId == EntityId.None &&
         !_raidPartyIds.Contains(actor.Id) &&
@@ -190,9 +190,9 @@ public sealed partial class SimulationEngine
         var shelterCapacity = GetShelterCapacity();
         var healthyWorkers = _actors.Values.Count(actor =>
             !IsJuvenile(actor) &&
-            actor.Health >= Definitions.MaximumHealth / 2 &&
-            actor.Hunger < Definitions.CriticalHungerThreshold &&
-            actor.Thirst < Definitions.DehydrationThirstThreshold &&
+            actor.Health >= GoblinVitals.MaximumHealth / 2 &&
+            actor.Hunger < GoblinNeeds.CriticalHungerThreshold &&
+            actor.Thirst < GoblinNeeds.DehydrationThirstThreshold &&
             actor.JobKind != ActorJobKind.Collapsed);
         return new(
             FoodUnits: GetTotalResourceQuantity(ResourceKind.Food),
@@ -292,8 +292,8 @@ public sealed partial class SimulationEngine
             _goblinBuds.Remove(bud.Id);
             var newborn = AllocateActor(
                 bud.Position,
-                Definitions.EatThreshold / 2,
-                Math.Max(1, Definitions.MaximumHealth / 2));
+                GoblinNeeds.EatThreshold / 2,
+                Math.Max(1, GoblinVitals.MaximumHealth / 2));
             newborn.Equipment = PersonalEquipment.RagClothes |
                 PersonalEquipment.PrimitiveWaterskin;
             newborn.PersonalWater = Math.Min(1, Definitions.PersonalWaterCapacity);

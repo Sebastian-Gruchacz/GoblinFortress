@@ -36,6 +36,10 @@ internal static class ActorJobTextPresenter
             Format(locale, "construction-build-travel", job.Target),
         ActorJobKind.BuildConstruction =>
             Format(locale, "construction-build-working", job.RemainingWorkTicks),
+        ActorJobKind.DismantleConstruction when job.Phase == ActorJobPhase.Traveling =>
+            Format(locale, "construction-dismantle-travel", job.Target),
+        ActorJobKind.DismantleConstruction =>
+            Format(locale, "construction-dismantle-working", job.RemainingWorkTicks),
         ActorJobKind.SupplyCrafting when job.Stage == ActorJobStage.Collecting &&
             job.Phase == ActorJobPhase.Traveling =>
             Format(locale, "crafting-supply-collect-travel", job.ReservedQuantity),

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using GoblinStronghold.Simulation.Civilizations;
+using GoblinStronghold.Simulation.Civilizations.Polities;
 
 namespace GoblinStronghold.Simulation;
 
@@ -39,7 +40,10 @@ public readonly record struct UndergroundFactionSnapshot(
     int Fortification,
     UndergroundFactionDirective Directive,
     ulong TargetFactionId,
-    int LastUpdatedDay);
+    int LastUpdatedDay)
+{
+    public PolityId PolityId { get; init; }
+}
 
 public readonly record struct UndergroundFactionRelationSnapshot(
     ulong FirstFactionId,
@@ -49,6 +53,8 @@ public readonly record struct UndergroundFactionRelationSnapshot(
 internal sealed class UndergroundFactionSaveModel
 {
     public ulong Id { get; set; }
+
+    public string PolityId { get; set; } = string.Empty;
 
     public bool IsActive { get; set; }
 
@@ -399,11 +405,15 @@ public sealed class UndergroundFactionDirector
             Fortification,
             Directive,
             TargetFactionId,
-            LastUpdatedDay);
+            LastUpdatedDay)
+        {
+            PolityId = CorePolityIds.CaveDwarfClan(Id),
+        };
 
         public UndergroundFactionSaveModel ToSaveModel() => new()
         {
             Id = Id,
+            PolityId = CorePolityIds.CaveDwarfClan(Id).Value,
             IsActive = IsActive,
             Population = Population,
             Fighters = Fighters,
@@ -419,7 +429,9 @@ public sealed class UndergroundFactionDirector
             UndergroundFactionSaveModel model,
             IEnumerable<ulong> knownFactionIds)
         {
-            if (model.Population < 0 || model.Fighters < 0 ||
+            if (!PolityId.TryParse(model.PolityId, out var polityId) ||
+                polityId != CorePolityIds.CaveDwarfClan(Id) ||
+                model.Population < 0 || model.Fighters < 0 ||
                 model.Fighters > model.Population || model.Provisions < 0 ||
                 model.OreStock < 0 || model.Fortification < 0 || model.LastUpdatedDay < -1 ||
                 !Enum.IsDefined(model.Directive) ||

@@ -1,14 +1,14 @@
 using Godot;
 using GoblinStronghold.GodotClient.Application.Profiles;
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Map.Generation;
 using System.Globalization;
 
 namespace GoblinStronghold.GodotClient.UI.MainMenu;
 
 public readonly record struct NewGameSetup(
     string ProfileName,
-    WorldSeed Seed,
-    int MapDimension);
+    LocationGenerationRequest Map);
 
 public sealed partial class NewGameSetupWindow : Window
 {
@@ -31,7 +31,7 @@ public sealed partial class NewGameSetupWindow : Window
     private readonly Label _climateLabel = new();
     private readonly OptionButton _climate = new();
     private readonly Label _riverLabel = new();
-    private readonly CheckButton _river = new();
+    private readonly OptionButton _river = new();
     private readonly Label _roadLabel = new();
     private readonly CheckButton _road = new();
     private readonly Label _neighborsLabel = new();
@@ -87,6 +87,7 @@ public sealed partial class NewGameSetupWindow : Window
         AddRow(activeGrid, _mapSizeLabel, _mapSize);
         AddRow(activeGrid, _seedLabel, CreateSeedControls());
         AddRow(activeGrid, _climateLabel, _climate);
+        AddRow(activeGrid, _riverLabel, _river);
         content.AddChild(_seedError);
 
         content.AddChild(new HSeparator());
@@ -94,7 +95,6 @@ public sealed partial class NewGameSetupWindow : Window
         content.AddChild(_plannedHeading);
         var plannedGrid = CreateGrid();
         content.AddChild(plannedGrid);
-        AddRow(plannedGrid, _riverLabel, _river);
         AddRow(plannedGrid, _roadLabel, _road);
         AddRow(plannedGrid, _neighborsLabel, _neighbors);
         AddRow(plannedGrid, _villageLabel, _village);
@@ -155,7 +155,10 @@ public sealed partial class NewGameSetupWindow : Window
         _climateLabel.Text = T("climate-zone");
         _climate.SetItemText(0, T("climate-temperate-marsh"));
         _riverLabel.Text = T("river");
-        _river.Text = T("river-present");
+        _river.SetItemText(0, T("river-none"));
+        _river.SetItemText(1, T("river-single"));
+        _river.SetItemText(2, T("river-branching"));
+        _river.TooltipText = T("river-tooltip");
         _roadLabel.Text = T("road");
         _road.Text = T("road-absent");
         _neighborsLabel.Text = T("neighbor-civilizations");
@@ -172,7 +175,7 @@ public sealed partial class NewGameSetupWindow : Window
         var plannedTooltip = T("planned-tooltip");
         foreach (var control in new Control[]
                  {
-                     _river, _road, _neighbors, _village, _relief, _difficulty,
+                     _road, _neighbors, _village, _relief, _difficulty,
                  })
         {
             control.TooltipText = plannedTooltip;
@@ -189,8 +192,12 @@ public sealed partial class NewGameSetupWindow : Window
         _mapSize.Select(1);
 
         _climate.AddItem(string.Empty);
-        _river.ButtonPressed = true;
-        _river.Disabled = true;
+        foreach (var mode in Enum.GetValues<RiverGenerationMode>())
+        {
+            _river.AddItem(string.Empty);
+            _river.SetItemMetadata(_river.ItemCount - 1, (int)mode);
+        }
+        _river.Select((int)RiverGenerationMode.SingleChannel);
         _road.ButtonPressed = false;
         _road.Disabled = true;
         _neighbors.AddItem(string.Empty);
@@ -250,10 +257,16 @@ public sealed partial class NewGameSetupWindow : Window
         }
 
         var dimension = _mapSize.GetItemMetadata(_mapSize.Selected).AsInt32();
-        StartRequested?.Invoke(new NewGameSetup(
-            profileName,
+        var request = LocationGenerationRequest.CreateDefault(
             new WorldSeed(seedValue),
-            dimension));
+            dimension,
+            dimension) with
+        {
+            RiverMode = (RiverGenerationMode)_river
+                .GetItemMetadata(_river.Selected)
+                .AsInt32(),
+        };
+        StartRequested?.Invoke(new NewGameSetup(profileName, request));
     }
 
     private string T(string key) => _translate("new-game", key);

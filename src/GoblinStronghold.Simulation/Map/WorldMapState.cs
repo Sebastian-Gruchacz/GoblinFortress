@@ -460,7 +460,10 @@ public sealed class WorldMapState
         var hasConstructedSurface = _occupancy.TryGetValue(
             new SpatialOccupancyKey(position, SpatialOccupancyChannel.Surface),
             out var surfaceClaim) &&
-            surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor;
+            surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor ||
+            _occupancy.TryGetValue(
+                new SpatialOccupancyKey(position, SpatialOccupancyChannel.FloorCover),
+                out var floorClaim) && floorClaim.PartKind == WorldObjectPartKind.Floor;
         if (!Baseline.GetCell(position).IsTraversable && !hasConstructedSurface)
         {
             return false;
@@ -569,11 +572,16 @@ public sealed class WorldMapState
 
     private bool HasConstructedSurface(GridPosition position) =>
         TryGetOccupancyClaim(
-            position,
-            SpatialOccupancyChannel.Surface,
-            out var surfaceClaim) &&
-        surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor or
-            WorldObjectPartKind.ConstructedRamp;
+                position,
+                SpatialOccupancyChannel.Surface,
+                out var surfaceClaim) &&
+            surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor or
+                WorldObjectPartKind.ConstructedRamp ||
+        TryGetOccupancyClaim(
+                position,
+                SpatialOccupancyChannel.FloorCover,
+                out var floorClaim) &&
+            floorClaim.PartKind == WorldObjectPartKind.Floor;
 
     private bool IsSpatiallyReachable(GridPosition position)
     {
@@ -973,19 +981,49 @@ public sealed class WorldMapState
                 (geometry.Support != CellSupportKind.NaturalRamp ||
                  _excavatedTerrainRamps.Contains(position)) &&
                 !TryGetFluid(position, out _, out _) &&
-                !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Surface, out _) &&
-                !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _));
+                !HasStandaloneFloorAt(position) &&
+                !TryGetOccupancyClaim(position, SpatialOccupancyChannel.FloorCover, out _) &&
+                (!TryGetOccupancyClaim(
+                     position,
+                     SpatialOccupancyChannel.Surface,
+                     out var surfaceClaim) ||
+                 surfaceClaim.PartKind == WorldObjectPartKind.Floor &&
+                 IsGoblinConstructionClaim(surfaceClaim)) &&
+                (!TryGetOccupancyClaim(
+                     position,
+                     SpatialOccupancyChannel.Solid,
+                     out var solidClaim) ||
+                 IsGoblinConstructionClaim(solidClaim)));
     }
 
     public bool CanPlanFloorConstruction(IReadOnlyList<GridPosition> positions) =>
-        CanBuildFloors(positions) && positions.All(position => !HasVerticalPassageAt(position));
+        CanBuildFloors(positions);
 
     public bool HasConstructedFloorSurface(GridPosition position) =>
         TryGetOccupancyClaim(
-            position,
-            SpatialOccupancyChannel.Surface,
-            out var surfaceClaim) &&
-        surfaceClaim.PartKind == WorldObjectPartKind.Floor;
+                position,
+                SpatialOccupancyChannel.FloorCover,
+                out var floorCover) && floorCover.PartKind == WorldObjectPartKind.Floor ||
+        TryGetOccupancyClaim(
+                position,
+                SpatialOccupancyChannel.Surface,
+                out var surface) && surface.PartKind == WorldObjectPartKind.Floor;
+
+    private bool HasStandaloneFloorAt(GridPosition position) =>
+        TryGetOccupancyClaim(
+                position,
+                SpatialOccupancyChannel.FloorCover,
+                out var floorCover) && floorCover.PartKind == WorldObjectPartKind.Floor ||
+        TryGetOccupancyClaim(
+                position,
+                SpatialOccupancyChannel.Surface,
+                out var surface) &&
+            _worldObjects.TryGetValue(surface.ObjectId, out var worldObject) &&
+            (worldObject.Kind is WorldObjectKind.WoodenFloor or WorldObjectKind.StoneFloor);
+
+    private bool IsGoblinConstructionClaim(SpatialOccupancyClaim claim) =>
+        _worldObjects.TryGetValue(claim.ObjectId, out var worldObject) &&
+        worldObject.Owner == WorldObjectOwner.GoblinTribe;
 
     public bool TryInferBuildRamp(GridPosition lower, out GridPosition upper)
     {
@@ -1123,11 +1161,11 @@ public sealed class WorldMapState
             WorldObjectOwner.GoblinTribe,
             position,
             CardinalOrientation.North,
-            [new(default, SpatialOccupancyChannel.Surface, WorldObjectPartKind.Floor)],
+            [new(default, SpatialOccupancyChannel.FloorCover, WorldObjectPartKind.Floor)],
             materialVariant);
         _worldObjects.Add(id, worldObject);
         _occupancy.Add(
-            new SpatialOccupancyKey(position, SpatialOccupancyChannel.Surface),
+            new SpatialOccupancyKey(position, SpatialOccupancyChannel.FloorCover),
             new SpatialOccupancyClaim(id, WorldObjectPartKind.Floor));
         if (position.Z == 0)
         {
@@ -2379,6 +2417,10 @@ public sealed class WorldMapState
 
     public bool HasVerticalPassageAt(GridPosition position) =>
         _verticalPassageDestinations.ContainsKey(position);
+
+    public bool IsVerticalPassageUpper(GridPosition position) =>
+        _verticalPassageDestinations.TryGetValue(position, out var destination) &&
+        destination.Z < position.Z;
 
     private static Dictionary<GridPosition, GridPosition> BuildVerticalPassageIndex(
         IEnumerable<VerticalPassage> passages)

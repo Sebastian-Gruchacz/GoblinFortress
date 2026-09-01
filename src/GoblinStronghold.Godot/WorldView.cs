@@ -300,7 +300,7 @@ public partial class WorldView : Node2D
             return;
         }
 
-        var movementDuration = _engine.Definitions.ActorMovementIntervalTicks *
+        var movementDuration = _engine.GoblinSpatialBehavior.MovementIntervalTicks *
             _secondsPerTick / _simulationSpeed;
         var maximumDistance = (float)(TileSize * delta / movementDuration);
         var changed = false;
@@ -2272,6 +2272,9 @@ public partial class WorldView : Node2D
                 WorkDesignationKind.Scout => new Color(0.38f, 0.78f, 0.94f, 0.68f),
                 WorkDesignationKind.HuntAnimal => new Color(0.96f, 0.32f, 0.18f, 0.88f),
                 WorkDesignationKind.CleanBlood => new Color(0.86f, 0.76f, 1f, 0.9f),
+                WorkDesignationKind.DismantleWorldObject or
+                    WorkDesignationKind.DismantleStorageZone =>
+                    new Color(0.96f, 0.54f, 0.2f, 0.94f),
                 _ => Colors.Magenta,
             };
             if (designation.IsSuspended)
@@ -2492,7 +2495,8 @@ public partial class WorldView : Node2D
             ActorJobKind.FellTree or ActorJobKind.ClearVegetation => WorkTool.Axe,
             ActorJobKind.QuarryBoulder or ActorJobKind.MineRock or ActorJobKind.CarveRamp =>
                 WorkTool.Pickaxe,
-            ActorJobKind.BuildConstruction or ActorJobKind.Craft => WorkTool.Hammer,
+            ActorJobKind.BuildConstruction or ActorJobKind.DismantleConstruction or
+                ActorJobKind.Craft => WorkTool.Hammer,
             ActorJobKind.CleanBlood => WorkTool.GhostBroom,
             _ => WorkTool.None,
         };
@@ -3071,6 +3075,7 @@ public partial class WorldView : Node2D
                 ActorJobKind.Haul => new Color(0.96f, 0.62f, 0.25f, 0.72f),
                 ActorJobKind.SupplyConstruction => new Color(0.98f, 0.68f, 0.25f, 0.82f),
                 ActorJobKind.BuildConstruction => new Color(0.38f, 0.82f, 0.92f, 0.82f),
+                ActorJobKind.DismantleConstruction => new Color(0.92f, 0.58f, 0.32f, 0.82f),
                 ActorJobKind.SupplyCrafting => new Color(0.78f, 0.58f, 0.34f, 0.82f),
                 ActorJobKind.Craft => new Color(0.72f, 0.82f, 0.42f, 0.82f),
                 ActorJobKind.Rest => new Color(0.48f, 0.72f, 0.96f, 0.72f),
@@ -3288,6 +3293,7 @@ public partial class WorldView : Node2D
             ActorJobKind.ClearConstructionSite => UiIcon.GatherBrushwood,
             ActorJobKind.SupplyConstruction => UiIcon.GatherBrushwood,
             ActorJobKind.BuildConstruction => UiIcon.Build,
+            ActorJobKind.DismantleConstruction => UiIcon.Build,
             ActorJobKind.SupplyCrafting => UiIcon.GatherBrushwood,
             ActorJobKind.Craft => UiIcon.Build,
             ActorJobKind.Rest => UiIcon.FieldCamp,

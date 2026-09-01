@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -37,9 +38,95 @@ public sealed class SwampMapGeneratorTests
         var second = SwampMapGenerator.Generate(new WorldSeed(123), width: 64, height: 48);
 
         Assert.Equal(SwampMapGenerator.CurrentVersion, first.GeneratorVersion);
+        Assert.Equal(SwampMapGenerator.DefaultProfileId, first.ProfileId);
         Assert.Equal(first.ComputeFingerprint(), second.ComputeFingerprint());
         Assert.Equal(first.GoblinSpawn, second.GoblinSpawn);
         Assert.Equal(first.HumanVillage, second.HumanVillage);
+    }
+
+    [Fact]
+    public void ExplicitDefaultRequestMatchesCompatibilityOverload()
+    {
+        var seed = new WorldSeed(0x50524F46494C45UL);
+        var request = LocationGenerationRequest.CreateDefault(seed, 64, 48);
+
+        var requested = SwampMapGenerator.Generate(request);
+        var compatible = SwampMapGenerator.Generate(seed, 64, 48);
+
+        Assert.Equal(request.ProfileId, requested.ProfileId);
+        Assert.Equal(compatible.ComputeFingerprint(), requested.ComputeFingerprint());
+        Assert.Equal(compatible.GoblinSpawn, requested.GoblinSpawn);
+        Assert.Equal(compatible.HumanVillage, requested.HumanVillage);
+    }
+
+    [Fact]
+    public void RiverCanBeOmittedWithoutRemovingWetlandWaterAccess()
+    {
+        var seed = new WorldSeed(0x44525946524F4E54UL);
+        var withRiver = SwampMapGenerator.Generate(
+            LocationGenerationRequest.CreateDefault(seed, 96, 96));
+        var withoutRiver = SwampMapGenerator.Generate(
+            LocationGenerationRequest.CreateDefault(seed, 96, 96) with
+            {
+                RiverMode = RiverGenerationMode.Absent,
+            });
+
+        var validation = SwampMapValidator.Validate(withoutRiver);
+
+        Assert.True(validation.IsValid, string.Join("; ", validation.Errors));
+        Assert.Equal(RiverGenerationMode.Absent, withoutRiver.RiverMode);
+        Assert.NotEqual(withRiver.ComputeFingerprint(), withoutRiver.ComputeFingerprint());
+        Assert.True(
+            withoutRiver.CountTerrain(TerrainKind.DeepWater) <
+            withRiver.CountTerrain(TerrainKind.DeepWater));
+        Assert.True(withoutRiver.CountTerrain(TerrainKind.ShallowWater) > 0);
+        Assert.True(withoutRiver.HasTraversablePath(
+            withoutRiver.GoblinSpawn,
+            withoutRiver.HumanVillage));
+    }
+
+    [Fact]
+    public void BranchingRiverAddsAJoinedLowerRightChannel()
+    {
+        var seed = new WorldSeed(0x4252414E43484553UL);
+        var single = SwampMapGenerator.Generate(
+            LocationGenerationRequest.CreateDefault(seed, 96, 96));
+        var request = LocationGenerationRequest.CreateDefault(seed, 96, 96) with
+        {
+            RiverMode = RiverGenerationMode.BranchingChannels,
+        };
+        var branching = SwampMapGenerator.Generate(request);
+        var repeated = SwampMapGenerator.Generate(request);
+        var validation = SwampMapValidator.Validate(branching);
+
+        Assert.True(validation.IsValid, string.Join("; ", validation.Errors));
+        Assert.Equal(RiverGenerationMode.BranchingChannels, branching.RiverMode);
+        Assert.Equal(branching.ComputeFingerprint(), repeated.ComputeFingerprint());
+        Assert.NotEqual(single.ComputeFingerprint(), branching.ComputeFingerprint());
+        Assert.True(
+            CountLowerRightRiverWater(branching) > CountLowerRightRiverWater(single),
+            $"Single={CountLowerRightRiverWater(single)}, " +
+            $"branching={CountLowerRightRiverWater(branching)}");
+    }
+
+    [Theory]
+    [InlineData(RiverGenerationMode.Absent)]
+    [InlineData(RiverGenerationMode.BranchingChannels)]
+    public void AlternativeRiverModesRemainValidAcrossSeeds(RiverGenerationMode mode)
+    {
+        for (ulong seed = 0; seed < 32; seed++)
+        {
+            var map = SwampMapGenerator.Generate(
+                LocationGenerationRequest.CreateDefault(new WorldSeed(seed), 48, 48) with
+                {
+                    RiverMode = mode,
+                });
+            var validation = SwampMapValidator.Validate(map);
+
+            Assert.True(
+                validation.IsValid,
+                $"Mode {mode}, seed {seed}: {string.Join("; ", validation.Errors)}");
+        }
     }
 
     [Theory]
@@ -615,6 +702,13 @@ public sealed class SwampMapGeneratorTests
     private static IEnumerable<GridPosition> Positions(GeneratedMap map) =>
         Enumerable.Range(0, map.Height)
             .SelectMany(y => Enumerable.Range(0, map.Width).Select(x => new GridPosition(x, y)));
+
+    private static int CountLowerRightRiverWater(GeneratedMap map) =>
+        Positions(map).Count(position =>
+            position.X >= (map.Width * 2) / 3 &&
+            position.Y >= map.Height / 2 &&
+            map.GetCell(position).Terrain is
+                TerrainKind.ShallowWater or TerrainKind.DeepWater);
 
     private static bool IsWetTerrain(MapCell cell) =>
         cell.Terrain is TerrainKind.Mud or TerrainKind.ShallowWater or TerrainKind.DeepWater;

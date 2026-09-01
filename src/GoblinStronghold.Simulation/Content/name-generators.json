@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "generators": [
+    {
+      "id": "core:goblin-syllables",
+      "kind": "SyllableCombination",
+      "randomDomain": "GoblinIdentity",
+      "firstSampleKey": 1,
+      "secondSampleKey": 2,
+      "appendSubjectIdOnCollision": true,
+      "beginnings": ["Gr", "Kr", "Sn", "Br", "Zg", "Tr", "Gl", "Wrz"],
+      "endings": ["uk", "ak", "iz", "og", "yn", "ek", "usz", "ag"],
+      "femaleEndings": ["uka", "aka", "iza", "oga", "yna", "ka", "usza", "aga"],
+      "maleEndings": ["uk", "ak", "iz", "og", "yn", "ek", "usz", "ag"],
+      "names": []
+    },
+    {
+      "id": "core:human-frontier-names",
+      "kind": "OrderedList",
+      "appendSubjectIdOnCollision": false,
+      "beginnings": [],
+      "endings": [],
+      "names": [
+        "Aldona", "Bogdan", "Celina", "Dobromir", "Elwira", "Florian",
+        "Grażyna", "Hubert", "Irena", "Jeremi", "Klara", "Lucjan"
+      ],
+      "femaleNames": ["Aldona", "Celina", "Elwira", "Grażyna", "Irena", "Klara"],
+      "maleNames": ["Bogdan", "Dobromir", "Florian", "Hubert", "Jeremi", "Lucjan"]
+    },
+    {
+      "id": "core:numeric-placeholder",
+      "kind": "NumericPlaceholder",
+      "appendSubjectIdOnCollision": false,
+      "beginnings": [],
+      "endings": [],
+      "names": []
+    }
+  ]
+}

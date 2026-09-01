@@ -1,12 +1,21 @@
+using GoblinStronghold.Simulation.ContentPacks;
+using GoblinStronghold.Simulation.Map.Generation;
+
 namespace GoblinStronghold.Simulation.Map;
 
 public static class SwampMapGenerator
 {
+    public static readonly ContentId DefaultProfileId =
+        ContentId.Parse("core:demo-swamp-frontier");
+
     public const int CurrentVersion = 14;
     public const int MinimumInitialCaveLevelCount = 2;
-    public const int DefaultDimension = 96;
-    public const int MinimumDimension = 16;
-    public const int MaximumDimension = 2_048;
+    public static int DefaultDimension => DefaultProfile.DefaultDimension;
+    public static int MinimumDimension => DefaultProfile.MinimumDimension;
+    public static int MaximumDimension => DefaultProfile.MaximumDimension;
+
+    public static LocationGenerationProfile DefaultProfile =>
+        LocationGenerationCatalog.Core.Get(DefaultProfileId);
 
     public static bool SupportsVersion(int version) => version is >= 1 and <= CurrentVersion;
 
@@ -14,8 +23,16 @@ public static class SwampMapGenerator
         WorldSeed seed,
         int width,
         int height,
-        int generatorVersion = CurrentVersion)
+        int generatorVersion = CurrentVersion) =>
+        Generate(LocationGenerationRequest.CreateDefault(
+            seed,
+            width,
+            height,
+            generatorVersion));
+
+    public static GeneratedMap Generate(LocationGenerationRequest request)
     {
+        var generatorVersion = request.GeneratorVersion;
         if (!SupportsVersion(generatorVersion))
         {
             throw new ArgumentOutOfRangeException(
@@ -23,8 +40,19 @@ public static class SwampMapGenerator
                 generatorVersion,
                 "The requested map generator version is not supported.");
         }
+        if (!Enum.IsDefined(request.RiverMode))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                request.RiverMode,
+                "The requested river generation mode is not supported.");
+        }
 
-        ValidateDimensions(width, height);
+        var profile = LocationGenerationCatalog.Core.Get(request.ProfileId);
+        var seed = request.Seed;
+        var width = request.Width;
+        var height = request.Height;
+        ValidateDimensions(width, height, profile);
 
         var cells = new MapCell[checked(width * height)];
         for (var y = 0; y < height; y++)
@@ -33,17 +61,37 @@ public static class SwampMapGenerator
             {
                 var index = checked((y * width) + x);
                 cells[index] = generatorVersion >= 4
-                    ? GenerateRegionalCell(seed, x, y, width, height, generatorVersion)
+                    ? GenerateRegionalCell(
+                        seed,
+                        x,
+                        y,
+                        width,
+                        height,
+                        generatorVersion,
+                        request.RiverMode,
+                        profile)
                     : GenerateLegacyCell(seed, index, generatorVersion);
             }
         }
         if (generatorVersion >= 5)
         {
-            ApplyTerrainRelief(cells, seed, width, height, generatorVersion);
+            ApplyTerrainRelief(
+                cells,
+                seed,
+                width,
+                height,
+                generatorVersion,
+                request.RiverMode,
+                profile);
         }
 
         var goblinSpawn = generatorVersion >= 4
-            ? CreateRegionalSettlementPosition(seed, width, height, human: false)
+            ? CreateRegionalSettlementPosition(
+                seed,
+                width,
+                height,
+                profile.GoblinSettlement,
+                human: false)
             : new GridPosition(
                 Math.Max(2, width / 6),
                 DeterministicRandom.NextInt(
@@ -56,7 +104,12 @@ public static class SwampMapGenerator
                     maximumExclusive: height - 2));
 
         var humanVillage = generatorVersion >= 4
-            ? CreateRegionalSettlementPosition(seed, width, height, human: true)
+            ? CreateRegionalSettlementPosition(
+                seed,
+                width,
+                height,
+                profile.HumanSettlement,
+                human: true)
             : new GridPosition(
                 Math.Min(width - 3, width - (width / 6) - 1),
                 DeterministicRandom.NextInt(
@@ -71,9 +124,23 @@ public static class SwampMapGenerator
         if (generatorVersion >= 2)
         {
             CarveSettlementPad(
-                cells, seed, width, height, goblinSpawn, goblin: true, generatorVersion);
+                cells,
+                seed,
+                width,
+                height,
+                goblinSpawn,
+                profile.GoblinSettlement,
+                goblin: true,
+                generatorVersion);
             CarveSettlementPad(
-                cells, seed, width, height, humanVillage, goblin: false, generatorVersion);
+                cells,
+                seed,
+                width,
+                height,
+                humanVillage,
+                profile.HumanSettlement,
+                goblin: false,
+                generatorVersion);
         }
 
         CarveSettlementAccess(
@@ -110,6 +177,8 @@ public static class SwampMapGenerator
             height,
             seed,
             generatorVersion,
+            profile.Id,
+            request.RiverMode,
             cells,
             goblinSpawn,
             humanVillage,
@@ -177,33 +246,52 @@ public static class SwampMapGenerator
         int y,
         int width,
         int height,
-        int generatorVersion)
+        int generatorVersion,
+        RiverGenerationMode riverMode,
+        LocationGenerationProfile profile)
     {
+        var river = profile.River;
+        var wetland = profile.Wetland;
         var normalizedX = width == 1 ? 0d : x / (double)(width - 1);
         var normalizedY = height == 1 ? 0d : y / (double)(height - 1);
         var terrainNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 20_000);
         var moistureNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 21_000);
-        var riverMeander =
-            (FractalValueNoise(seed, normalizedX, 0.5d, sampleKey: 22_000) - 0.5d) * 0.11d;
-        var riverCenterY = 0.82d - (0.64d * normalizedX) + riverMeander;
-        var riverHalfWidth = Math.Max(1.5d, Math.Min(width, height) * 0.035d);
-        var riverDistance = Math.Abs(normalizedY - riverCenterY) * height;
+        var riverHalfWidth = Math.Max(
+            river.MinimumHalfWidth,
+            Math.Min(width, height) * river.HalfWidthRatio);
+        var riverDistance = GetRiverDistance(
+            seed,
+            normalizedX,
+            normalizedY,
+            height,
+            riverMode,
+            river);
         var swampSampleX = normalizedX;
         var swampSampleY = normalizedY;
         if (generatorVersion >= 7)
         {
             var boundaryWarpX =
-                FractalValueNoise(seed, normalizedX * 0.68d, normalizedY * 0.68d, 29_000) - 0.5d;
+                FractalValueNoise(
+                    seed,
+                    normalizedX * wetland.BoundaryNoiseScale,
+                    normalizedY * wetland.BoundaryNoiseScale,
+                    29_000) - 0.5d;
             var boundaryWarpY =
-                FractalValueNoise(seed, normalizedX * 0.68d, normalizedY * 0.68d, 29_100) - 0.5d;
-            swampSampleX += (boundaryWarpX * 0.18d) + ((terrainNoise - 0.5d) * 0.035d);
-            swampSampleY += (boundaryWarpY * 0.16d) + ((moistureNoise - 0.5d) * 0.03d);
+                FractalValueNoise(
+                    seed,
+                    normalizedX * wetland.BoundaryNoiseScale,
+                    normalizedY * wetland.BoundaryNoiseScale,
+                    29_100) - 0.5d;
+            swampSampleX += (boundaryWarpX * wetland.BoundaryWarpX) +
+                ((terrainNoise - 0.5d) * wetland.TerrainWarpX);
+            swampSampleY += (boundaryWarpY * wetland.BoundaryWarpY) +
+                ((moistureNoise - 0.5d) * wetland.MoistureWarpY);
             var riverBankNoise =
                 FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 29_200) - 0.5d;
-            riverDistance += riverBankNoise * riverHalfWidth * 0.9d;
+            riverDistance += riverBankNoise * riverHalfWidth * river.BankNoiseScale;
         }
 
-        if (riverDistance <= riverHalfWidth * 0.48d)
+        if (riverDistance <= riverHalfWidth * river.DeepWaterRatio)
         {
             return CreateDeepWater();
         }
@@ -213,10 +301,17 @@ public static class SwampMapGenerator
             return CreateShallowWater();
         }
 
-        var leftSwamp = Math.Clamp((0.48d - swampSampleX) / 0.48d, 0d, 1d);
-        var bottomSwamp = Math.Clamp((swampSampleY - 0.58d) / 0.42d, 0d, 1d);
+        var leftSwamp = Math.Clamp(
+            (wetland.LeftBoundary - swampSampleX) / wetland.LeftBoundary,
+            0d,
+            1d);
+        var bottomSwamp = Math.Clamp(
+            (swampSampleY - wetland.BottomBoundary) / wetland.BottomRange,
+            0d,
+            1d);
         var swampInfluence = Math.Max(leftSwamp, bottomSwamp);
-        var wetness = (swampInfluence * 0.68d) + (moistureNoise * 0.32d);
+        var wetness = (swampInfluence * wetland.InfluenceWeight) +
+            (moistureNoise * wetland.MoistureWeight);
         var moisture = checked((byte)Math.Clamp(
             (int)Math.Round(35d + (swampInfluence * 48d) + (moistureNoise * 17d)),
             0,
@@ -226,7 +321,9 @@ public static class SwampMapGenerator
             0,
             100));
 
-        if (swampInfluence > 0.62d && wetness > 0.72d && terrainNoise > 0.76d)
+        if (swampInfluence > wetland.DeepInfluenceThreshold &&
+            wetness > wetland.DeepWetnessThreshold &&
+            terrainNoise > wetland.DeepTerrainThreshold)
         {
             return new MapCell(
                 TerrainKind.DeepWater,
@@ -236,12 +333,14 @@ public static class SwampMapGenerator
                 FloorLevel: -1);
         }
 
-        if (swampInfluence > 0.45d && wetness > 0.68d)
+        if (swampInfluence > wetland.ShallowInfluenceThreshold &&
+            wetness > wetland.ShallowWetnessThreshold)
         {
             return new MapCell(TerrainKind.ShallowWater, moisture, fertility, TraversalCost: 4);
         }
 
-        if (swampInfluence > 0.18d || wetness > 0.56d)
+        if (swampInfluence > wetland.MudInfluenceThreshold ||
+            wetness > wetland.MudWetnessThreshold)
         {
             return CreateMud(moisture, fertility);
         }
@@ -253,6 +352,7 @@ public static class SwampMapGenerator
         WorldSeed seed,
         int width,
         int height,
+        SettlementGenerationProfile settlement,
         bool human)
     {
         var jitterX = DeterministicRandom.NextInt(
@@ -271,11 +371,15 @@ public static class SwampMapGenerator
             sampleKey: human ? 23_002UL : 23_004UL,
             minimumInclusive: -1,
             maximumExclusive: 2);
-        var normalizedX = human ? 0.82d : 0.16d;
-        var normalizedY = human ? 0.2d : 0.76d;
         return new GridPosition(
-            Math.Clamp((int)Math.Round((width - 1) * normalizedX) + jitterX, 2, width - 3),
-            Math.Clamp((int)Math.Round((height - 1) * normalizedY) + jitterY, 2, height - 3));
+            Math.Clamp(
+                (int)Math.Round((width - 1) * settlement.NormalizedX) + jitterX,
+                2,
+                width - 3),
+            Math.Clamp(
+                (int)Math.Round((height - 1) * settlement.NormalizedY) + jitterY,
+                2,
+                height - 3));
     }
 
     private static double FractalValueNoise(
@@ -359,11 +463,12 @@ public static class SwampMapGenerator
         int width,
         int height,
         GridPosition center,
+        SettlementGenerationProfile settlement,
         bool goblin,
         int generatorVersion)
     {
-        const int padWidth = 8;
-        const int padHeight = 9;
+        var padWidth = settlement.PadWidth;
+        var padHeight = settlement.PadHeight;
         var startX = Math.Clamp(center.X - (padWidth / 2), 0, width - padWidth);
         var startY = Math.Clamp(center.Y - (padHeight / 2), 0, height - padHeight);
 
@@ -394,8 +499,8 @@ public static class SwampMapGenerator
                     width,
                     new GridPosition(x, y),
                     goblin
-                        ? CreateMud(moisture: 82, fertility: 66)
-                        : CreateGround(moisture: 52, fertility: 70));
+                        ? CreateMud(settlement.Moisture, settlement.Fertility)
+                        : CreateGround(settlement.Moisture, settlement.Fertility));
             }
         }
     }
@@ -431,8 +536,12 @@ public static class SwampMapGenerator
         WorldSeed seed,
         int width,
         int height,
-        int generatorVersion)
+        int generatorVersion,
+        RiverGenerationMode riverMode,
+        LocationGenerationProfile profile)
     {
+        var river = profile.River;
+        var relief = profile.Relief;
         for (var y = 0; y < height; y++)
         {
             for (var x = 0; x < width; x++)
@@ -446,7 +555,12 @@ public static class SwampMapGenerator
                         x / (double)(width - 1),
                         y / (double)(height - 1),
                         sampleKey: 24_000);
-                    cells[index] = cell with { FloorLevel = depthNoise > 0.72d ? (sbyte)-2 : (sbyte)-1 };
+                    cells[index] = cell with
+                    {
+                        FloorLevel = depthNoise > relief.DeepFloorThreshold
+                            ? (sbyte)-2
+                            : (sbyte)-1,
+                    };
                     continue;
                 }
                 if (cell.Terrain == TerrainKind.ShallowWater)
@@ -458,30 +572,48 @@ public static class SwampMapGenerator
                 var normalizedY = y / (double)(height - 1);
                 var broadRelief = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 25_000);
                 var ridgeNoise = FractalValueNoise(seed, normalizedX, normalizedY, sampleKey: 26_000);
-                var riverCenterY = 0.82d - (0.64d * normalizedX) +
-                    ((FractalValueNoise(seed, normalizedX, 0.5d, sampleKey: 22_000) - 0.5d) * 0.11d);
-                var riverDistance = Math.Abs(normalizedY - riverCenterY) * height;
-                var valleySuppression = Math.Clamp(riverDistance / (Math.Min(width, height) * 0.18d), 0d, 1d);
-                var uplandInfluence = Math.Clamp((normalizedX + (1d - normalizedY) - 0.72d) / 0.9d, 0d, 1d);
+                var riverDistance = GetRiverDistance(
+                    seed,
+                    normalizedX,
+                    normalizedY,
+                    height,
+                    riverMode,
+                    river);
+                var valleySuppression = Math.Clamp(
+                    riverDistance / (Math.Min(width, height) * relief.ValleyWidthRatio),
+                    0d,
+                    1d);
+                var uplandInfluence = Math.Clamp(
+                    (normalizedX + (1d - normalizedY) - relief.UplandStart) /
+                    relief.UplandRange,
+                    0d,
+                    1d);
                 var foothillInfluence = generatorVersion >= 11
                     ? RadialInfluence(
                         normalizedX,
                         normalizedY,
-                        centerX: 0.22d,
-                        centerY: 0.6d,
-                        radiusX: 0.16d,
-                        radiusY: 0.18d)
+                        relief.FoothillCenterX,
+                        relief.FoothillCenterY,
+                        relief.FoothillRadiusX,
+                        relief.FoothillRadiusY)
                     : 0d;
-                var reliefScore = (broadRelief * 0.5d) + (ridgeNoise * 0.2d) +
-                    (uplandInfluence * 0.42d) + (foothillInfluence * 0.72d) -
-                    ((1d - valleySuppression) * 0.38d);
-                var highThreshold = generatorVersion >= 11 ? 0.79d : 0.83d;
-                var raisedThreshold = generatorVersion >= 11 ? 0.55d : 0.59d;
+                var reliefScore = (broadRelief * relief.BroadWeight) +
+                    (ridgeNoise * relief.RidgeWeight) +
+                    (uplandInfluence * relief.UplandWeight) +
+                    (foothillInfluence * relief.FoothillWeight) -
+                    ((1d - valleySuppression) * relief.ValleyPenalty);
+                var highThreshold = generatorVersion >= 11
+                    ? relief.HighThreshold
+                    : 0.83d;
+                var raisedThreshold = generatorVersion >= 11
+                    ? relief.RaisedThreshold
+                    : 0.59d;
                 var level = reliefScore >= highThreshold
                     ? (sbyte)2
                     : reliefScore >= raisedThreshold
                         ? (sbyte)1
-                        : reliefScore <= 0.19d && riverDistance > 5d
+                        : reliefScore <= relief.DepressionThreshold &&
+                            riverDistance > relief.MinimumDepressionRiverDistance
                             ? (sbyte)-1
                             : (sbyte)0;
                 cells[index] = cell with
@@ -506,6 +638,47 @@ public static class SwampMapGenerator
         var offsetY = (y - centerY) / radiusY;
         var distance = Math.Sqrt((offsetX * offsetX) + (offsetY * offsetY));
         return Smooth(Math.Clamp(1d - distance, 0d, 1d));
+    }
+
+    private static double GetRiverCenterY(
+        WorldSeed seed,
+        double normalizedX,
+        RiverGenerationProfile river) =>
+        river.StartY - (river.Slope * normalizedX) +
+        ((FractalValueNoise(seed, normalizedX, 0.5d, sampleKey: 22_000) - 0.5d) *
+            river.MeanderAmplitude);
+
+    private static double GetRiverDistance(
+        WorldSeed seed,
+        double normalizedX,
+        double normalizedY,
+        int height,
+        RiverGenerationMode mode,
+        RiverGenerationProfile river)
+    {
+        if (mode == RiverGenerationMode.Absent)
+        {
+            return double.PositiveInfinity;
+        }
+
+        var mainDistance = Math.Abs(
+            normalizedY - GetRiverCenterY(seed, normalizedX, river)) * height;
+        if (mode == RiverGenerationMode.SingleChannel ||
+            normalizedX < river.BranchJunctionX)
+        {
+            return mainDistance;
+        }
+
+        var branchStartY = GetRiverCenterY(seed, river.BranchJunctionX, river);
+        var branchProgress =
+            (normalizedX - river.BranchJunctionX) / (1d - river.BranchJunctionX);
+        var branchCenterY = branchStartY +
+            ((river.BranchEndY - branchStartY) * branchProgress) +
+            ((FractalValueNoise(seed, normalizedX, 0.5d, sampleKey: 22_100) - 0.5d) *
+                river.BranchMeanderAmplitude * Math.Sin(Math.PI * branchProgress));
+        var branchDistance = Math.Abs(normalizedY - branchCenterY) * height /
+            river.BranchHalfWidthScale;
+        return Math.Min(mainDistance, branchDistance);
     }
 
     private static void AssignTerrainRamps(
@@ -1365,14 +1538,17 @@ public static class SwampMapGenerator
     private static MapCell CreateDeepWater() =>
         new(TerrainKind.DeepWater, Moisture: 100, Fertility: 52, TraversalCost: 0, FloorLevel: -1);
 
-    private static void ValidateDimensions(int width, int height)
+    private static void ValidateDimensions(
+        int width,
+        int height,
+        LocationGenerationProfile profile)
     {
-        if (width < MinimumDimension || width > MaximumDimension)
+        if (width < profile.MinimumDimension || width > profile.MaximumDimension)
         {
             throw new ArgumentOutOfRangeException(nameof(width));
         }
 
-        if (height < MinimumDimension || height > MaximumDimension)
+        if (height < profile.MinimumDimension || height > profile.MaximumDimension)
         {
             throw new ArgumentOutOfRangeException(nameof(height));
         }

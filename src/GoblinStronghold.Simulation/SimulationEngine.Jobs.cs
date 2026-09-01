@@ -1,3 +1,4 @@
+using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Terrain;
@@ -94,12 +95,12 @@ public sealed partial class SimulationEngine
             stageStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             if (actor.JobKind == ActorJobKind.None)
             {
-                var needsFood = actor.Hunger >= Definitions.FoodSeekThreshold &&
+                var needsFood = actor.Hunger >= GoblinNeeds.FoodSeekThreshold &&
                     actor.PersonalFood == 0;
-                var needsWater = actor.Thirst >= Definitions.DrinkThreshold && actor.PersonalWater == 0;
+                var needsWater = actor.Thirst >= GoblinNeeds.DrinkThreshold && actor.PersonalWater == 0;
                 var shouldPlanBackgroundWork = IsBackgroundPlanningTick(actor);
                 var reserveForExploration = shouldPlanBackgroundWork &&
-                    activeExplorers < Definitions.MaximumExplorers;
+                    activeExplorers < GoblinSpatialBehavior.MaximumExplorers;
                 if (_raidPhase == GoblinRaidPhase.Preparing &&
                     raidPartyIds.Contains(actor.Id) &&
                     TryPlanRaidPreparation(
@@ -155,7 +156,7 @@ public sealed partial class SimulationEngine
                 {
                     // Raiders reserve camp beds; excess occupants return to huts or the start area.
                 }
-                else if (actor.Fatigue >= Definitions.RestThreshold && TryPlanRestJob(actor))
+                else if (actor.Fatigue >= GoblinNeeds.RestThreshold && TryPlanRestJob(actor))
                 {
                     // Survival work outranks gathering once the current job has ended.
                 }
@@ -221,7 +222,7 @@ public sealed partial class SimulationEngine
                     // A named hauler services assigned stockpiles before public settlement work.
                 }
                 else if (GetWorkDesignationPriority(WorkDesignationKind.Scout) >= StoragePriority.High &&
-                         activeExplorers < Definitions.MaximumExplorers &&
+                         activeExplorers < GoblinSpatialBehavior.MaximumExplorers &&
                          TryPlanExploreJob(actor))
                 {
                     activeExplorers++;
@@ -262,7 +263,7 @@ public sealed partial class SimulationEngine
                 {
                     // With no useful work left, tidy a nearby stain or loose stack.
                 }
-                else if (activeExplorers < Definitions.MaximumExplorers &&
+                else if (activeExplorers < GoblinSpatialBehavior.MaximumExplorers &&
                          TryPlanExploreJob(actor))
                 {
                     activeExplorers++;
@@ -345,6 +346,9 @@ public sealed partial class SimulationEngine
                 case ActorJobKind.BuildConstruction:
                     UpdateConstructionBuildJob(actor);
                     break;
+                case ActorJobKind.DismantleConstruction:
+                    UpdateConstructionDismantlingJob(actor);
+                    break;
                 case ActorJobKind.SupplyCrafting:
                     UpdateCraftingSupplyJob(actor);
                     break;
@@ -406,7 +410,7 @@ public sealed partial class SimulationEngine
             actor.Equipment);
         var foodTarget = preparation.FoodTarget;
         var waterTarget = preparation.WaterTarget;
-        if (!isInRallyArea && actor.Hunger >= Definitions.FoodSeekThreshold &&
+        if (!isInRallyArea && actor.Hunger >= GoblinNeeds.FoodSeekThreshold &&
             TryPlanEatJob(actor, sourceReservations))
         {
             return true;
@@ -417,7 +421,7 @@ public sealed partial class SimulationEngine
             return true;
         }
 
-        if (actor.Hunger >= Definitions.FoodSeekThreshold &&
+        if (actor.Hunger >= GoblinNeeds.FoodSeekThreshold &&
             TryPlanEatJob(actor, sourceReservations, isInRallyArea ? _raidRallyPoint : null))
         {
             return true;
@@ -440,7 +444,7 @@ public sealed partial class SimulationEngine
         {
             return true;
         }
-        if (actor.Fatigue >= Definitions.RestThreshold && TryPlanRestJob(actor))
+        if (actor.Fatigue >= GoblinNeeds.RestThreshold && TryPlanRestJob(actor))
         {
             return true;
         }
@@ -449,7 +453,7 @@ public sealed partial class SimulationEngine
         var raidParty = GetRaidParty();
         var outstandingPartyFood = raidParty.Sum(candidate =>
             Math.Max(0, foodTarget - candidate.PersonalFood) +
-            (candidate.Hunger >= Definitions.FoodSeekThreshold ? 1 : 0));
+            (candidate.Hunger >= GoblinNeeds.FoodSeekThreshold ? 1 : 0));
         var requiredCampStock = outstandingPartyFood;
         if (campZone is not null &&
             GetStoredQuantity(campZone.Id) + destinationReservations.GetValueOrDefault(campZone.Id) <
@@ -491,9 +495,9 @@ public sealed partial class SimulationEngine
                 actor.CarriedStackId != EntityId.None ||
                 actor.PersonalFood < preparation.FoodTarget ||
                 actor.PersonalWater < preparation.WaterTarget ||
-                actor.Hunger >= Definitions.FoodSeekThreshold ||
-                actor.Thirst >= Definitions.DrinkThreshold ||
-                actor.Fatigue >= Definitions.RestThreshold;
+                actor.Hunger >= GoblinNeeds.FoodSeekThreshold ||
+                actor.Thirst >= GoblinNeeds.DrinkThreshold ||
+                actor.Fatigue >= GoblinNeeds.RestThreshold;
             }))
         {
             return;
@@ -584,7 +588,7 @@ public sealed partial class SimulationEngine
             .Select(designation => designation.Target)
             .Where(position => Visibility.Get(position) == CellVisibility.Unknown)
             .ToHashSet();
-        if (Definitions.MaximumExplorers == 0 || scoutingTargets.Count == 0)
+        if (GoblinSpatialBehavior.MaximumExplorers == 0 || scoutingTargets.Count == 0)
         {
             return false;
         }
@@ -653,6 +657,13 @@ public sealed partial class SimulationEngine
             .Select(site => site.Priority)
             .DefaultIfEmpty(StoragePriority.Low)
             .Max();
+        var dismantlingPriority = _workDesignations.Values
+            .Where(designation => designation.Kind is
+                WorkDesignationKind.DismantleWorldObject or
+                WorkDesignationKind.DismantleStorageZone && !designation.IsSuspended)
+            .Select(designation => designation.Priority)
+            .DefaultIfEmpty(StoragePriority.Low)
+            .Max();
         var haulingPriority = _storageZones.Values
             .Select(zone => zone.Priority)
             .Concat(_workDesignations.Values
@@ -689,11 +700,13 @@ public sealed partial class SimulationEngine
                     constructionReservations)),
             ("construction-work", Score(constructionWorkPriority, actor.WorkPreferences.Building), 2,
                 () => TryPlanConstructionWork(actor)),
+            ("construction-dismantling", Score(dismantlingPriority, actor.WorkPreferences.Building), 3,
+                () => TryPlanConstructionDismantling(actor)),
             ("crafting-supply", Score(hasCraftingSupply ? StoragePriority.Normal : StoragePriority.Low,
-                    actor.WorkPreferences.Hauling), 3,
+                    actor.WorkPreferences.Hauling), 4,
                 () => TryPlanCraftingSupply(actor, sourceReservations, craftingReservations)),
             ("crafting-work", Score(hasCraftingWork ? StoragePriority.Normal : StoragePriority.Low,
-                    actor.WorkPreferences.Building), 4,
+                    actor.WorkPreferences.Building), 5,
                 () => TryPlanCraftingWork(actor)),
             ("hauling", Score(haulingPriority, actor.WorkPreferences.Hauling), 5,
                 () => TryPlanHaulCollection(
@@ -886,6 +899,9 @@ public sealed partial class SimulationEngine
             WorkDesignationKind.HuntAnimal =>
                 _animals.ContainsKey(designation.TargetEntityId.Value),
             WorkDesignationKind.CleanBlood => HasCleanableSurface(designation.Target),
+            WorkDesignationKind.DismantleWorldObject or
+                WorkDesignationKind.DismantleStorageZone =>
+                TryGetDismantlingWorkTicks(designation, out _),
             _ => false,
         };
     }
@@ -911,6 +927,8 @@ public sealed partial class SimulationEngine
             WorkDesignationKind.Scout =>
                 actor.KnownSkills.HasFlag(GoblinSkill.Scouting) ? 2 : 0,
             WorkDesignationKind.CleanBlood => GetCleaningPreference(actor),
+            WorkDesignationKind.DismantleWorldObject or
+                WorkDesignationKind.DismantleStorageZone => actor.WorkPreferences.Building,
             _ => actor.WorkPreferences.Foraging,
         };
     }
@@ -944,6 +962,9 @@ public sealed partial class SimulationEngine
             WorkDesignationKind.Scout => ActorJobKind.Explore,
             WorkDesignationKind.HuntAnimal => ActorJobKind.HuntAnimal,
             WorkDesignationKind.CleanBlood => ActorJobKind.CleanBlood,
+            WorkDesignationKind.DismantleWorldObject or
+                WorkDesignationKind.DismantleStorageZone =>
+                ActorJobKind.DismantleConstruction,
             _ => ActorJobKind.None,
         };
     }
@@ -1026,18 +1047,18 @@ public sealed partial class SimulationEngine
 
     private int GetHungerPriority(ActorState actor) => GetNeedPriority(
         actor.Hunger,
-        Definitions.FoodSeekThreshold,
-        Definitions.CriticalHungerThreshold);
+        GoblinNeeds.FoodSeekThreshold,
+        GoblinNeeds.CriticalHungerThreshold);
 
     private int GetThirstPriority(ActorState actor) => GetNeedPriority(
         actor.Thirst,
-        Definitions.DrinkThreshold,
-        Definitions.DehydrationThirstThreshold);
+        GoblinNeeds.DrinkThreshold,
+        GoblinNeeds.DehydrationThirstThreshold);
 
     private int GetFatiguePriority(ActorState actor) => GetNeedPriority(
         actor.Fatigue,
-        Definitions.RestThreshold,
-        Definitions.MaximumFatigue);
+        GoblinNeeds.RestThreshold,
+        GoblinNeeds.MaximumFatigue);
 
     private int GetNeedPriority(int value, int planningThreshold, int criticalThreshold)
     {
@@ -1124,7 +1145,7 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> itemReservations,
         Dictionary<EntityId, int> destinationReservations)
     {
-        if (actor.Hunger < Definitions.FoodSeekThreshold ||
+        if (actor.Hunger < GoblinNeeds.FoodSeekThreshold ||
             actor.PersonalFood > 0 ||
             actor.CarriedStackId != EntityId.None ||
             actor.JobKind is ActorJobKind.None or ActorJobKind.Eat or ActorJobKind.Resupply)
@@ -1165,7 +1186,7 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> itemReservations,
         Dictionary<EntityId, int> destinationReservations)
     {
-        if (actor.Fatigue < Definitions.RestThreshold ||
+        if (actor.Fatigue < GoblinNeeds.RestThreshold ||
             actor.CarriedStackId != EntityId.None ||
             actor.JobKind is ActorJobKind.None or ActorJobKind.Rest or ActorJobKind.Eat or
                 ActorJobKind.Resupply ||
@@ -1210,7 +1231,7 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> itemReservations,
         Dictionary<EntityId, int> destinationReservations)
     {
-        if (actor.Thirst < Definitions.DrinkThreshold ||
+        if (actor.Thirst < GoblinNeeds.DrinkThreshold ||
             actor.PersonalWater > 0 ||
             actor.CarriedStackId != EntityId.None ||
             (actor.JobKind == ActorJobKind.Resupply &&
@@ -1727,9 +1748,9 @@ public sealed partial class SimulationEngine
         var useStored = stored is not null;
         var route = useStored ? stored!.Value.Route : naturalRoute!;
         var projectedThirst = Math.Min(
-            Definitions.MaximumThirst,
+            GoblinNeeds.MaximumThirst,
             checked(actor.Thirst +
-                (route.Count + Definitions.ResupplyWorkTicks) * Definitions.ThirstPerTick));
+                (route.Count + Definitions.ResupplyWorkTicks) * GoblinNeeds.ThirstPerTick));
         var requestedQuantity = checked(missing + GetWaterDrinksNeeded(projectedThirst));
         var quantity = useStored
             ? Math.Min(
@@ -2083,9 +2104,9 @@ public sealed partial class SimulationEngine
     }
 
     private int GetWaterDrinksNeeded(int thirst) =>
-        thirst < Definitions.DrinkThreshold
+        thirst < GoblinNeeds.DrinkThreshold
             ? 0
-            : (thirst - Definitions.DrinkThreshold) / Definitions.WaterHydration + 1;
+            : (thirst - GoblinNeeds.DrinkThreshold) / Definitions.WaterHydration + 1;
 
     private bool TryPlanEatJob(
         ActorState actor,
@@ -3572,6 +3593,241 @@ public sealed partial class SimulationEngine
         actor.ClearJob();
     }
 
+    private bool TryPlanConstructionDismantling(ActorState actor)
+    {
+        var reserved = _actors.Values
+            .Where(candidate => candidate.JobKind == ActorJobKind.DismantleConstruction)
+            .Select(candidate => candidate.SourceStackId)
+            .ToHashSet();
+        var candidates = _workDesignations.Values
+            .Where(designation => designation.Kind is
+                    WorkDesignationKind.DismantleWorldObject or
+                    WorkDesignationKind.DismantleStorageZone &&
+                !designation.IsSuspended && !reserved.Contains(designation.Id))
+            .OrderByDescending(designation => designation.Priority)
+            .ThenBy(designation => ManhattanDistance(actor.Position, designation.Target))
+            .ThenBy(designation => designation.Id)
+            .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
+        foreach (var designation in candidates)
+        {
+            if (!TryGetDismantlingWorkTicks(designation, out var workTicks))
+            {
+                continue;
+            }
+
+            var access = GetDismantlingAccessCells(designation);
+            if (access.Count == 0)
+            {
+                continue;
+            }
+
+            var routeRequest = RequestActorPathToNearest(actor, access);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+            {
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Unreachable ||
+                routeRequest.Path is not { } route)
+            {
+                continue;
+            }
+
+            actor.JobKind = ActorJobKind.DismantleConstruction;
+            actor.SourceStackId = designation.Id;
+            actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
+            BeginJobLeg(actor, route, workTicks);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void UpdateConstructionDismantlingJob(ActorState actor)
+    {
+        if (!_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
+            designation.IsSuspended ||
+            !TryGetDismantlingWorkTicks(designation, out _))
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        if (actor.JobPhase == ActorJobPhase.Traveling)
+        {
+            AdvanceTravel(actor);
+        }
+        if (actor.JobKind != ActorJobKind.DismantleConstruction ||
+            actor.JobPhase != ActorJobPhase.Working)
+        {
+            return;
+        }
+
+        actor.RemainingWorkTicks--;
+        if (actor.RemainingWorkTicks > 0)
+        {
+            return;
+        }
+
+        CompleteConstructionDismantling(actor, designation);
+        actor.ClearJob();
+    }
+
+    private bool TryGetDismantlingWorkTicks(
+        WorkDesignationSnapshot designation,
+        out int workTicks)
+    {
+        if (TryResolveDismantlingTarget(designation, out var target))
+        {
+            workTicks = target.WorkTicks;
+            return true;
+        }
+
+        workTicks = 0;
+        return false;
+    }
+
+    private bool TryResolveDismantlingTarget(
+        WorkDesignationSnapshot designation,
+        out ConstructionDismantlingTarget target)
+    {
+        if (designation.Kind == WorkDesignationKind.DismantleStorageZone &&
+            _storageZones.TryGetValue(designation.TargetEntityId, out var zone))
+        {
+            target = ConstructionDismantlingTargetFactory.CreateStorage(
+                zone.Id,
+                zone.Position,
+                zone.ProviderKind,
+                zone.AcceptedResource);
+            return true;
+        }
+
+        if (designation.Kind == WorkDesignationKind.DismantleWorldObject)
+        {
+            var id = new WorldObjectId(designation.TargetEntityId.Value);
+            var worldObject = World.CreateWorldObjectSnapshot()
+                .FirstOrDefault(candidate => candidate.Id == id);
+            if (worldObject is not null)
+            {
+                return ConstructionDismantlingTargetFactory.TryCreate(
+                    worldObject,
+                    out target);
+            }
+        }
+
+        target = default;
+        return false;
+    }
+
+    private IReadOnlySet<GridPosition> GetDismantlingAccessCells(
+        WorkDesignationSnapshot designation)
+    {
+        if (!TryResolveDismantlingTarget(designation, out var target))
+        {
+            return new HashSet<GridPosition>();
+        }
+
+        return ConstructionDismantlingTargetFactory.GetAccessCells(
+            target,
+            World.IsTerrainTraversable,
+            World.GetCardinalWorldNeighbors);
+    }
+
+    private void CompleteConstructionDismantling(
+        ActorState actor,
+        WorkDesignationSnapshot designation)
+    {
+        if (designation.Kind == WorkDesignationKind.DismantleStorageZone)
+        {
+            TryDismantleStorageZone(designation.TargetEntityId, publishEvent: true);
+            _workDesignations.Remove(designation.Id);
+            GainBuildingExperience(actor, 2);
+            return;
+        }
+
+        var id = new WorldObjectId(designation.TargetEntityId.Value);
+        var worldObject = World.CreateWorldObjectSnapshot()
+            .First(candidate => candidate.Id == id);
+        var unsupportedPositions = worldObject.Kind is
+            WorldObjectKind.WoodenFloor or WorldObjectKind.StoneFloor
+            ? worldObject.GetAbsoluteParts().Select(part => part.Position).Distinct().ToArray()
+            : [];
+
+        CancelCraftingOrdersAt(worldObject.Anchor);
+        if (worldObject.Kind == WorldObjectKind.GoblinFieldCamp)
+        {
+            var campStorage = _storageZones.Values.FirstOrDefault(zone =>
+                zone.Position == worldObject.Anchor &&
+                zone.AcceptedResource == ResourceKind.Food);
+            if (campStorage is not null)
+            {
+                TryDismantleStorageZone(campStorage.Id, publishEvent: false);
+            }
+        }
+
+        _undeliveredWorldChanges.Add(World.DismantleWorldObject(id, CurrentTick));
+        _workDesignations.Remove(designation.Id);
+        ResolveUnsupportedOccupants(unsupportedPositions);
+        GainBuildingExperience(actor, 3);
+        Publish(
+            SimulationEventKind.ConstructionDismantled,
+            actor.Id,
+            designation.TargetEntityId,
+            1);
+    }
+
+    private void ResolveUnsupportedOccupants(IEnumerable<GridPosition> changedPositions)
+    {
+        foreach (var position in changedPositions.Distinct())
+        {
+            if (World.IsTerrainTraversable(position) ||
+                !TryFindFallLanding(position, out var landing))
+            {
+                continue;
+            }
+
+            foreach (var occupant in _actors.Values.Where(candidate =>
+                         candidate.Position == position).ToArray())
+            {
+                occupant.Position = landing;
+                occupant.ClearJob();
+                if (occupant.CarriedCorpseId != EntityId.None &&
+                    _corpses.TryGetValue(occupant.CarriedCorpseId, out var carriedCorpse))
+                {
+                    carriedCorpse.Position = landing;
+                }
+            }
+
+            foreach (var stack in _itemStacks.Values.Where(candidate =>
+                         candidate.Location.Kind == ItemLocationKind.Ground &&
+                         candidate.Location.Position == position).ToArray())
+            {
+                MoveItemStack(stack, ItemLocation.OnGround(landing));
+            }
+
+            foreach (var corpse in _corpses.Values.Where(candidate =>
+                         candidate.Position == position).ToArray())
+            {
+                corpse.Position = landing;
+            }
+        }
+    }
+
+    private bool TryFindFallLanding(GridPosition origin, out GridPosition landing)
+    {
+        for (var z = origin.Z - 1; z >= Map.DeepestCaveLevel; z--)
+        {
+            var candidate = origin with { Z = z };
+            if (World.IsTerrainTraversable(candidate))
+            {
+                landing = candidate;
+                return true;
+            }
+        }
+
+        landing = default;
+        return false;
+    }
+
     private bool CanActorBuild(ActorState actor, ConstructionSiteState site) =>
         (actor.KnownSkills & site.Capabilities.RequiredSkills) == site.Capabilities.RequiredSkills &&
         HasRequiredConstructionEquipment(actor.Equipment, site.Capabilities.RequiredEquipment) &&
@@ -4046,6 +4302,9 @@ public sealed partial class SimulationEngine
                 WorkDesignationKind.HuntAnimal =>
                     !_animals.ContainsKey(designation.TargetEntityId.Value),
                 WorkDesignationKind.CleanBlood => !HasCleanableSurface(designation.Target),
+                WorkDesignationKind.DismantleWorldObject or
+                    WorkDesignationKind.DismantleStorageZone =>
+                    !TryGetDismantlingWorkTicks(designation, out _),
                 _ => false,
             })
             .Select(designation => designation.Id)
@@ -4428,8 +4687,8 @@ public sealed partial class SimulationEngine
 
         var next = actor.RemainingRoute[0];
         var movementInterval = World.HasConstructedFloorSurface(next)
-            ? Math.Max(1, Definitions.ActorMovementIntervalTicks * 4 / 5)
-            : Definitions.ActorMovementIntervalTicks;
+            ? Math.Max(1, GoblinSpatialBehavior.MovementIntervalTicks * 4 / 5)
+            : GoblinSpatialBehavior.MovementIntervalTicks;
         if (CurrentTick.Value % movementInterval != 0)
         {
             return;
@@ -4802,6 +5061,9 @@ public sealed partial class SimulationEngine
                 case ActorJobKind.BuildConstruction:
                     ValidateLoadedConstructionBuildJob(actor);
                     break;
+                case ActorJobKind.DismantleConstruction:
+                    ValidateLoadedConstructionDismantlingJob(actor);
+                    break;
                 case ActorJobKind.Collapsed:
                     ValidateLoadedCollapsedJob(actor);
                     break;
@@ -4971,6 +5233,22 @@ public sealed partial class SimulationEngine
             !HasCleanableSurface(actor.JobTarget))
         {
             throw new InvalidDataException("The save contains an invalid blood-cleaning job.");
+        }
+    }
+
+    private void ValidateLoadedConstructionDismantlingJob(ActorState actor)
+    {
+        if (actor.JobStage != ActorJobStage.None ||
+            actor.CarriedStackId != EntityId.None ||
+            actor.DestinationZoneId != EntityId.None ||
+            actor.ReservedQuantity != 0 ||
+            !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
+            designation.Kind is not (WorkDesignationKind.DismantleWorldObject or
+                WorkDesignationKind.DismantleStorageZone) ||
+            !TryGetDismantlingWorkTicks(designation, out _) ||
+            !GetDismantlingAccessCells(designation).Contains(actor.JobTarget))
+        {
+            throw new InvalidDataException("The save contains an invalid dismantling job.");
         }
     }
 
@@ -5283,6 +5561,10 @@ public sealed partial class SimulationEngine
             ActorJobKind.BuildConstruction when
                 _constructionSites.TryGetValue(actor.DestinationZoneId, out var site) =>
                 site.TotalWorkTicks,
+            ActorJobKind.DismantleConstruction when
+                _workDesignations.TryGetValue(actor.SourceStackId, out var dismantling) &&
+                TryGetDismantlingWorkTicks(dismantling, out var dismantlingWorkTicks) =>
+                dismantlingWorkTicks,
             ActorJobKind.Collapsed => GetMaximumRestWorkTicks(),
             ActorJobKind.TendBud => Definitions.Reproduction.TendWorkTicks,
             ActorJobKind.HuntAnimal => GetHuntWorkTicks(),
@@ -5380,6 +5662,15 @@ public sealed partial class SimulationEngine
             throw new InvalidDataException("Multiple builders reserve one construction site.");
         }
 
+        var duplicateDismantlers = _actors.Values
+            .Where(actor => actor.JobKind == ActorJobKind.DismantleConstruction)
+            .GroupBy(actor => actor.SourceStackId)
+            .Any(group => group.Count() > 1);
+        if (duplicateDismantlers)
+        {
+            throw new InvalidDataException("Multiple goblins reserve one dismantling order.");
+        }
+
 
         var craftingReservations = CreateCraftingReservations();
         foreach (var reservation in craftingReservations)
@@ -5441,6 +5732,10 @@ public sealed partial class SimulationEngine
         ActorJobKind.BuildConstruction when
             _constructionSites.TryGetValue(actor.DestinationZoneId, out var site) =>
             site.RemainingWorkTicks,
+        ActorJobKind.DismantleConstruction when
+            _workDesignations.TryGetValue(actor.SourceStackId, out var dismantling) &&
+            TryGetDismantlingWorkTicks(dismantling, out var dismantlingWorkTicks) =>
+            dismantlingWorkTicks,
         ActorJobKind.Collapsed => GetRestWorkTicks(actor),
         ActorJobKind.TendBud when _goblinBuds.TryGetValue(actor.SourceStackId, out var bud) =>
             bud.RemainingCareTicks,
@@ -5461,7 +5756,7 @@ public sealed partial class SimulationEngine
             Definitions.RestRecoveryPerTick);
 
     private int GetMaximumRestWorkTicks() =>
-        (Definitions.MaximumFatigue + Definitions.RestRecoveryPerTick - 1) /
+        (GoblinNeeds.MaximumFatigue + Definitions.RestRecoveryPerTick - 1) /
         Definitions.RestRecoveryPerTick;
 
     private int GetClearVegetationWorkTicks() => checked(Definitions.ForageWorkTicks * 2);

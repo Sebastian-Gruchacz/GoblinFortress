@@ -2,6 +2,7 @@
   <ItemGroup>
     <Compile Include="..\GoblinStronghold.Simulation.Tests\AutonomousHaulingTests.cs" Link="AutonomousHaulingTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\ConstructionRemovalTests.cs" Link="ConstructionRemovalTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\ConstructionDismantlingTargetTests.cs" Link="ConstructionDismantlingTargetTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\CorpseDirectiveTests.cs" Link="CorpseDirectiveTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\CraftingTests.cs" Link="CraftingTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\FieldCampTests.cs" Link="FieldCampTests.cs" />

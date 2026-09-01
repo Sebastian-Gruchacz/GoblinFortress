@@ -8,6 +8,7 @@
     <Compile Include="..\GoblinStronghold.Simulation.Tests\MaterialCatalogTests.cs" Link="MaterialCatalogTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\TerrainModificationCatalogTests.cs" Link="TerrainModificationCatalogTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\GameSessionPreferencesTests.cs" Link="GameSessionPreferencesTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\LocationGenerationCatalogTests.cs" Link="LocationGenerationCatalogTests.cs" />
     <Compile Include="..\..\src\GoblinStronghold.Godot\GameSessionPreferences.cs" Link="GameSessionPreferences.cs" />
     <Compile Include="..\..\src\GoblinStronghold.Godot\Application\Profiles\GameProfileName.cs" Link="GameProfileName.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\TranslationCatalogCollection.cs" Link="TranslationCatalogCollection.cs" />

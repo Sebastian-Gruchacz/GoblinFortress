@@ -3,6 +3,11 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using GoblinStronghold.Simulation.Civilizations;
+using GoblinStronghold.Simulation.Civilizations.Naming;
+using GoblinStronghold.Simulation.Civilizations.Polities;
+using GoblinStronghold.Simulation.Construction;
+using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Terrain;
@@ -42,6 +47,8 @@ public sealed partial class SimulationEngine
     private readonly SortedDictionary<EntityId, CorpseState> _corpses = [];
     private readonly SortedSet<ResourceVariant> _stolenVillageEquipment = [];
     private readonly SortedDictionary<ulong, AnimalState> _animals = [];
+    private readonly CivilizationDefinition _goblinCivilization;
+    private readonly CivilizationDefinition _humanCivilization;
     private readonly UndergroundFactionDirector _undergroundFactions;
     private readonly NavigationKnowledgeState _tribeNavigationKnowledge = new();
     private readonly SortedDictionary<CommandKey, SimulationCommand> _pendingCommands = [];
@@ -80,8 +87,17 @@ public sealed partial class SimulationEngine
         World = WorldMapState.CreateInitial(map);
         Navigation = new NavigationPathService(World);
         Visibility = WorldVisibilityState.Create(map);
+        _goblinCivilization = CivilizationCatalog.Current.Get(
+            CivilizationLegacyRole.PlayerGoblins);
+        _humanCivilization = CivilizationCatalog.Current.Get(
+            CivilizationLegacyRole.HumanVillage);
         _undergroundFactions = UndergroundFactionDirector.Create(worldSeed, map.MinimumWorldLevel);
-        _humanVillage = HumanVillageState.CreateInitial(World, definitions);
+        _humanVillage = HumanVillageState.CreateInitial(
+            World,
+            definitions,
+            HumanVitals,
+            HumanPopulationNeeds,
+            HumanSpatialBehavior);
         _raidTarget = map.HumanVillage;
         _logisticsNetworks.Add(
             EntityId.None,
@@ -98,6 +114,22 @@ public sealed partial class SimulationEngine
 
     public SimulationDebugSettings DebugSettings { get; }
 
+    public int MaximumGoblinHealth => GoblinVitals.MaximumHealth;
+
+    public CivilizationCombatDefinition GoblinCombat => _goblinCivilization.Combat!;
+
+    public CivilizationPerceptionDefinition GoblinPerception =>
+        _goblinCivilization.Perception!;
+
+    public CivilizationSpatialBehaviorDefinition GoblinSpatialBehavior =>
+        _goblinCivilization.SpatialBehavior!;
+
+    public int MaximumGoblinHunger => GoblinNeeds.MaximumHunger;
+
+    public int MaximumGoblinThirst => GoblinNeeds.MaximumThirst;
+
+    public int MaximumGoblinFatigue => GoblinNeeds.MaximumFatigue;
+
     public GeneratedMap Map => World.Baseline;
 
     public WorldMapState World { get; private set; }
@@ -105,6 +137,25 @@ public sealed partial class SimulationEngine
     public NavigationPathService Navigation { get; private set; }
 
     public WorldVisibilityState Visibility { get; private set; }
+
+    private CivilizationVitalsDefinition GoblinVitals => _goblinCivilization.Vitals!;
+
+    public CivilizationNeedsDefinition GoblinNeeds => _goblinCivilization.Needs!;
+
+    private CivilizationAgingDefinition GoblinAging => _goblinCivilization.Aging!;
+
+    private CivilizationVitalsDefinition HumanVitals => _humanCivilization.Vitals!;
+
+    public CivilizationCombatDefinition HumanCombat => _humanCivilization.Combat!;
+
+    public CivilizationPerceptionDefinition HumanPerception =>
+        _humanCivilization.Perception!;
+
+    public CivilizationSpatialBehaviorDefinition HumanSpatialBehavior =>
+        _humanCivilization.SpatialBehavior!;
+
+    public CivilizationPopulationNeedsDefinition HumanPopulationNeeds =>
+        _humanCivilization.PopulationNeeds!;
 
     public SimulationTick CurrentTick { get; private set; } = SimulationTick.Zero;
 
@@ -202,10 +253,15 @@ public sealed partial class SimulationEngine
         ArgumentOutOfRangeException.ThrowIfNegative(initialFoodStock);
         ArgumentOutOfRangeException.ThrowIfNegative(initialWoodStock);
         ArgumentOutOfRangeException.ThrowIfNegative(initialHunger);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(initialHunger, definitions.MaximumHunger);
-        var actorHealth = initialHealth ?? definitions.MaximumHealth;
+        var goblinCivilization = CivilizationCatalog.Current.Get(
+            CivilizationLegacyRole.PlayerGoblins);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            initialHunger,
+            goblinCivilization.Needs!.MaximumHunger);
+        var maximumHealth = goblinCivilization.Vitals!.MaximumHealth;
+        var actorHealth = initialHealth ?? maximumHealth;
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(actorHealth);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(actorHealth, definitions.MaximumHealth);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(actorHealth, maximumHealth);
 
         if (map.Seed != worldSeed)
         {
@@ -274,10 +330,13 @@ public sealed partial class SimulationEngine
         try
         {
             map = SwampMapGenerator.Generate(
-                worldSeed,
-                save.MapWidth,
-                save.MapHeight,
-                save.MapGeneratorVersion);
+                new Map.Generation.LocationGenerationRequest(
+                    ContentId.Parse(save.MapProfileId),
+                    worldSeed,
+                    save.MapWidth,
+                    save.MapHeight,
+                    save.MapGeneratorVersion,
+                    save.MapRiverMode));
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -375,6 +434,9 @@ public sealed partial class SimulationEngine
             engine.World,
             save.HumanVillage,
             definitions,
+            engine.HumanVitals,
+            engine.HumanPopulationNeeds,
+            engine.HumanSpatialBehavior,
             engine.CurrentTick);
         engine.ValidateLoadedRaidState();
         engine.LoadResourcePriorities(save.ResourcePriorities);
@@ -507,6 +569,7 @@ public sealed partial class SimulationEngine
                         ? futureWork
                         : null))
             {
+                Sex = actor.Sex,
                 Loadout = CreateEquipmentLoadout(actor),
                 CarriedCorpseId = actor.CarriedCorpseId,
                 TacticalOrder = new ActorTacticalOrderSnapshot(
@@ -645,8 +708,13 @@ public sealed partial class SimulationEngine
             Map.MaterializedNegativeLevelCount,
             World.Version,
             Map.GeneratorVersion,
+            Map.ProfileId,
+            Map.RiverMode,
             Map.ComputeFingerprint(),
-            includeStateHash ? ComputeStateHash() : string.Empty);
+            includeStateHash ? ComputeStateHash() : string.Empty)
+        {
+            PlayerPolityId = CorePolityIds.PlayerTribe,
+        };
     }
 
     public StorageDeliveryDiagnostic InspectStorageDelivery(EntityId zoneId)
@@ -1036,8 +1104,11 @@ public sealed partial class SimulationEngine
             FormatVersion = SaveFormatVersion,
             DefinitionsId = Definitions.Id,
             ClimateProfileId = Definitions.Clock.Climate.Id,
+            PlayerPolityId = CorePolityIds.PlayerTribe.Value,
             WorldSeed = WorldSeed.Value,
             MapGeneratorVersion = Map.GeneratorVersion,
+            MapProfileId = Map.ProfileId.Value,
+            MapRiverMode = Map.RiverMode,
             MapWidth = Map.Width,
             MapHeight = Map.Height,
             MapFingerprint = Map.ComputeFingerprint(),
@@ -1285,8 +1356,11 @@ public sealed partial class SimulationEngine
         Append(canonical, SaveFormatVersion);
         Append(canonical, Definitions.Id);
         Append(canonical, Definitions.Clock.Climate.Id);
+        Append(canonical, CorePolityIds.PlayerTribe.Value);
         Append(canonical, WorldSeed.Value);
         Append(canonical, Map.GeneratorVersion);
+        Append(canonical, Map.ProfileId.Value);
+        Append(canonical, (int)Map.RiverMode);
         Append(canonical, Map.ComputeFingerprint());
         Append(canonical, World.Version);
         Append(canonical, (int)_raidPhase);
@@ -1321,6 +1395,7 @@ public sealed partial class SimulationEngine
         foreach (var faction in undergroundFactions)
         {
             Append(canonical, faction.Id);
+            Append(canonical, faction.PolityId.Value);
             Append(canonical, (int)faction.Kind);
             Append(canonical, faction.BandIndex);
             Append(canonical, faction.TopLevel);
@@ -1472,6 +1547,7 @@ public sealed partial class SimulationEngine
         }
 
         var humanVillage = _humanVillage.CreateSnapshot();
+        Append(canonical, humanVillage.PolityId.Value);
         Append(canonical, humanVillage.Anchor);
         Append(canonical, humanVillage.Population);
         Append(canonical, humanVillage.FoodStock);
@@ -1515,6 +1591,7 @@ public sealed partial class SimulationEngine
         foreach (var villager in humanVillage.Villagers)
         {
             Append(canonical, villager.Id);
+            Append(canonical, (int)villager.Sex);
             Append(canonical, (int)villager.Role);
             Append(canonical, villager.Position);
             Append(canonical, (int)villager.Task);
@@ -1556,6 +1633,7 @@ public sealed partial class SimulationEngine
         {
             Append(canonical, actor.Id.Value);
             Append(canonical, actor.Name);
+            Append(canonical, (int)actor.Sex);
             Append(canonical, (int)actor.KnownSkills);
             Append(canonical, (int)actor.KnownTraits);
             Append(canonical, (int)actor.Equipment);
@@ -1789,11 +1867,31 @@ public sealed partial class SimulationEngine
                 $"'{definitions.Clock.Climate.Id}' was supplied.");
         }
 
+        if (!PolityId.TryParse(save.PlayerPolityId, out var playerPolityId) ||
+            playerPolityId != CorePolityIds.PlayerTribe)
+        {
+            throw new InvalidDataException(
+                $"Save requires unsupported player polity '{save.PlayerPolityId}'.");
+        }
+
         if (save.MapGeneratorVersion != SwampMapGenerator.CurrentVersion)
         {
             throw new InvalidDataException(
                 $"Obsolete or incompatible map generator version " +
                 $"{save.MapGeneratorVersion}; expected {SwampMapGenerator.CurrentVersion}.");
+        }
+
+        if (!ContentId.TryParse(save.MapProfileId, out var mapProfileId) ||
+            mapProfileId != SwampMapGenerator.DefaultProfileId)
+        {
+            throw new InvalidDataException(
+                $"Save requires unsupported map profile '{save.MapProfileId}'.");
+        }
+
+        if (!Enum.IsDefined(save.MapRiverMode))
+        {
+            throw new InvalidDataException(
+                $"Save requires unsupported river mode '{save.MapRiverMode}'.");
         }
 
         if (save.CurrentTick < 0 || save.NextEntityId == 0 || save.NextEventSequence == 0)
@@ -1843,6 +1941,7 @@ public sealed partial class SimulationEngine
             };
             if (id == EntityId.None ||
                 string.IsNullOrWhiteSpace(actorModel.Name) ||
+                !Enum.IsDefined(actorModel.Sex) ||
                 !HasOnlyKnownFlags(actorModel.KnownSkills, GoblinSkill.Building) ||
                 !HasOnlyKnownFlags(actorModel.KnownTraits, GoblinTrait.Fastidious) ||
                 !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.WoodenBucket) ||
@@ -1850,10 +1949,10 @@ public sealed partial class SimulationEngine
                 actorModel.HaulingExperience < 0 ||
                 actorModel.BuildingExperience < 0 ||
                 !workPreferences.IsValid ||
-                actorModel.Hunger < 0 || actorModel.Hunger > Definitions.MaximumHunger ||
-                actorModel.Fatigue < 0 || actorModel.Fatigue > Definitions.MaximumFatigue ||
-                actorModel.Health <= 0 || actorModel.Health > Definitions.MaximumHealth ||
-                actorModel.Thirst < 0 || actorModel.Thirst > Definitions.MaximumThirst ||
+                actorModel.Hunger < 0 || actorModel.Hunger > GoblinNeeds.MaximumHunger ||
+                actorModel.Fatigue < 0 || actorModel.Fatigue > GoblinNeeds.MaximumFatigue ||
+                actorModel.Health <= 0 || actorModel.Health > GoblinVitals.MaximumHealth ||
+                actorModel.Thirst < 0 || actorModel.Thirst > GoblinNeeds.MaximumThirst ||
                 actorModel.PersonalFood < 0 || actorModel.PersonalFood > Definitions.PersonalFoodCapacity ||
                 personalFoodKinds.Length != actorModel.PersonalFood ||
                 personalFoodKinds.Any(kind => !Enum.IsDefined(kind) || kind == FoodKind.None) ||
@@ -1898,6 +1997,7 @@ public sealed partial class SimulationEngine
             var actor = new ActorState(id, position, actorModel.Hunger)
             {
                 Name = actorModel.Name,
+                Sex = actorModel.Sex,
                 KnownSkills = actorModel.KnownSkills,
                 KnownTraits = actorModel.KnownTraits,
                 Equipment = actorModel.Equipment,
@@ -2221,7 +2321,9 @@ public sealed partial class SimulationEngine
                     WorkDesignationKind.CarveRampUp or WorkDesignationKind.CleanBlood &&
                  targetEntityId != EntityId.None) ||
                 (model.Kind is WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone or
-                    WorkDesignationKind.HuntAnimal &&
+                    WorkDesignationKind.HuntAnimal or
+                    WorkDesignationKind.DismantleWorldObject or
+                    WorkDesignationKind.DismantleStorageZone &&
                  targetEntityId == EntityId.None) ||
                 !_workDesignations.TryAdd(
                     id,
@@ -2482,6 +2584,9 @@ public sealed partial class SimulationEngine
                     _animals.TryGetValue(designation.TargetEntityId.Value, out var animal) &&
                     animal.Position == designation.Target,
                 WorkDesignationKind.CleanBlood => HasCleanableSurface(designation.Target),
+                WorkDesignationKind.DismantleWorldObject or
+                    WorkDesignationKind.DismantleStorageZone =>
+                    TryGetDismantlingWorkTicks(designation, out _),
                 _ => false,
             };
             if (!valid)
@@ -2772,8 +2877,8 @@ public sealed partial class SimulationEngine
     {
         var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
         var goblinRadius = calendar.IsNight
-            ? Definitions.Vision.GoblinNightRadius
-            : Definitions.Vision.GoblinDayRadius;
+            ? GoblinPerception.NightVisionRadius
+            : GoblinPerception.DayVisionRadius;
         var observers = _actors.Values
             .Select(actor => (actor.Position, goblinRadius))
             .ToList();
@@ -2792,7 +2897,7 @@ public sealed partial class SimulationEngine
                 }
             }
         }
-        if (Definitions.Vision.GoblinStructureRadius > 0)
+        if (GoblinPerception.StructureVisionRadius > 0)
         {
             observers.AddRange(World.EnumerateWorldObjects()
                 .Where(worldObject =>
@@ -2800,11 +2905,13 @@ public sealed partial class SimulationEngine
                     worldObject.Kind is WorldObjectKind.GoblinHut or
                         WorldObjectKind.GoblinFieldCamp)
                 .Select(worldObject =>
-                    (worldObject.Anchor, Definitions.Vision.GoblinStructureRadius)));
+                    (worldObject.Anchor, GoblinPerception.StructureVisionRadius)));
         }
         if (DebugSettings.RevealFogFromNonPlayerUnits)
         {
-            var humanRadius = calendar.IsNight ? 3 : Definitions.VisionRadius;
+            var humanRadius = calendar.IsNight
+                ? HumanPerception.NightVisionRadius
+                : HumanPerception.DayVisionRadius;
             observers.AddRange(_humanVillage.GetLivingCohortPositions()
                 .Select(position => (position, humanRadius)));
             observers.AddRange(_animals.Values.Select(animal =>
@@ -3003,7 +3110,15 @@ public sealed partial class SimulationEngine
         var targetKind = (DismantleTargetKind)command.Amount;
         if (targetKind == DismantleTargetKind.StorageZone)
         {
-            return TryDismantleStorageZone(command.Target, publishEvent: true);
+            if (!_storageZones.TryGetValue(command.Target, out var zone))
+            {
+                return false;
+            }
+
+            return QueueDismantlingDesignation(
+                WorkDesignationKind.DismantleStorageZone,
+                zone.Position,
+                zone.Id);
         }
 
         if (targetKind != DismantleTargetKind.WorldObject)
@@ -3022,24 +3137,29 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        CancelCraftingOrdersAt(worldObject.Anchor);
-        if (worldObject.Kind == WorldObjectKind.GoblinFieldCamp)
+        return ConstructionDismantlingPolicy.TryGetConstructionKind(
+                worldObject.Kind,
+                out _) &&
+            QueueDismantlingDesignation(
+                WorkDesignationKind.DismantleWorldObject,
+                worldObject.Anchor,
+                command.Target);
+    }
+
+    private bool QueueDismantlingDesignation(
+        WorkDesignationKind kind,
+        GridPosition position,
+        EntityId targetId)
+    {
+        if (_workDesignations.Values.Any(designation =>
+                designation.Kind == kind && designation.TargetEntityId == targetId))
         {
-            var campStorage = _storageZones.Values.FirstOrDefault(zone =>
-                zone.Position == worldObject.Anchor &&
-                zone.AcceptedResource == ResourceKind.Food);
-            if (campStorage is not null)
-            {
-                TryDismantleStorageZone(campStorage.Id, publishEvent: false);
-            }
+            return false;
         }
 
-        _undeliveredWorldChanges.Add(World.DismantleWorldObject(id, CurrentTick));
-        Publish(
-            SimulationEventKind.ConstructionDismantled,
-            EntityId.None,
-            command.Target,
-            1);
+        var id = AllocateEntityId();
+        _workDesignations.Add(id, new WorkDesignationSnapshot(id, kind, position, targetId));
+        Publish(SimulationEventKind.WorkDesignationCreated, EntityId.None, id, (int)kind);
         return true;
     }
 
@@ -3843,6 +3963,10 @@ public sealed partial class SimulationEngine
             actor.JobKind == ActorJobKind.HuntAnimal && actor.SourceStackId == designation.Id,
         WorkDesignationKind.CleanBlood =>
             actor.JobKind == ActorJobKind.CleanBlood && actor.SourceStackId == designation.Id,
+        WorkDesignationKind.DismantleWorldObject or
+            WorkDesignationKind.DismantleStorageZone =>
+            actor.JobKind == ActorJobKind.DismantleConstruction &&
+            actor.SourceStackId == designation.Id,
         _ => false,
     };
 
@@ -4517,6 +4641,7 @@ public sealed partial class SimulationEngine
         IReadOnlyList<GridPosition> footprint)
     {
         if (footprint.Any(position => !IsPotentialConstructionPosition(position)) ||
+            kind is not (ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor) &&
             _storageZones.Values.Any(zone => footprint.Contains(zone.Position)))
         {
             return false;
@@ -5206,18 +5331,18 @@ public sealed partial class SimulationEngine
             if (actor.JobKind is not (ActorJobKind.Rest or ActorJobKind.Collapsed) ||
                 actor.JobPhase != ActorJobPhase.Working)
             {
-                var fatiguePerTick = Definitions.FatiguePerTick;
+                var fatiguePerTick = GoblinNeeds.FatiguePerTick;
                 if (IsJuvenile(actor) && actor.JobKind == ActorJobKind.Haul)
                 {
                     fatiguePerTick = checked(
                         fatiguePerTick * JuvenileHaulFatigueMultiplier);
                 }
                 actor.Fatigue = Math.Min(
-                    Definitions.MaximumFatigue,
+                    GoblinNeeds.MaximumFatigue,
                     checked(actor.Fatigue + fatiguePerTick));
             }
 
-            if (actor.Fatigue >= Definitions.MaximumFatigue &&
+            if (actor.Fatigue >= GoblinNeeds.MaximumFatigue &&
                 actor.JobKind is not (ActorJobKind.Rest or ActorJobKind.Collapsed))
             {
                 if (actor.CarriedStackId != EntityId.None &&
@@ -5238,20 +5363,20 @@ public sealed partial class SimulationEngine
             }
 
             actor.Hunger = Math.Min(
-                Definitions.MaximumHunger,
-                checked(actor.Hunger + Definitions.HungerPerTick));
+                GoblinNeeds.MaximumHunger,
+                checked(actor.Hunger + GoblinNeeds.HungerPerTick));
             actor.Thirst = Math.Min(
-                Definitions.MaximumThirst,
-                checked(actor.Thirst + Definitions.ThirstPerTick));
+                GoblinNeeds.MaximumThirst,
+                checked(actor.Thirst + GoblinNeeds.ThirstPerTick));
 
-            if (actor.Thirst >= Definitions.DrinkThreshold && actor.PersonalWater > 0)
+            if (actor.Thirst >= GoblinNeeds.DrinkThreshold && actor.PersonalWater > 0)
             {
                 actor.PersonalWater--;
                 actor.Thirst = Math.Max(0, actor.Thirst - Definitions.WaterHydration);
                 Publish(SimulationEventKind.ActorDrank, actor.Id, EntityId.None, 1);
             }
 
-            if (actor.Hunger >= Definitions.EatThreshold && actor.JobKind != ActorJobKind.Eat)
+            if (actor.Hunger >= GoblinNeeds.EatThreshold && actor.JobKind != ActorJobKind.Eat)
             {
                 if (actor.PersonalFood > 0)
                 {
@@ -5269,13 +5394,13 @@ public sealed partial class SimulationEngine
             actor.Health = Math.Min(actor.Health, GetEffectiveMaximumHealth(actor));
             ApplyPassiveHealthRecovery(actor);
 
-            if (actor.Hunger >= Definitions.StarvationHungerThreshold)
+            if (actor.Hunger >= GoblinNeeds.StarvationHungerThreshold)
             {
-                actor.Health = Math.Max(0, actor.Health - Definitions.StarvationDamagePerTick);
+                actor.Health = Math.Max(0, actor.Health - GoblinNeeds.StarvationDamagePerTick);
             }
-            if (actor.Thirst >= Definitions.DehydrationThirstThreshold)
+            if (actor.Thirst >= GoblinNeeds.DehydrationThirstThreshold)
             {
-                actor.Health = Math.Max(0, actor.Health - Definitions.DehydrationDamagePerTick);
+                actor.Health = Math.Max(0, actor.Health - GoblinNeeds.DehydrationDamagePerTick);
             }
 
             if (actor.Health == 0)
@@ -5382,8 +5507,8 @@ public sealed partial class SimulationEngine
     {
         var effectiveMaximumHealth = GetEffectiveMaximumHealth(actor);
         if (actor.Health <= 0 || actor.Health >= effectiveMaximumHealth ||
-            actor.Hunger >= Definitions.CriticalHungerThreshold ||
-            actor.Thirst >= Definitions.DehydrationThirstThreshold)
+            actor.Hunger >= GoblinNeeds.CriticalHungerThreshold ||
+            actor.Thirst >= GoblinNeeds.DehydrationThirstThreshold)
         {
             return;
         }
@@ -6203,14 +6328,16 @@ public sealed partial class SimulationEngine
         int? health = null)
     {
         var id = AllocateEntityId();
+        const ActorSex sex = ActorSex.Sexless;
         var actor = new ActorState(id, position, hunger)
         {
-            Name = CreateGoblinName(id),
+            Name = CreateGoblinName(id, sex),
+            Sex = sex,
             KnownSkills = CreateGoblinSkills(id),
             KnownTraits = CreateGoblinTraits(id),
             Equipment = CreateGoblinEquipment(id),
             WorkPreferences = CreateGoblinWorkPreferences(id),
-            Health = health ?? Definitions.MaximumHealth,
+            Health = health ?? GoblinVitals.MaximumHealth,
             PersonalWater = Definitions.PersonalWaterCapacity,
             AgeOffsetTicks = CreateInitialAgeOffsetTicks(id),
         };
@@ -6338,30 +6465,17 @@ public sealed partial class SimulationEngine
             ? _actors.Values.Sum(actor => actor.PersonalFood)
             : 0));
 
-    private string CreateGoblinName(EntityId id)
+    private string CreateGoblinName(EntityId id, ActorSex sex)
     {
-        string[] beginnings = ["Gr", "Kr", "Sn", "Br", "Zg", "Tr", "Gl", "Wrz"];
-        string[] endings = ["uk", "ak", "iz", "og", "yn", "ek", "usz", "ag"];
-        var beginning = DeterministicRandom.NextInt(
+        var definition = CivilizationCatalog.Current.Get(
+            CivilizationLegacyRole.PlayerGoblins);
+        return NameGeneratorCatalog.Current.Get(definition.Identity.NameGeneratorId).Generate(new(
             WorldSeed,
-            RandomDomain.GoblinIdentity,
-            id,
-            SimulationTick.Zero,
-            sampleKey: 1,
-            minimumInclusive: 0,
-            maximumExclusive: beginnings.Length);
-        var ending = DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.GoblinIdentity,
-            id,
-            SimulationTick.Zero,
-            sampleKey: 2,
-            minimumInclusive: 0,
-            maximumExclusive: endings.Length);
-        var candidate = beginnings[beginning] + endings[ending];
-        return _actors.Values.Any(actor => StringComparer.Ordinal.Equals(actor.Name, candidate))
-            ? $"{candidate}-{id.Value}"
-            : candidate;
+            id.Value,
+            Ordinal: 0,
+            _actors.Values.Select(actor => actor.Name)
+                .ToHashSet(StringComparer.Ordinal),
+            sex));
     }
 
     private GoblinSkill CreateGoblinSkills(EntityId id)
@@ -6523,7 +6637,8 @@ public sealed partial class SimulationEngine
             .Where(stack =>
             stack.Resource == ResourceKind.Wood &&
             stack.Location.Kind == ItemLocationKind.Ground &&
-            ManhattanDistance(stack.Location.Position, Map.GoblinSpawn) <= Definitions.VisionRadius)
+            ManhattanDistance(stack.Location.Position, Map.GoblinSpawn) <=
+                GoblinPerception.DayVisionRadius)
             .Sum(stack => stack.Quantity);
         if (nearbyBrushwood >= 4)
         {
@@ -6598,7 +6713,8 @@ public sealed partial class SimulationEngine
         if (_itemStacks.Values.Any(stack =>
                 stack.Resource == ResourceKind.Stone &&
                 stack.Location.Kind == ItemLocationKind.Ground &&
-                ManhattanDistance(stack.Location.Position, Map.GoblinSpawn) <= Definitions.VisionRadius))
+                ManhattanDistance(stack.Location.Position, Map.GoblinSpawn) <=
+                    GoblinPerception.DayVisionRadius))
         {
             return;
         }
@@ -6978,7 +7094,8 @@ public sealed partial class SimulationEngine
     private bool IsAvailableForConstruction(ItemStackState stack) =>
         stack.Location.Kind == ItemLocationKind.StorageZone ||
         (stack.Location.Kind == ItemLocationKind.Ground &&
-         Visibility.Get(stack.Location.Position) == CellVisibility.Visible);
+         Visibility.TryGet(stack.Location.Position, out var visibility) &&
+         visibility == CellVisibility.Visible);
 
     private int ConsumeResource(ResourceKind resource, int quantity)
     {
@@ -7191,9 +7308,9 @@ public sealed partial class SimulationEngine
     private long CreateInitialAgeOffsetTicks(EntityId id)
     {
         var ticksPerYear = Definitions.Clock.Climate.TicksPerYear;
-        var minimum = checked((int)(ticksPerYear * Definitions.Aging.InitialMinimumAgeYears));
+        var minimum = checked((int)(ticksPerYear * GoblinAging.InitialMinimumAgeYears));
         var maximum = checked((int)(ticksPerYear *
-            Definitions.Aging.InitialMaximumAgeYearsExclusive));
+            GoblinAging.InitialMaximumAgeYearsExclusive));
         return DeterministicRandom.NextInt(
             WorldSeed,
             RandomDomain.GoblinIdentity,
@@ -7214,12 +7331,12 @@ public sealed partial class SimulationEngine
 
     private bool IsElderly(ActorState actor) =>
         GetActorAgeTicks(actor) >= checked(
-            Definitions.Clock.Climate.TicksPerYear * Definitions.Aging.HealthyYears);
+            Definitions.Clock.Climate.TicksPerYear * GoblinAging.HealthyYears);
 
     private double GetSenescenceProgress(ActorState actor)
     {
         var healthyTicks = checked(
-            Definitions.Clock.Climate.TicksPerYear * Definitions.Aging.HealthyYears);
+            Definitions.Clock.Climate.TicksPerYear * GoblinAging.HealthyYears);
         var ageTicks = GetActorAgeTicks(actor);
         if (ageTicks <= healthyTicks)
         {
@@ -7240,8 +7357,8 @@ public sealed partial class SimulationEngine
             actor.Id,
             SimulationTick.Zero,
             sampleKey: 0x4F4C44414745UL,
-            minimumInclusive: Definitions.Aging.DeclineMinimumSeasons,
-            maximumExclusive: Definitions.Aging.DeclineMaximumSeasons + 1);
+            minimumInclusive: GoblinAging.DeclineMinimumSeasons,
+            maximumExclusive: GoblinAging.DeclineMaximumSeasons + 1);
         var declineTicks = 0L;
         for (var offset = 0; offset < declineSeasons; offset++)
         {
@@ -7255,12 +7372,12 @@ public sealed partial class SimulationEngine
     {
         var progress = GetSenescenceProgress(actor);
         var terminalHealth = checked(
-            Definitions.MaximumHealth * Definitions.Aging.TerminalHealthPermille / 1_000);
+            GoblinVitals.MaximumHealth * GoblinAging.TerminalHealthPermille / 1_000);
         return Math.Clamp(
-            (int)Math.Round(Definitions.MaximumHealth -
-                (Definitions.MaximumHealth - terminalHealth) * progress),
+            (int)Math.Round(GoblinVitals.MaximumHealth -
+                (GoblinVitals.MaximumHealth - terminalHealth) * progress),
             terminalHealth,
-            Definitions.MaximumHealth);
+            GoblinVitals.MaximumHealth);
     }
 
     private int GetActorAgeDays(ActorState actor, int currentAbsoluteDay)
@@ -7281,6 +7398,7 @@ public sealed partial class SimulationEngine
     {
         Id = actor.Id.Value,
         Name = actor.Name,
+        Sex = actor.Sex,
         KnownSkills = actor.KnownSkills,
         KnownTraits = actor.KnownTraits,
         Equipment = actor.Equipment,
@@ -7527,6 +7645,8 @@ public sealed partial class SimulationEngine
         public EntityId Id { get; } = id;
 
         public string Name { get; set; } = string.Empty;
+
+        public ActorSex Sex { get; set; }
 
         public GoblinSkill KnownSkills { get; set; }
 

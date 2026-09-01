@@ -63,6 +63,7 @@ public enum SpatialOccupancyChannel : byte
     Overhead = 3,
     Subsurface = 4,
     Fixture = 5,
+    FloorCover = 6,
 }
 
 public enum WorldObjectPartKind : byte

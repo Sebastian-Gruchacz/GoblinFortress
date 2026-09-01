@@ -19,6 +19,10 @@ public static class CoreContentPack
                 $"{ResourcePrefix}.Content.crafting-recipes.json",
             ["content/construction-blueprints.json"] =
                 $"{ResourcePrefix}.Content.construction-blueprints.json",
+            ["content/location-profiles.json"] =
+                $"{ResourcePrefix}.Content.location-profiles.json",
+            ["content/name-generators.json"] =
+                $"{ResourcePrefix}.Content.name-generators.json",
             ["content/materials.json"] = $"{ResourcePrefix}.Content.materials.json",
             ["content/terrain-modifications.json"] =
                 $"{ResourcePrefix}.Content.terrain-modifications.json",

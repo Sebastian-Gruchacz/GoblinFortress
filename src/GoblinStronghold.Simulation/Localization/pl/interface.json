@@ -46,7 +46,10 @@
       "climate-zone": "Strefa klimatyczna",
       "climate-temperate-marsh": "Umiarkowane pogranicze bagienne",
       "river": "Rzeka",
-      "river-present": "Generowana rzeka",
+      "river-none": "Bez wyznaczonej rzeki",
+      "river-single": "Pojedyncze koryto rzeki",
+      "river-branching": "Rozgałęzione koryta rzeki",
+      "river-tooltip": "Wybierz brak wyznaczonej rzeki, pierwotne pojedyncze koryto albo drugie koryto łączące się z głównym. Naturalne rozlewiska i lokalny dostęp do wody pozostają w każdym trybie.",
       "road": "Droga",
       "road-absent": "Bez generowanej drogi",
       "neighbor-civilizations": "Sąsiednie cywilizacje",
@@ -219,6 +222,8 @@
       "construction-supply-deliver-working": "składa materiał na budowie ({0})",
       "construction-build-travel": "idzie budować → {0}",
       "construction-build-working": "buduje ({0})",
+      "construction-dismantle-travel": "idzie rozbierać → {0}",
+      "construction-dismantle-working": "rozbiera ({0})",
       "crafting-supply-collect-travel": "idzie po składnik do warsztatu ×{0}",
       "crafting-supply-collect-working": "pobiera składnik ×{0}",
       "crafting-supply-deliver-travel": "niesie składnik do warsztatu ×{0}",
@@ -266,6 +271,13 @@
       "recover-corpse-return": "niesie zwłoki do obozu → {0}",
       "consume-corpse-travel": "idzie pożreć zwłoki → {0}",
       "consume-corpse-working": "pożera zwłoki ({0})"
+    },
+    "actor-job-kinds": {
+      "dismantling": "rozbiórki"
+    },
+    "work-order-kinds": {
+      "dismantle-structure": "rozbiórka konstrukcji",
+      "dismantle-storage": "rozbiórka magazynu"
     },
     "work-feedback": {
       "tunnel-preview": "Planowany obszar tunelu: {0} pól; nieznane komórki będą rozstrzygane wraz z odsłanianiem.",

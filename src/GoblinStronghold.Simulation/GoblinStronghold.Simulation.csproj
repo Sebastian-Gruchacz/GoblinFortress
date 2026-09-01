@@ -18,6 +18,10 @@
                       LogicalName="GoblinStronghold.Simulation.Content.civilizations.json" />
     <EmbeddedResource Include="Content\construction-blueprints.json"
                       LogicalName="GoblinStronghold.Simulation.Content.construction-blueprints.json" />
+    <EmbeddedResource Include="Content\location-profiles.json"
+                      LogicalName="GoblinStronghold.Simulation.Content.location-profiles.json" />
+    <EmbeddedResource Include="Content\name-generators.json"
+                      LogicalName="GoblinStronghold.Simulation.Content.name-generators.json" />
     <EmbeddedResource Include="Content\materials.json"
                       LogicalName="GoblinStronghold.Simulation.Content.materials.json" />
     <EmbeddedResource Include="Content\terrain-modifications.json"

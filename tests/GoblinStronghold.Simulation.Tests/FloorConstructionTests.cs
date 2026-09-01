@@ -84,6 +84,88 @@ public sealed class FloorConstructionTests
         Assert.True(engine.World.IsTerrainTraversable(position));
     }
 
+    [Fact]
+    public void FloorCanBeBuiltAtTheLowerEndOfAnExcavatedRamp()
+    {
+        var seed = new WorldSeed(0x4C4F574552464C52UL);
+        var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0,
+            initialWoodStock: 0);
+        var upper =
+            (from y in Enumerable.Range(0, map.Height)
+             from x in Enumerable.Range(0, map.Width)
+             let candidate = new GridPosition(x, y, -1)
+             where engine.World.CanCarveRampDown(candidate)
+             select candidate).First();
+        var lower = upper with { Z = upper.Z - 1 };
+        Assert.True(engine.World.TryCarveVerticalRamp(
+            upper,
+            carveDown: true,
+            SimulationTick.Zero,
+            out _,
+            out _));
+
+        Assert.True(engine.World.CanPlanFloorConstruction([upper]));
+        Assert.True(engine.World.CanPlanFloorConstruction([lower]));
+
+        engine.World.BuildFloor(
+            upper,
+            SimulationTick.Zero,
+            stone: false,
+            ResourceVariant.OakWood);
+        engine.World.BuildFloor(
+            lower,
+            SimulationTick.Zero,
+            stone: true,
+            ResourceVariant.Sandstone);
+
+        Assert.True(engine.World.HasConstructedFloorSurface(upper));
+        Assert.True(engine.World.HasConstructedFloorSurface(lower));
+        Assert.NotNull(engine.Navigation.FindPath(upper, lower));
+    }
+
+    [Fact]
+    public void FloorCoverCanBeBuiltBelowAnExistingWorkshop()
+    {
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0x554E44455253484FUL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 4,
+            initialFoodStock: 0,
+            initialWoodStock: 8);
+        var position = engine.Map.GetCardinalNeighbors(engine.Map.GoblinSpawn)
+            .First(engine.World.CanBuildPrimitiveWorkshop);
+        engine.QueueCommand(SimulationCommand.BuildPrimitiveWorkshop(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            position));
+        for (var tick = 0; tick < 5_000 &&
+             !engine.World.HasPrimitiveWorkshop(position); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+        Assert.True(engine.World.HasPrimitiveWorkshop(position));
+
+        Assert.True(engine.World.CanPlanFloorConstruction([position]));
+        engine.World.BuildFloor(
+            position,
+            engine.CurrentTick,
+            stone: false,
+            ResourceVariant.OakWood);
+
+        Assert.True(engine.World.HasPrimitiveWorkshop(position));
+        Assert.True(engine.World.HasConstructedFloorSurface(position));
+        Assert.Contains(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.PrimitiveWorkshop);
+        Assert.Contains(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenFloor);
+    }
+
     private static SimulationEngine CreateWithMaterial(
         WorldSeed seed,
         ResourceKind resource,
@@ -129,6 +211,7 @@ public sealed class FloorConstructionTests
                             engine.Visibility.TryGet(cell, out var visibility) &&
                             visibility.IsDiscovered()) &&
                         engine.World.CanBuildFloors(cells) &&
+                        cells.All(engine.World.IsTerrainTraversable) &&
                         cells.All(cell => cell != engine.Map.GoblinSpawn))
                     {
                         return cells;

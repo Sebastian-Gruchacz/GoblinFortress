@@ -10,7 +10,9 @@ public sealed partial class SimulationEngine
             .Select(actor => new HumanIntruderSnapshot(actor.Id, actor.Position))
             .ToArray();
         var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
-        var detectionRadius = calendar.IsNight ? 3 : Definitions.HumanDetectionRadius;
+        var detectionRadius = calendar.IsNight
+            ? HumanPerception.NightVisionRadius
+            : HumanPerception.DayVisionRadius;
         var result = _humanVillage.Update(
             CurrentTick,
             WorldSeed,
@@ -70,7 +72,7 @@ public sealed partial class SimulationEngine
                 continue;
             }
 
-            var guardDamage = Definitions.HumanGuardMinimumDamage +
+            var guardDamage = HumanCombat.MinimumMeleeDamage +
                 DeterministicRandom.NextInt(
                     WorldSeed,
                     RandomDomain.Combat,
@@ -78,7 +80,7 @@ public sealed partial class SimulationEngine
                     CurrentTick,
                     sampleKey: 1,
                     minimumInclusive: 0,
-                    maximumExclusive: Definitions.HumanGuardDamageVariance + 1);
+                    maximumExclusive: HumanCombat.MeleeDamageVariance + 1);
             ApplyTraumaDamage(guardTarget, guardDamage);
             Publish(
                 SimulationEventKind.HumanGuardHitGoblin,
@@ -134,7 +136,7 @@ public sealed partial class SimulationEngine
                 goblin.PersonalStoneAmmo--;
             }
             var baseDamage = isMelee
-                ? Definitions.GoblinMinimumDamage + GetMeleeEquipmentDamageBonus(goblin.Equipment)
+                ? GoblinCombat.MinimumMeleeDamage + GetMeleeEquipmentDamageBonus(goblin.Equipment)
                 : hasSling
                     ? Definitions.RangedCombat.SlingDamage
                     : Definitions.RangedCombat.ThrownStoneDamage;
@@ -147,7 +149,7 @@ public sealed partial class SimulationEngine
                     sampleKey: isMelee ? 2UL : 3UL,
                     minimumInclusive: 0,
                     maximumExclusive: isMelee
-                        ? Definitions.GoblinDamageVariance + 1
+                        ? GoblinCombat.MeleeDamageVariance + 1
                         : Definitions.RangedCombat.DamageVariance + 1);
             var result = _humanVillage.ApplyVillagerDamage(target.Id, goblinDamage);
             if (result.VillagerId == 0)

@@ -1,6 +1,7 @@
 using Godot;
 using GoblinStronghold.Simulation.Animals;
 using GoblinStronghold.Simulation.Civilizations;
+using GoblinStronghold.Simulation.Civilizations.Naming;
 using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Localization;
 using System.Text;
@@ -71,6 +72,7 @@ public partial class Main
         var enabledPacks = new List<ContentPack>();
         TranslationCatalog.ResetToCorePack();
         AnimalSpeciesCatalog.ResetToCore();
+        NameGeneratorCatalog.ResetToCore();
         CivilizationCatalog.ResetToCore();
         foreach (var type in new[] { "content", "language" })
         {
@@ -83,10 +85,14 @@ public partial class Main
                 {
                     var candidatePacks = enabledPacks.Append(pack).ToArray();
                     var animalCatalog = AnimalSpeciesCatalog.Compose(candidatePacks);
-                    var civilizationCatalog = CivilizationCatalog.Compose(candidatePacks);
+                    var nameGeneratorCatalog = NameGeneratorCatalog.Compose(candidatePacks);
+                    var civilizationCatalog = CivilizationCatalog.Compose(
+                        candidatePacks,
+                        nameGeneratorCatalog);
                     AnimalVisualAssetRegistry.Validate(animalCatalog);
                     TranslationCatalog.ConfigurePacks(candidatePacks);
                     AnimalSpeciesCatalog.Activate(animalCatalog);
+                    NameGeneratorCatalog.Activate(nameGeneratorCatalog);
                     CivilizationCatalog.Activate(civilizationCatalog);
                     enabledPacks.Add(pack);
                 }

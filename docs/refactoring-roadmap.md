@@ -166,6 +166,19 @@ and rendering stay outside simulation code.
   returns its world change, output position, yield, and experience as one result.
   Stack indexing, reservation mutation, event publication, and tick execution
   remain at the central composition boundary.
+  Construction dismantling now reuses persistent work designations and has a
+  focused `ConstructionDismantlingPolicy` for the legacy object-to-blueprint
+  adapter and the 30-percent work duration. A focused target factory now owns
+  world-object eligibility, storage-provider mapping, footprint normalization,
+  duration, and access-cell discovery. Route planning, completion orchestration,
+  and the legacy actor-job dispatch still remain at the composition boundary
+  pending the registered-executor migration. The
+  current Godot planner renders dismantling targets, tracks their active worker,
+  and supports priority, suspension, resumption, focus, and cancellation without
+  exposing the area-edit action used by ordinary region designations. Removing a
+  constructed floor resolves unsupported goblins, carried or loose corpses, and
+  loose item stacks onto the nearest traversable level below. Regression coverage
+  also protects floors beneath structures and at the lower end of vertical ramps.
 - Replace the central job-kind dispatch with registered executors keyed by a
   stable job ID and a legacy `ActorJobKind` adapter.
 - Keep tick ordering and deterministic tie-breaking explicit and covered by
@@ -181,7 +194,13 @@ and rendering stay outside simulation code.
   fortification, upkeep, relations, and conflict timing are data-driven while
   `UndergroundFactionKind` remains a save adapter. The wider polity, settlement,
   visitor-party, kingdom, bandit, legendary-threat, and location-profile stages
-  are tracked in `docs/civilizations-and-world-generation-roadmap.md`.
+  are tracked in `docs/civilizations-and-world-generation-roadmap.md`. The
+  current surface generator now reads geometry-driving river, wetland,
+  settlement-pad, relief, and dimension values from the validated embedded
+  `core:demo-swamp-frontier` profile; `SwampMapGenerator` remains the
+  save-compatible facade over `LocationGenerationRequest`. Format-73 saves pin
+  the stable profile ID and selected absent/single/branching river mode, while
+  deep geology is still code-native.
 - Surface contamination now has a focused `Contamination/SurfaceGrimeState`
   owner with deterministic pickup, deposition, cleaning, snapshot, and restore
   contracts. The goblin, human-villager, and animal movement boundaries all

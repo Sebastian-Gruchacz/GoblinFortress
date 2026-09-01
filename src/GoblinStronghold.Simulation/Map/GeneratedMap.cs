@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using GoblinStronghold.Simulation.ContentPacks;
+using GoblinStronghold.Simulation.Map.Generation;
 
 namespace GoblinStronghold.Simulation.Map;
 
@@ -18,6 +20,8 @@ public sealed class GeneratedMap
         int height,
         WorldSeed seed,
         int generatorVersion,
+        ContentId profileId,
+        RiverGenerationMode riverMode,
         MapCell[] cells,
         GridPosition goblinSpawn,
         GridPosition humanVillage,
@@ -28,6 +32,8 @@ public sealed class GeneratedMap
         Height = height;
         Seed = seed;
         GeneratorVersion = generatorVersion;
+        ProfileId = profileId;
+        RiverMode = riverMode;
         _cells = cells;
         _caveCells = caveCells ?? [];
         _verticalPassages = verticalPassages ?? [];
@@ -73,6 +79,10 @@ public sealed class GeneratedMap
     public WorldSeed Seed { get; }
 
     public int GeneratorVersion { get; }
+
+    public ContentId ProfileId { get; }
+
+    public RiverGenerationMode RiverMode { get; }
 
     public GridPosition GoblinSpawn { get; }
 

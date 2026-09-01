@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text;
 using GoblinStronghold.Simulation.Animals;
 using GoblinStronghold.Simulation.Civilizations;
+using GoblinStronghold.Simulation.Civilizations.Naming;
 using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Localization;
 using Xunit;
@@ -20,6 +21,8 @@ public sealed class ContentPackTests
         Assert.Equal("core", pack.Manifest.Type);
         Assert.True(pack.Contains("content/animal-species.json"));
         Assert.True(pack.Contains("content/civilizations.json"));
+        Assert.True(pack.Contains("content/name-generators.json"));
+        Assert.True(pack.Contains("content/location-profiles.json"));
         Assert.True(pack.Contains("content/materials.json"));
         Assert.True(pack.Contains("content/crafting-recipes.json"));
         Assert.True(pack.Contains("content/workshops.json"));
@@ -115,6 +118,29 @@ public sealed class ContentPackTests
         Assert.Equal(100, composed.Get(role).UndergroundGeneration!.PresencePercent);
         Assert.Equal(70,
             CivilizationCatalog.Core.Get(role).UndergroundGeneration!.PresencePercent);
+    }
+
+    [Fact]
+    public void ContentPackCanOverrideNameDataWithoutMutatingCoreCatalog()
+    {
+        var generatorJson = CoreContentPack.Pack.ReadAllText(
+                "content/name-generators.json")
+            .Replace("\"Aldona\"", "\"Mira\"", StringComparison.Ordinal);
+        using var archive = CreateArchive(
+            ("manifest.json", ValidManifest("frontier-names", "content")),
+            ("content/name-generators.json", generatorJson));
+        var pack = ContentPackArchiveLoader.Load(archive, "frontier-names.gobmod");
+        var id = ContentId.Parse("core:human-frontier-names");
+        var request = new NameGenerationRequest(
+            new WorldSeed(1),
+            SubjectId: 1,
+            Ordinal: 0,
+            new HashSet<string>(StringComparer.Ordinal));
+
+        var composed = NameGeneratorCatalog.Compose([pack]);
+
+        Assert.Equal("Mira", composed.Get(id).Generate(request));
+        Assert.Equal("Aldona", NameGeneratorCatalog.Core.Get(id).Generate(request));
     }
 
     [Fact]

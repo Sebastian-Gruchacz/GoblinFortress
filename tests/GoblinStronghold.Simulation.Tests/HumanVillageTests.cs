@@ -45,6 +45,10 @@ public sealed class HumanVillageTests
         Assert.Equal(village.Population, village.Cohorts.Sum(cohort => cohort.Population));
         Assert.Equal(village.Population, village.Villagers.Count);
         Assert.Equal(village.Population, village.Villagers.Count(villager => villager.Health > 0));
+        Assert.Equal(6, village.Villagers.Count(villager => villager.Sex == ActorSex.Female));
+        Assert.Equal(6, village.Villagers.Count(villager => villager.Sex == ActorSex.Male));
+        Assert.Equal("Aldona", village.Villagers.Single(villager => villager.Id == 1).Name);
+        Assert.Equal("Bogdan", village.Villagers.Single(villager => villager.Id == 2).Name);
         Assert.Equal(12, village.GrainStock);
         Assert.Equal(3, village.Villagers.Count(villager =>
             villager.Tools.HasFlag(HumanTool.WoodenBucket)));
@@ -52,6 +56,7 @@ public sealed class HumanVillageTests
             villager.Position).Distinct().Count());
         Assert.All(village.Villagers, villager =>
         {
+            Assert.NotEqual(ActorSex.Sexless, villager.Sex);
             Assert.False(string.IsNullOrWhiteSpace(villager.Name));
             Assert.Equal(villager.MaximumHealth, villager.Health);
             Assert.Equal(0, villager.Fatigue);

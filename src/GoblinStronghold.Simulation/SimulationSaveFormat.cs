@@ -1,14 +1,26 @@
 using System.Text.Json;
+using GoblinStronghold.Simulation.Civilizations.Polities;
+using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 
 namespace GoblinStronghold.Simulation;
 
 public static class SimulationSaveFormat
 {
     public const int SurfaceGrimeMigrationVersion = 70;
-    public const int CurrentVersion = 71;
+    public const int LocationProfileMigrationVersion = 71;
+    public const int RiverModeMigrationVersion = 72;
+    public const int ActorSexMigrationVersion = 73;
+    public const int PolityIdMigrationVersion = 74;
+    public const int CurrentVersion = 75;
 
     public static bool IsLoadableVersion(int version) =>
-        version is SurfaceGrimeMigrationVersion or CurrentVersion;
+        version is SurfaceGrimeMigrationVersion or
+            LocationProfileMigrationVersion or
+            RiverModeMigrationVersion or
+            ActorSexMigrationVersion or
+            PolityIdMigrationVersion or
+            CurrentVersion;
 }
 
 internal static class SimulationSaveReader
@@ -25,12 +37,32 @@ internal static class SimulationSaveReader
                 $"Save format version {save.FormatVersion} is obsolete or incompatible; " +
                 $"this pre-release build accepts versions " +
                 $"{SimulationSaveFormat.SurfaceGrimeMigrationVersion} and " +
+                $"{SimulationSaveFormat.LocationProfileMigrationVersion} and " +
+                $"{SimulationSaveFormat.RiverModeMigrationVersion} and " +
+                $"{SimulationSaveFormat.ActorSexMigrationVersion} and " +
+                $"{SimulationSaveFormat.PolityIdMigrationVersion} and " +
                 $"{SimulationSaveFormat.CurrentVersion}.");
         }
 
         if (save.FormatVersion == SimulationSaveFormat.SurfaceGrimeMigrationVersion)
         {
             MigrateSurfaceGrime(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.LocationProfileMigrationVersion)
+        {
+            MigrateLocationProfile(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.RiverModeMigrationVersion)
+        {
+            MigrateRiverMode(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.ActorSexMigrationVersion)
+        {
+            MigrateActorSex(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.PolityIdMigrationVersion)
+        {
+            MigratePolityIds(save);
         }
 
         return save;
@@ -50,6 +82,42 @@ internal static class SimulationSaveReader
         foreach (var villager in save.HumanVillage.Villagers)
         {
             villager.CarriedGrime = 0;
+        }
+        save.FormatVersion = SimulationSaveFormat.LocationProfileMigrationVersion;
+    }
+
+    private static void MigrateLocationProfile(SimulationSaveModel save)
+    {
+        save.MapProfileId = SwampMapGenerator.DefaultProfileId.Value;
+        save.FormatVersion = SimulationSaveFormat.RiverModeMigrationVersion;
+    }
+
+    private static void MigrateRiverMode(SimulationSaveModel save)
+    {
+        save.MapRiverMode = RiverGenerationMode.SingleChannel;
+        save.FormatVersion = SimulationSaveFormat.ActorSexMigrationVersion;
+    }
+
+    private static void MigrateActorSex(SimulationSaveModel save)
+    {
+        foreach (var actor in save.Actors)
+        {
+            actor.Sex = ActorSex.Sexless;
+        }
+        foreach (var villager in save.HumanVillage.Villagers)
+        {
+            villager.Sex = villager.Id % 2 == 0 ? ActorSex.Male : ActorSex.Female;
+        }
+        save.FormatVersion = SimulationSaveFormat.PolityIdMigrationVersion;
+    }
+
+    private static void MigratePolityIds(SimulationSaveModel save)
+    {
+        save.PlayerPolityId = CorePolityIds.PlayerTribe.Value;
+        save.HumanVillage.PolityId = CorePolityIds.HumanVillage.Value;
+        foreach (var faction in save.UndergroundFactions)
+        {
+            faction.PolityId = CorePolityIds.CaveDwarfClan(faction.Id).Value;
         }
         save.FormatVersion = SimulationSaveFormat.CurrentVersion;
     }

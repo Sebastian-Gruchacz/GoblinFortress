@@ -46,7 +46,10 @@
       "climate-zone": "Climate zone",
       "climate-temperate-marsh": "Temperate marsh frontier",
       "river": "River",
-      "river-present": "Generated river",
+      "river-none": "No directed river",
+      "river-single": "Single river channel",
+      "river-branching": "Branching river channels",
+      "river-tooltip": "Choose no directed river, the original single channel, or a second channel joining it. Natural pools and local water access remain in every mode.",
       "road": "Road",
       "road-absent": "No generated road",
       "neighbor-civilizations": "Neighboring civilizations",
@@ -219,6 +222,8 @@
       "construction-supply-deliver-working": "depositing building material ({0})",
       "construction-build-travel": "going to build → {0}",
       "construction-build-working": "building ({0})",
+      "construction-dismantle-travel": "going to dismantle → {0}",
+      "construction-dismantle-working": "dismantling ({0})",
       "crafting-supply-collect-travel": "going to collect a workshop ingredient ×{0}",
       "crafting-supply-collect-working": "collecting an ingredient ×{0}",
       "crafting-supply-deliver-travel": "carrying an ingredient to the workshop ×{0}",
@@ -266,6 +271,13 @@
       "recover-corpse-return": "carrying a corpse back to camp → {0}",
       "consume-corpse-travel": "going to consume a corpse → {0}",
       "consume-corpse-working": "consuming a corpse ({0})"
+    },
+    "actor-job-kinds": {
+      "dismantling": "dismantling"
+    },
+    "work-order-kinds": {
+      "dismantle-structure": "structure dismantling",
+      "dismantle-storage": "storage dismantling"
     },
     "work-feedback": {
       "tunnel-preview": "Planned tunnel area: {0} cells; unknown cells will be resolved as they are revealed.",

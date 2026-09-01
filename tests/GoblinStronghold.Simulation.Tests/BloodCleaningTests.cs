@@ -342,6 +342,60 @@ public sealed class BloodCleaningTests
             simulationEvent.Amount == (int)WorkDesignationKind.CleanBlood);
     }
 
+    [Fact]
+    public void IdleGoblinPublishesHousekeepingForFourthLevelGrime()
+    {
+        var seed = new WorldSeed(0xC1EA4UL);
+        var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 4,
+            initialFoodStock: 20);
+        engine.AdvanceTicks(1);
+        var initial = engine.CreateSnapshot();
+        var origin = initial.Actors[0].Position;
+        var floor = initial.WorldObjects
+            .Where(worldObject =>
+                worldObject.Kind == WorldObjectKind.GoblinHut &&
+                worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
+            .Select(part => part.Position)
+            .Where(position =>
+                initial.GetVisibility(position, map.Width).IsDiscovered() &&
+                engine.Navigation.FindPath(origin, position) is not null)
+            .OrderBy(position => Math.Abs(position.X - origin.X) +
+                Math.Abs(position.Y - origin.Y))
+            .First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["surfaceGrime"] = CreateSurfaceGrime(
+            floor,
+            engine.CurrentTick,
+            volume: SurfaceCleaningPolicy.AutomaticCleaningMinimumGrimeVolume);
+        foreach (var actor in save["actors"]!.AsArray())
+        {
+            actor!["knownTraits"] = (int)GoblinTrait.None;
+        }
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var actorIds = engine.CreateSnapshot().Actors.Select(actor => actor.Id).ToHashSet();
+
+        for (var index = 0; index < 5_000 &&
+             engine.CreateSnapshot().SurfaceGrime.Any(grime =>
+                 grime.Position == floor); index++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        Assert.DoesNotContain(engine.CreateSnapshot().SurfaceGrime, grime =>
+            grime.Position == floor);
+        Assert.Contains(engine.DrainEvents(), simulationEvent =>
+            simulationEvent.Kind == SimulationEventKind.WorkDesignationCreated &&
+            actorIds.Contains(simulationEvent.Subject) &&
+            simulationEvent.Amount == (int)WorkDesignationKind.CleanBlood);
+    }
+
     [Theory]
     [InlineData(BloodSurfaceKind.ConstructedFloor)]
     [InlineData(BloodSurfaceKind.AbsorbentGround)]

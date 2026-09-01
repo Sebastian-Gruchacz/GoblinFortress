@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "profiles": [
+    {
+      "id": "core:demo-swamp-frontier",
+      "climateProfileId": "core:temperate-marsh",
+      "character": "marsh-frontier",
+      "defaultDimension": 96,
+      "minimumDimension": 16,
+      "maximumDimension": 2048,
+      "river": {
+        "startY": 0.82,
+        "slope": 0.64,
+        "meanderAmplitude": 0.11,
+        "minimumHalfWidth": 1.5,
+        "halfWidthRatio": 0.035,
+        "deepWaterRatio": 0.48,
+        "bankNoiseScale": 0.9,
+        "branchJunctionX": 0.52,
+        "branchEndY": 0.82,
+        "branchHalfWidthScale": 0.82,
+        "branchMeanderAmplitude": 0.075
+      },
+      "wetland": {
+        "leftBoundary": 0.48,
+        "bottomBoundary": 0.58,
+        "bottomRange": 0.42,
+        "boundaryNoiseScale": 0.68,
+        "boundaryWarpX": 0.18,
+        "boundaryWarpY": 0.16,
+        "terrainWarpX": 0.035,
+        "moistureWarpY": 0.03,
+        "influenceWeight": 0.68,
+        "moistureWeight": 0.32,
+        "deepInfluenceThreshold": 0.62,
+        "deepWetnessThreshold": 0.72,
+        "deepTerrainThreshold": 0.76,
+        "shallowInfluenceThreshold": 0.45,
+        "shallowWetnessThreshold": 0.68,
+        "mudInfluenceThreshold": 0.18,
+        "mudWetnessThreshold": 0.56
+      },
+      "goblinSettlement": {
+        "normalizedX": 0.16,
+        "normalizedY": 0.76,
+        "padWidth": 8,
+        "padHeight": 9,
+        "moisture": 82,
+        "fertility": 66
+      },
+      "humanSettlement": {
+        "normalizedX": 0.82,
+        "normalizedY": 0.2,
+        "padWidth": 8,
+        "padHeight": 9,
+        "moisture": 52,
+        "fertility": 70
+      },
+      "relief": {
+        "deepFloorThreshold": 0.72,
+        "valleyWidthRatio": 0.18,
+        "uplandStart": 0.72,
+        "uplandRange": 0.9,
+        "foothillCenterX": 0.22,
+        "foothillCenterY": 0.6,
+        "foothillRadiusX": 0.16,
+        "foothillRadiusY": 0.18,
+        "broadWeight": 0.5,
+        "ridgeWeight": 0.2,
+        "uplandWeight": 0.42,
+        "foothillWeight": 0.72,
+        "valleyPenalty": 0.38,
+        "highThreshold": 0.79,
+        "raisedThreshold": 0.55,
+        "depressionThreshold": 0.19,
+        "minimumDepressionRiverDistance": 5.0
+      }
+    }
+  ]
+}

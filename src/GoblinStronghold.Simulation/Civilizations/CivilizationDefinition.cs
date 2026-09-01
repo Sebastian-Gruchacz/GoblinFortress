@@ -14,6 +14,61 @@ public sealed record CivilizationIdentityDefinition(
     ContentId ControllerId,
     ContentId NameGeneratorId);
 
+public sealed record CivilizationVitalsDefinition(int MaximumHealth);
+
+public sealed record CivilizationCombatDefinition(
+    int MinimumMeleeDamage,
+    int MeleeDamageVariance);
+
+public sealed record CivilizationPerceptionDefinition(
+    int DayVisionRadius,
+    int NightVisionRadius,
+    int StructureVisionRadius);
+
+public sealed record CivilizationSpatialBehaviorDefinition(
+    int MovementIntervalTicks,
+    int ActivityRadius,
+    int MaximumExplorers);
+
+public sealed record CivilizationNeedsDefinition(
+    int MaximumHunger,
+    int HungerPerTick,
+    int EatThreshold,
+    int FoodSeekThreshold,
+    int CriticalHungerThreshold,
+    int StarvationHungerThreshold,
+    int StarvationDamagePerTick,
+    int MaximumThirst,
+    int ThirstPerTick,
+    int DrinkThreshold,
+    int DehydrationThirstThreshold,
+    int DehydrationDamagePerTick,
+    int MaximumFatigue,
+    int FatiguePerTick,
+    int RestThreshold);
+
+public sealed record CivilizationPopulationNeedsDefinition(
+    int MaximumNeed,
+    int DailyHungerIncrease,
+    int DailyThirstIncrease,
+    int MealRelief,
+    int DrinkRelief,
+    int MaximumFatigue,
+    int RestThreshold,
+    int WorkFatiguePerMove,
+    int DayRestRecoveryPerMove,
+    int NightRestRecoveryPerMove,
+    int HungerDamageDivisor,
+    int ThirstDamageDivisor);
+
+public sealed record CivilizationAgingDefinition(
+    int HealthyYears,
+    int DeclineMinimumSeasons,
+    int DeclineMaximumSeasons,
+    int TerminalHealthPermille,
+    int InitialMinimumAgeYears,
+    int InitialMaximumAgeYearsExclusive);
+
 public sealed record UndergroundCivilizationGenerationDefinition(
     UndergroundFactionKind LegacyKind,
     int FirstLevel,
@@ -46,6 +101,13 @@ public sealed record CivilizationDefinition(
     CivilizationLegacyRole? LegacyRole,
     bool PlayerControllable,
     CivilizationIdentityDefinition Identity,
+    CivilizationVitalsDefinition? Vitals,
+    CivilizationCombatDefinition? Combat,
+    CivilizationPerceptionDefinition? Perception,
+    CivilizationSpatialBehaviorDefinition? SpatialBehavior,
+    CivilizationNeedsDefinition? Needs,
+    CivilizationPopulationNeedsDefinition? PopulationNeeds,
+    CivilizationAgingDefinition? Aging,
     UndergroundCivilizationGenerationDefinition? UndergroundGeneration,
     UndergroundCivilizationBehaviorDefinition? UndergroundBehavior);
 

@@ -135,21 +135,54 @@ adapters until profile IDs and versions are persisted.
   embedded core pack.
 - [ ] Move goblin and human vital, need, age, name, skill, equipment, and
   behavior profiles out of `SimulationDefinitions` and `HumanVillageState`.
-- [ ] Introduce deterministic `INameGenerator` strategies; retain numbered
-  names only as a save-compatible placeholder.
-- [ ] Add polity IDs to snapshots and saves without changing existing ownership
-  enums in one migration.
+  Schema-7 civilization data now owns goblin and human maximum health, the
+  goblin aging curve, goblin hunger, thirst, and fatigue, plus the human
+  population's daily needs and fatigue profile. It also owns baseline melee
+  damage and variance for both civilizations; equipment retains its separate
+  bonuses and ranged attacks. Day, night, and structure-assisted perception
+  ranges are civilization data too, including human intruder detection. Spatial
+  behavior now controls movement timing, the human village activity radius, and
+  the goblin autonomous-explorer limit. Runtime and UI consume civilization
+  values directly. Matching
+  `SimulationDefinitions` values remain compatibility adapters while skills,
+  equipment tables, and broader behavior await later vertical slices.
+- [x] Introduce deterministic `INameGenerator` strategies; retain numbered
+  names only as a save-compatible placeholder. The core registry now resolves
+  stable generator IDs from civilization definitions. Goblin syllable sampling
+  retains its existing random domain and keys, while the demo human sequence
+  preserves its current names. Schema-2 `content/name-generators.json` owns the
+  syllable and ordered-name tables, supports ordered package overrides, and is
+  validated before a civilization can reference a generator.
+- [x] Persist actor sex and let name generators provide female and male lists or
+  syllable affixes with a neutral fallback. Humans receive deterministic sex at
+  creation while starting and migrated goblins remain sexless.
+- [ ] Add a tribe genetic-development choice that can make later goblins
+  female or male. The actor field is mutable for that transition, but the
+  unlock, reproduction consequences, presentation, and naming policy for
+  already named goblins remain a separate gameplay slice.
+- [x] Add stable polity IDs to snapshots, state hashes, and format-75 saves
+  without changing existing ownership enums. The player tribe and human village
+  have fixed core IDs; every generated cave-dwarf clan has its own ID derived
+  from its persistent faction ID. Formats 70–74 migrate through the same chain.
 
 ### 1. Parameterized frontier map
 
 - [x] Add a localized New Game setup shell with Tutorial reserved as an
   unavailable mode and Custom Map as the active mode. Seed and square map size
   are selectable now; unsupported settings remain visible and honestly disabled.
-- [ ] Extract the current swamp constants into a validated location profile.
+- [x] Extract the current surface, river, wetland, settlement-pad, relief, and
+  dimension constants into the validated embedded `core:demo-swamp-frontier`
+  location profile. `LocationGenerationRequest` now carries its stable profile
+  ID and river mode into generation, snapshots, state hashes, and format-73
+  saves; formats 70–72 migrate to the existing profile and single-channel
+  river. Deep geology remains a separate future profile boundary.
 - [ ] Turn climate into a profile selection once at least one additional
   climate controls ecology, seasons, terrain, and settlement constraints.
-- [ ] Add river modes (absent, single channel, and branching) to the generation
+- [x] Add river modes (absent, single channel, and branching) to the generation
   request and persist the selected mode in save metadata.
+  All three are selectable in New Game and persisted in format 73. Branching
+  adds a deterministic narrower channel joined to the main river; crossing
+  selection remains part of the later road-generation stage.
 - [ ] Add road modes, including an absent road, a through-road, and a junction;
   select crossings only after hydrology has been generated.
 - [ ] Parameterize the number and composition of neighboring civilizations and

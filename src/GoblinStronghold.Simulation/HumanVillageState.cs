@@ -1,3 +1,6 @@
+using GoblinStronghold.Simulation.Civilizations;
+using GoblinStronghold.Simulation.Civilizations.Naming;
+using GoblinStronghold.Simulation.Civilizations.Polities;
 using GoblinStronghold.Simulation.Map;
 
 namespace GoblinStronghold.Simulation;
@@ -7,18 +10,16 @@ internal sealed class HumanVillageState
     private const int InitialGrainStock = 12;
     private const int GrainPerSowing = 1;
     private const int GrainRecoveredAtHarvest = 2;
-
-    private static readonly string[] VillagerNames =
-    [
-        "Aldona", "Bogdan", "Celina", "Dobromir", "Elwira", "Florian",
-        "Grażyna", "Hubert", "Irena", "Jeremi", "Klara", "Lucjan",
-    ];
+    private static readonly IReadOnlySet<string> EmptyNames =
+        new HashSet<string>(StringComparer.Ordinal);
 
     private readonly SortedDictionary<int, HumanCohortState> _cohorts;
     private readonly SortedDictionary<int, HumanVillagerState> _villagers;
     private readonly SortedDictionary<int, HumanFieldState> _fields;
-    private readonly HumanVillageNeedSettings _needs;
+    private readonly CivilizationPopulationNeedsDefinition _needs;
+    private readonly CivilizationSpatialBehaviorDefinition _spatialBehavior;
     private readonly HumanVillageEconomySettings _economy;
+    private readonly INameGenerator _nameGenerator;
     private readonly IReadOnlyList<GridPosition> _wellAccesses;
     private readonly IReadOnlyList<GridPosition> _goodsWorkshopAccesses;
     private GridPosition? _treeFellingTarget;
@@ -28,8 +29,10 @@ internal sealed class HumanVillageState
     private int _storehouseWorkProgress;
 
     private HumanVillageState(
-        GridPosition anchor, HumanVillageNeedSettings needs,
+        GridPosition anchor, CivilizationPopulationNeedsDefinition needs,
+        CivilizationSpatialBehaviorDefinition spatialBehavior,
         HumanVillageEconomySettings economy,
+        INameGenerator nameGenerator,
         IReadOnlyList<GridPosition> wellAccesses,
         IReadOnlyList<GridPosition> goodsWorkshopAccesses,
         int population, int foodStock, int grainStock, int woodStock, int goodsStock,
@@ -43,7 +46,9 @@ internal sealed class HumanVillageState
     {
         Anchor = anchor;
         _needs = needs;
+        _spatialBehavior = spatialBehavior;
         _economy = economy;
+        _nameGenerator = nameGenerator;
         _wellAccesses = wellAccesses;
         _goodsWorkshopAccesses = goodsWorkshopAccesses;
         Population = population;
@@ -111,11 +116,16 @@ internal sealed class HumanVillageState
         (Population + _economy.GoodsPopulationDivisor - 1) /
         _economy.GoodsPopulationDivisor;
 
-    public static HumanVillageState CreateInitial(WorldMapState world, SimulationDefinitions definitions)
+    public static HumanVillageState CreateInitial(
+        WorldMapState world,
+        SimulationDefinitions definitions,
+        CivilizationVitalsDefinition vitals,
+        CivilizationPopulationNeedsDefinition needs,
+        CivilizationSpatialBehaviorDefinition spatialBehavior)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(definitions);
-        var positions = FindPositions(world, definitions.HumanVillageActivityRadius);
+        var positions = FindPositions(world, spatialBehavior.ActivityRadius);
         if (positions.Count < 16)
         {
             throw new InvalidOperationException("The human village has too few traversable work positions.");
@@ -136,14 +146,15 @@ internal sealed class HumanVillageState
             new(2, HumanCohortRole.Workers, 6, positions[4], HumanCohortTask.DrawWater, 2, HumanTool.WoodenAxe | HumanTool.WoodenBucket),
             new(3, HumanCohortRole.Guards, 2, positions[10], HumanCohortTask.Guard, 2, HumanTool.WoodenSpear),
         ];
-        var villagers = CreateInitialVillagers(positions, cohorts, definitions);
+        var villagers = CreateInitialVillagers(positions, cohorts, vitals);
         return new(
-            world.Baseline.HumanVillage, definitions.HumanVillageNeeds,
+            world.Baseline.HumanVillage, needs, spatialBehavior,
             definitions.HumanVillageEconomy,
+            GetNameGenerator(),
             FindWellAccesses(world),
             FindStructureAccesses(world, WorldObjectKind.HumanBarn),
             12, 48, InitialGrainStock, 24, 4, 36, 0, false, 0, -1,
-            2 * definitions.HumanGuardHealth, 2 * definitions.HumanGuardHealth,
+            2 * vitals.MaximumHealth, 2 * vitals.MaximumHealth,
             treeFellingTarget: null, treeFellingProgress: 0, goodsWorkProgress: 0,
             storehouseSite: null, storehouseWorkProgress: 0,
             cohorts,
@@ -154,10 +165,20 @@ internal sealed class HumanVillageState
 
     public static HumanVillageState Restore(
         WorldMapState world, HumanVillageSaveModel model,
-        SimulationDefinitions definitions, SimulationTick currentTick)
+        SimulationDefinitions definitions,
+        CivilizationVitalsDefinition vitals,
+        CivilizationPopulationNeedsDefinition needs,
+        CivilizationSpatialBehaviorDefinition spatialBehavior,
+        SimulationTick currentTick)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(model);
+        if (!PolityId.TryParse(model.PolityId, out var polityId) ||
+            polityId != CorePolityIds.HumanVillage)
+        {
+            throw new InvalidDataException(
+                $"The save contains unsupported human polity '{model.PolityId}'.");
+        }
         if (model.Population < 0 || model.FoodStock < 0 || model.GrainStock < 0 ||
             model.WoodStock < 0 ||
             model.GoodsStock < 0 || model.WaterStock < 0 || model.StorehouseCount < 0 ||
@@ -216,11 +237,12 @@ internal sealed class HumanVillageState
         var cohorts = model.Cohorts.OrderBy(item => item.Id).Select(item =>
         {
             var position = new GridPosition(item.X, item.Y, item.Z);
-            if (item.Id <= 0 || !Enum.IsDefined(item.Role) || !Enum.IsDefined(item.Task) ||
+            if (item.Id <= 0 || !Enum.IsDefined(item.Role) ||
+                !Enum.IsDefined(item.Task) ||
                 item.Population < 0 || item.SkillLevel is < 1 or > 10 ||
                 !world.IsSurfaceTraversable(position) ||
                 Distance(position, world.Baseline.HumanVillage) >
-                    definitions.HumanVillageActivityRadius + 4)
+                    spatialBehavior.ActivityRadius + 4)
             {
                 throw new InvalidDataException(
                     $"The save contains invalid human cohort {item.Id} at {position} " +
@@ -232,25 +254,27 @@ internal sealed class HumanVillageState
         var villagers = model.Villagers.OrderBy(item => item.Id).Select(item =>
         {
             var position = new GridPosition(item.X, item.Y, item.Z);
-            var maximumHealth = GetMaximumHealth(item.Role, definitions);
-            if (item.Id <= 0 || !Enum.IsDefined(item.Role) || !Enum.IsDefined(item.Task) ||
+            var maximumHealth = GetMaximumHealth(item.Role, vitals);
+            if (item.Id <= 0 || !Enum.IsDefined(item.Sex) ||
+                item.Sex == ActorSex.Sexless || !Enum.IsDefined(item.Role) ||
+                !Enum.IsDefined(item.Task) ||
                 item.SkillLevel is < 1 or > 10 || item.Health is < 0 ||
                 item.Health > maximumHealth ||
-                item.Fatigue is < 0 || item.Fatigue > definitions.HumanVillageNeeds.MaximumFatigue ||
-                item.Hunger is < 0 || item.Hunger > definitions.HumanVillageNeeds.MaximumNeed ||
-                item.Thirst is < 0 || item.Thirst > definitions.HumanVillageNeeds.MaximumNeed ||
+                item.Fatigue is < 0 || item.Fatigue > needs.MaximumFatigue ||
+                item.Hunger is < 0 || item.Hunger > needs.MaximumNeed ||
+                item.Thirst is < 0 || item.Thirst > needs.MaximumNeed ||
                 item.CarriedGrime is < 0 or >
                     Contamination.SurfaceGrimeState.MaximumCarriedAmount ||
                 item.WorkProgress < 0 ||
                 !world.IsSurfaceTraversable(position) ||
                 Distance(position, world.Baseline.HumanVillage) >
-                    definitions.HumanVillageActivityRadius + 4)
+                    spatialBehavior.ActivityRadius + 4)
             {
                 throw new InvalidDataException(
                     $"The save contains invalid human villager {item.Id} at {position}.");
             }
             return new HumanVillagerState(
-                item.Id, item.Role, position, item.Task, item.SkillLevel, item.Tools,
+                item.Id, item.Sex, item.Role, position, item.Task, item.SkillLevel, item.Tools,
                 item.Health, maximumHealth, item.Fatigue, item.Hunger, item.Thirst,
                 item.WorkProgress)
             {
@@ -266,7 +290,7 @@ internal sealed class HumanVillageState
                 item.WorkProgress < 0 ||
                 item.WorkProgress > definitions.HumanVillageEconomy.FieldWorkPerStage ||
                 !world.IsSurfaceTraversable(position) ||
-                Distance(position, world.Baseline.HumanVillage) > definitions.HumanVillageActivityRadius)
+                Distance(position, world.Baseline.HumanVillage) > spatialBehavior.ActivityRadius)
             {
                 throw new InvalidDataException("The save contains an invalid human field.");
             }
@@ -277,7 +301,7 @@ internal sealed class HumanVillageState
             !world.CanBuildHumanStorehouseAt(
                 savedSite,
                 world.Baseline.HumanVillage,
-                definitions.HumanVillageActivityRadius,
+                spatialBehavior.ActivityRadius,
                 fields.Select(item => item.Position).Append(world.Baseline.HumanVillage).ToHashSet()))
         {
             throw new InvalidDataException("The saved human storehouse site is no longer valid.");
@@ -296,7 +320,7 @@ internal sealed class HumanVillageState
             throw new InvalidDataException("The human village cohorts or fields are inconsistent.");
         }
 
-        var maximumGuardHitPoints = 2 * definitions.HumanGuardHealth;
+        var maximumGuardHitPoints = 2 * vitals.MaximumHealth;
         if (model.GuardHitPoints > maximumGuardHitPoints ||
             villagers.Where(item => item.Role == HumanCohortRole.Guards)
                 .Sum(item => item.Health) != model.GuardHitPoints)
@@ -305,8 +329,9 @@ internal sealed class HumanVillageState
         }
 
         return new(
-            world.Baseline.HumanVillage, definitions.HumanVillageNeeds,
+            world.Baseline.HumanVillage, needs, spatialBehavior,
             definitions.HumanVillageEconomy,
+            GetNameGenerator(),
             FindWellAccesses(world),
             FindStructureAccesses(world, WorldObjectKind.HumanBarn),
             model.Population, model.FoodStock, model.GrainStock, model.WoodStock,
@@ -350,16 +375,16 @@ internal sealed class HumanVillageState
             LastIntruderSeenTick = tick.Value;
         }
 
-        AssignTasks(nearby, world, definitions.HumanVillageActivityRadius);
+        AssignTasks(nearby, world, _spatialBehavior.ActivityRadius);
         AssignVillagerTasks(calendar.IsNight);
-        if (tick.Value % definitions.HumanCohortMovementIntervalTicks == 0)
+        if (tick.Value % _spatialBehavior.MovementIntervalTicks == 0)
         {
             MoveVillagers(
                 tick,
                 worldSeed,
                 world,
                 navigation,
-                definitions.HumanVillageActivityRadius,
+                _spatialBehavior.ActivityRadius,
                 definitions.ActorPlanning.MaximumPathExpansionsPerSlice,
                 nearby,
                 calendar.IsNight,
@@ -394,10 +419,14 @@ internal sealed class HumanVillageState
         _cohorts.Values.Select(ToSnapshot).ToArray(),
         _villagers.Values.Select(ToSnapshot).ToArray(),
         _fields.Values.Select(item => new HumanFieldSnapshot(
-            item.Id, item.Position, item.Phase, item.GrowthDays, item.WorkProgress)).ToArray());
+            item.Id, item.Position, item.Phase, item.GrowthDays, item.WorkProgress)).ToArray())
+    {
+        PolityId = CorePolityIds.HumanVillage,
+    };
 
     public HumanVillageSaveModel CreateSaveModel() => new()
     {
+        PolityId = CorePolityIds.HumanVillage.Value,
         Population = Population,
         FoodStock = FoodStock,
         GrainStock = GrainStock,
@@ -426,7 +455,7 @@ internal sealed class HumanVillageState
         }).ToList(),
         Villagers = _villagers.Values.Select(item => new HumanVillagerSaveModel
         {
-            Id = item.Id, Role = item.Role,
+            Id = item.Id, Sex = item.Sex, Role = item.Role,
             X = item.Position.X, Y = item.Position.Y, Z = item.Position.Z,
             Task = item.Task, SkillLevel = item.SkillLevel, Tools = item.Tools,
             Health = item.Health, Fatigue = item.Fatigue,
@@ -643,7 +672,7 @@ internal sealed class HumanVillageState
 
         if (_fields.Count < PlannedFieldCount && absoluteDay % 5 == 0)
         {
-            var position = FindNextFieldPosition(world, definitions.HumanVillageActivityRadius);
+            var position = FindNextFieldPosition(world, _spatialBehavior.ActivityRadius);
             if (position is { } fieldPosition)
             {
                 if (world.TryUprootBerryBush(fieldPosition, tick, out var clearingChange))
@@ -1135,7 +1164,12 @@ internal sealed class HumanVillageState
     private HumanVillagerSnapshot ToSnapshot(HumanVillagerState item) =>
         new(
             item.Id,
-            VillagerNames[(item.Id - 1) % VillagerNames.Length],
+            _nameGenerator.Generate(new NameGenerationRequest(
+                default,
+                checked((ulong)item.Id),
+                (item.Id - 1) / 2,
+                EmptyNames,
+                item.Sex)),
             item.Role,
             item.Position,
             item.Task,
@@ -1150,13 +1184,21 @@ internal sealed class HumanVillageState
             _needs.MaximumNeed,
             item.WorkProgress)
         {
+            Sex = item.Sex,
             CarriedGrime = item.CarriedGrime,
         };
+
+    private static INameGenerator GetNameGenerator()
+    {
+        var definition = CivilizationCatalog.Current.Get(
+            CivilizationLegacyRole.HumanVillage);
+        return NameGeneratorCatalog.Current.Get(definition.Identity.NameGeneratorId);
+    }
     internal static int GetMaximumHealth(
         HumanCohortRole role,
-        SimulationDefinitions definitions) => role == HumanCohortRole.Guards
-        ? definitions.HumanGuardHealth
-        : Math.Max(1, definitions.HumanGuardHealth / 2);
+        CivilizationVitalsDefinition vitals) => role == HumanCohortRole.Guards
+        ? vitals.MaximumHealth
+        : Math.Max(1, vitals.MaximumHealth / 2);
 
     internal static HumanTool GetIndividualTools(HumanCohortRole role, int roleIndex) =>
         role switch
@@ -1171,7 +1213,7 @@ internal sealed class HumanVillageState
     private static IReadOnlyList<HumanVillagerState> CreateInitialVillagers(
         IReadOnlyList<GridPosition> positions,
         IReadOnlyList<HumanCohortState> cohorts,
-        SimulationDefinitions definitions)
+        CivilizationVitalsDefinition vitals)
     {
         var result = new List<HumanVillagerState>(cohorts.Sum(item => item.Population));
         var id = 1;
@@ -1180,15 +1222,17 @@ internal sealed class HumanVillageState
         {
             for (var index = 0; index < cohort.Population; index++)
             {
+                var villagerId = id++;
                 result.Add(new HumanVillagerState(
-                    id++,
+                    villagerId,
+                    SexForVillagerId(villagerId),
                     cohort.Role,
                     positions[positionIndex++],
                     cohort.Task,
                     cohort.SkillLevel,
                     GetIndividualTools(cohort.Role, index),
-                    GetMaximumHealth(cohort.Role, definitions),
-                    GetMaximumHealth(cohort.Role, definitions),
+                    GetMaximumHealth(cohort.Role, vitals),
+                    GetMaximumHealth(cohort.Role, vitals),
                     fatigue: 0,
                     hunger: 0,
                     thirst: 0,
@@ -1197,6 +1241,10 @@ internal sealed class HumanVillageState
         }
         return result;
     }
+
+    private static ActorSex SexForVillagerId(int id) => id % 2 == 0
+        ? ActorSex.Male
+        : ActorSex.Female;
 
     private void SynchronizeCohortsFromVillagers()
     {
@@ -1332,6 +1380,7 @@ internal sealed class HumanVillageState
 
     private sealed class HumanVillagerState(
         int id,
+        ActorSex sex,
         HumanCohortRole role,
         GridPosition position,
         HumanCohortTask task,
@@ -1345,6 +1394,7 @@ internal sealed class HumanVillageState
         int workProgress)
     {
         public int Id { get; } = id;
+        public ActorSex Sex { get; } = sex;
         public HumanCohortRole Role { get; } = role;
         public GridPosition Position { get; set; } = position;
         public HumanCohortTask Task { get; set; } = task;

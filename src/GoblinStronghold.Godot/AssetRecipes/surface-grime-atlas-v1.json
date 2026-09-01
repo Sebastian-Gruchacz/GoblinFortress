@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "kind": "splatter-atlas",
+  "id": "surface-grime-atlas-v1",
+  "entryMaterial": "grime",
+  "source": {
+    "path": "res://Assets/World/blood-splatter-atlas-v1.png",
+    "columns": 4,
+    "rows": 4,
+    "columnCuts": [0, 325, 633, 939, 1254],
+    "rowCuts": [0, 275, 567, 865, 1254]
+  },
+  "output": {
+    "atlasPath": "res://Assets/Generated/surface-grime-atlas-v1.png",
+    "manifestPath": "res://Assets/Generated/surface-grime-atlas-v1.manifest.json",
+    "tileSize": 128
+  },
+  "minimumSourceAlpha": 0.03,
+  "cellCoverage": [
+    0.68, 0.68, 0.68, 0.68,
+    0.8, 0.8, 0.8, 0.8,
+    0.9, 0.9, 0.9, 0.9,
+    1.0, 1.0, 1.0, 1.0
+  ],
+  "colorMode": "intensity-tint",
+  "tint": {
+    "red": 0.34,
+    "green": 0.31,
+    "blue": 0.25
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "kind": "splatter-atlas",
+  "id": "blood-splatter-atlas-v1",
+  "entryMaterial": "blood",
+  "source": {
+    "path": "res://Assets/World/blood-splatter-atlas-v1.png",
+    "columns": 4,
+    "rows": 4,
+    "columnCuts": [0, 325, 633, 939, 1254],
+    "rowCuts": [0, 275, 567, 865, 1254]
+  },
+  "output": {
+    "atlasPath": "res://Assets/Generated/blood-splatter-atlas-v1.png",
+    "manifestPath": "res://Assets/Generated/blood-splatter-atlas-v1.manifest.json",
+    "tileSize": 128
+  },
+  "minimumSourceAlpha": 0.03,
+  "cellCoverage": [
+    0.3, 0.61, 0.63, 0.63,
+    0.68, 0.66, 0.73, 0.77,
+    0.81, 0.71, 0.81, 0.73,
+    0.96, 0.98, 0.94, 0.89
+  ],
+  "colorMode": "preserve",
+  "tint": {
+    "red": 1.0,
+    "green": 1.0,
+    "blue": 1.0
+  }
+}

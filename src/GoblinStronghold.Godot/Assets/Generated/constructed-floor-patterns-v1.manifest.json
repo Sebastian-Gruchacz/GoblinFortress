@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "recipe": "constructed-floor-patterns-v1",
+  "contentHash": "30d7cae68c1235a21dd4f7e793d54dd0245e587f806c61e1a87b5d7f304cb83e",
+  "tileSize": 80,
+  "columns": 2,
+  "rows": 1,
+  "entries": [
+    {
+      "material": "neutral",
+      "topology": "wood",
+      "index": 0,
+      "x": 0,
+      "y": 0,
+      "width": 80,
+      "height": 80
+    },
+    {
+      "material": "neutral",
+      "topology": "stone",
+      "index": 1,
+      "x": 80,
+      "y": 0,
+      "width": 80,
+      "height": 80
+    }
+  ]
+}

@@ -4,7 +4,10 @@ param(
         'res://AssetRecipes/connected-walkways-v1.json',
         'res://AssetRecipes/terrain-height-transitions-v1.json',
         'res://AssetRecipes/cave-walls-v1.json',
-        'res://AssetRecipes/connected-structure-walls-v1.json'
+        'res://AssetRecipes/connected-structure-walls-v1.json',
+        'res://AssetRecipes/constructed-floor-patterns-v1.json',
+        'res://AssetRecipes/blood-splatter-atlas-v1.json',
+        'res://AssetRecipes/surface-grime-atlas-v1.json'
     )
 )
 

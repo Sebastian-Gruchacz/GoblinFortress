@@ -951,6 +951,9 @@ public sealed class WorldMapState
                 !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _));
     }
 
+    public bool CanPlanFloorConstruction(IReadOnlyList<GridPosition> positions) =>
+        CanBuildFloors(positions) && positions.All(position => !HasVerticalPassageAt(position));
+
     public bool HasConstructedFloorSurface(GridPosition position) =>
         TryGetOccupancyClaim(
             position,
@@ -2348,7 +2351,7 @@ public sealed class WorldMapState
         return true;
     }
 
-    private bool HasVerticalPassageAt(GridPosition position) =>
+    public bool HasVerticalPassageAt(GridPosition position) =>
         _verticalPassageDestinations.ContainsKey(position);
 
     private static Dictionary<GridPosition, GridPosition> BuildVerticalPassageIndex(

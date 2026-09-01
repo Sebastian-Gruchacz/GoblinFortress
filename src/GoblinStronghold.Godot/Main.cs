@@ -3142,10 +3142,14 @@ public partial class Main : Node
             return;
         }
 
-        var cells = _buildMode is BuildMode.StorageArea or BuildMode.WoodenFloor or
+        IReadOnlyList<GridPosition> cells = _buildMode is BuildMode.StorageArea or BuildMode.WoodenFloor or
                 BuildMode.StoneFloor || IsSmallStorageBuildMode(_buildMode)
             ? GetAreaCells(_linearBuildStart, end)
             : SimulationCommand.GetLinearCells(_linearBuildStart, end);
+        if (_buildMode is BuildMode.WoodenFloor or BuildMode.StoneFloor)
+        {
+            cells = GetPlaceableFloorCells(cells);
+        }
         if (IsSmallStorageBuildMode(_buildMode))
         {
             if (cells.Count > 64 || cells.Any(cell =>
@@ -3261,7 +3265,7 @@ public partial class Main : Node
             return;
         }
 
-        var cells = _buildMode switch
+        IReadOnlyList<GridPosition> cells = _buildMode switch
         {
             BuildMode.Walkway or BuildMode.BasaltWalkway or BuildMode.WoodenWall or
                 BuildMode.StoneWall
@@ -3277,6 +3281,10 @@ public partial class Main : Node
             BuildMode.GoblinHut => GetAreaCells(cell, cell with { X = cell.X + 2, Y = cell.Y + 2 }),
             _ => new[] { cell },
         };
+        if (_buildMode is BuildMode.WoodenFloor or BuildMode.StoneFloor)
+        {
+            cells = GetPlaceableFloorCells(cells);
+        }
         _worldView.SetConstructionPreview(cells, IsConstructionPreviewValid(cells));
         if (_isDraggingLinearBuild)
         {
@@ -3450,6 +3458,21 @@ public partial class Main : Node
         return canBuild &&
             IsKnownWalkwayEndpoint(cells[0]) &&
             IsKnownWalkwayEndpoint(cells[^1]);
+    }
+
+    private IReadOnlyList<GridPosition> GetPlaceableFloorCells(
+        IReadOnlyList<GridPosition> cells)
+    {
+        var reserved = _latestSnapshot.ConstructionSites
+            .SelectMany(site => site.Footprint)
+            .Concat(_latestSnapshot.StorageZones.Select(zone => zone.Position))
+            .ToHashSet();
+        return cells
+            .Where(cell =>
+                IsDiscoveredConstructionCell(cell) &&
+                !reserved.Contains(cell) &&
+                _engine.World.CanPlanFloorConstruction([cell]))
+            .ToArray();
     }
 
     private bool IsKnownWalkwayEndpoint(GridPosition position) =>
@@ -5030,7 +5053,8 @@ public partial class Main : Node
     private void UpdateGoblinRoster(SimulationSnapshot snapshot, bool force = false)
     {
         var signature = string.Join('|', snapshot.Actors.Select(actor =>
-            $"{actor.Id.Value}:{actor.Name}:{actor.Health}:{(int)actor.Job.Kind}:{(int)actor.Job.Phase}"));
+            $"{actor.Id.Value}:{actor.Name}:{actor.Health}:{actor.EffectiveMaximumHealth}:" +
+            $"{(int)actor.Job.Kind}:{(int)actor.Job.Phase}"));
         if (!force && signature == _goblinRosterSignature)
         {
             return;
@@ -5062,7 +5086,7 @@ public partial class Main : Node
             var health = new Label
             {
                 CustomMinimumSize = new Vector2(145, 0),
-                Text = $"zdrowie {actor.Health:N0}/{_engine.Definitions.MaximumHealth:N0}",
+                Text = $"zdrowie {actor.Health:N0}/{actor.EffectiveMaximumHealth:N0}",
                 VerticalAlignment = VerticalAlignment.Center,
             };
             var job = new Label
@@ -5719,7 +5743,7 @@ public partial class Main : Node
             return;
         }
 
-        UpdateNeedBar(_healthBar, actor.Health, _engine.Definitions.MaximumHealth, "Zdrowie");
+        UpdateNeedBar(_healthBar, actor.Health, actor.EffectiveMaximumHealth, "Zdrowie");
         UpdateNeedBar(
             _hungerBar,
             _engine.Definitions.MaximumHunger - actor.Hunger,
@@ -5881,6 +5905,7 @@ public partial class Main : Node
 
     private static void UpdateNeedBar(ProgressBar bar, int value, int maximum, string name)
     {
+        bar.MaxValue = maximum;
         bar.Value = value;
         bar.TooltipText = $"{name}: {value:N0} / {maximum:N0}";
     }

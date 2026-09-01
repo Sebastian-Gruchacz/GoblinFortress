@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "kind": "floor-pattern-atlas",
+  "id": "constructed-floor-patterns-v1",
+  "output": {
+    "atlasPath": "res://Assets/Generated/constructed-floor-patterns-v1.png",
+    "manifestPath": "res://Assets/Generated/constructed-floor-patterns-v1.manifest.json",
+    "tileSize": 80
+  },
+  "shading": {
+    "edgeWidthFraction": 0.1,
+    "wood": {
+      "overallDarkening": 0.04,
+      "edgeDarkening": 0.06
+    },
+    "stone": {
+      "overallDarkening": 0.1,
+      "edgeDarkening": 0.1
+    }
+  }
+}

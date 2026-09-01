@@ -4,11 +4,24 @@ using GoblinStronghold.Simulation.Animals;
 using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.GodotClient.UI.WorldRendering;
 
 namespace GoblinStronghold.GodotClient;
 
 public partial class WorldView : Node2D
 {
+    private static readonly Vector2[] ElderlyBeardShape =
+    [
+        new(-2.35f, 1.25f),
+        new(2.35f, 1.25f),
+        new(0f, 6.1f),
+    ];
+    private static readonly Vector2[] ElderlyBeardOutline =
+    [
+        .. ElderlyBeardShape,
+        ElderlyBeardShape[0],
+    ];
+
     private const float TileSize = 20f;
     private const double WaterAnimationCycleSeconds = 4.0;
     private const double WaterAnimationRedrawSeconds = 1d / 20d;
@@ -45,6 +58,7 @@ public partial class WorldView : Node2D
     private Texture2D _caveWallAtlas = null!;
     private Texture2D _humanStructureAtlas = null!;
     private Texture2D _walkwayAtlas = null!;
+    private Texture2D _floorPatternAtlas = null!;
     private Texture2D _structureWallAtlas = null!;
     private Texture2D _bloodAtlas = null!;
     private Texture2D _surfaceGrimeAtlas = null!;
@@ -96,6 +110,7 @@ public partial class WorldView : Node2D
         _caveWallAtlas = CaveSprites.LoadWallAtlas();
         _humanStructureAtlas = HumanStructureSprites.LoadAtlas();
         _walkwayAtlas = WalkwaySprites.LoadAtlas();
+        _floorPatternAtlas = FloorPatternSprites.LoadAtlas();
         _structureWallAtlas = StructureWallSprites.LoadAtlas();
         _bloodAtlas = BloodSprites.LoadAtlas();
         _surfaceGrimeAtlas = SurfaceGrimeSprites.LoadAtlas();
@@ -538,18 +553,9 @@ public partial class WorldView : Node2D
                 <= 28 => 0.52f,
                 _ => 0.66f,
             };
-            var scale = stain.Volume switch
-            {
-                <= 4 => 0.4f,
-                <= 12 => 0.62f,
-                <= 28 => 0.8f,
-                _ => 0.96f,
-            };
-            var size = rect.Size * scale;
-            var destination = new Rect2(rect.GetCenter() - size / 2f, size);
             DrawTextureRectRegion(
                 _surfaceGrimeAtlas,
-                destination,
+                rect,
                 SurfaceGrimeSprites.GetRegion(_surfaceGrimeAtlas, stain.Volume, variant),
                 new Color(1f, 1f, 1f, alpha));
         }
@@ -1348,6 +1354,26 @@ public partial class WorldView : Node2D
                     color);
             }
         }
+
+        DrawFloorCoveredVerticalPassages(structureCache);
+    }
+
+    private void DrawFloorCoveredVerticalPassages(StructureRenderCache structureCache)
+    {
+        if (structureCache.Floors.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var position in _engine.World.CreateVerticalPassageSnapshot()
+                     .SelectMany(passage => new[] { passage.Upper, passage.Lower })
+                     .Where(position =>
+                         position.Z == _visibleLevel &&
+                         structureCache.Floors.ContainsKey(position))
+                     .Distinct())
+        {
+            DrawCavePassage(position);
+        }
     }
 
     private void DrawWorkshop(WorldObjectSnapshot workshop)
@@ -1432,87 +1458,19 @@ public partial class WorldView : Node2D
     private void DrawMaterialFloor(WorldObjectSnapshot floor)
     {
         var rect = CellRect(floor.Anchor.X, floor.Anchor.Y);
-        var palette = PaletteFor(floor) ?? MaterialPaletteColors.For(
-            floor.Kind == WorldObjectKind.StoneFloor
+        var material = floor.MaterialVariant == ResourceVariant.None
+            ? floor.Kind == WorldObjectKind.StoneFloor
                 ? ResourceVariant.Granite
-                : ResourceVariant.PineWood);
-        if (floor.Kind == WorldObjectKind.WoodenFloor)
-        {
-            DrawRect(rect, palette.Shadow.Darkened(0.1f));
-            const int patternSize = 4;
-            for (var y = 0; y < (int)rect.Size.Y; y += patternSize)
-            {
-                for (var x = 0; x < (int)rect.Size.X; x += patternSize)
-                {
-                    var origin = rect.Position + new Vector2(x, y);
-                    // Keep each row on the same /\/\ rhythm. Alternating both axes
-                    // closes the joints into diamonds instead of a herringbone run.
-                    var rising = x / patternSize % 2 == 0;
-                    DrawFloorPlank(
-                        origin,
-                        patternSize,
-                        rising,
-                        palette.Midtone.Darkened(0.14f),
-                        palette.Edge.Darkened(0.12f));
-                }
-            }
-            return;
-        }
-
-        DrawRect(rect, palette.Edge.Darkened(0.22f));
-        const int slabColumns = 6;
-        const int slabRows = 6;
-        var slabSize = new Vector2(
-            rect.Size.X / slabColumns,
-            rect.Size.Y / slabRows);
-        for (var y = 0; y < slabRows; y++)
-        {
-            for (var x = 0; x < slabColumns; x++)
-            {
-                var slab = new Rect2(
-                    rect.Position + new Vector2(
-                        x * slabSize.X + 0.35f,
-                        y * slabSize.Y + 0.35f),
-                    slabSize - new Vector2(0.7f, 0.7f));
-                DrawRect(slab, ((x + y + floor.Anchor.X + floor.Anchor.Y) % 3) switch
-                {
-                    0 => palette.Shadow.Darkened(0.18f),
-                    1 => palette.Midtone.Darkened(0.22f),
-                    _ => palette.Highlight.Darkened(0.27f),
-                });
-            }
-        }
-    }
-
-    private void DrawFloorPlank(
-        Vector2 origin,
-        float size,
-        bool rising,
-        Color fill,
-        Color edge)
-    {
-        var width = size * 0.25f;
-        var points = rising
-            ? new[]
-            {
-                origin + new Vector2(0f, size - width),
-                origin + new Vector2(width, size),
-                origin + new Vector2(size, width),
-                origin + new Vector2(size - width, 0f),
-            }
-            : new[]
-            {
-                origin + new Vector2(0f, width),
-                origin + new Vector2(size - width, size),
-                origin + new Vector2(size, size - width),
-                origin + new Vector2(width, 0f),
-            };
-        DrawColoredPolygon(points, edge);
-        var center = origin + Vector2.One * size * 0.5f;
-        var inset = points
-            .Select(point => point.Lerp(center, 0.16f))
-            .ToArray();
-        DrawColoredPolygon(inset, fill);
+                : ResourceVariant.PineWood
+            : floor.MaterialVariant;
+        DrawTextureRect(
+            _materialPaletteTextures.Get(
+                _floorPatternAtlas,
+                FloorPatternSprites.GetRegion(_floorPatternAtlas, floor.Kind),
+                material,
+                MaterialPaletteTextureProfile.CompleteSurface),
+            rect,
+            tile: false);
     }
 
     private void DrawConstructedRamp(WorldObjectSnapshot ramp)
@@ -2379,7 +2337,11 @@ public partial class WorldView : Node2D
             for (var index = 0; index < actors.Length; index++)
             {
                 var center = GetVisualActorPosition(actors[index]) + offsets[actors[index].Id];
-                var healthRatio = (float)actors[index].Health / _engine.Definitions.MaximumHealth;
+                var healthRatio = Math.Clamp(
+                    (float)actors[index].Health /
+                    Math.Max(1, actors[index].EffectiveMaximumHealth),
+                    0f,
+                    1f);
                 var healthColor = new Color("b5443e").Lerp(new Color("a8d14b"), healthRatio);
                 if (_selectedActorIds.Contains(actors[index].Id))
                 {
@@ -2393,11 +2355,23 @@ public partial class WorldView : Node2D
                 DrawCircle(center, 3.6f, new Color("78a947"));
                 DrawCircle(center + new Vector2(-1.2f, -0.6f), 0.65f, new Color("182117"));
                 DrawCircle(center + new Vector2(1.2f, -0.6f), 0.65f, new Color("182117"));
+                if (actors[index].IsElderly)
+                {
+                    DrawElderlyBeard(center);
+                }
                 DrawCarriedResource(actors[index], center);
                 DrawWorkingTool(actors[index], center);
                 DrawActorIntent(actors[index], center);
             }
         }
+    }
+
+    private void DrawElderlyBeard(Vector2 center)
+    {
+        DrawSetTransform(center);
+        DrawColoredPolygon(ElderlyBeardShape, new Color("c5c7c0"));
+        DrawPolyline(ElderlyBeardOutline, new Color("5b605b"), 0.75f);
+        DrawSetTransform(Vector2.Zero);
     }
 
     private bool HasVisibleWorkAnimation() => _snapshot.Actors.Any(actor =>

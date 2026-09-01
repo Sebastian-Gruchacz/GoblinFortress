@@ -4406,13 +4406,31 @@ public sealed partial class SimulationEngine
             command.Construction,
             command.Position,
             command.EndPosition);
-        if (!CanPlaceConstruction(
-                command.Construction,
-                command.Position,
-                command.EndPosition,
-                footprint) ||
-            _constructionSites.Values.Any(site =>
-                site.GetFootprint().Intersect(footprint).Any()))
+        if (command.Construction is ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor)
+        {
+            footprint = footprint
+                .Where(position =>
+                    CanPlaceConstruction(
+                        command.Construction,
+                        position,
+                        position,
+                        [position]) &&
+                    World.CanPlanFloorConstruction([position]) &&
+                    !_constructionSites.Values.Any(site =>
+                        site.GetFootprint().Contains(position)))
+                .ToArray();
+            if (footprint.Count == 0)
+            {
+                return false;
+            }
+        }
+        else if (!CanPlaceConstruction(
+                     command.Construction,
+                     command.Position,
+                     command.EndPosition,
+                     footprint) ||
+                 _constructionSites.Values.Any(site =>
+                     site.GetFootprint().Intersect(footprint).Any()))
         {
             return false;
         }

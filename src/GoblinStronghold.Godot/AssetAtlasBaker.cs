@@ -26,6 +26,8 @@ internal static partial class AssetAtlasBaker
             "connected-atlas" => BakeConnectedAtlas(recipeResourcePath),
             "height-transition-atlas" => BakeHeightTransitionAtlas(recipeResourcePath),
             "cave-wall-atlas" => BakeCaveWallAtlas(recipeResourcePath),
+            "floor-pattern-atlas" => BakeFloorPatternAtlas(recipeResourcePath),
+            "splatter-atlas" => BakeSplatterAtlas(recipeResourcePath),
             _ => throw new InvalidDataException(
                 $"Unsupported asset recipe kind '{kind}' in {recipeResourcePath}."),
         };

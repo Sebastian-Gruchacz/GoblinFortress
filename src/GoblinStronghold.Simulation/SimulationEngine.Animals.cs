@@ -82,10 +82,11 @@ public sealed partial class SimulationEngine
                 var target = GetSpawnPopulation(species.Spawn, depth);
                 var current = _animals.Values.Count(animal =>
                     animal.Kind == species.LegacyKind && animal.Position.Z == level);
-                CreateInitialAnimals(
-                    species.LegacyKind,
-                    Math.Max(0, target - current),
-                    level);
+                var missing = target - current;
+                if (missing > 0)
+                {
+                    CreateInitialAnimals(species.LegacyKind, missing, level);
+                }
             }
         }
     }

@@ -32,11 +32,16 @@ public sealed class ConstructedSurfaceTests
         var engine = CreateEngine(initialWoodStock: 0);
         var natural = EnumerateWorldPositions(engine)
             .First(position =>
+                position.Z < 0 &&
+                engine.Map.IsCavePosition(position) &&
+                engine.Map.GetCaveCell(position).Kind == CaveCellKind.Floor &&
+                !engine.World.ExcavatedCaveCells.Contains(position) &&
                 engine.Map.TryGetInitialGeometry(position, out var geometry) &&
                 geometry.Support == CellSupportKind.NaturalFlat &&
                 geometry.Fluid == CellFluidKind.None &&
                 engine.World.IsTerrainTraversable(position) &&
-                engine.World.CanBuildFloors([position]));
+                !engine.World.GetWorldObjectsAt(position).Any());
+        Assert.True(engine.World.CanBuildFloors([natural]));
         engine.World.BuildFloor(
             natural,
             new SimulationTick(1),
@@ -63,6 +68,65 @@ public sealed class ConstructedSurfaceTests
         Assert.Contains(engine.World.GetWorldObjectsAt(excavated), worldObject =>
             worldObject.Kind == WorldObjectKind.StoneFloor);
         Assert.True(engine.World.IsTerrainTraversable(excavated));
+    }
+
+    [Fact]
+    public void FloorAreaKeepsNaturalCaveGroundAndSkipsAdjacentSolidRock()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var pair = EnumerateWorldPositions(engine)
+            .Where(position =>
+                position.Z < 0 &&
+                engine.Map.GetCaveCell(position).Kind == CaveCellKind.Floor &&
+                !engine.World.ExcavatedCaveCells.Contains(position) &&
+                engine.World.CanBuildFloors([position]))
+            .SelectMany(floor => engine.World.GetCardinalWorldNeighbors(floor)
+                .Where(engine.World.IsSolidCaveRock)
+                .Select(rock => (Floor: floor, Rock: rock)))
+            .First(pair => pair.Floor.Z == pair.Rock.Z);
+        engine.QueueCommand(SimulationCommand.BuildWoodenFloor(
+            new SimulationTick(1),
+            sequence: 1,
+            pair.Floor,
+            pair.Rock,
+            ResourceVariant.OakWood));
+
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(pair.Floor, site.Anchor);
+        Assert.Equal(pair.Floor, site.End);
+        Assert.Equal(ConstructionKind.WoodenFloor, site.Kind);
+    }
+
+    [Fact]
+    public void FloorConstructionSkipsBothEndsOfAVerticalPassage()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var upper = EnumerateWorldPositions(engine)
+            .First(position =>
+                engine.World.CanCarveRampDown(position) &&
+                engine.World.CanBuildFloors([position]));
+        var lower = upper with { Z = upper.Z - 1 };
+        Assert.True(engine.World.TryCarveVerticalRamp(
+            upper,
+            carveDown: true,
+            SimulationTick.Zero,
+            out _,
+            out _));
+
+        Assert.False(engine.World.CanPlanFloorConstruction([upper]));
+        Assert.False(engine.World.CanPlanFloorConstruction([lower]));
+        engine.QueueCommand(SimulationCommand.BuildWoodenFloor(
+            new SimulationTick(1),
+            sequence: 1,
+            upper,
+            upper,
+            ResourceVariant.OakWood));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Empty(engine.CreateSnapshot().ConstructionSites);
     }
 
     [Fact]

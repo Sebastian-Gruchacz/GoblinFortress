@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.Simulation.Workshops;
@@ -50,8 +51,7 @@ public sealed record WorkshopDefinition(
 
 public static class WorkshopCatalog
 {
-    private const string ResourceName =
-        "GoblinStronghold.Simulation.Content.workshops.json";
+    private const string ContentPath = "content/workshops.json";
     private static readonly Lazy<CatalogState> State = new(Load);
 
     public static IReadOnlyList<WorkshopDefinition> All => State.Value.All;
@@ -79,10 +79,7 @@ public static class WorkshopCatalog
 
     private static CatalogState Load()
     {
-        using var stream = typeof(WorkshopCatalog).Assembly
-            .GetManifestResourceStream(ResourceName)
-            ?? throw new InvalidOperationException(
-                $"Embedded workshop catalog '{ResourceName}' is missing.");
+        using var stream = CoreContentPack.Pack.OpenRead(ContentPath);
         var options = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,

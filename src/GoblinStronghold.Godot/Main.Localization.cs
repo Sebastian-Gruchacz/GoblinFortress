@@ -14,9 +14,21 @@ public partial class Main
 
     private string UiFormat(string subsection, string key, params object?[] arguments) =>
         string.Format(
-            CultureInfo.GetCultureInfo(_currentLocale == "pl" ? "pl-PL" : "en-US"),
+            GetFormattingCulture(),
             Ui(subsection, key),
             arguments);
+
+    private static CultureInfo GetFormattingCulture()
+    {
+        try
+        {
+            return CultureInfo.GetCultureInfo(_currentLocale);
+        }
+        catch (CultureNotFoundException)
+        {
+            return CultureInfo.GetCultureInfo("en-US");
+        }
+    }
 
     private void ApplyStaticTranslations()
     {
@@ -36,6 +48,7 @@ public partial class Main
         SetText<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/LoadGame", "main-menu", "load-last");
         SetText<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/ChooseSave", "main-menu", "choose-save");
         SetText<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Options", "main-menu", "options");
+        SetText<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Mods", "main-menu", "mods");
         SetText<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Quit", "main-menu", "quit");
 
         SetWindowTitle("GoblinDetails", "windows", "goblin");

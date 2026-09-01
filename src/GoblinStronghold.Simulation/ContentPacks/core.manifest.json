@@ -1,0 +1,14 @@
+{
+  "format": "goblin-pack",
+  "schemaVersion": 1,
+  "id": "core",
+  "type": "core",
+  "version": "0.2-dev",
+  "title": "Goblin Stronghold core-pack",
+  "authors": ["Sebastian Gruchacz"],
+  "minimumGameVersion": "0.2-dev",
+  "contentSchemaVersion": 1,
+  "dependencies": [],
+  "loadAfter": [],
+  "loadBefore": []
+}

@@ -52,6 +52,16 @@ public sealed class CraftingRecipeCatalogTests
     }
 
     [Fact]
+    public void LegacyAndStableRecipeIdsResolveToTheSameDefinition()
+    {
+        var legacy = CraftingRecipeCatalog.Get("wooden-barrel");
+        var stable = CraftingRecipeCatalog.Get("core:wooden-barrel");
+
+        Assert.Same(legacy, stable);
+        Assert.Equal("core:wooden-barrel", legacy.StableId.Value);
+    }
+
+    [Fact]
     public void PrimitiveAxeUsesWoodStoneBindingAndProducesPhysicalAxe()
     {
         var axe = CraftingRecipeCatalog.Get(CraftingRecipeKind.PrimitiveAxe);

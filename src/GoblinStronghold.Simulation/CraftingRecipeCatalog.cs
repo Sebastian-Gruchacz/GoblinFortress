@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Workshops;
 
@@ -27,12 +28,14 @@ public sealed record CraftingRecipeDefinition(
     int Level,
     int BaseWorkTicks,
     IReadOnlyList<CraftingMaterialRequirement> Materials,
-    CraftingOutputDefinition Output);
+    CraftingOutputDefinition Output)
+{
+    public ContentId StableId => ContentId.Parse(Id);
+}
 
 public static class CraftingRecipeCatalog
 {
-    private const string ResourceName =
-        "GoblinStronghold.Simulation.Content.crafting-recipes.json";
+    private const string ContentPath = "content/crafting-recipes.json";
     private static readonly Lazy<CatalogState> State = new(Load);
 
     public static IReadOnlyList<CraftingRecipeDefinition> All => State.Value.All;
@@ -45,7 +48,8 @@ public static class CraftingRecipeCatalog
     public static CraftingRecipeDefinition Get(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        return State.Value.ById.TryGetValue(id, out var recipe)
+        var lookupId = ContentId.Parse(id);
+        return State.Value.ByStableId.TryGetValue(lookupId.Value, out var recipe)
             ? recipe
             : throw new KeyNotFoundException($"Unknown crafting recipe id '{id}'.");
     }
@@ -67,10 +71,7 @@ public static class CraftingRecipeCatalog
 
     private static CatalogState Load()
     {
-        using var stream = typeof(CraftingRecipeCatalog).Assembly
-            .GetManifestResourceStream(ResourceName)
-            ?? throw new InvalidOperationException(
-                $"Embedded crafting recipe catalog '{ResourceName}' is missing.");
+        using var stream = CoreContentPack.Pack.OpenRead(ContentPath);
         var options = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -89,7 +90,7 @@ public static class CraftingRecipeCatalog
         return new CatalogState(
             Array.AsReadOnly(definitions),
             new ReadOnlyDictionary<string, CraftingRecipeDefinition>(definitions.ToDictionary(
-                recipe => recipe.Id,
+                recipe => recipe.StableId.Value,
                 StringComparer.OrdinalIgnoreCase)),
             new ReadOnlyDictionary<CraftingRecipeKind, CraftingRecipeDefinition>(
                 definitions.ToDictionary(recipe => recipe.Kind)));
@@ -189,7 +190,7 @@ public static class CraftingRecipeCatalog
 
     private sealed record CatalogState(
         IReadOnlyList<CraftingRecipeDefinition> All,
-        IReadOnlyDictionary<string, CraftingRecipeDefinition> ById,
+        IReadOnlyDictionary<string, CraftingRecipeDefinition> ByStableId,
         IReadOnlyDictionary<CraftingRecipeKind, CraftingRecipeDefinition> ByKind);
 
     private sealed class CraftingRecipeCatalogDocument

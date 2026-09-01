@@ -403,13 +403,13 @@ layout_mode = 0
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 32.0
-offset_top = -470.0
+offset_top = -521.0
 offset_right = 552.0
 offset_bottom = -28.0
 grow_vertical = 0
 
 [node name="Panel" type="PanelContainer" parent="Interface/MainMenu/Center" unique_id=1668188897]
-custom_minimum_size = Vector2(520, 442)
+custom_minimum_size = Vector2(520, 493)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_main_menu")
 
@@ -510,6 +510,15 @@ theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
 theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
 theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
 text = "Opcje"
+
+[node name="Mods" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_menu_button")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_menu_button_pressed")
+theme_override_styles/hover = SubResource("StyleBoxFlat_menu_button_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_menu_button_disabled")
+theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
 
 [node name="Quit" type="Button" parent="Interface/MainMenu/Center/Panel/Margin/Controls" unique_id=1146755296]
 custom_minimum_size = Vector2(0, 42)

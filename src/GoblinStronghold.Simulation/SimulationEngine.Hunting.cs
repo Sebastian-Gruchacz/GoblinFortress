@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Animals;
 using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.Simulation;
@@ -111,14 +112,7 @@ public sealed partial class SimulationEngine
                     sampleKey: 0x48554E54UL,
                     minimumInclusive: 0,
                     maximumExclusive: Definitions.RangedCombat.DamageVariance + 1)
-            : animal.Kind switch
-            {
-                AnimalKind.MarshHare => 120,
-                AnimalKind.CaveSpider => 80,
-                AnimalKind.DeepCrawler => 55,
-                AnimalKind.MagmaWyrm => 35,
-                _ => 110,
-            };
+            : AnimalSpecies.Get(animal.Kind).Harvest.HunterMeleeDamage;
         if (usesStone)
         {
             actor.PersonalStoneAmmo--;
@@ -132,16 +126,8 @@ public sealed partial class SimulationEngine
         }
 
         _animals.Remove(animal.Id);
-        var harvest = animal.Kind switch
-        {
-            AnimalKind.MarshHare => (Meat: 3, Hide: 1, Bone: 1, Experience: 12),
-            AnimalKind.SwampBoar => (Meat: 10, Hide: 3, Bone: 4, Experience: 30),
-            AnimalKind.CaveSpider => (Meat: 0, Hide: 0, Bone: 0, Experience: 25),
-            AnimalKind.DeepCrawler => (Meat: 0, Hide: 3, Bone: 4, Experience: 120),
-            AnimalKind.MagmaWyrm => (Meat: 0, Hide: 8, Bone: 10, Experience: 300),
-            _ => throw new ArgumentOutOfRangeException(),
-        };
-        if (harvest.Meat > 0)
+        var harvest = AnimalSpecies.Get(animal.Kind).Harvest;
+        if (harvest.RawMeat > 0)
         {
             var existing = FindMergeableGroundStack(
                 ResourceKind.Food,
@@ -151,13 +137,13 @@ public sealed partial class SimulationEngine
             {
                 AllocateItemStack(
                     ResourceKind.Food,
-                    harvest.Meat,
+                    harvest.RawMeat,
                     ItemLocation.OnGround(animal.Position),
                     FoodKind.RawMeat);
             }
             else
             {
-                existing.Quantity = checked(existing.Quantity + harvest.Meat);
+                existing.Quantity = checked(existing.Quantity + harvest.RawMeat);
             }
         }
         if (harvest.Hide > 0)
@@ -168,22 +154,21 @@ public sealed partial class SimulationEngine
         {
             DropAnimalMaterial(animal.Position, ResourceKind.Bone, harvest.Bone);
         }
-        if (animal.Kind == AnimalKind.CaveSpider)
+        foreach (var byproduct in harvest.Byproducts)
         {
             DropAnimalMaterial(
-                animal.Position, ResourceKind.Materials, 1, ResourceVariant.SpiderVenom);
-            DropAnimalMaterial(
-                animal.Position, ResourceKind.Materials, 2, ResourceVariant.SpiderSilk);
-            DropAnimalMaterial(
-                animal.Position, ResourceKind.Materials, 3, ResourceVariant.SpiderChitin);
+                animal.Position,
+                byproduct.Resource,
+                byproduct.Quantity,
+                byproduct.Variant);
         }
         if (hasDesignation)
         {
             _workDesignations.Remove(designation.Id);
         }
         actor.TacticalTargetEntityId = EntityId.None;
-        GainForagingExperience(actor, harvest.Experience);
-        Publish(SimulationEventKind.AnimalHunted, actor.Id, EntityId.None, harvest.Meat);
+        GainForagingExperience(actor, harvest.ForagingExperience);
+        Publish(SimulationEventKind.AnimalHunted, actor.Id, EntityId.None, harvest.RawMeat);
         if (hasDesignation)
         {
             Publish(SimulationEventKind.WorkDesignationRemoved, EntityId.None, designation.Id, 0);

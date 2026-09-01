@@ -77,6 +77,18 @@ public sealed class MaterialCatalogTests
     }
 
     [Fact]
+    public void LegacyAndStableMaterialIdsResolveToTheSameDefinition()
+    {
+        var legacy = MaterialCatalog.Get("iron-bar");
+        var stable = MaterialCatalog.Get("core:iron-bar");
+
+        Assert.Same(legacy, stable);
+        Assert.Equal("core:iron-bar", legacy.StableId.Value);
+        Assert.Equal("core", legacy.StableId.PackageId);
+        Assert.Equal("iron-bar", legacy.StableId.LocalId);
+    }
+
+    [Fact]
     public void DeepMaterialsExposeTheirIntendedDepthBands()
     {
         Assert.Equal(8, MaterialCatalog.Get(ResourceVariant.Basalt)

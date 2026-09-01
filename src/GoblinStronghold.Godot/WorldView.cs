@@ -1,5 +1,7 @@
 using Godot;
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Animals;
+using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 
@@ -57,6 +59,9 @@ public partial class WorldView : Node2D
         _cachedCaveSolids = [];
     private readonly Dictionary<int, StructureRenderCache> _structureRenderCaches = [];
     private readonly MaterialPaletteTextureCache _materialPaletteTextures = new();
+    private readonly AnimalPaletteTextureCache _animalPaletteTextures = new();
+    private Dictionary<ContentId,
+        Action<AnimalSnapshot, Vector2, AnimalSpeciesDefinition>> _animalRenderers = null!;
     private readonly List<CombatEffect> _combatEffects = [];
     private readonly AudioStreamPlayer[] _combatAudioPlayers = new AudioStreamPlayer[CombatAudioPlayerCount];
     private AudioStreamWav _stoneHitSound = null!;
@@ -71,6 +76,13 @@ public partial class WorldView : Node2D
 
     public override void _Ready()
     {
+        AnimalVisualAssetRegistry.Validate(AnimalSpeciesCatalog.Current);
+        _animalRenderers = new()
+        {
+            [AnimalVisualAssetRegistry.ProceduralHareRenderer] = DrawProceduralHare,
+            [AnimalVisualAssetRegistry.ProceduralBoarRenderer] = DrawProceduralBoar,
+            [AnimalVisualAssetRegistry.AtlasSpriteRenderer] = DrawAtlasAnimal,
+        };
         _iconAtlas = UiIcons.LoadAtlas();
         _itemIconAtlas = ItemIcons.LoadAtlas();
         _foodIconAtlas = ResourceThumbnails.TryLoadFoodAtlas();
@@ -101,7 +113,11 @@ public partial class WorldView : Node2D
         }
     }
 
-    public override void _ExitTree() => _materialPaletteTextures.Dispose();
+    public override void _ExitTree()
+    {
+        _materialPaletteTextures.Dispose();
+        _animalPaletteTextures.Dispose();
+    }
 
     public void SetWorld(SimulationEngine engine)
     {
@@ -2655,45 +2671,63 @@ public partial class WorldView : Node2D
                      CellVisibility.Visible))
         {
             var center = GetVisualAnimalPosition(animal);
-            if (animal.Kind == AnimalKind.MarshHare)
-            {
-                DrawEllipse(center + new Vector2(0, 1), new Vector2(4.6f, 3.2f),
-                    new Color("b9aa86"));
-                DrawLine(center + new Vector2(-1.5f, -2), center + new Vector2(-2.2f, -6),
-                    new Color("d5c9a8"), 1.8f);
-                DrawLine(center + new Vector2(0.5f, -2), center + new Vector2(1.2f, -6),
-                    new Color("d5c9a8"), 1.8f);
-                DrawCircle(center + new Vector2(2.6f, -0.4f), 0.65f, new Color("241d18"));
-            }
-            else if (animal.Kind == AnimalKind.SwampBoar)
-            {
-                DrawEllipse(center, new Vector2(6.2f, 4.2f), new Color("665044"));
-                DrawCircle(center + new Vector2(5, 1), 2.3f, new Color("7b5d4c"));
-                DrawLine(center + new Vector2(6.4f, 1.8f), center + new Vector2(8, 0.5f),
-                    new Color("e5d3a4"), 1.4f);
-                if (animal.Activity == AnimalActivity.Threatening)
-                {
-                    DrawArc(center, 8f, 0, Mathf.Tau, 20, new Color("e15b45"), 1.8f);
-                }
-            }
-            else
-            {
-                var size = new Vector2(TileSize, TileSize);
-                DrawTextureRectRegion(
-                    _undergroundFaunaAtlas,
-                    new Rect2(center - (size / 2f), size),
-                    UndergroundSprites.GetCaveSpiderRegion(_undergroundFaunaAtlas),
-                    animal.Kind switch
-                    {
-                        AnimalKind.DeepCrawler => new Color("9d57bd"),
-                        AnimalKind.MagmaWyrm => new Color("ef6b32"),
-                        _ => Colors.White,
-                    });
-                if (animal.Activity == AnimalActivity.Threatening)
-                {
-                    DrawArc(center, 9f, 0, Mathf.Tau, 20, new Color("e15b45"), 1.8f);
-                }
-            }
+            var species = AnimalSpeciesCatalog.Current.Get(animal.Kind);
+            _animalRenderers[species.Visual.RendererId](animal, center, species);
+        }
+    }
+
+    private void DrawProceduralHare(
+        AnimalSnapshot animal,
+        Vector2 center,
+        AnimalSpeciesDefinition species)
+    {
+        var palette = species.Visual.Palette;
+        DrawEllipse(center + new Vector2(0, 1), new Vector2(4.6f, 3.2f),
+            Color.FromHtml(palette["body"]));
+        DrawLine(center + new Vector2(-1.5f, -2), center + new Vector2(-2.2f, -6),
+            Color.FromHtml(palette["accent"]), 1.8f);
+        DrawLine(center + new Vector2(0.5f, -2), center + new Vector2(1.2f, -6),
+            Color.FromHtml(palette["accent"]), 1.8f);
+        DrawCircle(center + new Vector2(2.6f, -0.4f), 0.65f,
+            Color.FromHtml(palette["eye"]));
+    }
+
+    private void DrawProceduralBoar(
+        AnimalSnapshot animal,
+        Vector2 center,
+        AnimalSpeciesDefinition species)
+    {
+        var palette = species.Visual.Palette;
+        DrawEllipse(center, new Vector2(6.2f, 4.2f), Color.FromHtml(palette["body"]));
+        DrawCircle(center + new Vector2(5, 1), 2.3f,
+            Color.FromHtml(palette["accent"]));
+        DrawLine(center + new Vector2(6.4f, 1.8f), center + new Vector2(8, 0.5f),
+            Color.FromHtml(palette["tusk"]), 1.4f);
+        DrawAnimalThreat(animal, center, species, radius: 8f);
+    }
+
+    private void DrawAtlasAnimal(
+        AnimalSnapshot animal,
+        Vector2 center,
+        AnimalSpeciesDefinition species)
+    {
+        var size = new Vector2(TileSize, TileSize);
+        var region = UndergroundSprites.GetCaveSpiderRegion(_undergroundFaunaAtlas);
+        var texture = _animalPaletteTextures.Get(_undergroundFaunaAtlas, region, species);
+        DrawTextureRect(texture, new Rect2(center - (size / 2f), size), tile: false);
+        DrawAnimalThreat(animal, center, species, radius: 9f);
+    }
+
+    private void DrawAnimalThreat(
+        AnimalSnapshot animal,
+        Vector2 center,
+        AnimalSpeciesDefinition species,
+        float radius)
+    {
+        if (animal.Activity == AnimalActivity.Threatening)
+        {
+            DrawArc(center, radius, 0, Mathf.Tau, 20,
+                Color.FromHtml(species.Visual.Palette["threat"]), 1.8f);
         }
     }
 

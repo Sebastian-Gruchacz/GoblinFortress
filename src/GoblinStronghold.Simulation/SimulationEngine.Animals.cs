@@ -1,3 +1,4 @@
+using GoblinStronghold.Simulation.Animals;
 using GoblinStronghold.Simulation.Map;
 
 namespace GoblinStronghold.Simulation;
@@ -5,21 +6,7 @@ namespace GoblinStronghold.Simulation;
 public sealed partial class SimulationEngine
 {
     public const int AnimalUpdateIntervalTicks = 10;
-    private const int HareMaximumHealth = 100;
-    private const int HareMaximumFatigue = 6;
-    private const int HareMovementFatigue = 6;
-    private const int HareRestRecovery = 1;
-    private const int BoarMaximumHealth = 500;
-    private const int BoarMaximumFatigue = 24;
-    private const int BoarMovementFatigue = 1;
-    private const int BoarRestRecovery = 4;
-    private const int SpiderMaximumHealth = 180;
-    private const int SpiderMaximumFatigue = 18;
-    private const int SpiderMovementFatigue = 1;
-    private const int SpiderRestRecovery = 3;
-    private const int DeepCrawlerMaximumHealth = 900;
-    private const int MagmaWyrmMaximumHealth = 2_400;
-    private const int DeepPredatorMaximumFatigue = 30;
+    private static IAnimalSpeciesCatalog AnimalSpecies => AnimalSpeciesCatalog.Current;
 
     private void CreateInitialAnimals()
     {
@@ -28,14 +15,19 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        CreateInitialAnimals(AnimalKind.MarshHare, Math.Max(6, Map.CellCount / 400));
-        CreateInitialAnimals(AnimalKind.SwampBoar, Math.Max(3, Map.CellCount / 1_200));
-        for (var depth = 1; depth <= Map.CaveLevelCount; depth++)
+        foreach (var species in AnimalSpecies.All
+                     .Where(species => species.Spawn.Mode is
+                         AnimalSpawnMode.InitialSingleLevel or
+                         AnimalSpawnMode.InitialEachDepth)
+                     .OrderBy(species => species.Spawn.Order))
         {
-            CreateInitialAnimals(
-                AnimalKind.CaveSpider,
-                Math.Max(1, Map.CellCount / 8_000) * depth,
-                level: -depth);
+            foreach (var depth in GetSpawnDepths(species.Spawn))
+            {
+                CreateInitialAnimals(
+                    species.LegacyKind,
+                    GetSpawnPopulation(species.Spawn, depth),
+                    level: -depth);
+            }
         }
     }
 
@@ -75,26 +67,54 @@ public sealed partial class SimulationEngine
 
     private void EnsureDeepPredators()
     {
-        for (var depth = 12; depth <= Map.CaveLevelCount; depth++)
+        var maintained = AnimalSpecies.All
+            .Where(species => species.Spawn.Mode == AnimalSpawnMode.MaintainEachDepth)
+            .OrderBy(species => species.Spawn.Order)
+            .ToArray();
+        var minimumDepth = maintained.Min(species => species.Spawn.MinimumDepth);
+        for (var depth = minimumDepth; depth <= Map.CaveLevelCount; depth++)
         {
             var level = -depth;
-            if (depth >= 16 && !_animals.Values.Any(animal =>
-                    animal.Kind == AnimalKind.MagmaWyrm && animal.Position.Z == level))
+            foreach (var species in maintained.Where(species =>
+                         depth >= species.Spawn.MinimumDepth &&
+                         depth <= (species.Spawn.MaximumDepth ?? int.MaxValue)))
             {
-                CreateInitialAnimals(AnimalKind.MagmaWyrm, count: 1, level);
-            }
-
-            var crawlerTarget = depth >= 16 ? 2 : 1;
-            var crawlers = _animals.Values.Count(animal =>
-                animal.Kind == AnimalKind.DeepCrawler && animal.Position.Z == level);
-            if (crawlers < crawlerTarget)
-            {
+                var target = GetSpawnPopulation(species.Spawn, depth);
+                var current = _animals.Values.Count(animal =>
+                    animal.Kind == species.LegacyKind && animal.Position.Z == level);
                 CreateInitialAnimals(
-                    AnimalKind.DeepCrawler,
-                    crawlerTarget - crawlers,
+                    species.LegacyKind,
+                    Math.Max(0, target - current),
                     level);
             }
         }
+    }
+
+    private IEnumerable<int> GetSpawnDepths(AnimalSpawnDefinition spawn)
+    {
+        var maximumDepth = spawn.Mode == AnimalSpawnMode.InitialSingleLevel
+            ? spawn.MinimumDepth
+            : Math.Min(spawn.MaximumDepth ?? Map.CaveLevelCount, Map.CaveLevelCount);
+        for (var depth = spawn.MinimumDepth; depth <= maximumDepth; depth++)
+        {
+            yield return depth;
+        }
+    }
+
+    private int GetSpawnPopulation(AnimalSpawnDefinition spawn, int depth)
+    {
+        var population = spawn.MapCellsPerAnimal == 0
+            ? spawn.MinimumPopulation
+            : Math.Max(spawn.MinimumPopulation, Map.CellCount / spawn.MapCellsPerAnimal);
+        if (spawn.ScalePopulationWithDepth)
+        {
+            population = checked(population * Math.Max(1, depth));
+        }
+        if (depth >= (spawn.PopulationIncreaseDepth ?? int.MaxValue))
+        {
+            population = checked(population + spawn.PopulationIncrease);
+        }
+        return population;
     }
 
     private void UpdateAnimals()
@@ -112,7 +132,8 @@ public sealed partial class SimulationEngine
             animal.Hunger++;
             UpdateAnimal(animal);
             SynchronizeHuntDesignation(animal);
-            if (animal.Hunger > 24)
+            if (animal.Hunger > AnimalSpecies.Get(animal.Kind)
+                    .Behavior.StarvationHungerThreshold)
             {
                 animal.Health--;
             }
@@ -160,30 +181,33 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        if (animal.Kind == AnimalKind.MarshHare &&
-            animal.AgeTicks % (AnimalUpdateIntervalTicks * 2) != 0)
+        var species = AnimalSpecies.Get(animal.Kind);
+        if (species.Behavior.RoamingInterval > 1 &&
+            animal.AgeTicks %
+                (AnimalUpdateIntervalTicks * species.Behavior.RoamingInterval) != 0)
         {
             animal.Fatigue = Math.Max(0, animal.Fatigue - 1);
             animal.Activity = AnimalActivity.Resting;
             return;
         }
 
+        var considersGoblinsEnemies =
+            AnimalDispositionPolicy.ConsidersGoblinsEnemies(species.Behavior);
         var nearbyActors = _actors.Values
-            .Where(actor => actor.Health > 0 && actor.Position.Z == animal.Position.Z)
+            .Where(actor => considersGoblinsEnemies && actor.Health > 0 &&
+                actor.Position.Z == animal.Position.Z)
             .Select(actor => new { Actor = actor, Distance = Distance(actor.Position, animal.Position) })
-            .Where(candidate => candidate.Distance <= 5)
+            .Where(candidate => candidate.Distance <= species.Behavior.DetectionRadius)
             .OrderBy(candidate => candidate.Distance)
             .ThenBy(candidate => candidate.Actor.Id)
             .ToArray();
 
-        if ((animal.Kind == AnimalKind.SwampBoar && nearbyActors.Length == 1) ||
-            (animal.Kind is AnimalKind.CaveSpider or AnimalKind.DeepCrawler or
-                AnimalKind.MagmaWyrm && nearbyActors.Length > 0))
+        if (AnimalDispositionPolicy.ShouldAttack(species.Behavior, nearbyActors.Length))
         {
             var target = nearbyActors[0];
             if (target.Distance <= 1)
             {
-                var damage = AnimalCombatPolicy.GetAttackDamage(animal.Kind, animal.Position);
+                var damage = AnimalAttackPolicy.GetDamage(species, animal.Position);
                 ApplyTraumaDamage(target.Actor, damage);
                 animal.Activity = AnimalActivity.Threatening;
                 Publish(SimulationEventKind.AnimalHitGoblin, EntityId.None, target.Actor.Id, damage);
@@ -201,9 +225,12 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        if (animal.Hunger >= 6 && IsAnimalHabitat(animal.Kind, animal.Position))
+        if (animal.Hunger >= species.Behavior.ForageHungerThreshold &&
+            IsAnimalHabitat(animal.Kind, animal.Position))
         {
-            animal.Hunger = Math.Max(0, animal.Hunger - 6);
+            animal.Hunger = Math.Max(
+                0,
+                animal.Hunger - species.Behavior.ForageHungerThreshold);
             animal.Fatigue = Math.Max(0, animal.Fatigue - 1);
             animal.Activity = AnimalActivity.Foraging;
             return;
@@ -281,13 +308,11 @@ public sealed partial class SimulationEngine
 
     private IEnumerable<GridPosition> GetAnimalTraversableNeighbors(
         AnimalKind kind,
-        GridPosition position) => kind is AnimalKind.CaveSpider or AnimalKind.DeepCrawler or
-            AnimalKind.MagmaWyrm
-        ? World.GetTerrainNeighbors(position).Where(candidate => IsAnimalHabitat(kind, candidate))
-        : Map.GetCardinalNeighbors(position).Where(candidate =>
-            IsAnimalHabitat(kind, candidate) &&
-            World.IsSurfaceTraversable(candidate) &&
-            Map.CanTraverseSurfaceEdge(position, candidate));
+        GridPosition position) => AnimalHabitatPolicy.GetTraversableNeighbors(
+            AnimalSpecies.Get(kind),
+            Map,
+            World,
+            position);
 
     private bool IsAnimalReadyToBreed(AnimalState animal) =>
         animal.AgeTicks >= animal.MaturityAgeTicks &&
@@ -300,37 +325,8 @@ public sealed partial class SimulationEngine
             actor.Health > 0 && actor.Position.Z == animal.Position.Z &&
             Distance(actor.Position, animal.Position) <= 6);
 
-    private bool IsAnimalHabitat(AnimalKind kind, GridPosition position)
-    {
-        if (!Map.IsColumnWithin(position))
-        {
-            return false;
-        }
-        if (kind is AnimalKind.CaveSpider or AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm)
-        {
-            var inhabitsDepth = kind switch
-            {
-                AnimalKind.DeepCrawler => position.Z <= -12,
-                AnimalKind.MagmaWyrm => position.Z <= -16,
-                _ => position.Z < 0,
-            };
-            return inhabitsDepth && Map.IsCavePosition(position) &&
-                World.IsTerrainTraversable(position);
-        }
-        if (position.Z != 0)
-        {
-            return false;
-        }
-        var cell = Map.GetCell(position);
-        return kind switch
-        {
-            AnimalKind.MarshHare => cell.IsTraversable && cell.Terrain == TerrainKind.SolidGround &&
-                cell.Fertility >= 45,
-            AnimalKind.SwampBoar => cell.IsTraversable && cell.Moisture >= 60 &&
-                cell.Terrain is TerrainKind.Mud or TerrainKind.ShallowWater,
-            _ => false,
-        };
-    }
+    private bool IsAnimalHabitat(AnimalKind kind, GridPosition position) =>
+        AnimalHabitatPolicy.Accepts(AnimalSpecies.Get(kind), Map, World, position);
 
     private AnimalState AllocateAnimal(
         AnimalKind kind,
@@ -390,42 +386,17 @@ public sealed partial class SimulationEngine
         }
     }
 
-    private static int MaximumAnimalHealth(AnimalKind kind) => kind switch
-    {
-        AnimalKind.MarshHare => HareMaximumHealth,
-        AnimalKind.SwampBoar => BoarMaximumHealth,
-        AnimalKind.CaveSpider => SpiderMaximumHealth,
-        AnimalKind.DeepCrawler => DeepCrawlerMaximumHealth,
-        AnimalKind.MagmaWyrm => MagmaWyrmMaximumHealth,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-    };
+    private static int MaximumAnimalHealth(AnimalKind kind) =>
+        AnimalSpecies.Get(kind).Vitals.MaximumHealth;
 
-    internal static int MaximumAnimalFatigue(AnimalKind kind) => kind switch
-    {
-        AnimalKind.MarshHare => HareMaximumFatigue,
-        AnimalKind.SwampBoar => BoarMaximumFatigue,
-        AnimalKind.CaveSpider => SpiderMaximumFatigue,
-        AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm => DeepPredatorMaximumFatigue,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-    };
+    internal static int MaximumAnimalFatigue(AnimalKind kind) =>
+        AnimalSpecies.Get(kind).Vitals.MaximumFatigue;
 
-    private static int AnimalMovementFatigue(AnimalKind kind) => kind switch
-    {
-        AnimalKind.MarshHare => HareMovementFatigue,
-        AnimalKind.SwampBoar => BoarMovementFatigue,
-        AnimalKind.CaveSpider => SpiderMovementFatigue,
-        AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm => SpiderMovementFatigue,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-    };
+    private static int AnimalMovementFatigue(AnimalKind kind) =>
+        AnimalSpecies.Get(kind).Vitals.MovementFatigue;
 
-    private static int AnimalRestRecovery(AnimalKind kind) => kind switch
-    {
-        AnimalKind.MarshHare => HareRestRecovery,
-        AnimalKind.SwampBoar => BoarRestRecovery,
-        AnimalKind.CaveSpider => SpiderRestRecovery,
-        AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm => SpiderRestRecovery,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-    };
+    private static int AnimalRestRecovery(AnimalKind kind) =>
+        AnimalSpecies.Get(kind).Vitals.RestRecovery;
 
     private long GetAnimalMaturityTicks(AnimalKind kind)
     {

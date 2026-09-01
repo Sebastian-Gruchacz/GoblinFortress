@@ -2768,13 +2768,7 @@ public sealed partial class SimulationEngine
             observers.AddRange(_humanVillage.GetLivingCohortPositions()
                 .Select(position => (position, humanRadius)));
             observers.AddRange(_animals.Values.Select(animal =>
-                (animal.Position, animal.Kind switch
-                {
-                    AnimalKind.SwampBoar or AnimalKind.CaveSpider => 3,
-                    AnimalKind.DeepCrawler => 4,
-                    AnimalKind.MagmaWyrm => 5,
-                    _ => 2,
-                })));
+                (animal.Position, AnimalSpecies.Get(animal.Kind).DebugVisionRadius)));
         }
 
         Visibility.Reveal(observers, World.IsSolidHillRock);

@@ -333,6 +333,7 @@ public partial class Main : Node
 
     public override void _Ready()
     {
+        LoadLocalContentPacks();
         _localeSettings = new LocaleSettings(
             ProjectSettings.GlobalizePath("user://settings/locale.json"),
             SteamLocaleProvider.TryGetCurrentGameLanguage);
@@ -827,6 +828,7 @@ public partial class Main : Node
         CreateUnitOrderMenu();
         CreateConstructionMaterialMenu();
         CreateOptionsWindow();
+        CreateModManagerWindow();
         CreateRecoveryWindow();
         ApplyGameThemeToWindows();
         ApplyStaticTranslations();
@@ -1482,10 +1484,8 @@ public partial class Main : Node
         var language = new OptionButton();
         foreach (var locale in TranslationCatalog.SupportedLocales)
         {
-            language.AddItem(TranslationCatalog.Get(
+            language.AddItem(TranslationCatalog.GetLocaleDisplayName(
                 _currentLocale,
-                "interface",
-                "language",
                 locale));
             language.SetItemMetadata(language.ItemCount - 1, locale);
             if (locale == _currentLocale)

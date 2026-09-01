@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "species": [
+    {
+      "id": "core:marsh-hare",
+      "legacyKind": "MarshHare",
+      "vitals": { "maximumHealth": 100, "maximumFatigue": 6, "movementFatigue": 6, "restRecovery": 1 },
+      "habitat": { "kind": "FertileGround", "minimumDepthBelowSurface": 0 },
+      "behavior": {
+        "modelId": "core:passive-prey",
+        "disposition": "Passive",
+        "aggression": 0,
+        "detectionRadius": 5,
+        "forageHungerThreshold": 6,
+        "starvationHungerThreshold": 24,
+        "roamingInterval": 2,
+        "enemies": [{ "kind": "Group", "id": "core:goblins" }]
+      },
+      "spawn": {
+        "mode": "InitialSingleLevel", "order": 10, "minimumDepth": 0,
+        "maximumDepth": 0, "minimumPopulation": 6, "mapCellsPerAnimal": 400,
+        "scalePopulationWithDepth": false, "populationIncreaseDepth": null,
+        "populationIncrease": 0
+      },
+      "ecologyProfile": "MarshHare",
+      "attack": { "baseDamage": 0, "damagePerDepth": 0 },
+      "harvest": {
+        "rawMeat": 3, "hide": 1, "bone": 1, "foragingExperience": 12,
+        "hunterMeleeDamage": 120, "byproducts": []
+      },
+      "debugVisionRadius": 2,
+      "visual": {
+        "rendererId": "core:procedural-hare", "atlasId": null,
+        "spriteId": "core:marsh-hare",
+        "palette": { "body": "#b9aa86", "accent": "#d5c9a8", "eye": "#241d18", "threat": "#e15b45" }
+      }
+    },
+    {
+      "id": "core:swamp-boar",
+      "legacyKind": "SwampBoar",
+      "vitals": { "maximumHealth": 500, "maximumFatigue": 24, "movementFatigue": 1, "restRecovery": 4 },
+      "habitat": { "kind": "Wetland", "minimumDepthBelowSurface": 0 },
+      "behavior": {
+        "modelId": "core:territorial",
+        "disposition": "Territorial",
+        "aggression": 60,
+        "detectionRadius": 5,
+        "forageHungerThreshold": 6,
+        "starvationHungerThreshold": 24,
+        "roamingInterval": 1,
+        "enemies": [{ "kind": "Group", "id": "core:goblins" }]
+      },
+      "spawn": {
+        "mode": "InitialSingleLevel", "order": 20, "minimumDepth": 0,
+        "maximumDepth": 0, "minimumPopulation": 3, "mapCellsPerAnimal": 1200,
+        "scalePopulationWithDepth": false, "populationIncreaseDepth": null,
+        "populationIncrease": 0
+      },
+      "ecologyProfile": "SwampBoar",
+      "attack": { "baseDamage": 90, "damagePerDepth": 0 },
+      "harvest": {
+        "rawMeat": 10, "hide": 3, "bone": 4, "foragingExperience": 30,
+        "hunterMeleeDamage": 110, "byproducts": []
+      },
+      "debugVisionRadius": 3,
+      "visual": {
+        "rendererId": "core:procedural-boar", "atlasId": null,
+        "spriteId": "core:swamp-boar",
+        "palette": { "body": "#665044", "accent": "#7b5d4c", "tusk": "#e5d3a4", "threat": "#e15b45" }
+      }
+    },
+    {
+      "id": "core:cave-spider",
+      "legacyKind": "CaveSpider",
+      "vitals": { "maximumHealth": 180, "maximumFatigue": 18, "movementFatigue": 1, "restRecovery": 3 },
+      "habitat": { "kind": "Cave", "minimumDepthBelowSurface": 1 },
+      "behavior": {
+        "modelId": "core:aggressive-predator", "disposition": "Aggressive",
+        "aggression": 85, "detectionRadius": 5, "forageHungerThreshold": 6,
+        "starvationHungerThreshold": 24, "roamingInterval": 1,
+        "enemies": [{ "kind": "Group", "id": "core:goblins" }]
+      },
+      "spawn": {
+        "mode": "InitialEachDepth", "order": 30, "minimumDepth": 1,
+        "maximumDepth": null, "minimumPopulation": 1, "mapCellsPerAnimal": 8000,
+        "scalePopulationWithDepth": true, "populationIncreaseDepth": null,
+        "populationIncrease": 0
+      },
+      "ecologyProfile": "CaveSpider",
+      "attack": { "baseDamage": 45, "damagePerDepth": 25 },
+      "harvest": {
+        "rawMeat": 0, "hide": 0, "bone": 0, "foragingExperience": 25,
+        "hunterMeleeDamage": 80,
+        "byproducts": [
+          { "resource": "Materials", "variant": "SpiderVenom", "quantity": 1 },
+          { "resource": "Materials", "variant": "SpiderSilk", "quantity": 2 },
+          { "resource": "Materials", "variant": "SpiderChitin", "quantity": 3 }
+        ]
+      },
+      "debugVisionRadius": 3,
+      "visual": {
+        "rendererId": "core:atlas-sprite", "atlasId": "core:underground-fauna",
+        "spriteId": "core:cave-spider",
+        "palette": { "edge": "#241b24", "shadow": "#493849", "midtone": "#756075", "highlight": "#ba8d68", "threat": "#e15b45" }
+      }
+    },
+    {
+      "id": "core:deep-crawler",
+      "legacyKind": "DeepCrawler",
+      "vitals": { "maximumHealth": 900, "maximumFatigue": 30, "movementFatigue": 1, "restRecovery": 3 },
+      "habitat": { "kind": "Cave", "minimumDepthBelowSurface": 12 },
+      "behavior": {
+        "modelId": "core:aggressive-predator", "disposition": "Aggressive",
+        "aggression": 95, "detectionRadius": 5, "forageHungerThreshold": 6,
+        "starvationHungerThreshold": 24, "roamingInterval": 1,
+        "enemies": [{ "kind": "Group", "id": "core:goblins" }]
+      },
+      "spawn": {
+        "mode": "MaintainEachDepth", "order": 20, "minimumDepth": 12,
+        "maximumDepth": null, "minimumPopulation": 1, "mapCellsPerAnimal": 0,
+        "scalePopulationWithDepth": false, "populationIncreaseDepth": 16,
+        "populationIncrease": 1
+      },
+      "ecologyProfile": "CaveSpider",
+      "attack": { "baseDamage": 260, "damagePerDepth": 30 },
+      "harvest": { "rawMeat": 0, "hide": 3, "bone": 4, "foragingExperience": 120, "hunterMeleeDamage": 55, "byproducts": [] },
+      "debugVisionRadius": 4,
+      "visual": {
+        "rendererId": "core:atlas-sprite", "atlasId": "core:underground-fauna",
+        "spriteId": "core:cave-spider",
+        "palette": { "edge": "#21172d", "shadow": "#432653", "midtone": "#75408d", "highlight": "#bd7bd1", "threat": "#e15b45" }
+      }
+    },
+    {
+      "id": "core:magma-wyrm",
+      "legacyKind": "MagmaWyrm",
+      "vitals": { "maximumHealth": 2400, "maximumFatigue": 30, "movementFatigue": 1, "restRecovery": 3 },
+      "habitat": { "kind": "Cave", "minimumDepthBelowSurface": 16 },
+      "behavior": {
+        "modelId": "core:aggressive-predator", "disposition": "Aggressive",
+        "aggression": 100, "detectionRadius": 5, "forageHungerThreshold": 6,
+        "starvationHungerThreshold": 24, "roamingInterval": 1,
+        "enemies": [{ "kind": "Group", "id": "core:goblins" }]
+      },
+      "spawn": {
+        "mode": "MaintainEachDepth", "order": 10, "minimumDepth": 16,
+        "maximumDepth": null, "minimumPopulation": 1, "mapCellsPerAnimal": 0,
+        "scalePopulationWithDepth": false, "populationIncreaseDepth": null,
+        "populationIncrease": 0
+      },
+      "ecologyProfile": "CaveSpider",
+      "attack": { "baseDamage": 600, "damagePerDepth": 50 },
+      "harvest": { "rawMeat": 0, "hide": 8, "bone": 10, "foragingExperience": 300, "hunterMeleeDamage": 35, "byproducts": [] },
+      "debugVisionRadius": 5,
+      "visual": {
+        "rendererId": "core:atlas-sprite", "atlasId": "core:underground-fauna",
+        "spriteId": "core:cave-spider",
+        "palette": { "edge": "#29120b", "shadow": "#5b2415", "midtone": "#a53d1e", "highlight": "#f29a3f", "threat": "#ffcf4a" }
+      }
+    }
+  ]
+}

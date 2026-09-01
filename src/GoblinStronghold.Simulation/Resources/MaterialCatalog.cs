@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GoblinStronghold.Simulation.ContentPacks;
 
 namespace GoblinStronghold.Simulation.Resources;
 
@@ -106,12 +107,14 @@ public sealed record MaterialDefinition(
     MaterialAcquisition Acquisition,
     MaterialProcessing? Processing,
     IReadOnlyList<MaterialUse> Uses,
-    MaterialPalette Palette);
+    MaterialPalette Palette)
+{
+    public ContentId StableId => ContentId.Parse(Id);
+}
 
 public static class MaterialCatalog
 {
-    private const string ResourceName =
-        "GoblinStronghold.Simulation.Content.materials.json";
+    private const string ContentPath = "content/materials.json";
     private static readonly Lazy<CatalogState> State = new(Load);
 
     public static IReadOnlyList<MaterialDefinition> All => State.Value.All;
@@ -119,7 +122,8 @@ public static class MaterialCatalog
     public static MaterialDefinition Get(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        return State.Value.ById.TryGetValue(id, out var material)
+        var lookupId = ContentId.Parse(id);
+        return State.Value.ByStableId.TryGetValue(lookupId.Value, out var material)
             ? material
             : throw new KeyNotFoundException($"Unknown material id '{id}'.");
     }
@@ -153,10 +157,7 @@ public static class MaterialCatalog
 
     private static CatalogState Load()
     {
-        using var stream = typeof(MaterialCatalog).Assembly
-            .GetManifestResourceStream(ResourceName)
-            ?? throw new InvalidOperationException(
-                $"Embedded material catalog '{ResourceName}' is missing.");
+        using var stream = CoreContentPack.Pack.OpenRead(ContentPath);
         var options = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -176,8 +177,9 @@ public static class MaterialCatalog
 
         return new CatalogState(
             Array.AsReadOnly(definitions),
-            new ReadOnlyDictionary<string, MaterialDefinition>(
-                definitions.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase)),
+            new ReadOnlyDictionary<string, MaterialDefinition>(definitions.ToDictionary(
+                item => item.StableId.Value,
+                StringComparer.OrdinalIgnoreCase)),
             new ReadOnlyDictionary<ResourceVariant, MaterialDefinition>(
                 definitions
                     .Where(item => item.Variant is not null)
@@ -423,7 +425,7 @@ public static class MaterialCatalog
 
     private sealed record CatalogState(
         IReadOnlyList<MaterialDefinition> All,
-        IReadOnlyDictionary<string, MaterialDefinition> ById,
+        IReadOnlyDictionary<string, MaterialDefinition> ByStableId,
         IReadOnlyDictionary<ResourceVariant, MaterialDefinition> ByVariant,
         IReadOnlyDictionary<(ResourceKind, ResourceVariant), MaterialDefinition>
             ByResourceIdentity);

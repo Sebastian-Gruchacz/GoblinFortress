@@ -1,3 +1,5 @@
+using GoblinStronghold.Simulation.Animals;
+
 namespace GoblinStronghold.Simulation;
 
 public sealed record ActorNeedSettings(
@@ -121,13 +123,15 @@ public sealed record AnimalEcologySettings(
     AnimalSpeciesEcologySettings SwampBoar,
     AnimalSpeciesEcologySettings CaveSpider)
 {
-    public AnimalSpeciesEcologySettings Get(AnimalKind kind) => kind switch
+    public AnimalSpeciesEcologySettings Get(AnimalKind kind) =>
+        Get(AnimalSpeciesCatalog.Current.Get(kind).EcologyProfile);
+
+    public AnimalSpeciesEcologySettings Get(AnimalEcologyProfile profile) => profile switch
     {
-        AnimalKind.MarshHare => MarshHare,
-        AnimalKind.SwampBoar => SwampBoar,
-        AnimalKind.CaveSpider => CaveSpider,
-        AnimalKind.DeepCrawler or AnimalKind.MagmaWyrm => CaveSpider,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        AnimalEcologyProfile.MarshHare => MarshHare,
+        AnimalEcologyProfile.SwampBoar => SwampBoar,
+        AnimalEcologyProfile.CaveSpider => CaveSpider,
+        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
     };
 }
 

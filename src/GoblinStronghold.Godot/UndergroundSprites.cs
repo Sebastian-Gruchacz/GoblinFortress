@@ -6,7 +6,7 @@ namespace GoblinStronghold.GodotClient;
 internal static class UndergroundSprites
 {
     private const int MineralColumns = 2;
-    private const string FaunaAtlasPath =
+    internal const string FaunaAtlasPath =
         "res://Assets/World/underground-fauna-atlas-v1.png";
     private const string MineralAtlasPath =
         "res://Assets/World/mineral-deposits-atlas-v1.png";

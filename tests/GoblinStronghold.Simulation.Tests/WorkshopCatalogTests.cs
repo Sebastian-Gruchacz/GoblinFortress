@@ -5,6 +5,7 @@ using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
 
+[Collection(TranslationCatalogCollection.Name)]
 public sealed class WorkshopCatalogTests
 {
     [Fact]
@@ -48,6 +49,7 @@ public sealed class WorkshopCatalogTests
     public void PolishAndEnglishTranslationsAreSeparateFromGameplayDefinitions()
     {
         Assert.Equal(["en", "pl"], TranslationCatalog.SupportedLocales);
+        Assert.Equal("en", TranslationCatalog.NormalizeLocale("en-EN"));
         Assert.Equal("pl", TranslationCatalog.NormalizeLocale("pl-PL"));
         Assert.Equal("en", TranslationCatalog.NormalizeLocale("de-DE"));
         Assert.Equal(

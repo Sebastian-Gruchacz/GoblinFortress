@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "civilizations": [
+    {
+      "id": "core:goblin-tribe",
+      "legacyRole": "PlayerGoblins",
+      "playerControllable": true,
+      "identity": {
+        "speciesId": "core:goblin",
+        "controllerId": "core:player-tribe",
+        "nameGeneratorId": "core:numeric-placeholder"
+      },
+      "undergroundGeneration": null,
+      "undergroundBehavior": null
+    },
+    {
+      "id": "core:human-village",
+      "legacyRole": "HumanVillage",
+      "playerControllable": false,
+      "identity": {
+        "speciesId": "core:human",
+        "controllerId": "core:surface-village",
+        "nameGeneratorId": "core:numeric-placeholder"
+      },
+      "undergroundGeneration": null,
+      "undergroundBehavior": null
+    },
+    {
+      "id": "core:cave-dwarf-clan",
+      "legacyRole": "DeepDwarfClan",
+      "playerControllable": false,
+      "identity": {
+        "speciesId": "core:cave-dwarf",
+        "controllerId": "core:underground-clan",
+        "nameGeneratorId": "core:numeric-placeholder"
+      },
+      "undergroundGeneration": {
+        "legacyKind": "DarkDwarves",
+        "firstLevel": -6,
+        "depthBandSize": 10,
+        "presencePercent": 70,
+        "baseMinimumPopulation": 18,
+        "minimumPopulationPerBand": 4,
+        "baseMaximumPopulationExclusive": 41,
+        "maximumPopulationPerBand": 8,
+        "minimumFighters": 4,
+        "fighterPopulationDivisor": 3,
+        "provisionsPerCapita": 3,
+        "orePerCapitaBandOffset": 1,
+        "baseFortification": 10,
+        "fortificationPerBand": 5
+      },
+      "undergroundBehavior": {
+        "lowProvisionPopulationMultiplier": 2,
+        "provisionGatherPopulationDivisor": 8,
+        "oreTargetBandOffset": 2,
+        "oreGatherPopulationDivisor": 10,
+        "provisionConsumptionPopulationDivisor": 12,
+        "conflictIntervalDays": 10,
+        "conflictLossFighterDivisor": 5,
+        "hostileRelationPercent": 45,
+        "waryRelationPercent": 30
+      }
+    }
+  ]
+}

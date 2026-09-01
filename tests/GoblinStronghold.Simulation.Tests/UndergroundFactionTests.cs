@@ -1,3 +1,4 @@
+using GoblinStronghold.Simulation.Civilizations;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -12,6 +13,24 @@ public sealed class UndergroundFactionTests
         Assert.Empty(director.CreateSnapshot());
         Assert.Empty(director.Relations);
         Assert.False(director.HasFactions);
+    }
+
+    [Fact]
+    public void DirectorUsesCivilizationOccurrenceParameters()
+    {
+        var core = CivilizationCatalog.Core.Get(CivilizationLegacyRole.DeepDwarfClan);
+        var generation = core.UndergroundGeneration!;
+        var guaranteed = core with
+        {
+            UndergroundGeneration = generation with { PresencePercent = 100 },
+        };
+
+        var director = UndergroundFactionDirector.Create(
+            new WorldSeed(1),
+            minimumWorldLevel: -36,
+            guaranteed);
+
+        Assert.Equal(4, director.CreateSnapshot().Count);
     }
 
     [Fact]

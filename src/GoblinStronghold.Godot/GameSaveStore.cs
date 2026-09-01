@@ -67,7 +67,8 @@ internal sealed class GameSaveStore(string directoryPath, int supportedFormatVer
                 candidate.LastWriteTimeUtc,
                 candidate.WorldSeed,
                 candidate.CurrentTick,
-                candidate.LowestSavedZ))
+                candidate.LowestSavedZ,
+                candidate.ProfileName))
             .ToArray();
 
     private IReadOnlyList<SaveCandidate> ReadCandidatesInRecoveryOrder()
@@ -94,7 +95,8 @@ internal sealed class GameSaveStore(string directoryPath, int supportedFormatVer
                     File.GetLastWriteTimeUtc(path),
                     progress.Value.WorldSeed,
                     progress.Value.CurrentTick,
-                    progress.Value.LowestSavedZ));
+                    progress.Value.LowestSavedZ,
+                    progress.Value.ProfileName));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -174,7 +176,21 @@ internal sealed class GameSaveStore(string directoryPath, int supportedFormatVer
                     }
                 }
 
-                return new SaveProgress(seed, tick, lowestSavedZ);
+                string? profileName = null;
+                if (root.TryGetProperty("clientPreferences", out var clientPreferences) &&
+                    clientPreferences.ValueKind == JsonValueKind.Object &&
+                    clientPreferences.TryGetProperty("profileName", out var profileNameValue) &&
+                    profileNameValue.ValueKind == JsonValueKind.String)
+                {
+                    var candidate = profileNameValue.GetString()?.Trim();
+                    if (candidate is { Length: > 0 and <= 64 } &&
+                        !candidate.Any(char.IsControl))
+                    {
+                        profileName = candidate;
+                    }
+                }
+
+                return new SaveProgress(seed, tick, lowestSavedZ, profileName);
             }
         }
         catch (JsonException)
@@ -259,12 +275,14 @@ internal sealed class GameSaveStore(string directoryPath, int supportedFormatVer
         DateTime LastWriteTimeUtc,
         ulong? WorldSeed,
         long? CurrentTick,
-        int? LowestSavedZ);
+        int? LowestSavedZ,
+        string? ProfileName);
 
     private readonly record struct SaveProgress(
         ulong WorldSeed,
         long CurrentTick,
-        int LowestSavedZ);
+        int LowestSavedZ,
+        string? ProfileName);
 }
 
 internal readonly record struct GameSaveReceipt(
@@ -277,7 +295,8 @@ internal readonly record struct GameSaveSummary(
     DateTime LastWriteTimeUtc,
     ulong? WorldSeed,
     long? CurrentTick,
-    int? LowestSavedZ)
+    int? LowestSavedZ,
+    string? ProfileName)
 {
     public bool HasReadableHeader => WorldSeed.HasValue && CurrentTick.HasValue;
 }

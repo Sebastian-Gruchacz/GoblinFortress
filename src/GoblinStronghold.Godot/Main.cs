@@ -8,7 +8,10 @@ using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Workshops;
 using GoblinStronghold.GodotClient.UI.Actors;
 using GoblinStronghold.GodotClient.UI.Animals;
+using GoblinStronghold.GodotClient.UI.MainMenu;
 using GoblinStronghold.GodotClient.UI.WorldPlanning;
+using GoblinStronghold.GodotClient.Application.Profiles;
+using GoblinStronghold.GodotClient.Platform.Steam;
 using System.Text;
 
 namespace GoblinStronghold.GodotClient;
@@ -182,6 +185,7 @@ public partial class Main : Node
     private Control _mainMenu = null!;
     private Button _resumeGameButton = null!;
     private Button _newGameButton = null!;
+    private NewGameSetupWindow _newGameSetupWindow = null!;
     private Button _loadMenuButton = null!;
     private Button _chooseSaveButton = null!;
     private Window _recoveryWindow = null!;
@@ -575,7 +579,7 @@ public partial class Main : Node
         GetNode<Button>("Interface/RightHud/CameraPanel/Controls/RotateRight").Pressed +=
             () => Rotate3DCamera(1);
         _resumeGameButton.Pressed += ResumeGame;
-        _newGameButton.Pressed += StartNewGame;
+        _newGameButton.Pressed += ShowNewGameSetup;
         _loadMenuButton.Pressed += LoadGame;
         GetNode<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Quit").Pressed += () => GetTree().Quit();
         _worldView.Hide();
@@ -690,6 +694,15 @@ public partial class Main : Node
         CreateOptionsWindow();
         CreateModManagerWindow();
         CreateRecoveryWindow();
+        _newGameSetupWindow = new NewGameSetupWindow(
+            Ui,
+            () => GameProfileName.CreateDefault(
+                SteamPlayerIdentityProvider.TryGetPersonaName(),
+                System.Environment.UserName,
+                Ui("new-game", "default-profile-owner"),
+                DateTimeOffset.Now));
+        _newGameSetupWindow.StartRequested += StartNewGame;
+        AddChild(_newGameSetupWindow);
         ApplyGameThemeToWindows();
         ApplyStaticTranslations();
         UpdateSpeedButtons();
@@ -806,7 +819,7 @@ public partial class Main : Node
                 }
                 else if (menuKey.CtrlPressed && menuKey.Keycode == Key.N)
                 {
-                    StartNewGame();
+                    ShowNewGameSetup();
                 }
             }
 
@@ -1008,12 +1021,12 @@ public partial class Main : Node
             : "Pełny ekran w aktualnej rozdzielczości monitora • Alt+Enter wraca do okna.";
     }
 
-    private SimulationEngine CreateNewEngine(WorldSeed seed)
+    private SimulationEngine CreateNewEngine(WorldSeed seed, int mapDimension)
     {
         var map = SwampMapGenerator.Generate(
             seed,
-            SwampMapGenerator.DefaultDimension,
-            SwampMapGenerator.DefaultDimension);
+            mapDimension,
+            mapDimension);
         var engine = SimulationEngine.Create(
             seed,
             SimulationDefinitions.Foundation,
@@ -1032,7 +1045,9 @@ public partial class Main : Node
         return engine;
     }
 
-    private void StartNewGame()
+    private void ShowNewGameSetup() => _newGameSetupWindow.ShowSetup();
+
+    private void StartNewGame(NewGameSetup setup)
     {
         try
         {
@@ -1042,18 +1057,21 @@ public partial class Main : Node
                 SaveAutosave();
             }
 
-            var seedBytes = Guid.NewGuid().ToByteArray();
-            var seed = new WorldSeed(BitConverter.ToUInt64(seedBytes, 0));
-            _sessionPreferences = new GameSessionPreferences();
-            ReplaceEngine(CreateNewEngine(seed));
+            _sessionPreferences = new GameSessionPreferences(setup.ProfileName);
+            ReplaceEngine(CreateNewEngine(setup.Seed, setup.MapDimension));
             _hasActiveSession = true;
+            _newGameSetupWindow.Hide();
             CloseMainMenu();
-            _inspector.Text = $"Nowa gra • seed {seed.Value:X16}" +
-                (protectedPreviousSession ? " • poprzednia sesja zabezpieczona autozapisem." : ".");
+            _inspector.Text = UiFormat(
+                "new-game",
+                protectedPreviousSession ? "started-autosaved" : "started",
+                setup.ProfileName,
+                setup.Seed.Value,
+                setup.MapDimension);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _inspector.Text = $"Nie udało się rozpocząć nowej gry: {exception.Message}";
+            _inspector.Text = UiFormat("new-game", "failed", exception.Message);
         }
     }
 
@@ -1185,7 +1203,8 @@ public partial class Main : Node
         }
 
         var selected = candidates[0];
-        var selectedName = Path.GetFileNameWithoutExtension(selected.Path);
+        var selectedName = selected.ProfileName ??
+            Path.GetFileNameWithoutExtension(selected.Path);
         _loadMenuButton.Text = selected.CurrentTick is { } tick
             ? UiFormat("save-load", "load-selected-tick", selectedName, tick)
             : UiFormat("save-load", "load-selected", selectedName);
@@ -1205,12 +1224,20 @@ public partial class Main : Node
             return UiFormat("save-load", "unreadable-save", fileName, savedAt);
         }
 
-        return UiFormat("save-load", "save-summary",
-            fileName,
-            candidate.CurrentTick!.Value,
-            candidate.LowestSavedZ!.Value,
-            candidate.WorldSeed!.Value,
-            savedAt);
+        return candidate.ProfileName is { } profileName
+            ? UiFormat("save-load", "save-summary-profile",
+                fileName,
+                profileName,
+                candidate.CurrentTick!.Value,
+                candidate.LowestSavedZ!.Value,
+                candidate.WorldSeed!.Value,
+                savedAt)
+            : UiFormat("save-load", "save-summary",
+                fileName,
+                candidate.CurrentTick!.Value,
+                candidate.LowestSavedZ!.Value,
+                candidate.WorldSeed!.Value,
+                savedAt);
     }
 
     private void CreateRecoveryWindow()
@@ -1702,6 +1729,7 @@ public partial class Main : Node
         }
 
         _recoveryWindow.Hide();
+        _newGameSetupWindow.Hide();
         _mainMenu.Hide();
         FadeOutTitleMusic();
         SetSpeed(_speedBeforeMenu);
@@ -4438,11 +4466,8 @@ public partial class Main : Node
         var descriptions = new List<string>();
         foreach (var worldObject in snapshot.WorldObjects)
         {
-            var isNaturalSurfaceObject = worldObject.Kind is WorldObjectKind.Tree or
-                WorldObjectKind.DeadTreeStump or WorldObjectKind.Boulder;
-            var surfaceOffset = isNaturalSurfaceObject && worldObject.Anchor.Z == 0
-                ? _engine.Map.GetColumnCell(worldObject.Anchor).SurfaceLevel
-                : 0;
+            var effectiveAnchor = _engine.World.GetEffectiveWorldObjectAnchor(worldObject);
+            var surfaceOffset = effectiveAnchor.Z - worldObject.Anchor.Z;
             descriptions.AddRange(worldObject.GetAbsoluteParts()
                 .Where(part => part.Position.X == position.X &&
                     part.Position.Y == position.Y &&
@@ -9041,13 +9066,7 @@ public partial class Main : Node
                 index / _engine.Map.Width)).FloorLevel)
             .Min(level => (int)level);
         var minimumLevel = Math.Min(minimumSurfaceFloor, _engine.Map.DeepestCaveLevel);
-        var maximumLevel = Math.Max(
-            _engine.Map.MaximumTerrainLevel,
-            snapshot.WorldObjects
-                .SelectMany(worldObject => worldObject.GetAbsoluteParts())
-                .Select(part => part.Position.Z)
-                .DefaultIfEmpty(0)
-                .Max());
+        var maximumLevel = _engine.World.MaximumOccupiedLevel;
         var next = Math.Clamp(_visibleLevel + delta, minimumLevel, maximumLevel);
         if (next == _visibleLevel)
         {

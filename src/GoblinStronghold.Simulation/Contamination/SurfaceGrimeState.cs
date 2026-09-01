@@ -32,6 +32,9 @@ internal sealed class SurfaceGrimeState
     public bool Contains(GridPosition position) =>
         _entries.TryGetValue(position, out var entry) && entry.Volume > 0;
 
+    public int GetVolume(GridPosition position) =>
+        _entries.TryGetValue(position, out var entry) ? entry.Volume : 0;
+
     public int PickUp(GridPosition position, int carriedAmount, SimulationTick tick)
     {
         if (!_entries.TryGetValue(position, out var entry) || entry.Volume < PickupThreshold)

@@ -2322,7 +2322,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = GetCleanableSurfacePositions()
+        var best = GetAutonomousCleaningPositions()
             .Where(position =>
                 Visibility.Get(position).IsDiscovered() &&
                 IsGoblinOwnedFloor(position) &&
@@ -2395,7 +2395,7 @@ public sealed partial class SimulationEngine
         ActorState actor,
         ISet<EntityId> reservedDesignations)
     {
-        var best = GetCleanableSurfacePositions()
+        var best = GetAutonomousCleaningPositions()
             .Where(position =>
                 ManhattanDistance(actor.Position, position) <=
                     IdleHousekeepingMaximumRouteLength &&

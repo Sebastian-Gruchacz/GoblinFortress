@@ -227,6 +227,35 @@ public sealed class GameSaveStoreTests
         }
     }
 
+    [Fact]
+    public void SaveSummaryReadsOptionalProfileNameFromClientPreferences()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"goblin-stronghold-save-store-{Guid.NewGuid():N}");
+        try
+        {
+            var store = CreateStore(directory);
+            var json = CreateSaveHeader(worldSeed: 17, currentTick: 321)
+                .Replace(
+                    "\"currentTick\":321",
+                    "\"currentTick\":321,\"clientPreferences\":{\"profileName\":\"Lo 20260901-2245\"}",
+                    StringComparison.Ordinal);
+
+            store.SaveQuick(json);
+
+            var summary = Assert.Single(store.InspectCandidates());
+            Assert.Equal("Lo 20260901-2245", summary.ProfileName);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
     private static string CreateSaveHeader(
         ulong worldSeed,
         long currentTick,

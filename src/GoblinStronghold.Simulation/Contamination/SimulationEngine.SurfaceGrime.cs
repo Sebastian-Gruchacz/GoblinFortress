@@ -77,9 +77,18 @@ public sealed partial class SimulationEngine
             .Distinct()
             .Where(IsConstructedFloorSurface);
 
+    private IEnumerable<GridPosition> GetAutonomousCleaningPositions() =>
+        GetCleanableSurfacePositions().Where(HasAutonomouslyCleanableSurface);
+
     private bool HasCleanableSurface(GridPosition position) =>
         IsConstructedFloorSurface(position) &&
         (HasCleanableBloodOnly(position) || HasSurfaceGrime(position));
+
+    private bool HasAutonomouslyCleanableSurface(GridPosition position) =>
+        IsConstructedFloorSurface(position) &&
+        Contamination.SurfaceCleaningPolicy.ShouldStartAutonomousCleaning(
+            HasCleanableBloodOnly(position),
+            _surfaceGrime.GetVolume(position));
 
     private int GetSurfaceCleaningWorkTicks(GridPosition position) =>
         HasCleanableBloodOnly(position)

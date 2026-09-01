@@ -86,6 +86,18 @@ public sealed class WorldMapState
 
     public int WorldObjectCount => _worldObjects.Count;
 
+    public int MaximumOccupiedLevel => Math.Max(
+        Baseline.MaximumWorldLevel,
+        _worldObjects.Values
+            .SelectMany(worldObject =>
+            {
+                var effectiveAnchor = GetEffectiveWorldObjectAnchor(worldObject);
+                return worldObject.Parts.Select(part =>
+                    checked(effectiveAnchor.Z + part.RelativePosition.Z));
+            })
+            .DefaultIfEmpty(Baseline.MaximumWorldLevel)
+            .Max());
+
     public IReadOnlyCollection<GridPosition> ExcavatedCaveCells => _excavatedCaveCells;
 
     public IReadOnlyCollection<GridPosition> ExcavatedTerrainRamps => _excavatedTerrainRamps;
@@ -312,6 +324,16 @@ public sealed class WorldMapState
     internal IEnumerable<WorldObjectSnapshot> EnumerateWorldObjects() =>
         _worldObjects.Values;
 
+    public GridPosition GetEffectiveWorldObjectAnchor(WorldObjectSnapshot worldObject)
+    {
+        ArgumentNullException.ThrowIfNull(worldObject);
+        return worldObject.Anchor.Z == 0 &&
+            (worldObject.Kind is WorldObjectKind.Tree or
+                WorldObjectKind.DeadTreeStump or WorldObjectKind.Boulder)
+            ? Baseline.GetTerrainSurfacePosition(worldObject.Anchor)
+            : worldObject.Anchor;
+    }
+
     public int CountWorldObjects(WorldObjectKind kind, WorldObjectOwner owner) =>
         _worldObjects.Values.Count(item => item.Kind == kind && item.Owner == owner);
 
@@ -401,9 +423,7 @@ public sealed class WorldMapState
     }
 
     internal GridPosition GetNaturalObjectSurfacePosition(WorldObjectSnapshot worldObject) =>
-        worldObject.Anchor.Z == 0
-            ? Baseline.GetTerrainSurfacePosition(worldObject.Anchor)
-            : worldObject.Anchor;
+        GetEffectiveWorldObjectAnchor(worldObject);
 
     internal WorldObjectSnapshot? GetFellableWood(GridPosition position) =>
         _worldObjects.Values.FirstOrDefault(worldObject =>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using GoblinStronghold.GodotClient.Application.Profiles;
 using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.GodotClient;
@@ -9,6 +10,15 @@ internal sealed class GameSessionPreferences
     private const string SavePropertyName = "clientPreferences";
     private readonly Dictionary<string, ResourceVariant> _constructionMaterials =
         new(StringComparer.OrdinalIgnoreCase);
+
+    internal GameSessionPreferences(string? profileName = null)
+    {
+        ProfileName = GameProfileName.TryNormalize(profileName, out var normalized)
+            ? normalized
+            : string.Empty;
+    }
+
+    internal string ProfileName { get; }
 
     internal bool TryGetConstructionMaterial(string group, out ResourceVariant variant) =>
         _constructionMaterials.TryGetValue(group, out variant);
@@ -30,6 +40,7 @@ internal sealed class GameSessionPreferences
             ?? throw new JsonException("Simulation save root is missing.");
         root[SavePropertyName] = new JsonObject
         {
+            ["profileName"] = ProfileName,
             ["constructionMaterials"] = new JsonObject(
                 _constructionMaterials
                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
@@ -43,10 +54,19 @@ internal sealed class GameSessionPreferences
     internal static GameSessionPreferences FromSave(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        var preferences = new GameSessionPreferences();
         using var document = JsonDocument.Parse(json);
         if (!document.RootElement.TryGetProperty(SavePropertyName, out var client) ||
-            !client.TryGetProperty("constructionMaterials", out var materials) ||
+            client.ValueKind != JsonValueKind.Object)
+        {
+            return new GameSessionPreferences();
+        }
+
+        var profileName = client.TryGetProperty("profileName", out var profileNameValue) &&
+            profileNameValue.ValueKind == JsonValueKind.String
+                ? profileNameValue.GetString()
+                : null;
+        var preferences = new GameSessionPreferences(profileName);
+        if (!client.TryGetProperty("constructionMaterials", out var materials) ||
             materials.ValueKind != JsonValueKind.Object)
         {
             return preferences;

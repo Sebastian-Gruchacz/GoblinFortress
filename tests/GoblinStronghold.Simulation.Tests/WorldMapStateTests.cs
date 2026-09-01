@@ -306,6 +306,7 @@ public sealed class WorldMapStateTests
         var stumps = objects.Where(item => item.Kind == WorldObjectKind.DeadTreeStump).ToArray();
 
         Assert.NotEmpty(trees);
+        Assert.Contains(trees, tree => map.GetColumnCell(tree.Anchor).SurfaceLevel > 0);
         Assert.Contains(trees, tree => tree.Parts.Count(part =>
             part.Kind == WorldObjectPartKind.TreeTrunk) > 1);
         Assert.All(trees, tree =>
@@ -336,6 +337,20 @@ public sealed class WorldMapStateTests
             Assert.False(engine.World.IsTerrainTraversable(
                 map.GetTerrainSurfacePosition(stump.Anchor)));
         });
+        var expectedHighestLevel = objects
+            .SelectMany(worldObject =>
+            {
+                var surfaceOffset = worldObject.Anchor.Z == 0 &&
+                    (worldObject.Kind is WorldObjectKind.Tree or
+                        WorldObjectKind.DeadTreeStump or WorldObjectKind.Boulder)
+                    ? map.GetColumnCell(worldObject.Anchor).SurfaceLevel
+                    : 0;
+                return worldObject.Parts.Select(part =>
+                    worldObject.Anchor.Z + surfaceOffset + part.RelativePosition.Z);
+            })
+            .Append(map.MaximumWorldLevel)
+            .Max();
+        Assert.Equal(expectedHighestLevel, engine.World.MaximumOccupiedLevel);
         var actor = Assert.Single(engine.CreateSnapshot().Actors);
         Assert.Null(engine.Navigation.FindPath(
             actor.Position,

@@ -13,6 +13,8 @@ public static class CoreContentPack
             [ContentPack.ManifestPath] = $"{ResourcePrefix}.ContentPacks.core.manifest.json",
             ["content/animal-species.json"] =
                 $"{ResourcePrefix}.Content.animal-species.json",
+            ["content/civilizations.json"] =
+                $"{ResourcePrefix}.Content.civilizations.json",
             ["content/crafting-recipes.json"] =
                 $"{ResourcePrefix}.Content.crafting-recipes.json",
             ["content/construction-blueprints.json"] =

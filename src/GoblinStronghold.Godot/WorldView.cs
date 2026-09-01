@@ -1970,9 +1970,8 @@ public partial class WorldView : Node2D
     private void DrawIllustratedNaturalStructure(WorldObjectSnapshot worldObject)
     {
         var center = CellCenter(worldObject.Anchor);
-        var surfaceOffset = worldObject.Anchor.Z == 0
-            ? _engine.Map.GetColumnCell(worldObject.Anchor).SurfaceLevel
-            : 0;
+        var effectiveAnchor = _engine.World.GetEffectiveWorldObjectAnchor(worldObject);
+        var surfaceOffset = effectiveAnchor.Z - worldObject.Anchor.Z;
         if (worldObject.Kind == WorldObjectKind.Boulder)
         {
             if (_visibleLevel == worldObject.Anchor.Z + surfaceOffset)

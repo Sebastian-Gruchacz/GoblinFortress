@@ -46,7 +46,7 @@ GoblinStronghold.Simulation/
   ContentPacks/     manifests, IDs, discovery and immutable runtime composition
   Crafting/         recipe catalogs, orders, supply and work execution
   Economy/          resources, stock, storage and hauling contracts
-  Factions/         human village, underground factions and relations
+  Civilizations/    definitions, polities, settlements, parties and relations
   Jobs/             planning, reservations, priorities and job executors
   Localization/     translation composition only
   Map/              geometry, generation, navigation and visibility
@@ -175,6 +175,13 @@ and rendering stay outside simulation code.
 
 - Give animals, crafting, storage, combat, construction, and raids dedicated
   stateful subsystems.
+- Civilization foundations now have a stable-ID catalog in `Civilizations/`.
+  The core pack defines player goblins, the human demo village, and cave-dwarf
+  clans. Underground occurrence, depth bands, population, stocks,
+  fortification, upkeep, relations, and conflict timing are data-driven while
+  `UndergroundFactionKind` remains a save adapter. The wider polity, settlement,
+  visitor-party, kingdom, bandit, legendary-threat, and location-profile stages
+  are tracked in `docs/civilizations-and-world-generation-roadmap.md`.
 - Surface contamination now has a focused `Contamination/SurfaceGrimeState`
   owner with deterministic pickup, deposition, cleaning, snapshot, and restore
   contracts. The goblin, human-villager, and animal movement boundaries all
@@ -191,6 +198,11 @@ and rendering stay outside simulation code.
 
 - Split `Main` into session orchestration plus focused menu/HUD/window
   controllers.
+  The first New Game extraction now lives in `UI/MainMenu`: the focused window
+  owns setup layout, validation, and localized control state, while `Main` only
+  starts a session from the accepted seed and dimensions. Future generation
+  parameters should extend that setup contract instead of rebuilding the window
+  in `Main`.
 - Replace direct snapshot formatting with localized presenters/view models.
   Current actor-job descriptions completed: one focused presenter now formats
   every travel, collection, delivery, work, need, terrain, and raid phase from

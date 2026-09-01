@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using GoblinStronghold.Simulation.Contamination;
 using GoblinStronghold.Simulation.Map;
 using Xunit;
 
@@ -6,6 +7,27 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class BloodCleaningTests
 {
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(12, false)]
+    [InlineData(24, false)]
+    [InlineData(36, false)]
+    [InlineData(37, true)]
+    [InlineData(48, true)]
+    public void AutonomousCleaningToleratesFirstThreeGrimeLevels(
+        int grimeVolume,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            SurfaceCleaningPolicy.ShouldStartAutonomousCleaning(
+                hasBlood: false,
+                grimeVolume));
+        Assert.True(SurfaceCleaningPolicy.ShouldStartAutonomousCleaning(
+            hasBlood: true,
+            grimeVolume));
+    }
+
     [Fact]
     public void LooseGroundIsTrackedAcrossConstructedFloorsAndPersists()
     {

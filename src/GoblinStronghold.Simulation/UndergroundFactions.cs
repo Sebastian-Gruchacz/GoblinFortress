@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using GoblinStronghold.Simulation.Civilizations;
 
 namespace GoblinStronghold.Simulation;
 
@@ -74,23 +75,46 @@ public sealed class UndergroundFactionDirector
     public const int DepthBandSize = 10;
 
     private readonly WorldSeed _worldSeed;
+    private readonly UndergroundCivilizationBehaviorDefinition _behavior;
     private readonly SortedDictionary<ulong, UndergroundFactionState> _factions;
     private readonly ReadOnlyCollection<UndergroundFactionRelationSnapshot> _relations;
 
     private UndergroundFactionDirector(
         WorldSeed worldSeed,
+        CivilizationDefinition civilization,
         IEnumerable<UndergroundFactionState> factions)
     {
         _worldSeed = worldSeed;
+        _ = civilization.UndergroundGeneration ?? throw new ArgumentException(
+            "The underground civilization requires generation parameters.",
+            nameof(civilization));
+        _behavior = civilization.UndergroundBehavior ?? throw new ArgumentException(
+            "The underground civilization requires behavior parameters.",
+            nameof(civilization));
         _factions = new SortedDictionary<ulong, UndergroundFactionState>(
             factions.ToDictionary(faction => faction.Id));
-        _relations = Array.AsReadOnly(CreateRelations(worldSeed, _factions.Values));
+        _relations = Array.AsReadOnly(CreateRelations(_factions.Values));
     }
 
     public static UndergroundFactionDirector Create(WorldSeed worldSeed, int minimumWorldLevel)
     {
+        var civilization = CivilizationCatalog.Current.Get(
+            CivilizationLegacyRole.DeepDwarfClan);
+        return Create(worldSeed, minimumWorldLevel, civilization);
+    }
+
+    internal static UndergroundFactionDirector Create(
+        WorldSeed worldSeed,
+        int minimumWorldLevel,
+        CivilizationDefinition civilization)
+    {
+        ArgumentNullException.ThrowIfNull(civilization);
+        var generation = civilization.UndergroundGeneration ?? throw new InvalidDataException(
+            $"Civilization '{civilization.Id}' has no underground generation parameters.");
         var factions = new List<UndergroundFactionState>();
-        for (var bandIndex = 0; GetBandTopLevel(bandIndex) >= minimumWorldLevel; bandIndex++)
+        for (var bandIndex = 0;
+             GetBandTopLevel(generation, bandIndex) >= minimumWorldLevel;
+             bandIndex++)
         {
             if (DeterministicRandom.NextInt(
                     worldSeed,
@@ -99,15 +123,15 @@ public sealed class UndergroundFactionDirector
                     SimulationTick.Zero,
                     sampleKey: checked(0x464F5254UL + (ulong)bandIndex),
                     minimumInclusive: 0,
-                    maximumExclusive: 100) >= 70)
+                    maximumExclusive: 100) >= generation.PresencePercent)
             {
                 continue;
             }
 
-            var topLevel = GetBandTopLevel(bandIndex);
+            var topLevel = GetBandTopLevel(generation, bandIndex);
             var bottomLevel = Math.Max(
                 minimumWorldLevel,
-                topLevel - DepthBandSize + 1);
+                topLevel - generation.DepthBandSize + 1);
             var id = checked(0x554E4400UL + (ulong)bandIndex + 1UL);
             var subject = new EntityId(id);
             var population = DeterministicRandom.NextInt(
@@ -116,11 +140,13 @@ public sealed class UndergroundFactionDirector
                 subject,
                 SimulationTick.Zero,
                 sampleKey: 1,
-                minimumInclusive: 18 + (bandIndex * 4),
-                maximumExclusive: 41 + (bandIndex * 8));
+                minimumInclusive: generation.BaseMinimumPopulation +
+                    (bandIndex * generation.MinimumPopulationPerBand),
+                maximumExclusive: generation.BaseMaximumPopulationExclusive +
+                    (bandIndex * generation.MaximumPopulationPerBand));
             factions.Add(new UndergroundFactionState(
                 id,
-                UndergroundFactionKind.DarkDwarves,
+                generation.LegacyKind,
                 bandIndex,
                 topLevel,
                 bottomLevel,
@@ -133,12 +159,16 @@ public sealed class UndergroundFactionDirector
                     minimumInclusive: bottomLevel,
                     maximumExclusive: topLevel + 1),
                 population,
-                fighters: Math.Max(4, population / 3),
-                provisions: checked(population * 3),
-                oreStock: checked((bandIndex + 1) * population),
-                fortification: 10 + (bandIndex * 5)));
+                fighters: Math.Max(
+                    generation.MinimumFighters,
+                    population / generation.FighterPopulationDivisor),
+                provisions: checked(population * generation.ProvisionsPerCapita),
+                oreStock: checked(
+                    (bandIndex + generation.OrePerCapitaBandOffset) * population),
+                fortification: generation.BaseFortification +
+                    (bandIndex * generation.FortificationPerBand)));
         }
-        return new UndergroundFactionDirector(worldSeed, factions);
+        return new UndergroundFactionDirector(worldSeed, civilization, factions);
     }
 
     public IReadOnlyList<UndergroundFactionSnapshot> CreateSnapshot() =>
@@ -192,17 +222,24 @@ public sealed class UndergroundFactionDirector
                 faction.Directive = UndergroundFactionDirective.WageWar;
                 faction.TargetFactionId = enemy.Id;
             }
-            else if (faction.Provisions < faction.Population * 2)
+            else if (faction.Provisions <
+                     faction.Population * _behavior.LowProvisionPopulationMultiplier)
             {
                 faction.Directive = UndergroundFactionDirective.GatherProvisions;
                 faction.TargetFactionId = 0;
-                faction.Provisions = checked(faction.Provisions + Math.Max(1, faction.Population / 8));
+                faction.Provisions = checked(faction.Provisions + Math.Max(
+                    1,
+                    faction.Population / _behavior.ProvisionGatherPopulationDivisor));
             }
-            else if (faction.OreStock < faction.Population * (faction.BandIndex + 2))
+            else if (faction.OreStock <
+                     faction.Population *
+                     (faction.BandIndex + _behavior.OreTargetBandOffset))
             {
                 faction.Directive = UndergroundFactionDirective.ExpandMines;
                 faction.TargetFactionId = 0;
-                faction.OreStock = checked(faction.OreStock + Math.Max(1, faction.Population / 10));
+                faction.OreStock = checked(faction.OreStock + Math.Max(
+                    1,
+                    faction.Population / _behavior.OreGatherPopulationDivisor));
             }
             else
             {
@@ -210,10 +247,13 @@ public sealed class UndergroundFactionDirector
                 faction.TargetFactionId = 0;
                 faction.Fortification = checked(faction.Fortification + 1);
             }
-            faction.Provisions = Math.Max(0, faction.Provisions - Math.Max(1, faction.Population / 12));
+            faction.Provisions = Math.Max(0, faction.Provisions - Math.Max(
+                1,
+                faction.Population / _behavior.ProvisionConsumptionPopulationDivisor));
         }
 
-        if (!advancedDay || absoluteDay <= 0 || absoluteDay % 10 != 0)
+        if (!advancedDay || absoluteDay <= 0 ||
+            absoluteDay % _behavior.ConflictIntervalDays != 0)
         {
             return;
         }
@@ -254,7 +294,9 @@ public sealed class UndergroundFactionDirector
             new SimulationTick(absoluteDay),
             sampleKey: second.Id,
             minimumInclusive: 1,
-            maximumExclusive: Math.Max(2, second.Fighters / 5 + 1));
+            maximumExclusive: Math.Max(
+                2,
+                second.Fighters / _behavior.ConflictLossFighterDivisor + 1));
         var secondLoss = DeterministicRandom.NextInt(
             _worldSeed,
             RandomDomain.UndergroundFactions,
@@ -262,7 +304,9 @@ public sealed class UndergroundFactionDirector
             new SimulationTick(absoluteDay),
             sampleKey: first.Id,
             minimumInclusive: 1,
-            maximumExclusive: Math.Max(2, first.Fighters / 5 + 1));
+            maximumExclusive: Math.Max(
+                2,
+                first.Fighters / _behavior.ConflictLossFighterDivisor + 1));
         ApplyLoss(first, firstLoss);
         ApplyLoss(second, secondLoss);
     }
@@ -273,8 +317,7 @@ public sealed class UndergroundFactionDirector
         faction.Fighters = Math.Min(faction.Population, Math.Max(0, faction.Fighters - loss));
     }
 
-    private static UndergroundFactionRelationSnapshot[] CreateRelations(
-        WorldSeed worldSeed,
+    private UndergroundFactionRelationSnapshot[] CreateRelations(
         IEnumerable<UndergroundFactionState> factions)
     {
         var ordered = factions.OrderBy(faction => faction.Id).ToArray();
@@ -286,7 +329,7 @@ public sealed class UndergroundFactionDirector
                 var first = ordered[firstIndex];
                 var second = ordered[secondIndex];
                 var roll = DeterministicRandom.NextInt(
-                    worldSeed,
+                    _worldSeed,
                     RandomDomain.UndergroundFactions,
                     new EntityId(first.Id),
                     SimulationTick.Zero,
@@ -296,9 +339,10 @@ public sealed class UndergroundFactionDirector
                 relations.Add(new UndergroundFactionRelationSnapshot(
                     first.Id,
                     second.Id,
-                    roll < 45
+                    roll < _behavior.HostileRelationPercent
                         ? UndergroundFactionRelationKind.Hostile
-                        : roll < 75
+                        : roll < _behavior.HostileRelationPercent +
+                          _behavior.WaryRelationPercent
                             ? UndergroundFactionRelationKind.Wary
                             : UndergroundFactionRelationKind.Neutral));
             }
@@ -306,8 +350,10 @@ public sealed class UndergroundFactionDirector
         return relations.ToArray();
     }
 
-    private static int GetBandTopLevel(int bandIndex) =>
-        checked(FirstFactionLevel - (bandIndex * DepthBandSize));
+    private static int GetBandTopLevel(
+        UndergroundCivilizationGenerationDefinition generation,
+        int bandIndex) =>
+        checked(generation.FirstLevel - (bandIndex * generation.DepthBandSize));
 
     private sealed class UndergroundFactionState(
         ulong id,

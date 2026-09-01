@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using GoblinStronghold.Simulation.Animals;
+using GoblinStronghold.Simulation.Civilizations;
 using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Localization;
 using Xunit;
@@ -18,6 +19,7 @@ public sealed class ContentPackTests
         Assert.Equal("core", pack.Manifest.Id);
         Assert.Equal("core", pack.Manifest.Type);
         Assert.True(pack.Contains("content/animal-species.json"));
+        Assert.True(pack.Contains("content/civilizations.json"));
         Assert.True(pack.Contains("content/materials.json"));
         Assert.True(pack.Contains("content/crafting-recipes.json"));
         Assert.True(pack.Contains("content/workshops.json"));
@@ -91,6 +93,28 @@ public sealed class ContentPackTests
         Assert.Equal(150, composed.Get(AnimalKind.MarshHare).Vitals.MaximumHealth);
         Assert.Equal(100,
             AnimalSpeciesCatalog.Core.Get(AnimalKind.MarshHare).Vitals.MaximumHealth);
+    }
+
+    [Fact]
+    public void ContentPackCanOverrideCivilizationParametersWithoutMutatingCoreCatalog()
+    {
+        var civilizationJson = CoreContentPack.Pack.ReadAllText(
+                "content/civilizations.json")
+            .Replace(
+                "\"presencePercent\": 70",
+                "\"presencePercent\": 100",
+                StringComparison.Ordinal);
+        using var archive = CreateArchive(
+            ("manifest.json", ValidManifest("deeper-clans", "content")),
+            ("content/civilizations.json", civilizationJson));
+        var pack = ContentPackArchiveLoader.Load(archive, "deeper-clans.gobmod");
+
+        var composed = CivilizationCatalog.Compose([pack]);
+        var role = CivilizationLegacyRole.DeepDwarfClan;
+
+        Assert.Equal(100, composed.Get(role).UndergroundGeneration!.PresencePercent);
+        Assert.Equal(70,
+            CivilizationCatalog.Core.Get(role).UndergroundGeneration!.PresencePercent);
     }
 
     [Fact]

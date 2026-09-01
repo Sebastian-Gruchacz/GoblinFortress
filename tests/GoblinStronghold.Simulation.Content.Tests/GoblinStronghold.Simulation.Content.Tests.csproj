@@ -2,12 +2,14 @@
   <ItemGroup>
     <Compile Include="..\GoblinStronghold.Simulation.Tests\AnimalSpeciesCatalogTests.cs" Link="AnimalSpeciesCatalogTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\ConstructionBlueprintCatalogTests.cs" Link="ConstructionBlueprintCatalogTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\CivilizationCatalogTests.cs" Link="CivilizationCatalogTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\ContentPackTests.cs" Link="ContentPackTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\CraftingRecipeCatalogTests.cs" Link="CraftingRecipeCatalogTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\MaterialCatalogTests.cs" Link="MaterialCatalogTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\TerrainModificationCatalogTests.cs" Link="TerrainModificationCatalogTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\GameSessionPreferencesTests.cs" Link="GameSessionPreferencesTests.cs" />
     <Compile Include="..\..\src\GoblinStronghold.Godot\GameSessionPreferences.cs" Link="GameSessionPreferences.cs" />
+    <Compile Include="..\..\src\GoblinStronghold.Godot\Application\Profiles\GameProfileName.cs" Link="GameProfileName.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\TranslationCatalogCollection.cs" Link="TranslationCatalogCollection.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\WorkshopCatalogTests.cs" Link="WorkshopCatalogTests.cs" />
   </ItemGroup>

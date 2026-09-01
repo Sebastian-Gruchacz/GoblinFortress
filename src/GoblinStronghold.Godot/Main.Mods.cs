@@ -1,5 +1,6 @@
 using Godot;
 using GoblinStronghold.Simulation.Animals;
+using GoblinStronghold.Simulation.Civilizations;
 using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Localization;
 using System.Text;
@@ -36,6 +37,7 @@ public partial class Main
             GD.PushWarning($"Could not open the local content pack directory: {exception.Message}");
             TranslationCatalog.ResetToCorePack();
             AnimalSpeciesCatalog.ResetToCore();
+            CivilizationCatalog.ResetToCore();
             ContentPackRuntime.ResetToCorePack();
             return;
         }
@@ -69,6 +71,7 @@ public partial class Main
         var enabledPacks = new List<ContentPack>();
         TranslationCatalog.ResetToCorePack();
         AnimalSpeciesCatalog.ResetToCore();
+        CivilizationCatalog.ResetToCore();
         foreach (var type in new[] { "content", "language" })
         {
             foreach (var pack in orderedPacks.Where(pack =>
@@ -80,9 +83,11 @@ public partial class Main
                 {
                     var candidatePacks = enabledPacks.Append(pack).ToArray();
                     var animalCatalog = AnimalSpeciesCatalog.Compose(candidatePacks);
+                    var civilizationCatalog = CivilizationCatalog.Compose(candidatePacks);
                     AnimalVisualAssetRegistry.Validate(animalCatalog);
                     TranslationCatalog.ConfigurePacks(candidatePacks);
                     AnimalSpeciesCatalog.Activate(animalCatalog);
+                    CivilizationCatalog.Activate(civilizationCatalog);
                     enabledPacks.Add(pack);
                 }
                 catch (InvalidDataException exception)

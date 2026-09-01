@@ -42,6 +42,24 @@ public sealed class SwampMapGeneratorTests
         Assert.Equal(first.HumanVillage, second.HumanVillage);
     }
 
+    [Theory]
+    [InlineData(64)]
+    [InlineData(96)]
+    [InlineData(128)]
+    public void NewGameMapSizesProduceValidReachableMaps(int dimension)
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x4E455747414D45UL),
+            dimension,
+            dimension);
+        var validation = SwampMapValidator.Validate(map);
+
+        Assert.True(validation.IsValid, string.Join("; ", validation.Errors));
+        Assert.Equal(dimension, map.Width);
+        Assert.Equal(dimension, map.Height);
+        Assert.True(map.HasTraversablePath(map.GoblinSpawn, map.HumanVillage));
+    }
+
     [Fact]
     public void UnsupportedGeneratorVersionIsRejected()
     {

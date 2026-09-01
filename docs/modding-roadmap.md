@@ -110,6 +110,10 @@ enum/save adapters must land before such definitions can be used safely.
 
 ### Stage 3: profiles and save contracts
 
+- [x] The New Game setup captures an editable display name, preferring the Steam
+  persona and then the operating-system account for its timestamped default.
+  The name round-trips through the existing client-preferences save envelope;
+  this is metadata preparation, not yet a separate save directory or mod setup.
 - Add multiple profiles and per-profile package configuration.
 - Persist package version/hash metadata with every save series.
 - Add missing-mod and incompatible-version load gates.

@@ -50,8 +50,10 @@ GoblinStronghold.Simulation/
   Jobs/             planning, reservations, priorities and job executors
   Localization/     translation composition only
   Map/              geometry, generation, navigation and visibility
+  Planning/         shared world-tool placement gestures and menu contracts
   Persistence/      versioned save DTOs, migration and compatibility gates
   Raids/            preparation, travel, combat, loot and return state machine
+  Terrain/          mining, carving and other map-modification definitions
   Time/             clock, calendar and scheduled simulation updates
 
 GoblinStronghold.Godot/
@@ -128,14 +130,42 @@ and rendering stay outside simulation code.
   load-order overrides. Completed: AI parameters, enemy selectors, spawn rules,
   harvest data, renderer/atlas/sprite IDs, and named palettes load from
   `content/animal-species.json`. Godot validates the referenced core visual
-  assets before activating a package candidate.
+  assets before activating a package candidate. Localized animal inspection is
+  now composed by the focused `AnimalTextPresenter`; simulation snapshots keep
+  stable species adapters and contain no player-facing species prose.
 - Move material, recipe, workshop, and construction definitions into matching
   subsystem namespaces while retaining compatibility facades.
+  Construction blueprint data completed for the core pack: stable IDs,
+  footprint geometry, material identity, quantity/work scaling, builder
+  capabilities, and workshop links now live in the validated embedded
+  `Construction/` catalog. `ConstructionKind`, commands, and save fields remain
+  compatibility contracts. Package-level construction overrides and entirely
+  new runtime construction kinds remain a later migration because placement,
+  completion, rendering, and persistence still use the legacy enum.
+  Planning metadata now distinguishes simple placement, building blueprints,
+  and cell designations, plus point/line/area/fixed/directional gestures.
+  Stable recursive menu paths prepare data-driven submenus without coupling
+  construction to zones or terrain modification. See
+  `docs/world-planning-tools.md`.
 
 ### Stage B: job planning and execution
 
 - Split job candidates, reservations, scoring, and execution into separate
   contracts.
+  Terrain work now owns actor capability checks, target exhaustion, forecast
+  preference, legacy actor-job mapping, and deterministic candidate selection in
+  `Terrain/Jobs`. The selector preserves the distinct route budgets and ordering
+  rules for tunnel approaches and carved ramps. A complete immutable terrain
+  assignment now combines the job kind, designation, target, route, and
+  rock-sensitive work duration before actor state is mutated. Deterministic
+  stone/deposit yields and experience rewards now come from a terrain policy,
+  with multipliers, ranges, resource mappings, variants, and experience values
+  loaded from the core terrain package. Deposit kinds still use their legacy enum
+  adapter until geology definitions receive stable content IDs. A focused terrain
+  execution service now performs the validated excavation or ramp mutation and
+  returns its world change, output position, yield, and experience as one result.
+  Stack indexing, reservation mutation, event publication, and tick execution
+  remain at the central composition boundary.
 - Replace the central job-kind dispatch with registered executors keyed by a
   stable job ID and a legacy `ActorJobKind` adapter.
 - Keep tick ordering and deterministic tie-breaking explicit and covered by
@@ -145,6 +175,14 @@ and rendering stay outside simulation code.
 
 - Give animals, crafting, storage, combat, construction, and raids dedicated
   stateful subsystems.
+- Surface contamination now has a focused `Contamination/SurfaceGrimeState`
+  owner with deterministic pickup, deposition, cleaning, snapshot, and restore
+  contracts. The goblin, human-villager, and animal movement boundaries all
+  apply the same neutral tracked-dirt policy, while goblin movement additionally
+  applies blood footprints; the legacy `CleanBlood` job/designation ID remains a
+  save-compatible adapter for cleaning either kind of surface contamination.
+  Move blood state beside this subsystem when the broader combat extraction
+  reaches it, then replace the legacy name with a stable cleaning job ID.
 - Move save/load conversion beside the subsystem that owns each state model.
 - Retain `SimulationEngine` as the deterministic clock, command boundary, event
   collector, and cross-subsystem coordinator.
@@ -154,7 +192,49 @@ and rendering stay outside simulation code.
 - Split `Main` into session orchestration plus focused menu/HUD/window
   controllers.
 - Replace direct snapshot formatting with localized presenters/view models.
+  Current actor-job descriptions completed: one focused presenter now formats
+  every travel, collection, delivery, work, need, terrain, and raid phase from
+  matching English/Polish catalog entries for all UI consumers.
 - Separate selection/input command construction from popup and layout code.
+- Replace the manual build/work button lists with a world-tool controller that
+  composes construction, zone, terrain-modification, and general work catalogs
+  into localized recursive menus.
+  Menu composition completed for the current primary layout: Orders exposes four
+  grouped rows in one second-level grid, while Basic constructions, Other
+  constructions, and Digging and carving are flat toolbar-level grids.
+  Construction content declares `basic/*`, `terrain/*`, or `advanced/*` paths.
+  Future routes and terrain shaping,
+  plus the drying rack and cooking fire, have localized disabled slots without
+  speculative gameplay definitions. Material-bearing families remember their
+  per-save variant through a Godot-owned `clientPreferences` envelope, defaulting
+  to the largest compatible stored supply; simulation save contracts remain
+  unchanged. Terrain target qualification and UI command creation remain behind
+  focused terrain policies, while persisted designations still use the legacy
+  `WorkDesignationKind` adapter and job tick dispatch remains centralized.
+
+#### Disabled world-tool backlog
+
+The following localized menu slots are deliberately visible but disabled. Keep
+them in the roadmap until each has a complete content definition, simulation
+command and job flow, placement validation, rendering, persistence, and tests:
+
+- [ ] Path construction: define supported materials, placement cost, movement
+  effect, work execution, and content-pack override rules.
+- [ ] Road construction: define how roads differ from paths in cost, movement,
+  footprint, and required work before enabling the existing slot.
+- [ ] Raise terrain: place a chosen material over an area with explicit support,
+  navigation, resource-consumption, and geology rules.
+- [ ] Level terrain: use the first selected cell as the target elevation and
+  validate excavation, fill, ramps, fluids, and unreachable fragments safely.
+- [ ] Drying rack: add its construction blueprint, storage/input contract, work
+  orders, and data-driven recipes for preserving fish and meat.
+- [ ] Cooking fire: add its construction blueprint, fuel and ingredient flow,
+  work orders, and data-driven recipes for simple meals.
+
+The drying rack and cooking fire should use the future `Crafting/` recipe
+catalog rather than introduce structure-specific recipe switches. Exact costs,
+ingredients, outputs, durations, and skill requirements remain intentionally
+undefined until the food-processing design is agreed.
 
 ### Stage E: rendering
 
@@ -163,6 +243,10 @@ and rendering stay outside simulation code.
 - Move per-entity and per-structure drawing into dedicated renderers selected by
   stable IDs where content is moddable.
 - Keep draw ordering, culling, animation time, and resource lifetime centralized.
+- Floor patterns and neutral grime currently remain code-native drawing layers.
+  The grime layer reuses a recolored atlas mask and is ordered below blood; move
+  both into a dedicated contamination renderer when render-layer extraction
+  begins.
 
 ### Stage F: profiles, saves and mod content
 
@@ -174,7 +258,8 @@ and rendering stay outside simulation code.
 ## Validation for every slice
 
 - focused regression tests for the extracted behavior;
-- full simulation test suite;
+- full simulation test suite across the thematic content, world, economy, and
+  scenario projects described in `docs/testing.md`;
 - Godot C# build with no warnings;
 - localization key parity and hardcoded-prose review when UI is touched;
 - `git diff --check` and per-file encoding/newline verification;

@@ -237,6 +237,16 @@ public partial class Main
         _modManagerWindow.PopupCentered();
     }
 
+    private void UpdateModMenuButtonAvailability()
+    {
+        var button = GetNode<Button>(
+            "Interface/MainMenu/Center/Panel/Margin/Controls/Mods");
+        button.Disabled = _modEntries.Count == 0 && _modPreferencesError is null;
+        button.TooltipText = button.Disabled
+            ? Ui("main-menu", "mods-unavailable-tooltip")
+            : string.Empty;
+    }
+
     private void RebuildModRows()
     {
         foreach (var child in _modRows.GetChildren())

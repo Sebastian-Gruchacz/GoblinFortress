@@ -47,6 +47,7 @@ public partial class WorldView : Node2D
     private Texture2D _walkwayAtlas = null!;
     private Texture2D _structureWallAtlas = null!;
     private Texture2D _bloodAtlas = null!;
+    private Texture2D _surfaceGrimeAtlas = null!;
     private Texture2D _undergroundFaunaAtlas = null!;
     private Texture2D _mineralDepositAtlas = null!;
     private int _visibleLevel;
@@ -97,6 +98,7 @@ public partial class WorldView : Node2D
         _walkwayAtlas = WalkwaySprites.LoadAtlas();
         _structureWallAtlas = StructureWallSprites.LoadAtlas();
         _bloodAtlas = BloodSprites.LoadAtlas();
+        _surfaceGrimeAtlas = SurfaceGrimeSprites.LoadAtlas();
         _undergroundFaunaAtlas = UndergroundSprites.LoadFaunaAtlas();
         _mineralDepositAtlas = UndergroundSprites.LoadMineralAtlas();
         _stoneHitSound = CreateCombatSound(720f, 0.075f, 0.22f);
@@ -335,6 +337,7 @@ public partial class WorldView : Node2D
         }
 
         DrawStructures();
+        DrawSurfaceGrime();
         DrawBloodStains();
         if (_visibleLevel >= 0)
         {
@@ -513,6 +516,41 @@ public partial class WorldView : Node2D
                 _bloodAtlas,
                 destination,
                 BloodSprites.GetRegion(_bloodAtlas, stain.Volume, variant),
+                new Color(1f, 1f, 1f, alpha));
+        }
+    }
+
+    private void DrawSurfaceGrime()
+    {
+        foreach (var stain in _snapshot.SurfaceGrime.Where(stain =>
+                     stain.Position.Z == _visibleLevel &&
+                     _snapshot.GetVisibility(stain.Position, _engine.Map.Width).IsDiscovered()))
+        {
+            var variant = unchecked(
+                (stain.Position.X * 83_492_791) ^
+                (stain.Position.Y * 29_784_371) ^
+                (stain.Position.Z * 961_748_927));
+            var rect = CellRect(stain.Position.X, stain.Position.Y);
+            var alpha = stain.Volume switch
+            {
+                <= 4 => 0.24f,
+                <= 12 => 0.38f,
+                <= 28 => 0.52f,
+                _ => 0.66f,
+            };
+            var scale = stain.Volume switch
+            {
+                <= 4 => 0.4f,
+                <= 12 => 0.62f,
+                <= 28 => 0.8f,
+                _ => 0.96f,
+            };
+            var size = rect.Size * scale;
+            var destination = new Rect2(rect.GetCenter() - size / 2f, size);
+            DrawTextureRectRegion(
+                _surfaceGrimeAtlas,
+                destination,
+                SurfaceGrimeSprites.GetRegion(_surfaceGrimeAtlas, stain.Volume, variant),
                 new Color(1f, 1f, 1f, alpha));
         }
     }
@@ -1393,40 +1431,37 @@ public partial class WorldView : Node2D
 
     private void DrawMaterialFloor(WorldObjectSnapshot floor)
     {
-        var rect = CellRect(floor.Anchor.X, floor.Anchor.Y).Grow(-0.75f);
+        var rect = CellRect(floor.Anchor.X, floor.Anchor.Y);
         var palette = PaletteFor(floor) ?? MaterialPaletteColors.For(
             floor.Kind == WorldObjectKind.StoneFloor
                 ? ResourceVariant.Granite
                 : ResourceVariant.PineWood);
-        DrawRect(rect, palette.Edge);
         if (floor.Kind == WorldObjectKind.WoodenFloor)
         {
-            const int plankCount = 4;
-            var plankHeight = rect.Size.Y / plankCount;
-            for (var index = 0; index < plankCount; index++)
+            DrawRect(rect, palette.Shadow.Darkened(0.1f));
+            const int patternSize = 4;
+            for (var y = 0; y < (int)rect.Size.Y; y += patternSize)
             {
-                var plank = new Rect2(
-                    rect.Position + new Vector2(0.75f, index * plankHeight + 0.5f),
-                    new Vector2(rect.Size.X - 1.5f, plankHeight - 1f));
-                DrawRect(plank, (index % 3) switch
+                for (var x = 0; x < (int)rect.Size.X; x += patternSize)
                 {
-                    0 => palette.Shadow,
-                    1 => palette.Midtone,
-                    _ => palette.Highlight,
-                });
-                var seamX = rect.Position.X +
-                    ((floor.Anchor.X * 7 + floor.Anchor.Y * 11 + index * 13) & 15) + 5f;
-                DrawLine(
-                    new Vector2(seamX, plank.Position.Y),
-                    new Vector2(seamX, plank.End.Y),
-                    palette.Edge,
-                    1f);
+                    var origin = rect.Position + new Vector2(x, y);
+                    // Keep each row on the same /\/\ rhythm. Alternating both axes
+                    // closes the joints into diamonds instead of a herringbone run.
+                    var rising = x / patternSize % 2 == 0;
+                    DrawFloorPlank(
+                        origin,
+                        patternSize,
+                        rising,
+                        palette.Midtone.Darkened(0.14f),
+                        palette.Edge.Darkened(0.12f));
+                }
             }
             return;
         }
 
-        const int slabColumns = 4;
-        const int slabRows = 4;
+        DrawRect(rect, palette.Edge.Darkened(0.22f));
+        const int slabColumns = 6;
+        const int slabRows = 6;
         var slabSize = new Vector2(
             rect.Size.X / slabColumns,
             rect.Size.Y / slabRows);
@@ -1436,21 +1471,48 @@ public partial class WorldView : Node2D
             {
                 var slab = new Rect2(
                     rect.Position + new Vector2(
-                        x * slabSize.X + 0.5f,
-                        y * slabSize.Y + 0.5f),
-                    slabSize - Vector2.One);
+                        x * slabSize.X + 0.35f,
+                        y * slabSize.Y + 0.35f),
+                    slabSize - new Vector2(0.7f, 0.7f));
                 DrawRect(slab, ((x + y + floor.Anchor.X + floor.Anchor.Y) % 3) switch
                 {
-                    0 => palette.Shadow,
-                    1 => palette.Midtone,
-                    _ => palette.Highlight,
+                    0 => palette.Shadow.Darkened(0.18f),
+                    1 => palette.Midtone.Darkened(0.22f),
+                    _ => palette.Highlight.Darkened(0.27f),
                 });
-                DrawLine(slab.Position, new Vector2(slab.End.X, slab.Position.Y),
-                    palette.Highlight, 0.5f);
-                DrawLine(slab.End, new Vector2(slab.Position.X, slab.End.Y),
-                    palette.Edge, 0.5f);
             }
         }
+    }
+
+    private void DrawFloorPlank(
+        Vector2 origin,
+        float size,
+        bool rising,
+        Color fill,
+        Color edge)
+    {
+        var width = size * 0.25f;
+        var points = rising
+            ? new[]
+            {
+                origin + new Vector2(0f, size - width),
+                origin + new Vector2(width, size),
+                origin + new Vector2(size, width),
+                origin + new Vector2(size - width, 0f),
+            }
+            : new[]
+            {
+                origin + new Vector2(0f, width),
+                origin + new Vector2(size - width, size),
+                origin + new Vector2(size, size - width),
+                origin + new Vector2(width, 0f),
+            };
+        DrawColoredPolygon(points, edge);
+        var center = origin + Vector2.One * size * 0.5f;
+        var inset = points
+            .Select(point => point.Lerp(center, 0.16f))
+            .ToArray();
+        DrawColoredPolygon(inset, fill);
     }
 
     private void DrawConstructedRamp(WorldObjectSnapshot ramp)

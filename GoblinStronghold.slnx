@@ -2,5 +2,9 @@
   <Project Path="src/GoblinStronghold.Headless/GoblinStronghold.Headless.csproj" />
   <Project Path="src/GoblinStronghold.Godot/GoblinStronghold.Godot.csproj" />
   <Project Path="src/GoblinStronghold.Simulation/GoblinStronghold.Simulation.csproj" />
-  <Project Path="tests/GoblinStronghold.Simulation.Tests/GoblinStronghold.Simulation.Tests.csproj" />
+  <Project Path="tests/GoblinStronghold.Simulation.Content.Tests/GoblinStronghold.Simulation.Content.Tests.csproj" />
+  <Project Path="tests/GoblinStronghold.Simulation.Economy.Tests/GoblinStronghold.Simulation.Economy.Tests.csproj" />
+  <Project Path="tests/GoblinStronghold.Simulation.Scenarios.Tests/GoblinStronghold.Simulation.Scenarios.Tests.csproj" />
+  <Project Path="tests/GoblinStronghold.Simulation.TestSupport/GoblinStronghold.Simulation.TestSupport.csproj" />
+  <Project Path="tests/GoblinStronghold.Simulation.World.Tests/GoblinStronghold.Simulation.World.Tests.csproj" />
 </Solution>

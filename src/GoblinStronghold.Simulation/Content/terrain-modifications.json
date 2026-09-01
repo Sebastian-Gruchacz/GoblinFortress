@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "modifications": [
+    {
+      "id": "mine-rock",
+      "legacyDesignation": "MineRock",
+      "placementMode": "Area",
+      "menuPath": ["terrain", "excavation"],
+      "work": {
+        "baseTicksMultiplier": 8,
+        "yield": {
+          "resource": "Stone",
+          "variant": "None",
+          "variantFromRock": true,
+          "minimumQuantity": 1,
+          "maximumQuantityExclusive": 4,
+          "minimumBuildingExperience": 12,
+          "buildingExperiencePerUnit": 2,
+          "deposits": [
+            { "deposit": "Coal", "resource": "Coal", "variant": "None", "minimumQuantity": 1, "maximumQuantityExclusive": 4 },
+            { "deposit": "IronOre", "resource": "Ore", "variant": "IronOre", "minimumQuantity": 1, "maximumQuantityExclusive": 3 },
+            { "deposit": "CopperOre", "resource": "Ore", "variant": "CopperOre", "minimumQuantity": 1, "maximumQuantityExclusive": 3 },
+            { "deposit": "SilverOre", "resource": "Ore", "variant": "SilverOre", "minimumQuantity": 1, "maximumQuantityExclusive": 3 },
+            { "deposit": "GoldOre", "resource": "Ore", "variant": "GoldOre", "minimumQuantity": 1, "maximumQuantityExclusive": 3 },
+            { "deposit": "Ruby", "resource": "Materials", "variant": "Ruby", "minimumQuantity": 1, "maximumQuantityExclusive": 2 },
+            { "deposit": "Emerald", "resource": "Materials", "variant": "Emerald", "minimumQuantity": 1, "maximumQuantityExclusive": 2 },
+            { "deposit": "Diamond", "resource": "Materials", "variant": "Diamond", "minimumQuantity": 1, "maximumQuantityExclusive": 2 }
+          ]
+        }
+      }
+    },
+    {
+      "id": "carve-ramp-down",
+      "legacyDesignation": "CarveRampDown",
+      "placementMode": "Point",
+      "menuPath": ["terrain", "excavation"],
+      "work": {
+        "baseTicksMultiplier": 12,
+        "yield": {
+          "resource": "Stone",
+          "variant": "None",
+          "variantFromRock": true,
+          "minimumQuantity": 6,
+          "maximumQuantityExclusive": 11,
+          "minimumBuildingExperience": 20,
+          "buildingExperiencePerUnit": 3,
+          "deposits": []
+        }
+      }
+    },
+    {
+      "id": "carve-ramp-up",
+      "legacyDesignation": "CarveRampUp",
+      "placementMode": "Point",
+      "menuPath": ["terrain", "excavation"],
+      "work": {
+        "baseTicksMultiplier": 12,
+        "yield": {
+          "resource": "Stone",
+          "variant": "None",
+          "variantFromRock": true,
+          "minimumQuantity": 6,
+          "maximumQuantityExclusive": 11,
+          "minimumBuildingExperience": 20,
+          "buildingExperiencePerUnit": 3,
+          "deposits": []
+        }
+      }
+    }
+  ]
+}

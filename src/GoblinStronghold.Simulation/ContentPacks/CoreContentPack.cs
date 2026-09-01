@@ -15,7 +15,11 @@ public static class CoreContentPack
                 $"{ResourcePrefix}.Content.animal-species.json",
             ["content/crafting-recipes.json"] =
                 $"{ResourcePrefix}.Content.crafting-recipes.json",
+            ["content/construction-blueprints.json"] =
+                $"{ResourcePrefix}.Content.construction-blueprints.json",
             ["content/materials.json"] = $"{ResourcePrefix}.Content.materials.json",
+            ["content/terrain-modifications.json"] =
+                $"{ResourcePrefix}.Content.terrain-modifications.json",
             ["content/workshops.json"] = $"{ResourcePrefix}.Content.workshops.json",
             ["localization/en/interface.json"] =
                 $"{ResourcePrefix}.Localization.en.interface.json",

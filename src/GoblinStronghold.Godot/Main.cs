@@ -1,9 +1,14 @@
 using Godot;
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Localization;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Workshops;
+using GoblinStronghold.GodotClient.UI.Actors;
+using GoblinStronghold.GodotClient.UI.Animals;
+using GoblinStronghold.GodotClient.UI.WorldPlanning;
 using System.Text;
 
 namespace GoblinStronghold.GodotClient;
@@ -34,13 +39,19 @@ public partial class Main : Node
     private Label _inspector = null!;
     private PopupPanel _managementMenu = null!;
     private PopupPanel _buildMenu = null!;
+    private PopupPanel _advancedBuildMenu = null!;
+    private PopupPanel _terrainMenu = null!;
     private PopupPanel _workMenu = null!;
     private PopupPanel _statisticsMenu = null!;
     private GridContainer _managementMenuGrid = null!;
     private GridContainer _buildMenuGrid = null!;
-    private readonly Dictionary<BuildCategory, (PopupPanel Menu, GridContainer Grid)>
-        _buildCategoryMenus = [];
+    private WorldPlanningMenuController _constructionPlanningMenu = null!;
+    private GridContainer _advancedBuildMenuGrid = null!;
+    private WorldPlanningMenuController _advancedConstructionPlanningMenu = null!;
+    private GridContainer _terrainMenuGrid = null!;
+    private WorldPlanningMenuController _terrainPlanningMenu = null!;
     private GridContainer _workMenuGrid = null!;
+    private WorldPlanningMenuController _workPlanningMenu = null!;
     private GridContainer _statisticsMenuGrid = null!;
     private Texture2D _iconAtlas = null!;
     private Texture2D _itemIconAtlas = null!;
@@ -121,8 +132,9 @@ public partial class Main : Node
     private readonly HashSet<EntityId> _selectedActorIds = [];
     private BuildMode _buildMode;
     private PopupMenu _constructionMaterialMenu = null!;
-    private BuildMode _pendingMaterialBuildMode;
+    private ConstructionMaterialGroup _pendingMaterialGroup;
     private ResourceVariant _selectedConstructionMaterial;
+    private GameSessionPreferences _sessionPreferences = new();
     private bool _isDraggingLinearBuild;
     private GridPosition _linearBuildStart;
     private WorkMode _workMode;
@@ -230,12 +242,15 @@ public partial class Main : Node
         GoblinHut,
     }
 
-    private enum BuildCategory
+    private enum ConstructionMaterialGroup
     {
-        Storage,
-        Infrastructure,
-        Habitation,
-        Production,
+        Walkway,
+        StoneWalkway,
+        Wall,
+        Floor,
+        Ramp,
+        DoorFrame,
+        Door,
     }
 
     private enum WorkMode
@@ -358,10 +373,14 @@ public partial class Main : Node
         _inspector = GetNode<Label>("Interface/Inspector/Text");
         _managementMenu = GetNode<PopupPanel>("ManagementMenu");
         _buildMenu = GetNode<PopupPanel>("BuildMenu");
+        _advancedBuildMenu = GetNode<PopupPanel>("AdvancedBuildMenu");
+        _terrainMenu = GetNode<PopupPanel>("TerrainMenu");
         _workMenu = GetNode<PopupPanel>("WorkMenu");
         _statisticsMenu = GetNode<PopupPanel>("StatisticsMenu");
         _managementMenuGrid = GetNode<GridContainer>("ManagementMenu/Margin/Grid");
         _buildMenuGrid = GetNode<GridContainer>("BuildMenu/Margin/Grid");
+        _advancedBuildMenuGrid = GetNode<GridContainer>("AdvancedBuildMenu/Margin/Grid");
+        _terrainMenuGrid = GetNode<GridContainer>("TerrainMenu/Margin/Grid");
         _workMenuGrid = GetNode<GridContainer>("WorkMenu/Margin/Grid");
         _statisticsMenuGrid = GetNode<GridContainer>("StatisticsMenu/Margin/Grid");
         _mainMenu = GetNode<Control>("Interface/MainMenu");
@@ -425,190 +444,10 @@ public partial class Main : Node
             CreateStorageIcon(ItemIcon.Cargo),
             Ui("action-tiles", "logistics"),
             ShowLogistics);
-        CreateBuildCategoryMenus();
-        var storageBuild = _buildCategoryMenus[BuildCategory.Storage];
-        var infrastructureBuild = _buildCategoryMenus[BuildCategory.Infrastructure];
-        var habitationBuild = _buildCategoryMenus[BuildCategory.Habitation];
-        var productionBuild = _buildCategoryMenus[BuildCategory.Production];
-        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateStorageIcon(ItemIcon.Cargo),
-            Ui("action-tiles", "storage-category"),
-            () => ShowBuildCategory(BuildCategory.Storage));
-        CreateTextureTileButton(_buildMenuGrid, _buildMenu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneWall),
-            Ui("action-tiles", "infrastructure-category"),
-            () => ShowBuildCategory(BuildCategory.Infrastructure));
-        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateGoblinHutIcon(),
-            Ui("action-tiles", "habitation-category"),
-            () => ShowBuildCategory(BuildCategory.Habitation));
-        CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreatePrimitiveWorkshopIcon(),
-            Ui("action-tiles", "production-category"),
-            () => ShowBuildCategory(BuildCategory.Production));
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Food),
-            Ui("action-tiles", "food-storage"), () => SelectBuildMode((long)BuildMode.FoodStorage),
-            GameShortcutId.BuildFoodStorage);
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Wood),
-            Ui("action-tiles", "wood-storage"), () => SelectBuildMode((long)BuildMode.WoodStorage),
-            GameShortcutId.BuildWoodStorage);
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Stone),
-            Ui("action-tiles", "stone-storage"),
-            () => SelectBuildMode((long)BuildMode.StoneStorage),
-            GameShortcutId.BuildStoneStorage);
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Cargo),
-            Ui("action-tiles", "equipment-storage"),
-            () => SelectBuildMode((long)BuildMode.EquipmentStorage),
-            GameShortcutId.BuildEquipmentStorage);
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Reeds),
-            Ui("action-tiles", "materials-storage"),
-            () => SelectBuildMode((long)BuildMode.MaterialsStorage),
-            GameShortcutId.BuildMaterialsStorage);
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
-            _woodenBarrelIcon,
-            Ui("action-tiles", "water-barrel"),
-            () => SelectBuildMode((long)BuildMode.WaterBarrel));
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
-            CreateStorageIcon(ItemIcon.Cargo),
-            Ui("action-tiles", "wooden-box"),
-            () => SelectBuildMode((long)BuildMode.WoodenBox));
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
-            CreateStorageIcon(ItemIcon.Cargo),
-            Ui("action-tiles", "wooden-chest"),
-            () => SelectBuildMode((long)BuildMode.WoodenChest));
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
-            CreateStorageIcon(ItemIcon.Stone),
-            Ui("action-tiles", "bulk-bin"),
-            () => SelectBuildMode((long)BuildMode.WoodenBulkBin));
-        CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
-            CreateStorageIcon(ItemIcon.Cargo),
-            Ui("action-tiles", "storage-area"),
-            () => SelectBuildMode((long)BuildMode.StorageArea));
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenBridge),
-            Ui("action-tiles", "walkway"), () => ChooseConstructionMaterial(
-                BuildMode.Walkway, MaterialType.Wood),
-            GameShortcutId.BuildWalkway);
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.BasaltBridge),
-            Ui("action-tiles", "basalt-walkway"),
-            () => SelectBuildMode((long)BuildMode.BasaltWalkway));
-        CreateTileButton(habitationBuild.Grid, habitationBuild.Menu, UiIcon.FieldCamp,
-            Ui("action-tiles", "field-camp"), () => SelectBuildMode((long)BuildMode.FieldCamp),
-            GameShortcutId.BuildFieldCamp);
-        CreateTextureTileButton(habitationBuild.Grid, habitationBuild.Menu, CreateGoblinHutIcon(),
-            Ui("action-tiles", "goblin-hut"),
-            () => SelectBuildMode((long)BuildMode.GoblinHut),
-            GameShortcutId.BuildGoblinHut);
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenFloor),
-            Ui("action-tiles", "wooden-floor"),
-            () => ChooseConstructionMaterial(BuildMode.WoodenFloor, MaterialType.Wood));
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneFloor),
-            Ui("action-tiles", "stone-floor"),
-            () => ChooseConstructionMaterial(BuildMode.StoneFloor, MaterialType.Stone));
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenRamp),
-            Ui("action-tiles", "wooden-ramp"),
-            () => ChooseConstructionMaterial(BuildMode.WoodenRamp, MaterialType.Wood));
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneRamp),
-            Ui("action-tiles", "stone-ramp"),
-            () => ChooseConstructionMaterial(BuildMode.StoneRamp, MaterialType.Stone));
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenWall),
-            Ui("action-tiles", "wooden-wall"), () => ChooseConstructionMaterial(
-                BuildMode.WoodenWall, MaterialType.Wood),
-            GameShortcutId.BuildWoodenWall);
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneWall),
-            Ui("action-tiles", "stone-wall"),
-            () => ChooseConstructionMaterial(BuildMode.StoneWall, MaterialType.Stone),
-            GameShortcutId.BuildStoneWall);
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenDoorFrame),
-            Ui("action-tiles", "wooden-door-frame"), () => SelectBuildMode((long)BuildMode.WoodenDoorFrame));
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneDoorFrame),
-            Ui("action-tiles", "stone-door-frame"),
-            () => SelectBuildMode((long)BuildMode.StoneDoorFrame));
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenDoor),
-            Ui("action-tiles", "wooden-door"), () => SelectBuildMode((long)BuildMode.WoodenDoor),
-            GameShortcutId.BuildWoodenDoor);
-        CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
-            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WallTorch),
-            Ui("action-tiles", "wall-torch"),
-            () => SelectBuildMode((long)BuildMode.WallTorch));
-        CreateTextureTileButton(productionBuild.Grid, productionBuild.Menu, CreatePrimitiveWorkshopIcon(),
-            Ui("action-tiles", "primitive-workshop"),
-            () => SelectBuildMode((long)BuildMode.PrimitiveWorkshop),
-            GameShortcutId.BuildPrimitiveWorkshop);
-        CreateTextureTileButton(productionBuild.Grid, productionBuild.Menu,
-            CreateFurnaceIcon(WorkshopKind.Bloomery),
-            Ui("action-tiles", "bloomery"),
-            () => SelectBuildMode((long)BuildMode.Bloomery));
-        CreateTextureTileButton(productionBuild.Grid, productionBuild.Menu,
-            CreateFurnaceIcon(WorkshopKind.SmeltingFurnace),
-            Ui("action-tiles", "smelting-furnace"),
-            () => SelectBuildMode((long)BuildMode.SmeltingFurnace));
-        CreateTextureTileButton(productionBuild.Grid, productionBuild.Menu,
-            CreateFurnaceIcon(WorkshopKind.CrucibleFurnace),
-            Ui("action-tiles", "crucible-furnace"),
-            () => SelectBuildMode((long)BuildMode.CrucibleFurnace));
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherFood,
-            Ui("action-tiles", "gather-food"),
-            () => SelectWorkMode((long)WorkMode.GatherFood),
-            GameShortcutId.GatherFood);
-        CreateTextureTileButton(_workMenuGrid, _workMenu, CreateGatherIcon(ItemIcon.Reeds),
-            Ui("action-tiles", "gather-reeds"),
-            () => SelectWorkMode((long)WorkMode.GatherReeds),
-            GameShortcutId.GatherReeds);
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherBrushwood,
-            Ui("action-tiles", "gather-brushwood"), () => SelectWorkMode((long)WorkMode.GatherBrushwood),
-            GameShortcutId.GatherBrushwood);
-        CreateTextureTileButton(_workMenuGrid, _workMenu, CreateGatherIcon(ItemIcon.Stone),
-            Ui("action-tiles", "gather-stone"),
-            () => SelectWorkMode((long)WorkMode.GatherStone),
-            GameShortcutId.GatherStone);
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.UprootBush,
-            Ui("action-tiles", "uproot-bushes"), () => SelectWorkMode((long)WorkMode.UprootBerryBushes),
-            GameShortcutId.UprootBushes);
-        CreateTextureTileButton(_workMenuGrid, _workMenu,
-            ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.WoodenAxe),
-            Ui("action-tiles", "fell-trees"), () => SelectWorkMode((long)WorkMode.FellTrees),
-            GameShortcutId.FellTrees);
-        CreateTextureTileButton(_workMenuGrid, _workMenu,
-            CreateBadgedIcon(_pickaxeIcon, ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone)),
-            Ui("action-tiles", "quarry-boulders"), () => SelectWorkMode((long)WorkMode.QuarryBoulders),
-            GameShortcutId.QuarryBoulders);
-        CreateTextureTileButton(_workMenuGrid, _workMenu,
-            CreateBadgedIcon(_pickaxeIcon, CreateMineBadgeIcon()),
-            Ui("action-tiles", "mine-rock"), () => SelectWorkMode((long)WorkMode.MineRock),
-            GameShortcutId.MineRock);
-        CreateTextureTileButton(_workMenuGrid, _workMenu,
-            CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: false)),
-            Ui("action-tiles", "carve-ramp-down"),
-            () => SelectWorkMode((long)WorkMode.CarveRampDown),
-            GameShortcutId.CarveRampDown);
-        CreateTextureTileButton(_workMenuGrid, _workMenu,
-            CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: true)),
-            Ui("action-tiles", "carve-ramp-up"),
-            () => SelectWorkMode((long)WorkMode.CarveRampUp),
-            GameShortcutId.CarveRampUp);
-        CreateTextureTileButton(_workMenuGrid, _workMenu, CreateSlingIcon(),
-            Ui("action-tiles", "hunt-animals"),
-            () => SelectWorkMode((long)WorkMode.HuntAnimals),
-            GameShortcutId.HuntAnimals);
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.Expedition,
-            Ui("action-tiles", "scout"),
-            () => SelectWorkMode((long)WorkMode.Scout),
-            GameShortcutId.Scout);
-        CreateTextureTileButton(_workMenuGrid, _workMenu, CreateCleanBloodIcon(),
-            Ui("action-tiles", "clean-blood"),
-            () => SelectWorkMode((long)WorkMode.CleanBlood),
-            GameShortcutId.CleanBlood);
-        CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
-            Ui("action-tiles", "clear-orders"), () => SelectWorkMode((long)WorkMode.Clear),
-            GameShortcutId.ClearOrders);
+        CreateWorldPlanningMenus();
+        CreateWorldPlanningTools();
+        CreateWorkOrderMenus();
+        CreateWorkOrderTools();
         CreateTextureTileButton(
             _statisticsMenuGrid,
             _statisticsMenu,
@@ -759,6 +598,16 @@ public partial class Main : Node
         ConfigureActionButton("Management", UiIcon.Work, Ui("toolbar", "management"));
         GetToolbarButton("Management").Icon = _commandingHandIcon;
         ConfigureActionButton("Build", UiIcon.Build, Ui("toolbar", "build"));
+        GetToolbarButton("Build").Icon = PlanningToolIcons.CreateBasicConstructionIcon(
+            UiIcons.CreateTexture(_iconAtlas, UiIcon.Build));
+        ConfigureActionButton(
+            "AdvancedBuild", UiIcon.Build, Ui("toolbar", "advanced-build"));
+        GetToolbarButton("AdvancedBuild").Icon =
+            PlanningToolIcons.CreateAdvancedConstructionIcon(
+                UiIcons.CreateTexture(_iconAtlas, UiIcon.Build));
+        ConfigureActionButton("Terrain", UiIcon.Build, Ui("toolbar", "terrain"));
+        GetToolbarButton("Terrain").Icon =
+            CreateBadgedIcon(_pickaxeIcon, CreateMineBadgeIcon());
         ConfigureActionButton("Work", UiIcon.Work, Ui("toolbar", "work"));
         ConfigureActionButton("Move", UiIcon.Expedition, Ui("toolbar", "unit-orders"));
         var statisticsButton = GetToolbarButton("Statistics");
@@ -766,6 +615,8 @@ public partial class Main : Node
         statisticsButton.TooltipText = Ui("toolbar", "statistics");
         GetToolbarButton("Management").Pressed += ShowManagementMenu;
         GetToolbarButton("Build").Pressed += ShowBuildMenu;
+        GetToolbarButton("AdvancedBuild").Pressed += ShowAdvancedBuildMenu;
+        GetToolbarButton("Terrain").Pressed += ShowTerrainMenu;
         GetToolbarButton("Work").Pressed += ShowWorkMenu;
         GetToolbarButton("Move").Pressed += ShowUnitOrderMenu;
         GetToolbarButton("Raid").Hide();
@@ -778,6 +629,7 @@ public partial class Main : Node
         levelDownButton.Pressed += () => ChangeVisibleLevel(-1);
         RegisterShortcutAction(GameShortcutId.OpenManagement, ShowManagementMenu);
         RegisterShortcutAction(GameShortcutId.OpenConstruction, ShowBuildMenu);
+        RegisterShortcutAction(GameShortcutId.OpenTerrain, ShowTerrainMenu);
         RegisterShortcutAction(GameShortcutId.OpenWork, ShowWorkMenu);
         RegisterShortcutAction(GameShortcutId.OpenStatistics, ShowStatisticsMenu);
         RegisterShortcutAction(GameShortcutId.OpenUnitOrders, ShowUnitOrderMenu);
@@ -799,6 +651,14 @@ public partial class Main : Node
             GameShortcutId.OpenConstruction,
             GetToolbarButton("Build"),
             Ui("toolbar", "build"));
+        RegisterShortcutTile(
+            null,
+            GetToolbarButton("AdvancedBuild"),
+            Ui("toolbar", "advanced-build"));
+        RegisterShortcutTile(
+            GameShortcutId.OpenTerrain,
+            GetToolbarButton("Terrain"),
+            Ui("toolbar", "terrain"));
         RegisterShortcutTile(
             GameShortcutId.OpenWork,
             GetToolbarButton("Work"),
@@ -1184,6 +1044,7 @@ public partial class Main : Node
 
             var seedBytes = Guid.NewGuid().ToByteArray();
             var seed = new WorldSeed(BitConverter.ToUInt64(seedBytes, 0));
+            _sessionPreferences = new GameSessionPreferences();
             ReplaceEngine(CreateNewEngine(seed));
             _hasActiveSession = true;
             CloseMainMenu();
@@ -1205,7 +1066,7 @@ public partial class Main : Node
 
         try
         {
-            var receipt = _saveStore.SaveQuick(_engine.Save());
+            var receipt = _saveStore.SaveQuick(CreateSaveJson());
             _inspector.Text = $"Gra zapisana i zweryfikowana • " +
                 $"tick {_engine.CurrentTick.Value:N0} • {Path.GetFileName(receipt.Path)} • " +
                 $"{receipt.ByteCount:N0} B" +
@@ -1263,11 +1124,13 @@ public partial class Main : Node
                 json,
                 SimulationDefinitions.Foundation,
                 SimulationDebugSettings.ForCurrentBuild);
+            var loadedPreferences = GameSessionPreferences.FromSave(json);
             var protectedCurrentSession = _hasActiveSession;
             if (protectedCurrentSession)
             {
-                _saveStore.SaveBeforeLoad(_engine.Save(), excludedPath: path);
+                _saveStore.SaveBeforeLoad(CreateSaveJson(), excludedPath: path);
             }
+            _sessionPreferences = loadedPreferences;
             ReplaceEngine(loaded);
             _hasActiveSession = true;
             _recoveryWindow.Hide();
@@ -1734,6 +1597,9 @@ public partial class Main : Node
             case GameShortcutId.OpenConstruction:
                 _buildMenu.Hide();
                 break;
+            case GameShortcutId.OpenTerrain:
+                _terrainMenu.Hide();
+                break;
             case GameShortcutId.OpenWork:
                 _workMenu.Hide();
                 break;
@@ -1763,7 +1629,8 @@ public partial class Main : Node
         string tooltip)
     {
         _shortcutTiles[shortcut] = (button, tooltip);
-        button.TooltipText = $"{tooltip}\nSkrót: {_shortcutSettings.Describe(shortcut)}";
+        button.TooltipText = $"{tooltip}\n{UiFormat(
+            "toolbar", "shortcut", _shortcutSettings.Describe(shortcut))}";
     }
 
     private void RegisterShortcutTile(
@@ -1794,7 +1661,8 @@ public partial class Main : Node
         foreach (var (shortcut, tile) in _shortcutTiles)
         {
             tile.Button.TooltipText =
-                $"{tile.Tooltip}\nSkrót: {_shortcutSettings.Describe(shortcut)}";
+                $"{tile.Tooltip}\n{UiFormat(
+                    "toolbar", "shortcut", _shortcutSettings.Describe(shortcut))}";
         }
     }
 
@@ -1885,9 +1753,11 @@ public partial class Main : Node
 
     private void SaveAutosave()
     {
-        _saveStore.SaveAuto(_engine.Save());
+        _saveStore.SaveAuto(CreateSaveJson());
         _autosaveElapsedRealSeconds = 0;
     }
+
+    private string CreateSaveJson() => _sessionPreferences.AddToSave(_engine.Save());
 
     private void ScheduleNextAutosave() => _nextAutosaveTick =
         SimulationCalendar.NextDayStart(_engine.CurrentTick, _engine.Definitions.Clock);
@@ -2010,52 +1880,241 @@ public partial class Main : Node
         ShowToolbarMenu(_buildMenu, "Build");
     }
 
-    private void CreateBuildCategoryMenus()
+    private void ShowAdvancedBuildMenu()
     {
-        foreach (var category in Enum.GetValues<BuildCategory>())
-        {
-            var menu = new PopupPanel
-            {
-                Name = $"Build{category}Menu",
-                MinSize = new Vector2I(84, 84),
-            };
-            var margin = new MarginContainer();
-            margin.AddThemeConstantOverride("margin_left", 4);
-            margin.AddThemeConstantOverride("margin_top", 4);
-            margin.AddThemeConstantOverride("margin_right", 4);
-            margin.AddThemeConstantOverride("margin_bottom", 4);
-            var content = new VBoxContainer();
-            var heading = new Label
-            {
-                Text = category switch
-                {
-                    BuildCategory.Storage => Ui("build-categories", "storage"),
-                    BuildCategory.Infrastructure => Ui("build-categories", "infrastructure"),
-                    BuildCategory.Habitation => Ui("build-categories", "habitation"),
-                    BuildCategory.Production => Ui("build-categories", "production"),
-                    _ => throw new ArgumentOutOfRangeException(nameof(category)),
-                },
-                HorizontalAlignment = HorizontalAlignment.Center,
-            };
-            var grid = new GridContainer
-            {
-                Columns = category == BuildCategory.Habitation ? 2 : 4,
-            };
-            grid.AddThemeConstantOverride("h_separation", 6);
-            grid.AddThemeConstantOverride("v_separation", 6);
-            content.AddChild(heading);
-            content.AddChild(grid);
-            margin.AddChild(content);
-            menu.AddChild(margin);
-            AddChild(menu);
-            _buildCategoryMenus.Add(category, (menu, grid));
-        }
+        ShowToolbarMenu(_advancedBuildMenu, "AdvancedBuild");
     }
 
-    private void ShowBuildCategory(BuildCategory category)
+    private void ShowTerrainMenu()
     {
-        _buildMenu.Hide();
-        ShowToolbarMenu(_buildCategoryMenus[category].Menu, "Build");
+        ShowToolbarMenu(_terrainMenu, "Terrain");
+    }
+
+    private void CreateWorldPlanningMenus()
+    {
+        _constructionPlanningMenu = new WorldPlanningMenuController(
+            this,
+            _buildMenu,
+            _buildMenuGrid,
+            CreateTextureTileButton,
+            menu => ShowToolbarMenu(menu, "Build"));
+        _advancedConstructionPlanningMenu = new WorldPlanningMenuController(
+            this,
+            _advancedBuildMenu,
+            _advancedBuildMenuGrid,
+            CreateTextureTileButton,
+            menu => ShowToolbarMenu(menu, "AdvancedBuild"));
+        _terrainPlanningMenu = new WorldPlanningMenuController(
+            this,
+            _terrainMenu,
+            _terrainMenuGrid,
+            CreateTextureTileButton,
+            menu => ShowToolbarMenu(menu, "Terrain"));
+    }
+
+    private void CreateWorldPlanningTools()
+    {
+        void AddBasic(
+            Texture2D icon,
+            string tooltipKey,
+            Action action,
+            GameShortcutId? shortcut = null) => _constructionPlanningMenu.AddRootTool(
+                icon,
+                Ui("action-tiles", tooltipKey),
+                action,
+                shortcut);
+
+        void AddAdvanced(
+            Texture2D icon,
+            string tooltipKey,
+            Action action) => _advancedConstructionPlanningMenu.AddRootTool(
+                icon,
+                Ui("action-tiles", tooltipKey),
+                action);
+
+        AddBasic(CreateStorageIcon(ItemIcon.Food), "food-storage",
+            () => SelectBuildMode((long)BuildMode.FoodStorage),
+            GameShortcutId.BuildFoodStorage);
+        AddBasic(CreateStorageIcon(ItemIcon.Wood), "wood-storage",
+            () => SelectBuildMode((long)BuildMode.WoodStorage),
+            GameShortcutId.BuildWoodStorage);
+        AddBasic(CreateStorageIcon(ItemIcon.Stone), "stone-storage",
+            () => SelectBuildMode((long)BuildMode.StoneStorage),
+            GameShortcutId.BuildStoneStorage);
+        AddBasic(CreateStorageIcon(ItemIcon.Cargo),
+            "equipment-storage", () => SelectBuildMode((long)BuildMode.EquipmentStorage),
+            GameShortcutId.BuildEquipmentStorage);
+        AddBasic(CreateStorageIcon(ItemIcon.Reeds),
+            "materials-storage", () => SelectBuildMode((long)BuildMode.MaterialsStorage),
+            GameShortcutId.BuildMaterialsStorage);
+        AddBasic(_woodenBarrelIcon, "water-barrel",
+            () => SelectBuildMode((long)BuildMode.WaterBarrel));
+        AddBasic(PlanningToolIcons.CreateWoodenBoxIcon(), "wooden-box",
+            () => SelectBuildMode((long)BuildMode.WoodenBox));
+        AddBasic(PlanningToolIcons.CreateWoodenChestIcon(), "wooden-chest",
+            () => SelectBuildMode((long)BuildMode.WoodenChest));
+        AddBasic(PlanningToolIcons.CreateBulkBinIcon(), "bulk-bin",
+            () => SelectBuildMode((long)BuildMode.WoodenBulkBin));
+        AddBasic(
+            PlanningToolIcons.CreateStorageAreaIcon(),
+            "storage-area",
+            () => SelectBuildMode((long)BuildMode.StorageArea));
+
+        AddBasic(UiIcons.CreateTexture(_iconAtlas, UiIcon.FieldCamp), "field-camp",
+            () => SelectBuildMode((long)BuildMode.FieldCamp),
+            GameShortcutId.BuildFieldCamp);
+        AddBasic(CreateGoblinHutIcon(), "goblin-hut",
+            () => SelectBuildMode((long)BuildMode.GoblinHut),
+            GameShortcutId.BuildGoblinHut);
+        AddBasic(CreatePrimitiveWorkshopIcon(), "primitive-workshop",
+            () => SelectBuildMode((long)BuildMode.PrimitiveWorkshop),
+            GameShortcutId.BuildPrimitiveWorkshop);
+        _constructionPlanningMenu.AddDisabledRootTool(
+            PlanningToolIcons.CreateDryingRackIcon(),
+            Ui("action-tiles", "drying-rack-coming-soon"));
+        _constructionPlanningMenu.AddDisabledRootTool(
+            PlanningToolIcons.CreateCookingFireIcon(),
+            Ui("action-tiles", "cooking-fire-coming-soon"));
+
+        AddBasic(
+            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneWall),
+            "wall",
+            () => ChooseConstructionMaterial(ConstructionMaterialGroup.Wall),
+            GameShortcutId.BuildWoodenWall);
+        AddBasic(
+            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenFloor),
+            "floor",
+            () => ChooseConstructionMaterial(ConstructionMaterialGroup.Floor));
+        AddBasic(
+            ConstructionIcons.CreateTexture(
+                _constructionIconAtlas,
+                ConstructionIcon.WoodenDoorFrame),
+            "door-frame",
+            () => ChooseConstructionMaterial(ConstructionMaterialGroup.DoorFrame));
+        AddBasic(
+            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenDoor),
+            "door",
+            () => ChooseConstructionMaterial(ConstructionMaterialGroup.Door),
+            GameShortcutId.BuildWoodenDoor);
+        _constructionPlanningMenu.AddRootSpacer();
+        AddBasic(
+            ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WallTorch),
+            "wall-torch",
+            () => SelectBuildMode((long)BuildMode.WallTorch));
+
+        AddAdvanced(CreateFurnaceIcon(WorkshopKind.Bloomery), "bloomery",
+            () => SelectBuildMode((long)BuildMode.Bloomery));
+        AddAdvanced(CreateFurnaceIcon(WorkshopKind.SmeltingFurnace), "smelting-furnace",
+            () => SelectBuildMode((long)BuildMode.SmeltingFurnace));
+        AddAdvanced(CreateFurnaceIcon(WorkshopKind.CrucibleFurnace), "crucible-furnace",
+            () => SelectBuildMode((long)BuildMode.CrucibleFurnace));
+
+        _terrainPlanningMenu.AddRootTool(
+            CreateBadgedIcon(_pickaxeIcon, CreateMineBadgeIcon()),
+            Ui("action-tiles", "mine-rock"),
+            () => SelectWorkMode((long)WorkMode.MineRock),
+            GameShortcutId.MineRock);
+        _terrainPlanningMenu.AddRootTool(
+            CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: false)),
+            Ui("action-tiles", "carve-ramp-down"),
+            () => SelectWorkMode((long)WorkMode.CarveRampDown),
+            GameShortcutId.CarveRampDown);
+        _terrainPlanningMenu.AddRootTool(
+            CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: true)),
+            Ui("action-tiles", "carve-ramp-up"),
+            () => SelectWorkMode((long)WorkMode.CarveRampUp),
+            GameShortcutId.CarveRampUp);
+        _terrainPlanningMenu.AddRootSpacer();
+        _terrainPlanningMenu.AddRootTool(
+            PlanningToolIcons.CreateWoodenWalkwayIcon(),
+            Ui("action-tiles", "walkway"),
+            () => ChooseConstructionMaterial(ConstructionMaterialGroup.Walkway),
+            GameShortcutId.BuildWalkway);
+        _terrainPlanningMenu.AddRootTool(
+            PlanningToolIcons.CreateBasaltWalkwayIcon(),
+            Ui("action-tiles", "basalt-walkway"),
+            () => ChooseConstructionMaterial(ConstructionMaterialGroup.StoneWalkway));
+        _terrainPlanningMenu.AddDisabledRootTool(
+            PlanningToolIcons.CreatePathIcon(),
+            Ui("action-tiles", "path-coming-soon"));
+        _terrainPlanningMenu.AddDisabledRootTool(
+            PlanningToolIcons.CreateRoadIcon(),
+            Ui("action-tiles", "road-coming-soon"));
+        _terrainPlanningMenu.AddDisabledRootTool(
+            PlanningToolIcons.CreateRaiseTerrainIcon(),
+            Ui("action-tiles", "raise-terrain-coming-soon"));
+        _terrainPlanningMenu.AddDisabledRootTool(
+            PlanningToolIcons.CreateLevelTerrainIcon(),
+            Ui("action-tiles", "level-terrain-coming-soon"));
+        _terrainPlanningMenu.AddRootTool(
+            PlanningToolIcons.CreateRampIcon(),
+            Ui("action-tiles", "ramp"),
+            () => ChooseConstructionMaterial(ConstructionMaterialGroup.Ramp));
+        _terrainPlanningMenu.AddRootSpacer();
+
+        RegisterShortcutAction(
+            GameShortcutId.BuildStoneWall,
+            () => ChooseConstructionMaterial(ConstructionMaterialGroup.Wall));
+    }
+
+    private void CreateWorkOrderMenus()
+    {
+        _workPlanningMenu = new WorldPlanningMenuController(
+            this,
+            _workMenu,
+            _workMenuGrid,
+            CreateTextureTileButton,
+            menu => ShowToolbarMenu(menu, "Work"));
+    }
+
+    private void CreateWorkOrderTools()
+    {
+        void Add(
+            Texture2D icon,
+            string tooltipKey,
+            Action action,
+            GameShortcutId? shortcut = null) => _workPlanningMenu.AddRootTool(
+                icon, Ui("action-tiles", tooltipKey), action, shortcut);
+
+        Add(CreateGatherIcon(ItemIcon.Food), "gather-food",
+            () => SelectWorkMode((long)WorkMode.GatherFood), GameShortcutId.GatherFood);
+        Add(CreateGatherIcon(ItemIcon.Reeds), "gather-reeds",
+            () => SelectWorkMode((long)WorkMode.GatherReeds), GameShortcutId.GatherReeds);
+        Add(CreateGatherIcon(UiIcons.CreateTexture(_iconAtlas, UiIcon.GatherBrushwood)),
+            "gather-brushwood", () => SelectWorkMode((long)WorkMode.GatherBrushwood),
+            GameShortcutId.GatherBrushwood);
+        Add(CreateGatherIcon(ItemIcon.Stone), "gather-stone",
+            () => SelectWorkMode((long)WorkMode.GatherStone), GameShortcutId.GatherStone);
+
+        Add(UiIcons.CreateTexture(_iconAtlas, UiIcon.UprootBush),
+            "uproot-bushes", () => SelectWorkMode((long)WorkMode.UprootBerryBushes),
+            GameShortcutId.UprootBushes);
+        Add(ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.WoodenAxe),
+            "fell-trees", () => SelectWorkMode((long)WorkMode.FellTrees),
+            GameShortcutId.FellTrees);
+        Add(
+            CreateBadgedIcon(_pickaxeIcon, ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone)),
+            "quarry-boulders", () => SelectWorkMode((long)WorkMode.QuarryBoulders),
+            GameShortcutId.QuarryBoulders);
+        _workPlanningMenu.AddRootSpacer();
+
+        Add(PlanningToolIcons.CreateHuntDesignationIcon(CreateSlingIcon()), "hunt-animals",
+            () => SelectWorkMode((long)WorkMode.HuntAnimals), GameShortcutId.HuntAnimals);
+        Add(_commandingHandIcon, "attack-area",
+            () => SelectUnitOrderMode(UnitOrderMode.AttackArea), GameShortcutId.AttackArea);
+        Add(PlanningToolIcons.CreateHuntAreaIcon(CreateSlingIcon()), "hunt-area",
+            () => SelectUnitOrderMode(UnitOrderMode.HuntArea), GameShortcutId.HuntArea);
+        Add(PlanningToolIcons.CreatePatrolIcon(), "patrol",
+            () => SelectUnitOrderMode(UnitOrderMode.Patrol), GameShortcutId.Patrol);
+
+        Add(PlanningToolIcons.CreateScoutIcon(), "scout",
+            () => SelectWorkMode((long)WorkMode.Scout), GameShortcutId.Scout);
+        Add(CreateCleanBloodIcon(), "clean-blood",
+            () => SelectWorkMode((long)WorkMode.CleanBlood), GameShortcutId.CleanBlood);
+        Add(UiIcons.CreateTexture(_iconAtlas, UiIcon.ClearOrders),
+            "clear-orders", () => SelectWorkMode((long)WorkMode.Clear),
+            GameShortcutId.ClearOrders);
+        _workPlanningMenu.AddRootSpacer();
     }
 
     private void ShowManagementMenu() => ShowToolbarMenu(_managementMenu, "Management");
@@ -2087,37 +2146,105 @@ public partial class Main : Node
         _constructionMaterialMenu.IdPressed += id =>
         {
             _selectedConstructionMaterial = (ResourceVariant)(int)id;
-            SelectBuildMode((long)_pendingMaterialBuildMode);
+            _sessionPreferences.SetConstructionMaterial(
+                _pendingMaterialGroup.ToString(),
+                _selectedConstructionMaterial);
+            SelectBuildMode((long)ResolveMaterialBuildMode(
+                _pendingMaterialGroup,
+                _selectedConstructionMaterial));
         };
         AddChild(_constructionMaterialMenu);
     }
 
-    private void ChooseConstructionMaterial(BuildMode mode, MaterialType materialType)
+    private void ChooseConstructionMaterial(ConstructionMaterialGroup group)
     {
-        _pendingMaterialBuildMode = mode;
+        _pendingMaterialGroup = group;
         _constructionMaterialMenu.Clear();
         var snapshot = _latestSnapshot;
-        foreach (var material in MaterialCatalog.Supporting(MaterialUse.Construction)
-                     .Where(material => material.MaterialType == materialType &&
-                         material.Variant is not null)
-                     .OrderBy(material => DescribeResourceVariant(material.Variant!.Value),
-                         StringComparer.CurrentCulture))
+        var allowedTypes = group switch
         {
-            var variant = material.Variant!.Value;
-            var storedQuantity = snapshot.ItemStacks
-                .Where(stack => stack.Location.Kind == ItemLocationKind.StorageZone &&
-                    stack.Resource == material.ResourceKind &&
-                    stack.Variant == variant)
-                .Sum(stack => stack.Quantity);
-            _constructionMaterialMenu.AddItem(
-                $"{DescribeResourceVariant(variant)} ({storedQuantity})",
-                (int)variant);
+            ConstructionMaterialGroup.Walkway or ConstructionMaterialGroup.Door =>
+                new[] { MaterialType.Wood },
+            ConstructionMaterialGroup.StoneWalkway => new[] { MaterialType.Stone },
+            _ => new[] { MaterialType.Wood, MaterialType.Stone },
+        };
+        var options = MaterialCatalog.Supporting(MaterialUse.Construction)
+            .Where(material => allowedTypes.Contains(material.MaterialType) &&
+                material.Variant is not null)
+            .Select(material => new
+            {
+                Material = material,
+                Variant = material.Variant!.Value,
+                StoredQuantity = snapshot.ItemStacks
+                    .Where(stack => stack.Location.Kind == ItemLocationKind.StorageZone &&
+                        stack.Resource == material.ResourceKind &&
+                        stack.Variant == material.Variant.Value)
+                    .Sum(stack => stack.Quantity),
+            })
+            .OrderBy(item => DescribeResourceVariant(item.Variant),
+                StringComparer.CurrentCulture)
+            .ToArray();
+        if (options.Length == 0)
+        {
+            _inspector.Text = Ui("construction-feedback", "no-construction-materials");
+            return;
         }
+
+        var selected = _sessionPreferences.TryGetConstructionMaterial(
+                group.ToString(), out var remembered) &&
+            options.Any(item => item.Variant == remembered)
+                ? remembered
+                : options.OrderByDescending(item => item.StoredQuantity)
+                    .ThenBy(item => DescribeResourceVariant(item.Variant),
+                        StringComparer.CurrentCulture)
+                    .First().Variant;
+        _selectedConstructionMaterial = selected;
+        foreach (var option in options)
+        {
+            _constructionMaterialMenu.AddItem(
+                UiFormat(
+                    "material-selection",
+                    "option",
+                    DescribeResourceVariant(option.Variant),
+                    option.StoredQuantity),
+                (int)option.Variant);
+            var index = _constructionMaterialMenu.ItemCount - 1;
+            _constructionMaterialMenu.SetItemAsRadioCheckable(index, true);
+            _constructionMaterialMenu.SetItemChecked(index, option.Variant == selected);
+        }
+
+        SelectBuildMode((long)ResolveMaterialBuildMode(group, selected));
 
         _constructionMaterialMenu.Position = new Vector2I(
             Mathf.RoundToInt(GetViewport().GetMousePosition().X),
             Mathf.RoundToInt(GetViewport().GetMousePosition().Y));
         _constructionMaterialMenu.Popup();
+    }
+
+    private static BuildMode ResolveMaterialBuildMode(
+        ConstructionMaterialGroup group,
+        ResourceVariant variant)
+    {
+        var materialType = MaterialCatalog.Get(variant).MaterialType;
+        return (group, materialType) switch
+        {
+            (ConstructionMaterialGroup.Walkway, MaterialType.Wood) => BuildMode.Walkway,
+            (ConstructionMaterialGroup.StoneWalkway, MaterialType.Stone) =>
+                BuildMode.BasaltWalkway,
+            (ConstructionMaterialGroup.Wall, MaterialType.Wood) => BuildMode.WoodenWall,
+            (ConstructionMaterialGroup.Wall, MaterialType.Stone) => BuildMode.StoneWall,
+            (ConstructionMaterialGroup.Floor, MaterialType.Wood) => BuildMode.WoodenFloor,
+            (ConstructionMaterialGroup.Floor, MaterialType.Stone) => BuildMode.StoneFloor,
+            (ConstructionMaterialGroup.Ramp, MaterialType.Wood) => BuildMode.WoodenRamp,
+            (ConstructionMaterialGroup.Ramp, MaterialType.Stone) => BuildMode.StoneRamp,
+            (ConstructionMaterialGroup.DoorFrame, MaterialType.Wood) =>
+                BuildMode.WoodenDoorFrame,
+            (ConstructionMaterialGroup.DoorFrame, MaterialType.Stone) =>
+                BuildMode.StoneDoorFrame,
+            (ConstructionMaterialGroup.Door, MaterialType.Wood) => BuildMode.WoodenDoor,
+            _ => throw new InvalidOperationException(
+                $"Material '{variant}' cannot be used for '{group}'."),
+        };
     }
 
     private void UpdateUnitOrderMenuLabels()
@@ -2383,8 +2510,12 @@ public partial class Main : Node
     {
         foreach (var candidate in new[]
                  {
-                     _managementMenu, _buildMenu, _workMenu, _statisticsMenu,
-                 }.Concat(_buildCategoryMenus.Values.Select(category => category.Menu)))
+                     _managementMenu, _buildMenu, _advancedBuildMenu, _terrainMenu,
+                     _workMenu, _statisticsMenu,
+                 }.Concat(_constructionPlanningMenu.Submenus)
+                 .Concat(_advancedConstructionPlanningMenu.Submenus)
+                 .Concat(_terrainPlanningMenu.Submenus)
+                 .Concat(_workPlanningMenu.Submenus))
         {
             if (candidate != menu)
             {
@@ -2445,7 +2576,7 @@ public partial class Main : Node
         RegisterShortcutTile(shortcut, button, tooltip);
     }
 
-    private void CreateTextureTileButton(
+    private Button CreateTextureTileButton(
         GridContainer grid,
         PopupPanel menu,
         Texture2D texture,
@@ -2469,6 +2600,7 @@ public partial class Main : Node
         grid.AddChild(button);
         RegisterShortcutAction(shortcut, action);
         RegisterShortcutTile(shortcut, button, tooltip);
+        return button;
     }
 
     private Texture2D CreateStorageIcon(ItemIcon item) => CreateCompositeIcon(
@@ -2481,9 +2613,11 @@ public partial class Main : Node
             UiIcons.CreateTexture(_iconAtlas, action),
             ItemIcons.CreateTexture(_itemIconAtlas, item));
 
-    private Texture2D CreateGatherIcon(ItemIcon item) => CreateBadgedIcon(
-        ItemIcons.CreateTexture(_itemIconAtlas, item),
-        CreateGatherBadgeIcon());
+    private Texture2D CreateGatherIcon(ItemIcon item) =>
+        CreateGatherIcon(ItemIcons.CreateTexture(_itemIconAtlas, item));
+
+    private static Texture2D CreateGatherIcon(Texture2D resource) =>
+        CreateBadgedIcon(resource, CreateGatherBadgeIcon());
 
     private static Texture2D CreateBadgedIcon(Texture2D foundation, Texture2D badge) =>
         CreateCompositeIcon(foundation, badge, new Rect2I(36, 36, 27, 27));
@@ -2525,8 +2659,8 @@ public partial class Main : Node
         const string svg = """
             <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
               <circle cx="16" cy="16" r="14" fill="#315b35" stroke="#f2d889" stroke-width="2"/>
-              <path d="M16 6 V18 M11 13 L16 19 L21 13" fill="none" stroke="#f7edc0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M8 22 H24 L22 27 H10 Z" fill="#9b6532" stroke="#f2d889" stroke-width="2" stroke-linejoin="round"/>
+              <path d="M16 25 V9 M9 16 L16 9 L23 16" fill="none" stroke="#f7edc0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M7 26 H25" stroke="#d09a52" stroke-width="3" stroke-linecap="round"/>
             </svg>
             """;
         return CreateSvgIcon(svg, "gathering badge");
@@ -2795,7 +2929,9 @@ public partial class Main : Node
             BuildMode.StorageArea => Ui("build-prompts", "storage-area"),
             BuildMode.Walkway => UiFormat(
                 "build-prompts", "walkway", DescribeResourceVariant(_selectedConstructionMaterial)),
-            BuildMode.BasaltWalkway => Ui("build-prompts", "basalt-walkway"),
+            BuildMode.BasaltWalkway => UiFormat(
+                "build-prompts", "basalt-walkway",
+                DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.FieldCamp => Ui("build-prompts", "field-camp"),
             BuildMode.GoblinHut => UiFormat(
                 "build-prompts", "goblin-hut", SimulationDefinitions.GoblinHutCapacity),
@@ -2811,9 +2947,15 @@ public partial class Main : Node
                 "build-prompts", "wooden-ramp", DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.StoneRamp => UiFormat(
                 "build-prompts", "stone-ramp", DescribeResourceVariant(_selectedConstructionMaterial)),
-            BuildMode.WoodenDoorFrame => Ui("build-prompts", "wooden-door-frame"),
-            BuildMode.StoneDoorFrame => Ui("build-prompts", "stone-door-frame"),
-            BuildMode.WoodenDoor => Ui("build-prompts", "wooden-door"),
+            BuildMode.WoodenDoorFrame => UiFormat(
+                "build-prompts", "wooden-door-frame",
+                DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.StoneDoorFrame => UiFormat(
+                "build-prompts", "stone-door-frame",
+                DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.WoodenDoor => UiFormat(
+                "build-prompts", "wooden-door",
+                DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.WallTorch => Ui("build-prompts", "wall-torch"),
             BuildMode.PrimitiveWorkshop => Ui("build-prompts", "primitive-workshop"),
             BuildMode.Bloomery => Ui("build-prompts", "bloomery"),
@@ -2866,34 +3008,10 @@ public partial class Main : Node
             return;
         }
 
-        if (_buildMode is BuildMode.FoodStorage or BuildMode.WoodStorage or
-            BuildMode.StoneStorage or BuildMode.EquipmentStorage or BuildMode.MaterialsStorage or
-            BuildMode.WaterBarrel or BuildMode.WoodenBox or BuildMode.WoodenChest or
-            BuildMode.WoodenBulkBin)
+        if (IsSmallStorageBuildMode(_buildMode))
         {
-            var resource = _buildMode switch
-            {
-                BuildMode.FoodStorage => ResourceKind.Food,
-                BuildMode.WoodStorage => ResourceKind.Wood,
-                BuildMode.StoneStorage => ResourceKind.Stone,
-                BuildMode.EquipmentStorage => ResourceKind.Equipment,
-                BuildMode.MaterialsStorage => ResourceKind.Materials,
-                BuildMode.WaterBarrel => ResourceKind.Water,
-                BuildMode.WoodenBox or BuildMode.WoodenChest or BuildMode.WoodenBulkBin =>
-                    ResourceKind.Any,
-                _ => throw new InvalidOperationException(),
-            };
-            CreateStorage(
-                cell,
-                resource,
-                _buildMode switch
-                {
-                    BuildMode.WaterBarrel => StorageProviderKind.WaterBarrel,
-                    BuildMode.WoodenBox => StorageProviderKind.WoodenBox,
-                    BuildMode.WoodenChest => StorageProviderKind.WoodenChest,
-                    BuildMode.WoodenBulkBin => StorageProviderKind.WoodenBulkBin,
-                    _ => StorageProviderKind.OpenPile,
-                });
+            _linearBuildStart = cell;
+            _isDraggingLinearBuild = true;
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -2938,9 +3056,11 @@ public partial class Main : Node
             var command = _buildMode switch
             {
                 BuildMode.WoodenDoorFrame => SimulationCommand.BuildWoodenDoorFrame(
-                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                    _engine.CurrentTick.Next(), _commandSequence++, cell,
+                    _selectedConstructionMaterial),
                 BuildMode.StoneDoorFrame => SimulationCommand.BuildStoneDoorFrame(
-                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                    _engine.CurrentTick.Next(), _commandSequence++, cell,
+                    _selectedConstructionMaterial),
                 BuildMode.WallTorch => SimulationCommand.BuildWallTorch(
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
                 BuildMode.PrimitiveWorkshop => SimulationCommand.BuildPrimitiveWorkshop(
@@ -2954,7 +3074,8 @@ public partial class Main : Node
                     _engine.CurrentTick.Next(), _commandSequence++, cell,
                     WorkshopKind.CrucibleFurnace),
                 _ => SimulationCommand.BuildWoodenDoor(
-                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                    _engine.CurrentTick.Next(), _commandSequence++, cell,
+                    _selectedConstructionMaterial),
             };
             _engine.QueueCommand(command);
             _inspector.Text = _buildMode switch
@@ -3022,9 +3143,32 @@ public partial class Main : Node
         }
 
         var cells = _buildMode is BuildMode.StorageArea or BuildMode.WoodenFloor or
-                BuildMode.StoneFloor
+                BuildMode.StoneFloor || IsSmallStorageBuildMode(_buildMode)
             ? GetAreaCells(_linearBuildStart, end)
             : SimulationCommand.GetLinearCells(_linearBuildStart, end);
+        if (IsSmallStorageBuildMode(_buildMode))
+        {
+            if (cells.Count > 64 || cells.Any(cell =>
+                    !IsBuildableLayerCell(cell) ||
+                    !_engine.Visibility.Get(cell).IsDiscovered()))
+            {
+                _inspector.Text = Ui("construction-feedback", "storage-batch-invalid");
+                UpdateBuildPreview(screenPosition);
+                return;
+            }
+
+            var orderedCount = cells.Count(CreateSelectedStorage);
+            if (orderedCount == 0)
+            {
+                _inspector.Text = Ui("construction-feedback", "storage-batch-invalid");
+                UpdateBuildPreview(screenPosition);
+                return;
+            }
+            _inspector.Text = UiFormat(
+                "construction-feedback", "storage-batch-ordered", orderedCount);
+            UpdateBuildPreview(screenPosition);
+            return;
+        }
         if (_buildMode is BuildMode.StorageArea or BuildMode.WoodenFloor or
                 BuildMode.StoneFloor && cells.Count > 256)
         {
@@ -3067,7 +3211,8 @@ public partial class Main : Node
                 _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end,
                 _selectedConstructionMaterial),
             BuildMode.BasaltWalkway => SimulationCommand.BuildBasaltWalkway(
-                _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end),
+                _engine.CurrentTick.Next(), _commandSequence++, _linearBuildStart, end,
+                _selectedConstructionMaterial),
             BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
                 SimulationCommand.ResizeStorageArea(
                     _engine.CurrentTick.Next(),
@@ -3095,7 +3240,8 @@ public partial class Main : Node
                 UiFormat("construction-feedback", "stone-floor-ordered", cells.Count,
                     DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.BasaltWalkway =>
-                UiFormat("construction-feedback", "basalt-walkway-ordered", cells.Count),
+                UiFormat("construction-feedback", "basalt-walkway-ordered", cells.Count,
+                    DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
                 UiFormat("construction-feedback", "storage-resize-ordered",
                     _resizingStorageAreaId, cells.Count),
@@ -3123,6 +3269,8 @@ public partial class Main : Node
                 SimulationCommand.GetLinearCells(_linearBuildStart, cell),
             BuildMode.StorageArea when _isDraggingLinearBuild =>
                 GetAreaCells(_linearBuildStart, cell),
+            _ when IsSmallStorageBuildMode(_buildMode) && _isDraggingLinearBuild =>
+                GetAreaCells(_linearBuildStart, cell),
             BuildMode.WoodenFloor or BuildMode.StoneFloor when _isDraggingLinearBuild =>
                 GetAreaCells(_linearBuildStart, cell),
             BuildMode.FieldCamp => GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
@@ -3145,7 +3293,8 @@ public partial class Main : Node
                     UiFormat("construction-feedback", "stone-floor-preview", cells.Count,
                         DescribeResourceVariant(_selectedConstructionMaterial)),
                 BuildMode.BasaltWalkway =>
-                    UiFormat("construction-feedback", "basalt-walkway-preview", cells.Count),
+                    UiFormat("construction-feedback", "basalt-walkway-preview", cells.Count,
+                        DescribeResourceVariant(_selectedConstructionMaterial)),
                 BuildMode.Walkway when ContainsLava(cells) =>
                     Ui("construction-feedback", "walkway-lava-preview"),
                 BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
@@ -3173,7 +3322,9 @@ public partial class Main : Node
     }
 
     private bool IsConstructionPreviewValid(IReadOnlyList<GridPosition> cells) =>
-        cells.Count > 0 && (_buildMode == BuildMode.StorageArea
+        cells.Count > 0 && (IsSmallStorageBuildMode(_buildMode)
+            ? cells.Count <= 64 && cells.All(IsDiscoveredConstructionCell)
+            : _buildMode == BuildMode.StorageArea
             ? IsStorageAreaPreviewValid(cells)
             : _buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp
                 ? cells.Count == 1 && IsDiscoveredConstructionCell(cells[0]) &&
@@ -3183,6 +3334,38 @@ public partial class Main : Node
                 BuildMode.WoodenFloor or BuildMode.StoneFloor
                 ? IsLinearConstructionPlacementValid(cells)
                 : cells.All(IsDiscoveredConstructionCell));
+
+    private static bool IsSmallStorageBuildMode(BuildMode mode) => mode is
+        BuildMode.FoodStorage or BuildMode.WoodStorage or BuildMode.StoneStorage or
+        BuildMode.EquipmentStorage or BuildMode.MaterialsStorage or BuildMode.WaterBarrel or
+        BuildMode.WoodenBox or BuildMode.WoodenChest or BuildMode.WoodenBulkBin;
+
+    private bool CreateSelectedStorage(GridPosition cell)
+    {
+        var resource = _buildMode switch
+        {
+            BuildMode.FoodStorage => ResourceKind.Food,
+            BuildMode.WoodStorage => ResourceKind.Wood,
+            BuildMode.StoneStorage => ResourceKind.Stone,
+            BuildMode.EquipmentStorage => ResourceKind.Equipment,
+            BuildMode.MaterialsStorage => ResourceKind.Materials,
+            BuildMode.WaterBarrel => ResourceKind.Water,
+            BuildMode.WoodenBox or BuildMode.WoodenChest or BuildMode.WoodenBulkBin =>
+                ResourceKind.Any,
+            _ => throw new InvalidOperationException(),
+        };
+        return CreateStorage(
+            cell,
+            resource,
+            _buildMode switch
+            {
+                BuildMode.WaterBarrel => StorageProviderKind.WaterBarrel,
+                BuildMode.WoodenBox => StorageProviderKind.WoodenBox,
+                BuildMode.WoodenChest => StorageProviderKind.WoodenChest,
+                BuildMode.WoodenBulkBin => StorageProviderKind.WoodenBulkBin,
+                _ => StorageProviderKind.OpenPile,
+            });
+    }
 
     private string DescribeRampDirection(GridPosition lower, GridPosition upper) =>
         (upper.X - lower.X, upper.Y - lower.Y) switch
@@ -3365,7 +3548,15 @@ public partial class Main : Node
         }
 
         var executeAt = _engine.CurrentTick.Next();
-        var command = _workMode switch
+        var designationKind = ToDesignationKind(_workMode);
+        var command = TerrainModificationCatalog.TryGet(designationKind, out var terrain)
+            ? TerrainModificationCommandFactory.CreateDesignation(
+                terrain,
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end)
+            : _workMode switch
         {
             WorkMode.GatherFood => SimulationCommand.DesignateWork(
                 executeAt,
@@ -3407,19 +3598,6 @@ public partial class Main : Node
                 _commandSequence++,
                 _workAreaStart,
                 end),
-            WorkMode.MineRock => SimulationCommand.DesignateRockMining(
-                executeAt,
-                _commandSequence++,
-                _workAreaStart,
-                end),
-            WorkMode.CarveRampDown => SimulationCommand.DesignateRampDown(
-                executeAt,
-                _commandSequence++,
-                _workAreaStart),
-            WorkMode.CarveRampUp => SimulationCommand.DesignateRampUp(
-                executeAt,
-                _commandSequence++,
-                _workAreaStart),
             WorkMode.HuntAnimals => SimulationCommand.DesignateAnimalHunting(
                 executeAt,
                 _commandSequence++,
@@ -3652,7 +3830,7 @@ public partial class Main : Node
         return cells;
     }
 
-    private void CreateStorage(
+    private bool CreateStorage(
         GridPosition cell,
         ResourceKind resource,
         StorageProviderKind providerKind = StorageProviderKind.OpenPile)
@@ -3664,17 +3842,17 @@ public partial class Main : Node
         if (!discovered)
         {
             _inspector.Text = UiFormat("construction-feedback", "storage-undiscovered", cell);
-            return;
+            return false;
         }
         if (cell.Z < 0 && _engine.World.IsSolidCaveRock(cell))
         {
             _inspector.Text = UiFormat("construction-feedback", "storage-cave-wall", cell);
-            return;
+            return false;
         }
         if (!terrainAvailable)
         {
             _inspector.Text = UiFormat("construction-feedback", "storage-blocked", cell);
-            return;
+            return false;
         }
 
         var command = providerKind switch
@@ -3719,6 +3897,7 @@ public partial class Main : Node
                 Ui("storage-resources", resource.ToString()), capacity)
             : UiFormat("construction-feedback", "container-ordered", cell,
                 Ui("storage-providers", providerKind.ToString()), capacity);
+        return true;
     }
 
     private void HandleEvents(
@@ -4518,106 +4697,8 @@ public partial class Main : Node
             $"{_engine.Definitions.HumanVillageEconomy.CropGrowthDays} dni";
     }
 
-    private static string DescribeJob(ActorJobSnapshot job) => job.Kind switch
-    {
-        ActorJobKind.Forage when job.Phase == ActorJobPhase.Traveling => $"idzie po żywność → {job.Target}",
-        ActorJobKind.Forage when job.Phase == ActorJobPhase.Working => $"zbiera ({job.RemainingWorkTicks})",
-        ActorJobKind.Haul when job.Stage == ActorJobStage.Collecting && job.Phase == ActorJobPhase.Traveling =>
-            $"idzie po ładunek ×{job.ReservedQuantity}",
-        ActorJobKind.Haul when job.Stage == ActorJobStage.Collecting =>
-            $"ładuje ×{job.ReservedQuantity} ({job.RemainingWorkTicks})",
-        ActorJobKind.Haul when job.Stage == ActorJobStage.Delivering && job.Phase == ActorJobPhase.Traveling =>
-            $"niesie ×{job.ReservedQuantity}",
-        ActorJobKind.Haul when job.Stage == ActorJobStage.Delivering =>
-            $"rozładowuje ×{job.ReservedQuantity} ({job.RemainingWorkTicks})",
-        ActorJobKind.SupplyConstruction when job.Stage == ActorJobStage.Collecting &&
-            job.Phase == ActorJobPhase.Traveling => $"idzie po materiał budowlany ×{job.ReservedQuantity}",
-        ActorJobKind.SupplyConstruction when job.Stage == ActorJobStage.Collecting =>
-            $"pobiera materiał budowlany ×{job.ReservedQuantity} ({job.RemainingWorkTicks})",
-        ActorJobKind.SupplyConstruction when job.Phase == ActorJobPhase.Traveling =>
-            $"niesie materiał na budowę ×{job.ReservedQuantity}",
-        ActorJobKind.SupplyConstruction =>
-            $"składa materiał na budowie ({job.RemainingWorkTicks})",
-        ActorJobKind.BuildConstruction when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie budować → {job.Target}",
-        ActorJobKind.BuildConstruction => $"buduje ({job.RemainingWorkTicks})",
-        ActorJobKind.SupplyCrafting when job.Stage == ActorJobStage.Collecting &&
-            job.Phase == ActorJobPhase.Traveling =>
-            $"idzie po składnik do warsztatu ×{job.ReservedQuantity}",
-        ActorJobKind.SupplyCrafting when job.Stage == ActorJobStage.Collecting =>
-            $"pobiera składnik ×{job.ReservedQuantity}",
-        ActorJobKind.SupplyCrafting when job.Phase == ActorJobPhase.Traveling =>
-            $"niesie składnik do warsztatu ×{job.ReservedQuantity}",
-        ActorJobKind.SupplyCrafting => $"odkłada składnik ({job.RemainingWorkTicks})",
-        ActorJobKind.Craft when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie do warsztatu → {job.Target}",
-        ActorJobKind.Craft => $"wytwarza przedmiot ({job.RemainingWorkTicks})",
-        ActorJobKind.ClearConstructionSite when job.Stage == ActorJobStage.Collecting &&
-            job.Phase == ActorJobPhase.Traveling => "idzie uprzątnąć plac budowy",
-        ActorJobKind.ClearConstructionSite when job.Stage == ActorJobStage.Collecting =>
-            $"podnosi przeszkodę ({job.RemainingWorkTicks})",
-        ActorJobKind.ClearConstructionSite when job.Phase == ActorJobPhase.Traveling =>
-            $"wynosi przedmiot z placu ×{job.ReservedQuantity}",
-        ActorJobKind.ClearConstructionSite =>
-            $"odkłada przedmiot z placu ({job.RemainingWorkTicks})",
-        ActorJobKind.Rest when job.Phase == ActorJobPhase.Traveling => $"idzie odpocząć → {job.Target}",
-        ActorJobKind.Rest => $"odpoczywa ({job.RemainingWorkTicks})",
-        ActorJobKind.Collapsed => $"padł ze zmęczenia i śpi na ziemi ({job.RemainingWorkTicks})",
-        ActorJobKind.Eat when job.Phase == ActorJobPhase.Traveling => $"idzie coś zjeść → {job.Target}",
-        ActorJobKind.Eat => $"je ({job.RemainingWorkTicks})",
-        ActorJobKind.Explore => $"odkrywa teren → {job.Target}",
-        ActorJobKind.Move => $"wykonuje rozkaz marszu → {job.Target}",
-        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningFood &&
-            job.Phase == ActorJobPhase.Traveling => $"idzie po prowiant → {job.Target}",
-        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningFood =>
-            $"pakuje rację żywności ({job.RemainingWorkTicks})",
-        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningWater &&
-            job.Phase == ActorJobPhase.Traveling => $"idzie napełnić wodę → {job.Target}",
-        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningWater =>
-            $"napełnia bukłak ({job.RemainingWorkTicks})",
-        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningAmmo &&
-            job.Phase == ActorJobPhase.Traveling => $"idzie po kamienie do rzucania → {job.Target}",
-        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningAmmo =>
-            $"pakuje kamienie ×{job.ReservedQuantity} ({job.RemainingWorkTicks})",
-        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningEquipment &&
-            job.Phase == ActorJobPhase.Traveling => $"idzie po sprzęt → {job.Target}",
-        ActorJobKind.Resupply when job.Stage == ActorJobStage.ProvisioningEquipment =>
-            $"pobiera sprzęt ({job.RemainingWorkTicks})",
-        ActorJobKind.ClearVegetation when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie wykarczować krzak → {job.Target}",
-        ActorJobKind.ClearVegetation => $"karczuje krzak ({job.RemainingWorkTicks})",
-        ActorJobKind.FellTree when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie do wyrębu → {job.Target}",
-        ActorJobKind.FellTree => $"rąbie drzewo lub pień ({job.RemainingWorkTicks})",
-        ActorJobKind.QuarryBoulder when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie rozbić głaz → {job.Target}",
-        ActorJobKind.QuarryBoulder => $"rozbija głaz kilofem ({job.RemainingWorkTicks})",
-        ActorJobKind.MineRock when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie kopać w skale → {job.Target}",
-        ActorJobKind.MineRock => $"kopie w skale ({job.RemainingWorkTicks})",
-        ActorJobKind.CarveRamp when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie wykopać pochylnię → {job.Target}",
-        ActorJobKind.CarveRamp => $"wykuwa pochylnię ({job.RemainingWorkTicks})",
-        ActorJobKind.TendBud when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie opiekować się pąkiem → {job.Target}",
-        ActorJobKind.TendBud => $"dogląda pąka ({job.RemainingWorkTicks})",
-        ActorJobKind.HuntAnimal when job.Phase == ActorJobPhase.Traveling =>
-            $"ściga zwierzę → {job.Target}",
-        ActorJobKind.HuntAnimal => $"poluje ({job.RemainingWorkTicks})",
-        ActorJobKind.CleanBlood when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie zmyć krew → {job.Target}",
-        ActorJobKind.CleanBlood => $"szoruje podłogę ({job.RemainingWorkTicks})",
-        ActorJobKind.LootRaid when job.Stage == ActorJobStage.Collecting =>
-            $"idzie po łupy → {job.Target}",
-        ActorJobKind.LootRaid => $"odnosi łupy do obozu → {job.Target}",
-        ActorJobKind.RecoverRaidCorpse when job.Stage == ActorJobStage.Collecting =>
-            $"idzie po zwłoki → {job.Target}",
-        ActorJobKind.RecoverRaidCorpse => $"niesie zwłoki do obozu → {job.Target}",
-        ActorJobKind.ConsumeRaidCorpse when job.Phase == ActorJobPhase.Traveling =>
-            $"idzie pożreć zwłoki → {job.Target}",
-        ActorJobKind.ConsumeRaidCorpse => $"pożera zwłoki ({job.RemainingWorkTicks})",
-        _ => "bez zadania",
-    };
+    private static string DescribeJob(ActorJobSnapshot job) =>
+        ActorJobTextPresenter.Describe(_currentLocale, job);
 
     private string DescribeConstructionSite(ConstructionSiteSnapshot site)
     {
@@ -5129,32 +5210,8 @@ public partial class Main : Node
         _ => "stan nieznany",
     };
 
-    private static string DescribeAnimal(AnimalSnapshot animal)
-    {
-        var name = animal.Kind switch
-        {
-            AnimalKind.MarshHare => "zając bagienny",
-            AnimalKind.SwampBoar => "dzik bagienny",
-            AnimalKind.CaveSpider => "pająk jaskiniowy",
-            AnimalKind.DeepCrawler => "głębinowiec",
-            AnimalKind.MagmaWyrm => "żmija magmowa",
-            _ => "nieznane stworzenie",
-        };
-        var activity = animal.Activity switch
-        {
-            AnimalActivity.Foraging => "żeruje",
-            AnimalActivity.Resting => "odpoczywa",
-            AnimalActivity.Fleeing => "ucieka",
-            AnimalActivity.Threatening => "atakuje",
-            _ => "wędruje",
-        };
-        var sex = animal.Sex == AnimalSex.Female ? "samica" : "samiec";
-        var age = animal.IsAdult ? "dorosły" : "młode";
-        var attackDamage = AnimalCombatPolicy.GetAttackDamage(animal.Kind, animal.Position);
-        var threat = attackDamage > 0 ? $" • atak {attackDamage}" : string.Empty;
-        return $"{name} • {sex} • {age} • {activity} • zdrowie " +
-            $"{animal.Health}/{animal.MaximumHealth}{threat}";
-    }
+    private static string DescribeAnimal(AnimalSnapshot animal) =>
+        AnimalTextPresenter.Describe(_currentLocale, animal);
 
     private void SelectActor(EntityId actorId, bool showDetails = false)
     {

@@ -39,6 +39,33 @@ public sealed class GameSaveStoreTests
     }
 
     [Fact]
+    public void MigratableFormat70SlotEnablesContinue()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"goblin-stronghold-save-store-{Guid.NewGuid():N}");
+        try
+        {
+            var store = CreateStore(directory);
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(
+                store.QuickSavePath,
+                "{\"formatVersion\":70,\"worldSeed\":7,\"currentTick\":100}",
+                Encoding.UTF8);
+
+            Assert.True(store.HasAnySave);
+            Assert.Single(store.LoadLatestProgressFirst());
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void HighestTickWithinMostRecentlyWrittenWorldWins()
     {
         var directory = Path.Combine(

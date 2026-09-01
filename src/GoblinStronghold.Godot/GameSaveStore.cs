@@ -136,7 +136,9 @@ internal sealed class GameSaveStore(string directoryPath, int supportedFormatVer
             var root = document.RootElement;
             if (root.TryGetProperty("formatVersion", out var formatVersion) &&
                 formatVersion.TryGetInt32(out var version) &&
-                version == _supportedFormatVersion &&
+                (version == _supportedFormatVersion ||
+                 _supportedFormatVersion == Simulation.SimulationSaveFormat.CurrentVersion &&
+                 Simulation.SimulationSaveFormat.IsLoadableVersion(version)) &&
                 root.TryGetProperty("worldSeed", out var worldSeed) &&
                 root.TryGetProperty("currentTick", out var currentTick) &&
                 worldSeed.TryGetUInt64(out var seed) &&

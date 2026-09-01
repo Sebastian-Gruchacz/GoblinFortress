@@ -239,6 +239,8 @@ internal sealed class HumanVillageState
                 item.Fatigue is < 0 || item.Fatigue > definitions.HumanVillageNeeds.MaximumFatigue ||
                 item.Hunger is < 0 || item.Hunger > definitions.HumanVillageNeeds.MaximumNeed ||
                 item.Thirst is < 0 || item.Thirst > definitions.HumanVillageNeeds.MaximumNeed ||
+                item.CarriedGrime is < 0 or >
+                    Contamination.SurfaceGrimeState.MaximumCarriedAmount ||
                 item.WorkProgress < 0 ||
                 !world.IsSurfaceTraversable(position) ||
                 Distance(position, world.Baseline.HumanVillage) >
@@ -250,7 +252,10 @@ internal sealed class HumanVillageState
             return new HumanVillagerState(
                 item.Id, item.Role, position, item.Task, item.SkillLevel, item.Tools,
                 item.Health, maximumHealth, item.Fatigue, item.Hunger, item.Thirst,
-                item.WorkProgress);
+                item.WorkProgress)
+            {
+                CarriedGrime = item.CarriedGrime,
+            };
         }).ToList();
         var fields = model.Fields.OrderBy(item => item.Id).Select(item =>
         {
@@ -317,9 +322,11 @@ internal sealed class HumanVillageState
         SimulationTick tick, WorldSeed worldSeed, WorldMapState world,
         NavigationPathService navigation,
         SimulationDefinitions definitions, IReadOnlyList<HumanIntruderSnapshot> intruders,
-        int detectionRadius)
+        int detectionRadius,
+        Func<GridPosition, GridPosition, int, int> trackSurfaceGrime)
     {
         ArgumentNullException.ThrowIfNull(navigation);
+        ArgumentNullException.ThrowIfNull(trackSurfaceGrime);
         var worldChanges = new List<WorldChangeEvent>();
         IReadOnlyList<HumanVillagerDeath> deaths = [];
         var calendar = SimulationCalendar.At(tick, definitions.Clock);
@@ -356,7 +363,8 @@ internal sealed class HumanVillageState
                 definitions.ActorPlanning.MaximumPathExpansionsPerSlice,
                 nearby,
                 calendar.IsNight,
-                worldChanges);
+                worldChanges,
+                trackSurfaceGrime);
         }
         return new HumanVillageUpdateResult(
             wasPeaceful && Hostility > 0,
@@ -423,6 +431,7 @@ internal sealed class HumanVillageState
             Task = item.Task, SkillLevel = item.SkillLevel, Tools = item.Tools,
             Health = item.Health, Fatigue = item.Fatigue,
             Hunger = item.Hunger, Thirst = item.Thirst,
+            CarriedGrime = item.CarriedGrime,
             WorkProgress = item.WorkProgress,
         }).ToList(),
         Fields = _fields.Values.Select(item => new HumanFieldSaveModel
@@ -722,7 +731,8 @@ internal sealed class HumanVillageState
         int maximumPathExpansions,
         IReadOnlyList<HumanIntruderSnapshot> intruders,
         bool isNight,
-        ICollection<WorldChangeEvent> worldChanges)
+        ICollection<WorldChangeEvent> worldChanges,
+        Func<GridPosition, GridPosition, int, int> trackSurfaceGrime)
     {
         var occupied = _villagers.Values.Where(item => item.Health > 0)
             .Select(item => item.Position).ToHashSet();
@@ -739,7 +749,13 @@ internal sealed class HumanVillageState
             var villagerRadius = activityRadius +
                 (villager.Task == HumanCohortTask.GatherBerries ? 4 : 0);
             if (villager.Task == HumanCohortTask.Flee &&
-                TryTakeImmediateFleeStep(villager, intruder, world, occupied, villagerRadius))
+                TryTakeImmediateFleeStep(
+                    villager,
+                    intruder,
+                    world,
+                    occupied,
+                    villagerRadius,
+                    trackSurfaceGrime))
             {
                 villager.Fatigue = Math.Min(
                     _needs.MaximumFatigue,
@@ -766,7 +782,7 @@ internal sealed class HumanVillageState
             if (route is { Count: > 0 } && Distance(route[0], Anchor) <= villagerRadius &&
                 !occupied.Contains(route[0]))
             {
-                villager.Position = route[0];
+                MoveVillager(villager, route[0], trackSurfaceGrime);
                 if (villager.Task != HumanCohortTask.StayNearVillage)
                 {
                     villager.Fatigue = Math.Min(
@@ -785,9 +801,9 @@ internal sealed class HumanVillageState
                     .OrderBy(item => item.Y).ThenBy(item => item.X).ToArray();
                 if (candidates.Length > 0)
                 {
-                    villager.Position = candidates[DeterministicRandom.NextInt(
+                    MoveVillager(villager, candidates[DeterministicRandom.NextInt(
                         worldSeed, RandomDomain.HumanVillage, new EntityId((ulong)villager.Id),
-                        tick, 0, 0, candidates.Length)];
+                        tick, 0, 0, candidates.Length)], trackSurfaceGrime);
                 }
             }
             if (villager.Task == HumanCohortTask.StayNearVillage &&
@@ -897,7 +913,8 @@ internal sealed class HumanVillageState
         HumanIntruderSnapshot intruder,
         WorldMapState world,
         ISet<GridPosition> occupied,
-        int activityRadius)
+        int activityRadius,
+        Func<GridPosition, GridPosition, int, int> trackSurfaceGrime)
     {
         if (intruder.Id == EntityId.None)
         {
@@ -922,8 +939,25 @@ internal sealed class HumanVillageState
             return false;
         }
 
-        villager.Position = next;
+        MoveVillager(villager, next, trackSurfaceGrime);
         return true;
+    }
+
+    private static void MoveVillager(
+        HumanVillagerState villager,
+        GridPosition destination,
+        Func<GridPosition, GridPosition, int, int> trackSurfaceGrime)
+    {
+        if (destination == villager.Position)
+        {
+            return;
+        }
+
+        villager.CarriedGrime = trackSurfaceGrime(
+            villager.Position,
+            destination,
+            villager.CarriedGrime);
+        villager.Position = destination;
     }
 
     private static bool CanWanderWhileWorking(HumanCohortTask task) => task is
@@ -1114,7 +1148,10 @@ internal sealed class HumanVillageState
             item.Hunger,
             item.Thirst,
             _needs.MaximumNeed,
-            item.WorkProgress);
+            item.WorkProgress)
+        {
+            CarriedGrime = item.CarriedGrime,
+        };
     internal static int GetMaximumHealth(
         HumanCohortRole role,
         SimulationDefinitions definitions) => role == HumanCohortRole.Guards
@@ -1319,6 +1356,7 @@ internal sealed class HumanVillageState
         public int Hunger { get; set; } = hunger;
         public int Thirst { get; set; } = thirst;
         public int WorkProgress { get; set; } = workProgress;
+        public int CarriedGrime { get; set; }
     }
 
     private sealed class HumanFieldState(

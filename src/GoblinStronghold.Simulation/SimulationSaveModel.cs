@@ -66,6 +66,8 @@ internal sealed class SimulationSaveModel
 
     public List<BloodStainSaveModel> BloodStains { get; set; } = [];
 
+    public List<SurfaceGrimeSaveModel> SurfaceGrime { get; set; } = [];
+
     public List<GridPositionSaveModel> ExcavatedCaveCells { get; set; } = [];
 
     public List<GridPositionSaveModel> ExcavatedTerrainRamps { get; set; } = [];
@@ -174,6 +176,21 @@ internal sealed class BloodStainSaveModel
     public long LastChangedAtTick { get; set; }
 }
 
+internal sealed class SurfaceGrimeSaveModel
+{
+    public int X { get; set; }
+
+    public int Y { get; set; }
+
+    public int Z { get; set; }
+
+    public int Volume { get; set; }
+
+    public long CreatedAtTick { get; set; }
+
+    public long LastChangedAtTick { get; set; }
+}
+
 internal sealed class VerticalPassageSaveModel
 {
     public int UpperX { get; set; }
@@ -203,6 +220,7 @@ internal sealed class AnimalSaveModel
     public int Health { get; set; }
     public int Hunger { get; set; }
     public int Fatigue { get; set; }
+    public int CarriedGrime { get; set; }
     public long AgeTicks { get; set; }
 }
 
@@ -320,6 +338,8 @@ internal sealed class HumanVillagerSaveModel
     public int Hunger { get; set; }
 
     public int Thirst { get; set; }
+
+    public int CarriedGrime { get; set; }
 
     public int WorkProgress { get; set; }
 }
@@ -448,6 +468,8 @@ internal sealed class ActorSaveModel
     public int PersonalStoneAmmo { get; set; }
 
     public int BloodFootprintSteps { get; set; }
+
+    public int CarriedGrime { get; set; }
 
     public int BleedingTicksRemaining { get; set; }
 

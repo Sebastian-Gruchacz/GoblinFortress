@@ -18,7 +18,8 @@ public sealed partial class SimulationEngine
             Navigation,
             Definitions,
             intruders,
-            detectionRadius);
+            detectionRadius,
+            TrackSurfaceGrime);
         foreach (var worldChange in result.WorldChanges)
         {
             _undeliveredWorldChanges.Add(worldChange);

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\AutonomousHaulingTests.cs" Link="AutonomousHaulingTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\ConstructionRemovalTests.cs" Link="ConstructionRemovalTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\CorpseDirectiveTests.cs" Link="CorpseDirectiveTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\CraftingTests.cs" Link="CraftingTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\FieldCampTests.cs" Link="FieldCampTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\LogisticsManagementTests.cs" Link="LogisticsManagementTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\LogisticsNetworkTests.cs" Link="LogisticsNetworkTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\PhysicalStockTests.cs" Link="PhysicalStockTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\PersonalSupplyTests.cs" Link="PersonalSupplyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\StorageAreaTests.cs" Link="StorageAreaTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\StorageContainerTests.cs" Link="StorageContainerTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\WaterLogisticsTests.cs" Link="WaterLogisticsTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\WorkDispatcherTests.cs" Link="WorkDispatcherTests.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GoblinStronghold.Simulation.TestSupport\GoblinStronghold.Simulation.TestSupport.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\ActiveEatingTests.cs" Link="ActiveEatingTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\ActorJobTests.cs" Link="ActorJobTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\ActorPlanningTests.cs" Link="ActorPlanningTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\AnimalEcologyTests.cs" Link="AnimalEcologyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\BloodCleaningTests.cs" Link="BloodCleaningTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\ContextCommandTests.cs" Link="ContextCommandTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\GameSaveStoreTests.cs" Link="GameSaveStoreTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\GoblinAgingTests.cs" Link="GoblinAgingTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\GoblinReproductionTests.cs" Link="GoblinReproductionTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\HealingTests.cs" Link="HealingTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\HumanCombatTests.cs" Link="HumanCombatTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\HumanVillageTests.cs" Link="HumanVillageTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\MoveCommandTests.cs" Link="MoveCommandTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\RaidAutoAssignmentPolicyTests.cs" Link="RaidAutoAssignmentPolicyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\RaidPreparationPolicyTests.cs" Link="RaidPreparationPolicyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\SaveCompatibilityTests.cs" Link="SaveCompatibilityTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\SimulationCalendarTests.cs" Link="SimulationCalendarTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\SimulationEngineTests.cs" Link="SimulationEngineTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\StarvationTests.cs" Link="StarvationTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\SurvivalNeedTests.cs" Link="SurvivalNeedTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\TacticalOrderTests.cs" Link="TacticalOrderTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\UndergroundFactionTests.cs" Link="UndergroundFactionTests.cs" />
+    <Compile Include="..\..\src\GoblinStronghold.Godot\GameSaveStore.cs" Link="GodotClient\GameSaveStore.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GoblinStronghold.Simulation.TestSupport\GoblinStronghold.Simulation.TestSupport.csproj" />
+  </ItemGroup>
+</Project>

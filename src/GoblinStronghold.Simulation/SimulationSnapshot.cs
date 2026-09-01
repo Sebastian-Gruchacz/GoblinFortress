@@ -119,6 +119,8 @@ public readonly record struct AnimalSnapshot(
     long MaturityAgeTicks,
     long MaximumAgeTicks)
 {
+    public int CarriedGrime { get; init; }
+
     public bool IsAdult => AgeTicks >= MaturityAgeTicks;
 }
 
@@ -383,7 +385,10 @@ public readonly record struct HumanVillagerSnapshot(
     int Hunger,
     int Thirst,
     int MaximumNeed,
-    int WorkProgress);
+    int WorkProgress)
+{
+    public int CarriedGrime { get; init; }
+}
 
 public sealed class HumanVillageSnapshot
 {
@@ -521,6 +526,7 @@ public sealed class SimulationSnapshot
         PlantPatchSnapshot[] plantPatches,
         WorldObjectSnapshot[] worldObjects,
         BloodStainSnapshot[] bloodStains,
+        Contamination.SurfaceGrimeSnapshot[] surfaceGrime,
         HumanVillageSnapshot humanVillage,
         GoblinRaidPhase raidPhase,
         GridPosition raidRallyPoint,
@@ -564,6 +570,7 @@ public sealed class SimulationSnapshot
         PlantPatches = new ReadOnlyCollection<PlantPatchSnapshot>(plantPatches);
         WorldObjects = new ReadOnlyCollection<WorldObjectSnapshot>(worldObjects);
         BloodStains = new ReadOnlyCollection<BloodStainSnapshot>(bloodStains);
+        SurfaceGrime = new ReadOnlyCollection<Contamination.SurfaceGrimeSnapshot>(surfaceGrime);
         HumanVillage = humanVillage;
         RaidPhase = raidPhase;
         RaidRallyPoint = raidRallyPoint;
@@ -628,6 +635,8 @@ public sealed class SimulationSnapshot
     public IReadOnlyList<WorldObjectSnapshot> WorldObjects { get; }
 
     public IReadOnlyList<BloodStainSnapshot> BloodStains { get; }
+
+    public IReadOnlyList<Contamination.SurfaceGrimeSnapshot> SurfaceGrime { get; }
 
     public HumanVillageSnapshot HumanVillage { get; }
 

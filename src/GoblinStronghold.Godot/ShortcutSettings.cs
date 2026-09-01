@@ -7,6 +7,7 @@ internal enum GameShortcutId
 {
     OpenManagement,
     OpenConstruction,
+    OpenTerrain,
     OpenWork,
     OpenStatistics,
     OpenUnitOrders,
@@ -91,6 +92,7 @@ internal sealed class ShortcutSettings
     [
         new(GameShortcutId.OpenManagement, "Menu główne", "Zarządzanie", null, new(Key.J)),
         new(GameShortcutId.OpenConstruction, "Menu główne", "Konstrukcje", null, new(Key.B)),
+        new(GameShortcutId.OpenTerrain, "Menu główne", "terrain", null, new(Key.T)),
         new(GameShortcutId.OpenWork, "Menu główne", "Prace i obszary", null, new(Key.R)),
         new(GameShortcutId.OpenStatistics, "Menu główne", "Statystyki", null, new(Key.I)),
         new(GameShortcutId.OpenUnitOrders, "Menu główne", "Rozkazy jednostek", null, new(Key.O)),
@@ -109,18 +111,21 @@ internal sealed class ShortcutSettings
         new(GameShortcutId.HuntArea, "Rozkazy jednostek", "Poluj w obszarze", GameShortcutId.OpenUnitOrders, new(Key.H)),
         new(GameShortcutId.Patrol, "Rozkazy jednostek", "Patroluj", GameShortcutId.OpenUnitOrders, new(Key.P)),
 
-        new(GameShortcutId.BuildFoodStorage, "Konstrukcje", "Skład żywności", GameShortcutId.OpenConstruction, new(Key.F)),
-        new(GameShortcutId.BuildWoodStorage, "Konstrukcje", "Skład drewna", GameShortcutId.OpenConstruction, new(Key.D)),
-        new(GameShortcutId.BuildStoneStorage, "Konstrukcje", "Skład kamienia", GameShortcutId.OpenConstruction, new(Key.K)),
-        new(GameShortcutId.BuildEquipmentStorage, "Konstrukcje", "Skład sprzętu", GameShortcutId.OpenConstruction, new(Key.E)),
-        new(GameShortcutId.BuildMaterialsStorage, "Konstrukcje", "Skład materiałów", GameShortcutId.OpenConstruction, new(Key.T)),
-        new(GameShortcutId.BuildWalkway, "Konstrukcje", "Pomost", GameShortcutId.OpenConstruction, new(Key.P)),
-        new(GameShortcutId.BuildFieldCamp, "Konstrukcje", "Obóz wypadowy", GameShortcutId.OpenConstruction, new(Key.O)),
-        new(GameShortcutId.BuildGoblinHut, "Konstrukcje", "Chata goblinów", GameShortcutId.OpenConstruction, new(Key.C)),
-        new(GameShortcutId.BuildWoodenWall, "Konstrukcje", "Drewniana ściana", GameShortcutId.OpenConstruction, new(Key.W)),
-        new(GameShortcutId.BuildStoneWall, "Konstrukcje", "Kamienny mur", GameShortcutId.OpenConstruction, new(Key.M)),
-        new(GameShortcutId.BuildWoodenDoor, "Konstrukcje", "Drewniane drzwi", GameShortcutId.OpenConstruction, new(Key.Z)),
-        new(GameShortcutId.BuildPrimitiveWorkshop, "Konstrukcje", "Prymitywny warsztat", GameShortcutId.OpenConstruction, new(Key.N)),
+        new(GameShortcutId.BuildFoodStorage, "world-planning", "Skład żywności", GameShortcutId.OpenConstruction, new(Key.F)),
+        new(GameShortcutId.BuildWoodStorage, "world-planning", "Skład drewna", GameShortcutId.OpenConstruction, new(Key.D)),
+        new(GameShortcutId.BuildStoneStorage, "world-planning", "Skład kamienia", GameShortcutId.OpenConstruction, new(Key.K)),
+        new(GameShortcutId.BuildEquipmentStorage, "world-planning", "Skład sprzętu", GameShortcutId.OpenConstruction, new(Key.E)),
+        new(GameShortcutId.BuildMaterialsStorage, "world-planning", "Skład materiałów", GameShortcutId.OpenConstruction, new(Key.T)),
+        new(GameShortcutId.BuildWalkway, "world-planning", "Pomost", GameShortcutId.OpenConstruction, new(Key.P)),
+        new(GameShortcutId.BuildFieldCamp, "world-planning", "Obóz wypadowy", GameShortcutId.OpenConstruction, new(Key.O)),
+        new(GameShortcutId.BuildGoblinHut, "world-planning", "Chata goblinów", GameShortcutId.OpenConstruction, new(Key.C)),
+        new(GameShortcutId.BuildWoodenWall, "world-planning", "Drewniana ściana", GameShortcutId.OpenConstruction, new(Key.W)),
+        new(GameShortcutId.BuildStoneWall, "world-planning", "Kamienny mur", GameShortcutId.OpenConstruction, new(Key.M)),
+        new(GameShortcutId.BuildWoodenDoor, "world-planning", "Drewniane drzwi", GameShortcutId.OpenConstruction, new(Key.Z)),
+        new(GameShortcutId.BuildPrimitiveWorkshop, "world-planning", "Prymitywny warsztat", GameShortcutId.OpenConstruction, new(Key.N)),
+        new(GameShortcutId.MineRock, "world-planning", "Kop w skale", GameShortcutId.OpenTerrain, new(Key.X)),
+        new(GameShortcutId.CarveRampDown, "world-planning", "Wykop pochylnię w dół", GameShortcutId.OpenTerrain, new(Key.Pagedown)),
+        new(GameShortcutId.CarveRampUp, "world-planning", "Wykop pochylnię w górę", GameShortcutId.OpenTerrain, new(Key.Pageup)),
 
         new(GameShortcutId.GatherFood, "Prace i obszary", "Zbierz żywność", GameShortcutId.OpenWork, new(Key.F)),
         new(GameShortcutId.GatherReeds, "Prace i obszary", "Zbierz sitowie", GameShortcutId.OpenWork, new(Key.T)),
@@ -129,9 +134,6 @@ internal sealed class ShortcutSettings
         new(GameShortcutId.UprootBushes, "Prace i obszary", "Wykarcz krzaki", GameShortcutId.OpenWork, new(Key.C)),
         new(GameShortcutId.FellTrees, "Prace i obszary", "Wyrąb drzew i pni", GameShortcutId.OpenWork, new(Key.W)),
         new(GameShortcutId.QuarryBoulders, "Prace i obszary", "Rozbij głazy", GameShortcutId.OpenWork, new(Key.G)),
-        new(GameShortcutId.MineRock, "Prace i obszary", "Kop w skale", GameShortcutId.OpenWork, new(Key.M)),
-        new(GameShortcutId.CarveRampDown, "Prace i obszary", "Wykop pochylnię w dół", GameShortcutId.OpenWork, new(Key.Pagedown)),
-        new(GameShortcutId.CarveRampUp, "Prace i obszary", "Wykop pochylnię w górę", GameShortcutId.OpenWork, new(Key.Pageup)),
         new(GameShortcutId.HuntAnimals, "Prace i obszary", "Poluj na zwierzęta", GameShortcutId.OpenWork, new(Key.H)),
         new(GameShortcutId.Scout, "Prace i obszary", "Wyznacz zwiad", GameShortcutId.OpenWork, new(Key.S)),
         new(GameShortcutId.CleanBlood, "Prace i obszary", "Zmyj krew", GameShortcutId.OpenWork, new(Key.B)),
@@ -189,6 +191,11 @@ internal sealed class ShortcutSettings
                 _bindings[GameShortcutId.OpenStatistics] == new ShortcutStroke(Key.S))
             {
                 _bindings[GameShortcutId.OpenStatistics] = new ShortcutStroke(Key.I);
+            }
+            if (_bindings[GameShortcutId.MineRock] == new ShortcutStroke(Key.M) &&
+                _bindings[GameShortcutId.BuildStoneWall] == new ShortcutStroke(Key.M))
+            {
+                _bindings[GameShortcutId.MineRock] = new ShortcutStroke(Key.X);
             }
         }
         catch (Exception exception)

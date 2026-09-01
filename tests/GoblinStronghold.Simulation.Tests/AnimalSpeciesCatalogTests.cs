@@ -1,11 +1,13 @@
 using GoblinStronghold.Simulation.Animals;
 using GoblinStronghold.Simulation.ContentPacks;
+using GoblinStronghold.Simulation.Localization;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
 
+[Collection(TranslationCatalogCollection.Name)]
 public sealed class AnimalSpeciesCatalogTests
 {
     [Fact]
@@ -30,6 +32,21 @@ public sealed class AnimalSpeciesCatalogTests
         Assert.Equal(AnimalSpawnMode.MaintainEachDepth, wyrm.Spawn.Mode);
         Assert.Equal("core:underground-fauna", wyrm.Visual.AtlasId!.Value.Value);
         Assert.Equal("#f29a3f", wyrm.Visual.Palette["highlight"]);
+    }
+
+    [Fact]
+    public void EveryCoreAnimalSpeciesHasEnglishAndPolishDisplayNames()
+    {
+        foreach (var species in AnimalSpeciesCatalog.Core.All)
+        {
+            var key = species.LegacyKind.ToString();
+            Assert.True(TranslationCatalog.TryGet(
+                "en", "interface", "animal-kinds", key, out var english));
+            Assert.True(TranslationCatalog.TryGet(
+                "pl", "interface", "animal-kinds", key, out var polish));
+            Assert.False(string.IsNullOrWhiteSpace(english));
+            Assert.False(string.IsNullOrWhiteSpace(polish));
+        }
     }
 
     [Fact]

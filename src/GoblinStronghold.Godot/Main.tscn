@@ -296,9 +296,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -202.0
+offset_left = -230.0
 offset_top = -72.0
-offset_right = 202.0
+offset_right = 230.0
 offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -313,6 +313,14 @@ custom_minimum_size = Vector2(48, 48)
 layout_mode = 2
 
 [node name="Build" type="Button" parent="Interface/ActionBar/Controls" unique_id=108997841]
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+
+[node name="AdvancedBuild" type="Button" parent="Interface/ActionBar/Controls"]
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+
+[node name="Terrain" type="Button" parent="Interface/ActionBar/Controls"]
 custom_minimum_size = Vector2(48, 48)
 layout_mode = 2
 
@@ -531,7 +539,7 @@ theme_override_styles/focus = SubResource("StyleBoxFlat_menu_button_hover")
 text = "Wyjście"
 
 [node name="BuildMenu" type="PopupPanel" parent="." unique_id=1640149946]
-size = Vector2i(164, 164)
+size = Vector2i(378, 378)
 
 [node name="Margin" type="MarginContainer" parent="BuildMenu" unique_id=1205575898]
 anchors_preset = 15
@@ -539,8 +547,8 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 4.0
 offset_top = 4.0
-offset_right = 160.0
-offset_bottom = 160.0
+offset_right = 374.0
+offset_bottom = 374.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -548,7 +556,47 @@ grow_vertical = 2
 layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
-columns = 2
+columns = 5
+
+[node name="AdvancedBuildMenu" type="PopupPanel" parent="."]
+size = Vector2i(226, 84)
+
+[node name="Margin" type="MarginContainer" parent="AdvancedBuildMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 222.0
+offset_bottom = 80.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Grid" type="GridContainer" parent="AdvancedBuildMenu/Margin"]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 5
+
+[node name="TerrainMenu" type="PopupPanel" parent="."]
+size = Vector2i(300, 226)
+
+[node name="Margin" type="MarginContainer" parent="TerrainMenu"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 296.0
+offset_bottom = 222.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Grid" type="GridContainer" parent="TerrainMenu/Margin"]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 4
 
 [node name="ManagementMenu" type="PopupPanel" parent="." unique_id=1142828906]
 size = Vector2i(84, 84)
@@ -571,7 +619,7 @@ theme_override_constants/v_separation = 6
 columns = 2
 
 [node name="WorkMenu" type="PopupPanel" parent="." unique_id=1464302998]
-size = Vector2i(164, 164)
+size = Vector2i(300, 300)
 
 [node name="Margin" type="MarginContainer" parent="WorkMenu" unique_id=276597709]
 anchors_preset = 15
@@ -579,8 +627,8 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 4.0
 offset_top = 4.0
-offset_right = 160.0
-offset_bottom = 160.0
+offset_right = 296.0
+offset_bottom = 296.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -588,7 +636,7 @@ grow_vertical = 2
 layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
-columns = 2
+columns = 4
 
 [node name="StatisticsMenu" type="PopupPanel" parent="." unique_id=1749311103]
 size = Vector2i(164, 164)

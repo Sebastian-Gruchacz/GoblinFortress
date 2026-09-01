@@ -406,7 +406,8 @@ public readonly record struct SimulationCommand(
         SimulationTick executeAt,
         ulong sequence,
         GridPosition start,
-        GridPosition end) =>
+        GridPosition end,
+        ResourceVariant materialVariant = ResourceVariant.None) =>
         new(
             executeAt,
             sequence,
@@ -417,7 +418,8 @@ public readonly record struct SimulationCommand(
             end,
             ConstructionKind.BasaltWalkway,
             ResourceKind.Stone,
-            Amount: 1);
+            Amount: 1,
+            MaterialVariant: materialVariant);
 
     public static SimulationCommand BuildWoodStorage(
         SimulationTick executeAt,
@@ -597,7 +599,8 @@ public readonly record struct SimulationCommand(
     public static SimulationCommand BuildWoodenDoorFrame(
         SimulationTick executeAt,
         ulong sequence,
-        GridPosition position) =>
+        GridPosition position,
+        ResourceVariant materialVariant = ResourceVariant.None) =>
         new(
             executeAt,
             sequence,
@@ -608,7 +611,8 @@ public readonly record struct SimulationCommand(
             position,
             ConstructionKind.WoodenDoorFrame,
             ResourceKind.Wood,
-            Amount: 1);
+            Amount: 1,
+            MaterialVariant: materialVariant);
 
     public static SimulationCommand BuildStoneWall(
         SimulationTick executeAt,
@@ -714,7 +718,8 @@ public readonly record struct SimulationCommand(
     public static SimulationCommand BuildStoneDoorFrame(
         SimulationTick executeAt,
         ulong sequence,
-        GridPosition position) =>
+        GridPosition position,
+        ResourceVariant materialVariant = ResourceVariant.None) =>
         new(
             executeAt,
             sequence,
@@ -725,7 +730,8 @@ public readonly record struct SimulationCommand(
             position,
             ConstructionKind.StoneDoorFrame,
             ResourceKind.Stone,
-            Amount: 1);
+            Amount: 1,
+            MaterialVariant: materialVariant);
 
     public static SimulationCommand BuildWallTorch(
         SimulationTick executeAt,
@@ -746,7 +752,8 @@ public readonly record struct SimulationCommand(
     public static SimulationCommand BuildWoodenDoor(
         SimulationTick executeAt,
         ulong sequence,
-        GridPosition position) =>
+        GridPosition position,
+        ResourceVariant materialVariant = ResourceVariant.None) =>
         new(
             executeAt,
             sequence,
@@ -757,7 +764,8 @@ public readonly record struct SimulationCommand(
             position,
             ConstructionKind.WoodenDoor,
             ResourceKind.Wood,
-            Amount: 1);
+            Amount: 1,
+            MaterialVariant: materialVariant);
 
     public static SimulationCommand BuildPrimitiveWorkshop(
         SimulationTick executeAt,

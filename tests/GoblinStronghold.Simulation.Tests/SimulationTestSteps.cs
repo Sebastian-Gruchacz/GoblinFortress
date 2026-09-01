@@ -1,6 +1,6 @@
 namespace GoblinStronghold.Simulation.Tests;
 
-internal static class SimulationTestSteps
+public static class SimulationTestSteps
 {
     public static void AdvanceUntilConstructionCompletes(
         SimulationEngine engine,

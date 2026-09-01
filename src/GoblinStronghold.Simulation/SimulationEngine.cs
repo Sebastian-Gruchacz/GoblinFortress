@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Workshops;
 
 namespace GoblinStronghold.Simulation;
@@ -352,6 +353,20 @@ public sealed partial class SimulationEngine
                 model.Kind)));
         engine.Navigation = new NavigationPathService(engine.World);
         engine.LoadBloodStains(save.BloodStains);
+        var surfaceGrime = save.SurfaceGrime.Select(model =>
+            new Contamination.SurfaceGrimeSnapshot(
+                new GridPosition(model.X, model.Y, model.Z),
+                model.Volume,
+                new SimulationTick(model.CreatedAtTick),
+                new SimulationTick(model.LastChangedAtTick)))
+            .ToArray();
+        if (surfaceGrime.Any(stain =>
+                !engine.World.IsTerrainReachable(stain.Position) ||
+                !engine.IsConstructedFloorSurface(stain.Position)))
+        {
+            throw new InvalidDataException("The save contains misplaced surface grime.");
+        }
+        engine._surfaceGrime.Restore(surfaceGrime, engine.CurrentTick);
         engine.Visibility = WorldVisibilityState.Restore(
             map,
             save.Visibility,
@@ -587,6 +602,7 @@ public sealed partial class SimulationEngine
         var plantPatches = World.CreatePlantSnapshot().ToArray();
         var worldObjects = World.CreateWorldObjectSnapshot().ToArray();
         var bloodStains = CreateBloodStainSnapshot();
+        var surfaceGrime = CreateSurfaceGrimeSnapshot();
         var humanVillage = _humanVillage.CreateSnapshot();
         var visibility = Visibility.CreateSnapshot().ToArray();
         var resourceInventory = CreateResourceInventorySnapshot().ToArray();
@@ -615,6 +631,7 @@ public sealed partial class SimulationEngine
             plantPatches,
             worldObjects,
             bloodStains,
+            surfaceGrime,
             humanVillage,
             _raidPhase,
             _raidRallyPoint,
@@ -1129,6 +1146,16 @@ public sealed partial class SimulationEngine
                 CreatedAtTick = stain.CreatedAt.Value,
                 LastChangedAtTick = stain.LastChangedAt.Value,
             }).ToList(),
+            SurfaceGrime = CreateSurfaceGrimeSnapshot().Select(stain =>
+                new SurfaceGrimeSaveModel
+                {
+                    X = stain.Position.X,
+                    Y = stain.Position.Y,
+                    Z = stain.Position.Z,
+                    Volume = stain.Volume,
+                    CreatedAtTick = stain.CreatedAt.Value,
+                    LastChangedAtTick = stain.LastChangedAt.Value,
+                }).ToList(),
             ExcavatedCaveCells = World.ExcavatedCaveCells
                 .OrderBy(position => position.Z)
                 .ThenBy(position => position.Y)
@@ -1286,6 +1313,7 @@ public sealed partial class SimulationEngine
             Append(canonical, animal.Health);
             Append(canonical, animal.Hunger);
             Append(canonical, animal.Fatigue);
+            Append(canonical, animal.CarriedGrime);
             Append(canonical, animal.AgeTicks);
         }
         var undergroundFactions = _undergroundFactions.CreateSnapshot();
@@ -1398,6 +1426,16 @@ public sealed partial class SimulationEngine
             Append(canonical, stain.LastChangedAt.Value);
         }
 
+        var surfaceGrime = CreateSurfaceGrimeSnapshot();
+        Append(canonical, surfaceGrime.Length);
+        foreach (var stain in surfaceGrime)
+        {
+            Append(canonical, stain.Position);
+            Append(canonical, stain.Volume);
+            Append(canonical, stain.CreatedAt.Value);
+            Append(canonical, stain.LastChangedAt.Value);
+        }
+
         var excavatedCaveCells = World.ExcavatedCaveCells
             .OrderBy(position => position.Z)
             .ThenBy(position => position.Y)
@@ -1490,6 +1528,7 @@ public sealed partial class SimulationEngine
             Append(canonical, villager.Thirst);
             Append(canonical, villager.MaximumNeed);
             Append(canonical, villager.WorkProgress);
+            Append(canonical, villager.CarriedGrime);
         }
         Append(canonical, humanVillage.Fields.Count);
         foreach (var field in humanVillage.Fields)
@@ -1540,6 +1579,7 @@ public sealed partial class SimulationEngine
             Append(canonical, actor.PersonalWater);
             Append(canonical, actor.PersonalStoneAmmo);
             Append(canonical, actor.BloodFootprintSteps);
+            Append(canonical, actor.CarriedGrime);
             Append(canonical, actor.BirthTick ?? -1);
             Append(canonical, actor.MaturesAtTick ?? -1);
             Append(canonical, actor.AgeOffsetTicks);
@@ -1824,6 +1864,8 @@ public sealed partial class SimulationEngine
                 actorModel.PersonalStoneAmmo < 0 ||
                 actorModel.PersonalStoneAmmo > GetStoneAmmoCapacity(actorModel.Equipment) ||
                 actorModel.BloodFootprintSteps is < 0 or > BloodFootprintMaximumSteps ||
+                actorModel.CarriedGrime is < 0 or >
+                    Contamination.SurfaceGrimeState.MaximumCarriedAmount ||
                 actorModel.BleedingTicksRemaining is < 0 or > MaximumBleedingTicks ||
                 actorModel.BirthTick is < 0 ||
                 actorModel.MaturesAtTick is < 0 ||
@@ -1871,6 +1913,7 @@ public sealed partial class SimulationEngine
                 PersonalWater = actorModel.PersonalWater,
                 PersonalStoneAmmo = actorModel.PersonalStoneAmmo,
                 BloodFootprintSteps = actorModel.BloodFootprintSteps,
+                CarriedGrime = actorModel.CarriedGrime,
                 BleedingTicksRemaining = actorModel.BleedingTicksRemaining,
                 BirthTick = actorModel.BirthTick,
                 MaturesAtTick = actorModel.MaturesAtTick,
@@ -2212,8 +2255,6 @@ public sealed partial class SimulationEngine
                     (!MaterialCatalog.TryGet(requiredVariant, out var requiredMaterial) ||
                      requiredMaterial.ResourceKind != requiredResource ||
                      !requiredMaterial.Uses.Contains(MaterialUse.Construction)) ||
-                model.Kind == ConstructionKind.BasaltWalkway &&
-                    requiredVariant != ResourceVariant.Basalt ||
                 !IsPotentialConstructionPosition(anchor) ||
                 !IsPotentialConstructionPosition(end) ||
                 model.RequiredWood <= 0 ||
@@ -2412,7 +2453,13 @@ public sealed partial class SimulationEngine
     {
         foreach (var designation in _workDesignations.Values)
         {
-            var valid = designation.Kind switch
+            var valid = TerrainModificationCatalog.TryGet(designation.Kind, out var terrain)
+                ? TerrainModificationTargetPolicy.CanRetainDesignation(
+                    terrain,
+                    World,
+                    Visibility,
+                    designation.Target)
+                : designation.Kind switch
             {
                 WorkDesignationKind.GatherFood => World.GetPlantPatch(designation.Target) is
                     { Kind: not PlantKind.ReedBed },
@@ -2429,19 +2476,12 @@ public sealed partial class SimulationEngine
                 WorkDesignationKind.FellTree => World.GetFellableWood(designation.Target) is not null,
                 WorkDesignationKind.QuarryBoulder =>
                     World.GetQuarriableBoulder(designation.Target) is not null,
-                WorkDesignationKind.MineRock =>
-                    Visibility.Get(designation.Target) == CellVisibility.Unknown ||
-                    World.IsSolidRock(designation.Target) ||
-                    World.IsTerrainRampIntact(designation.Target) ||
-                    World.TryGetFluid(designation.Target, out _, out _),
-                WorkDesignationKind.CarveRampDown => World.CanCarveRampDown(designation.Target),
-                WorkDesignationKind.CarveRampUp => World.CanCarveRampUp(designation.Target),
                 WorkDesignationKind.Scout => designation.Target.Z == 0 &&
                     World.IsSurfaceTraversable(designation.Target),
                 WorkDesignationKind.HuntAnimal =>
                     _animals.TryGetValue(designation.TargetEntityId.Value, out var animal) &&
                     animal.Position == designation.Target,
-                WorkDesignationKind.CleanBlood => HasCleanableBlood(designation.Target),
+                WorkDesignationKind.CleanBlood => HasCleanableSurface(designation.Target),
                 _ => false,
             };
             if (!valid)
@@ -3534,7 +3574,20 @@ public sealed partial class SimulationEngine
         ResolveWorkDesignationTargets(
             WorkDesignationKind kind,
             GridPosition minimum,
-            GridPosition maximum) => kind switch
+            GridPosition maximum)
+    {
+        if (TerrainModificationCatalog.TryGet(kind, out var terrain))
+        {
+            return TerrainModificationTargetPolicy.QueryApplicableTargets(
+                    terrain,
+                    World,
+                    Visibility,
+                    minimum,
+                    maximum)
+                .Select(position => (position, EntityId.None));
+        }
+
+        return kind switch
         {
             WorkDesignationKind.GatherFood => World.CreatePlantSnapshot()
                 .Where(plant => plant.Kind != PlantKind.ReedBed && plant.Biomass > 0 &&
@@ -3576,28 +3629,6 @@ public sealed partial class SimulationEngine
                 .Where(position => IsInside(position, minimum, maximum) &&
                     Visibility.Get(position) != CellVisibility.Unknown)
                 .Select(position => (position, EntityId.None)),
-            WorkDesignationKind.MineRock =>
-                (from y in Enumerable.Range(minimum.Y, maximum.Y - minimum.Y + 1)
-                 from x in Enumerable.Range(minimum.X, maximum.X - minimum.X + 1)
-                 let position = new GridPosition(x, y, minimum.Z)
-                 where (Map.IsRockPosition(position) || World.IsTerrainRampIntact(position)) &&
-                       (Visibility.Get(position) == CellVisibility.Unknown ||
-                        World.IsSolidRock(position) || World.IsTerrainRampIntact(position))
-                 select (position, EntityId.None)),
-            WorkDesignationKind.CarveRampDown =>
-                (from y in Enumerable.Range(minimum.Y, maximum.Y - minimum.Y + 1)
-                 from x in Enumerable.Range(minimum.X, maximum.X - minimum.X + 1)
-                 let position = new GridPosition(x, y, minimum.Z)
-                 where Visibility.Get(position) != CellVisibility.Unknown &&
-                       World.CanCarveRampDown(position)
-                 select (position, EntityId.None)),
-            WorkDesignationKind.CarveRampUp =>
-                (from y in Enumerable.Range(minimum.Y, maximum.Y - minimum.Y + 1)
-                 from x in Enumerable.Range(minimum.X, maximum.X - minimum.X + 1)
-                 let position = new GridPosition(x, y, minimum.Z)
-                 where Visibility.Get(position) != CellVisibility.Unknown &&
-                       World.CanCarveRampUp(position)
-                 select (position, EntityId.None)),
             WorkDesignationKind.Scout =>
                 (from y in Enumerable.Range(minimum.Y, maximum.Y - minimum.Y + 1)
                  from x in Enumerable.Range(minimum.X, maximum.X - minimum.X + 1)
@@ -3608,13 +3639,13 @@ public sealed partial class SimulationEngine
                 .Where(animal => IsInside(animal.Position, minimum, maximum) &&
                     Visibility.Get(animal.Position) != CellVisibility.Unknown)
                 .Select(animal => (animal.Position, new EntityId(animal.Id))),
-            WorkDesignationKind.CleanBlood => _bloodStains.Values
-                .Where(stain => stain.Volume > 0 &&
-                    IsInside(stain.Position, minimum, maximum) &&
-                    Visibility.Get(stain.Position) != CellVisibility.Unknown)
-                .Select(stain => (stain.Position, EntityId.None)),
+            WorkDesignationKind.CleanBlood => GetCleanableSurfacePositions()
+                .Where(position => IsInside(position, minimum, maximum) &&
+                    Visibility.Get(position) != CellVisibility.Unknown)
+                .Select(position => (position, EntityId.None)),
             _ => [],
         };
+    }
 
     private bool TryExecuteDesignateWork(SimulationCommand command)
     {
@@ -5544,13 +5575,6 @@ public sealed partial class SimulationEngine
                         "The selected construction material is invalid.", nameof(command));
                 }
 
-                if (command.Construction == ConstructionKind.BasaltWalkway &&
-                    command.MaterialVariant is not (ResourceVariant.None or ResourceVariant.Basalt))
-                {
-                    throw new ArgumentException(
-                        "A basalt walkway requires basalt.", nameof(command));
-                }
-
                 if ((command.Construction is ConstructionKind.FoodStorage or ConstructionKind.WoodStorage or
                         ConstructionKind.StoneStorage or ConstructionKind.EquipmentStorage or
                         ConstructionKind.MaterialsStorage) &&
@@ -7258,6 +7282,7 @@ public sealed partial class SimulationEngine
         PersonalWater = actor.PersonalWater,
         PersonalStoneAmmo = actor.PersonalStoneAmmo,
         BloodFootprintSteps = actor.BloodFootprintSteps,
+        CarriedGrime = actor.CarriedGrime,
         BleedingTicksRemaining = actor.BleedingTicksRemaining,
         BirthTick = actor.BirthTick,
         MaturesAtTick = actor.MaturesAtTick,
@@ -7522,6 +7547,8 @@ public sealed partial class SimulationEngine
         public int PersonalStoneAmmo { get; set; }
 
         public int BloodFootprintSteps { get; set; }
+
+        public int CarriedGrime { get; set; }
 
         public int BleedingTicksRemaining { get; set; }
 

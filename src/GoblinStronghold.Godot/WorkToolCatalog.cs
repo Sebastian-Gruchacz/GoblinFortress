@@ -1,4 +1,6 @@
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Planning;
+using GoblinStronghold.Simulation.Terrain;
 using Godot;
 
 namespace GoblinStronghold.GodotClient;
@@ -18,8 +20,16 @@ internal readonly record struct WorkPreviewStyle(
 
 internal static class WorkToolCatalog
 {
-    public static WorkAreaSelectionBehavior GetSelectionBehavior(WorkDesignationKind kind) =>
-        kind switch
+    public static WorkAreaSelectionBehavior GetSelectionBehavior(WorkDesignationKind kind)
+    {
+        if (TerrainModificationCatalog.TryGet(kind, out var terrain))
+        {
+            return terrain.PlacementMode == WorldToolPlacementMode.Point
+                ? WorkAreaSelectionBehavior.SingleApplicableCell
+                : WorkAreaSelectionBehavior.ApplyToApplicableCells;
+        }
+
+        return kind switch
         {
             WorkDesignationKind.GatherFood or
             WorkDesignationKind.GatherReeds or
@@ -29,10 +39,9 @@ internal static class WorkToolCatalog
             WorkDesignationKind.FellTree or
             WorkDesignationKind.QuarryBoulder or
             WorkDesignationKind.HuntAnimal => WorkAreaSelectionBehavior.FilterTargets,
-            WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
-                WorkAreaSelectionBehavior.SingleApplicableCell,
             _ => WorkAreaSelectionBehavior.ApplyToApplicableCells,
         };
+    }
 
     public static WorkPreviewStyle GetPreviewStyle(WorkDesignationKind kind) => kind switch
     {

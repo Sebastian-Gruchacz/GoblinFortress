@@ -1235,6 +1235,39 @@ public sealed class SimulationEngineTests
 
     }
 
+    [Fact]
+    public void StoneWalkwayPreservesSelectedMaterialAcrossSaveLoad()
+    {
+        var seed = new WorldSeed(0x53544F4E42524944UL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 8);
+        var position = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, 0)))
+            .First(cell => engine.World.CanBuildBasaltWalkway([cell]));
+
+        engine.QueueCommand(SimulationCommand.BuildBasaltWalkway(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            position,
+            position,
+            ResourceVariant.Granite));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ResourceVariant.Granite, Assert.Single(site.Materials).Variant);
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        var restoredSite = Assert.Single(restored.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ResourceVariant.Granite, Assert.Single(restoredSite.Materials).Variant);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(1)]

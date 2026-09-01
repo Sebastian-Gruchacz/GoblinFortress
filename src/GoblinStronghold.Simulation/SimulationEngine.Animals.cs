@@ -250,7 +250,7 @@ public sealed partial class SimulationEngine
                 sampleKey: 1,
                 0,
                 neighbors.Length);
-            animal.Position = neighbors[index];
+            MoveAnimalTo(animal, neighbors[index]);
             AddMovementFatigue(animal);
         }
         animal.Activity = AnimalActivity.Roaming;
@@ -267,6 +267,20 @@ public sealed partial class SimulationEngine
         {
             AddMovementFatigue(animal);
         }
+        MoveAnimalTo(animal, destination);
+    }
+
+    private void MoveAnimalTo(AnimalState animal, GridPosition destination)
+    {
+        if (destination == animal.Position)
+        {
+            return;
+        }
+
+        animal.CarriedGrime = TrackSurfaceGrime(
+            animal.Position,
+            destination,
+            animal.CarriedGrime);
         animal.Position = destination;
     }
 
@@ -360,6 +374,8 @@ public sealed partial class SimulationEngine
                 !IsAnimalHabitat(model.Kind, position) || model.Health <= 0 ||
                 model.Health > MaximumAnimalHealth(model.Kind) || model.Hunger < 0 ||
                 model.Fatigue < 0 || model.Fatigue > MaximumAnimalFatigue(model.Kind) ||
+                model.CarriedGrime is < 0 or >
+                    Contamination.SurfaceGrimeState.MaximumCarriedAmount ||
                 model.AgeTicks < 0 ||
                 !_animals.TryAdd(model.Id, new AnimalState(
                     model.Id,
@@ -373,6 +389,7 @@ public sealed partial class SimulationEngine
                     Activity = model.Activity,
                     Hunger = model.Hunger,
                     Fatigue = model.Fatigue,
+                    CarriedGrime = model.CarriedGrime,
                     AgeTicks = model.AgeTicks,
                 }))
             {
@@ -438,6 +455,7 @@ public sealed partial class SimulationEngine
         public int Health { get; set; } = health;
         public int Hunger { get; set; }
         public int Fatigue { get; set; }
+        public int CarriedGrime { get; set; }
         public long AgeTicks { get; set; }
 
         public AnimalSnapshot ToSnapshot() =>
@@ -454,7 +472,10 @@ public sealed partial class SimulationEngine
                 MaximumAnimalFatigue(Kind),
                 AgeTicks,
                 MaturityAgeTicks,
-                MaximumAgeTicks);
+                MaximumAgeTicks)
+            {
+                CarriedGrime = CarriedGrime,
+            };
 
         public AnimalSaveModel ToSaveModel() => new()
         {
@@ -468,6 +489,7 @@ public sealed partial class SimulationEngine
             Health = Health,
             Hunger = Hunger,
             Fatigue = Fatigue,
+            CarriedGrime = CarriedGrime,
             AgeTicks = AgeTicks,
         };
     }

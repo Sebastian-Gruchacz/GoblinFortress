@@ -21,6 +21,42 @@ public sealed class SaveCompatibilityTests
             JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
+    [Fact]
+    public void Format70MigratesToCleanSurfaceGrimeState()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = SimulationSaveFormat.SurfaceGrimeMigrationVersion;
+        save.Remove("surfaceGrime");
+        foreach (var actor in save["actors"]!.AsArray())
+        {
+            actor!.AsObject().Remove("carriedGrime");
+        }
+        foreach (var animal in save["animals"]!.AsArray())
+        {
+            animal!.AsObject().Remove("carriedGrime");
+        }
+        foreach (var villager in save["humanVillage"]!["villagers"]!.AsArray())
+        {
+            villager!.AsObject().Remove("carriedGrime");
+        }
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        var snapshot = restored.CreateSnapshot();
+
+        Assert.Empty(snapshot.SurfaceGrime);
+        Assert.All(snapshot.Animals, animal => Assert.Equal(0, animal.CarriedGrime));
+        Assert.All(snapshot.HumanVillage.Villagers, villager =>
+            Assert.Equal(0, villager.CarriedGrime));
+        var migrated = JsonNode.Parse(restored.Save())!.AsObject();
+        Assert.Equal(
+            SimulationSaveFormat.CurrentVersion,
+            migrated["formatVersion"]!.GetValue<int>());
+        Assert.All(migrated["actors"]!.AsArray(), actor =>
+            Assert.Equal(0, actor!["carriedGrime"]!.GetValue<int>()));
+    }
+
     [Theory]
     [InlineData(61)]
     [InlineData(63)]

@@ -644,6 +644,8 @@ public sealed class HumanCombatTests
         save["humanVillage"]!["goblinAttackOrdered"] = true;
         save["humanVillage"]!["hostility"] = 100;
         save["humanVillage"]!["lastIntruderSeenTick"] = movementTick.Value - 1;
+        save["humanVillage"]!["villagers"]!.AsArray()
+            .Single(item => item!["id"]!.GetValue<int>() == civilian.Id)!["carriedGrime"] = 6;
         var partyIds = save["raidPartyIds"]!.AsArray()
             .Select(item => item!.GetValue<ulong>())
             .ToHashSet();
@@ -664,6 +666,7 @@ public sealed class HumanCombatTests
         var fleeing = engine.CreateSnapshot().HumanVillage.Villagers.Single(item =>
             item.Id == civilian.Id);
         Assert.Equal(HumanCohortTask.Flee, fleeing.Task);
+        Assert.InRange(fleeing.CarriedGrime, 0, 5);
         Assert.True(
             Distance(fleeing.Position, fleeSetup.AttackerPosition) >
             Distance(civilian.Position, fleeSetup.AttackerPosition),

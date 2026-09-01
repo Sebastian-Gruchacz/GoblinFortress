@@ -1,5 +1,7 @@
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Terrain;
+using GoblinStronghold.Simulation.Terrain.Jobs;
 
 namespace GoblinStronghold.Simulation;
 
@@ -826,6 +828,11 @@ public sealed partial class SimulationEngine
 
     private bool CanForecastWork(ActorState actor, WorkDesignationSnapshot designation)
     {
+        if (TerrainModificationCatalog.TryGet(designation.Kind, out var terrain) &&
+            !CanActorPerformTerrainWork(actor, terrain, designation.Target))
+        {
+            return false;
+        }
         if (designation.Kind == WorkDesignationKind.FellTree &&
             (!actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) ||
              !actor.KnownSkills.HasFlag(GoblinSkill.Building)))
@@ -835,17 +842,6 @@ public sealed partial class SimulationEngine
         if (designation.Kind == WorkDesignationKind.QuarryBoulder &&
             (!MiningCapabilityPolicy.HasPickaxe(actor.Equipment) ||
              !actor.KnownSkills.HasFlag(GoblinSkill.Building)))
-        {
-            return false;
-        }
-        if (designation.Kind == WorkDesignationKind.MineRock &&
-            !CanActorMineRock(actor, designation.Target))
-        {
-            return false;
-        }
-        if (designation.Kind is WorkDesignationKind.CarveRampDown or
-                WorkDesignationKind.CarveRampUp &&
-            !CanActorCarveRamp(actor, designation))
         {
             return false;
         }
@@ -883,32 +879,41 @@ public sealed partial class SimulationEngine
             WorkDesignationKind.FellTree => World.GetFellableWood(designation.Target) is not null,
             WorkDesignationKind.QuarryBoulder =>
                 World.GetQuarriableBoulder(designation.Target) is not null,
-            WorkDesignationKind.MineRock => CanActorMineRock(actor, designation.Target),
-            WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
-                CanActorCarveRamp(actor, designation),
+            WorkDesignationKind.MineRock or WorkDesignationKind.CarveRampDown or
+                WorkDesignationKind.CarveRampUp => true,
             WorkDesignationKind.Scout =>
                 Visibility.Get(designation.Target) == CellVisibility.Unknown,
             WorkDesignationKind.HuntAnimal =>
                 _animals.ContainsKey(designation.TargetEntityId.Value),
-            WorkDesignationKind.CleanBlood => HasCleanableBlood(designation.Target),
+            WorkDesignationKind.CleanBlood => HasCleanableSurface(designation.Target),
             _ => false,
         };
     }
 
     private static int GetForecastWorkPreference(
         ActorState actor,
-        WorkDesignationKind kind) => kind switch
+        WorkDesignationKind kind)
     {
-        WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone =>
-            actor.WorkPreferences.Hauling,
-        WorkDesignationKind.FellTree or WorkDesignationKind.QuarryBoulder or
-            WorkDesignationKind.MineRock or WorkDesignationKind.CarveRampDown or
-            WorkDesignationKind.CarveRampUp =>
-            actor.WorkPreferences.Building + SpecialistPublicWorkBonus,
-        WorkDesignationKind.Scout => actor.KnownSkills.HasFlag(GoblinSkill.Scouting) ? 2 : 0,
-        WorkDesignationKind.CleanBlood => GetCleaningPreference(actor),
-        _ => actor.WorkPreferences.Foraging,
-    };
+        if (TerrainModificationCatalog.TryGet(kind, out var terrain))
+        {
+            return TerrainWorkPolicy.GetForecastPreference(
+                terrain,
+                actor.WorkPreferences.Building,
+                SpecialistPublicWorkBonus);
+        }
+
+        return kind switch
+        {
+            WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone =>
+                actor.WorkPreferences.Hauling,
+            WorkDesignationKind.FellTree or WorkDesignationKind.QuarryBoulder =>
+                actor.WorkPreferences.Building + SpecialistPublicWorkBonus,
+            WorkDesignationKind.Scout =>
+                actor.KnownSkills.HasFlag(GoblinSkill.Scouting) ? 2 : 0,
+            WorkDesignationKind.CleanBlood => GetCleaningPreference(actor),
+            _ => actor.WorkPreferences.Foraging,
+        };
+    }
 
     private static int GetCleaningPreference(ActorState actor) => checked(
         actor.WorkPreferences.Hauling +
@@ -920,21 +925,28 @@ public sealed partial class SimulationEngine
         Math.Abs(first.X - second.X) + Math.Abs(first.Y - second.Y) +
         Math.Abs(first.Z - second.Z) * 8;
 
-    private static ActorJobKind ToForecastJobKind(WorkDesignationKind kind) => kind switch
+    private static ActorJobKind ToForecastJobKind(WorkDesignationKind kind)
     {
-        WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds => ActorJobKind.Forage,
-        WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone => ActorJobKind.Haul,
-        WorkDesignationKind.UprootBerryBush => ActorJobKind.ClearVegetation,
-        WorkDesignationKind.FellTree => ActorJobKind.FellTree,
-        WorkDesignationKind.QuarryBoulder => ActorJobKind.QuarryBoulder,
-        WorkDesignationKind.MineRock => ActorJobKind.MineRock,
-        WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
-            ActorJobKind.CarveRamp,
-        WorkDesignationKind.Scout => ActorJobKind.Explore,
-        WorkDesignationKind.HuntAnimal => ActorJobKind.HuntAnimal,
-        WorkDesignationKind.CleanBlood => ActorJobKind.CleanBlood,
-        _ => ActorJobKind.None,
-    };
+        if (TerrainModificationCatalog.TryGet(kind, out var terrain))
+        {
+            return TerrainWorkPolicy.GetJobKind(terrain);
+        }
+
+        return kind switch
+        {
+            WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds =>
+                ActorJobKind.Forage,
+            WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone =>
+                ActorJobKind.Haul,
+            WorkDesignationKind.UprootBerryBush => ActorJobKind.ClearVegetation,
+            WorkDesignationKind.FellTree => ActorJobKind.FellTree,
+            WorkDesignationKind.QuarryBoulder => ActorJobKind.QuarryBoulder,
+            WorkDesignationKind.Scout => ActorJobKind.Explore,
+            WorkDesignationKind.HuntAnimal => ActorJobKind.HuntAnimal,
+            WorkDesignationKind.CleanBlood => ActorJobKind.CleanBlood,
+            _ => ActorJobKind.None,
+        };
+    }
 
     private IReadOnlyList<ActorPlanEntrySnapshot> CreateActorPlanSnapshot(
         ActorState actor,
@@ -1483,7 +1495,7 @@ public sealed partial class SimulationEngine
             case ActorJobKind.CleanBlood:
                 var cleaningDesignation = _workDesignations.Values
                     .Where(item => item.Kind == WorkDesignationKind.CleanBlood &&
-                        !item.IsSuspended && item.Target == target && HasCleanableBlood(target))
+                        !item.IsSuspended && item.Target == target && HasCleanableSurface(target))
                     .OrderBy(item => item.Id)
                     .FirstOrDefault();
                 if (cleaningDesignation == default)
@@ -1493,7 +1505,7 @@ public sealed partial class SimulationEngine
                 actor.JobKind = kind;
                 actor.JobTarget = target;
                 actor.SourceStackId = cleaningDesignation.Id;
-                BeginJobLeg(actor, route, GetBloodCleaningWorkTicks(target));
+                BeginJobLeg(actor, route, GetSurfaceCleaningWorkTicks(target));
                 return true;
             case ActorJobKind.FellTree:
                 if (!actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe))
@@ -1553,10 +1565,9 @@ public sealed partial class SimulationEngine
                 {
                     return false;
                 }
-                actor.JobKind = kind;
-                actor.JobTarget = target;
-                actor.SourceStackId = miningDesignation.Id;
-                BeginJobLeg(actor, route, GetMineRockWorkTicks(actor));
+                BeginTerrainWork(
+                    actor,
+                    CreateTerrainWorkAssignment(miningDesignation, target, route));
                 return true;
             case ActorJobKind.CarveRamp:
                 if (!MiningCapabilityPolicy.HasPickaxe(actor.Equipment))
@@ -1575,10 +1586,9 @@ public sealed partial class SimulationEngine
                 {
                     return false;
                 }
-                actor.JobKind = kind;
-                actor.JobTarget = target;
-                actor.SourceStackId = rampDesignation.Id;
-                BeginJobLeg(actor, route, GetCarveRampWorkTicks(actor));
+                BeginTerrainWork(
+                    actor,
+                    CreateTerrainWorkAssignment(rampDesignation, target, route));
                 return true;
             default:
                 return false;
@@ -2279,7 +2289,7 @@ public sealed partial class SimulationEngine
             .Where(designation => designation.Kind == WorkDesignationKind.CleanBlood &&
                 !designation.IsSuspended &&
                 !reservedDesignations.Contains(designation.Id) &&
-                HasCleanableBlood(designation.Target))
+                HasCleanableSurface(designation.Target))
             .Select(designation => new
             {
                 Designation = designation,
@@ -2297,7 +2307,7 @@ public sealed partial class SimulationEngine
         actor.JobKind = ActorJobKind.CleanBlood;
         actor.JobTarget = best.Designation.Target;
         actor.SourceStackId = best.Designation.Id;
-        BeginJobLeg(actor, best.Route!, GetBloodCleaningWorkTicks(best.Designation.Target));
+        BeginJobLeg(actor, best.Route!, GetSurfaceCleaningWorkTicks(best.Designation.Target));
         reservedDesignations.Add(best.Designation.Id);
         return true;
     }
@@ -2312,18 +2322,17 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = _bloodStains.Values
-            .Where(stain => stain.Surface == BloodSurfaceKind.ConstructedFloor &&
-                stain.Volume > 0 &&
-                Visibility.Get(stain.Position).IsDiscovered() &&
-                IsGoblinOwnedFloor(stain.Position) &&
+        var best = GetCleanableSurfacePositions()
+            .Where(position =>
+                Visibility.Get(position).IsDiscovered() &&
+                IsGoblinOwnedFloor(position) &&
                 !_workDesignations.Values.Any(designation =>
                     designation.Kind == WorkDesignationKind.CleanBlood &&
-                    designation.Target == stain.Position))
-            .Select(stain => new
+                    designation.Target == position))
+            .Select(position => new
             {
-                stain.Position,
-                Route = FindActorPath(actor, stain.Position),
+                Position = position,
+                Route = FindActorPath(actor, position),
             })
             .Where(candidate => candidate.Route is not null)
             .OrderBy(candidate => candidate.Route!.Count)
@@ -2358,7 +2367,7 @@ public sealed partial class SimulationEngine
         actor.JobKind = ActorJobKind.CleanBlood;
         actor.JobTarget = best.Position;
         actor.SourceStackId = designationId;
-        BeginJobLeg(actor, best.Route!, GetBloodCleaningWorkTicks(best.Position));
+        BeginJobLeg(actor, best.Route!, GetSurfaceCleaningWorkTicks(best.Position));
         reservedDesignations.Add(designationId);
         return true;
     }
@@ -2386,18 +2395,18 @@ public sealed partial class SimulationEngine
         ActorState actor,
         ISet<EntityId> reservedDesignations)
     {
-        var best = _bloodStains.Values
-            .Where(stain => stain.Volume > 0 &&
-                ManhattanDistance(actor.Position, stain.Position) <=
+        var best = GetCleanableSurfacePositions()
+            .Where(position =>
+                ManhattanDistance(actor.Position, position) <=
                     IdleHousekeepingMaximumRouteLength &&
-                Visibility.Get(stain.Position).IsDiscovered() &&
+                Visibility.Get(position).IsDiscovered() &&
                 !_workDesignations.Values.Any(designation =>
                     designation.Kind == WorkDesignationKind.CleanBlood &&
-                    designation.Target == stain.Position))
-            .Select(stain => new
+                    designation.Target == position))
+            .Select(position => new
             {
-                stain.Position,
-                Route = FindActorPath(actor, stain.Position),
+                Position = position,
+                Route = FindActorPath(actor, position),
             })
             .Where(candidate => candidate.Route is { Count: <= IdleHousekeepingMaximumRouteLength })
             .OrderBy(candidate => candidate.Route!.Count)
@@ -2432,7 +2441,7 @@ public sealed partial class SimulationEngine
         actor.JobKind = ActorJobKind.CleanBlood;
         actor.JobTarget = best.Position;
         actor.SourceStackId = designationId;
-        BeginJobLeg(actor, best.Route!, GetBloodCleaningWorkTicks(best.Position));
+        BeginJobLeg(actor, best.Route!, GetSurfaceCleaningWorkTicks(best.Position));
         reservedDesignations.Add(designationId);
         return true;
     }
@@ -2451,7 +2460,7 @@ public sealed partial class SimulationEngine
             designation.Kind != WorkDesignationKind.CleanBlood ||
             designation.IsSuspended ||
             designation.Target != actor.JobTarget ||
-            !HasCleanableBlood(actor.JobTarget))
+            !HasCleanableSurface(actor.JobTarget))
         {
             actor.ClearJob();
             return;
@@ -2474,7 +2483,7 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        var cleaned = CleanBlood(actor.Position);
+        var cleaned = CleanSurface(actor.Position);
         if (cleaned > 0)
         {
             GainHaulingExperience(actor, Math.Max(1, cleaned / 4));
@@ -2734,41 +2743,25 @@ public sealed partial class SimulationEngine
                 CanActorMineRock(actor, designation.Target))
             .SelectMany(designation => World.GetCardinalWorldNeighbors(designation.Target)
                 .Where(World.IsTerrainTraversable)
-                .Select(position => new
-                {
-                    Designation = designation,
-                    Position = position,
-                    EstimatedDistance = ManhattanDistance(actor.Position, position),
-                }))
-            .OrderByDescending(candidate => candidate.Designation.Priority)
-            .ThenBy(candidate => candidate.EstimatedDistance)
-            .ThenBy(candidate => candidate.Designation.Id)
-            .ThenBy(candidate => candidate.Position.Z)
-            .ThenBy(candidate => candidate.Position.Y)
-            .ThenBy(candidate => candidate.Position.X)
-            .ToArray();
-        if (candidates.Length == 0)
+                .Select(position => new TerrainWorkCandidate(
+                    designation.Id,
+                    position,
+                    designation.Priority,
+                    ManhattanDistance(actor.Position, position))));
+        var plan = TerrainWorkCandidateSelector.SelectFirstReachableByEstimate(
+            candidates,
+            MaximumPublicWorkRouteCandidatesPerPlanningTick,
+            position => FindTribePath(actor.Position, position));
+        if (plan is null)
         {
             return false;
         }
 
-        foreach (var candidate in candidates
-                     .Take(MaximumPublicWorkRouteCandidatesPerPlanningTick))
-        {
-            var route = FindTribePath(actor.Position, candidate.Position);
-            if (route is null)
-            {
-                continue;
-            }
-
-            actor.JobKind = ActorJobKind.MineRock;
-            actor.JobTarget = candidate.Position;
-            actor.SourceStackId = candidate.Designation.Id;
-            BeginJobLeg(actor, route, GetMineRockWorkTicks(actor));
-            reservedDesignations.Add(candidate.Designation.Id);
-            return true;
-        }
-        return false;
+        var designation = _workDesignations[plan.Value.DesignationId];
+        return TryBeginTerrainWork(
+            actor,
+            CreateTerrainWorkAssignment(designation, plan.Value),
+            reservedDesignations);
     }
 
     private void UpdateMineRockJob(ActorState actor)
@@ -2800,95 +2793,7 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        if (World.TryExcavateRock(
-                designation.Target,
-                CurrentTick,
-                out var rock,
-                out var deposit,
-                out var change))
-        {
-            _undeliveredWorldChanges.Add(change);
-            var quantity = DeterministicRandom.NextInt(
-                WorldSeed,
-                RandomDomain.Stone,
-                actor.Id,
-                CurrentTick,
-                sampleKey: designation.Id.Value,
-                minimumInclusive: 1,
-                maximumExclusive: 4);
-            var variant = rock switch
-            {
-                RockKind.Granite => ResourceVariant.Granite,
-                RockKind.Basalt => ResourceVariant.Basalt,
-                RockKind.Obsidian => ResourceVariant.Obsidian,
-                _ => ResourceVariant.Sandstone,
-            };
-            var outputPosition = World.IsTerrainTraversable(designation.Target)
-                ? designation.Target
-                : actor.Position;
-            var existing = FindMergeableGroundStack(
-                ResourceKind.Stone,
-                outputPosition,
-                variant: variant);
-            if (existing is null)
-            {
-                AllocateItemStack(
-                    ResourceKind.Stone,
-                    quantity,
-                    ItemLocation.OnGround(outputPosition),
-                    variant: variant);
-            }
-            else
-            {
-                existing.Quantity = checked(existing.Quantity + quantity);
-            }
-            if (deposit != MineralDepositKind.None)
-            {
-                var (depositResource, depositVariant) = deposit switch
-                {
-                    MineralDepositKind.Coal => (ResourceKind.Coal, ResourceVariant.None),
-                    MineralDepositKind.IronOre => (ResourceKind.Ore, ResourceVariant.IronOre),
-                    MineralDepositKind.CopperOre => (ResourceKind.Ore, ResourceVariant.CopperOre),
-                    MineralDepositKind.SilverOre => (ResourceKind.Ore, ResourceVariant.SilverOre),
-                    MineralDepositKind.GoldOre => (ResourceKind.Ore, ResourceVariant.GoldOre),
-                    MineralDepositKind.Ruby => (ResourceKind.Materials, ResourceVariant.Ruby),
-                    MineralDepositKind.Emerald => (ResourceKind.Materials, ResourceVariant.Emerald),
-                    MineralDepositKind.Diamond => (ResourceKind.Materials, ResourceVariant.Diamond),
-                    _ => throw new ArgumentOutOfRangeException(nameof(deposit)),
-                };
-                var isGem = deposit is MineralDepositKind.Ruby or MineralDepositKind.Emerald or
-                    MineralDepositKind.Diamond;
-                var depositQuantity = DeterministicRandom.NextInt(
-                    WorldSeed,
-                    RandomDomain.Stone,
-                    actor.Id,
-                    CurrentTick,
-                    sampleKey: designation.Id.Value ^ 0x4F52454445504F53UL,
-                    minimumInclusive: 1,
-                    maximumExclusive: deposit == MineralDepositKind.Coal ? 4 : isGem ? 2 : 3);
-                var depositStack = FindMergeableGroundStack(
-                    depositResource,
-                    outputPosition,
-                    variant: depositVariant);
-                if (depositStack is null)
-                {
-                    AllocateItemStack(
-                        depositResource,
-                        depositQuantity,
-                        ItemLocation.OnGround(outputPosition),
-                        variant: depositVariant);
-                }
-                else
-                {
-                    depositStack.Quantity = checked(depositStack.Quantity + depositQuantity);
-                }
-            }
-            GainBuildingExperience(actor, Math.Max(12, quantity * 2));
-        }
-
-        _workDesignations.Remove(designation.Id);
-        Publish(SimulationEventKind.WorkDesignationRemoved, actor.Id, designation.Id, 0);
-        actor.ClearJob();
+        CompleteTerrainWork(actor, designation);
     }
 
     private bool TryPlanCarveRampJob(
@@ -2901,33 +2806,30 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = _workDesignations.Values
+        var candidates = _workDesignations.Values
             .Where(designation => designation.Kind is WorkDesignationKind.CarveRampDown or
                     WorkDesignationKind.CarveRampUp &&
                 !designation.IsSuspended &&
                 !reservedDesignations.Contains(designation.Id) &&
                 CanActorCarveRamp(actor, designation))
-            .Select(designation => new
-            {
-                Designation = designation,
-                Route = FindActorPath(actor, designation.Target),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderByDescending(candidate => candidate.Designation.Priority)
-            .ThenBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Designation.Id)
-            .FirstOrDefault();
-        if (best is null)
+            .Select(designation => new TerrainWorkCandidate(
+                designation.Id,
+                designation.Target,
+                designation.Priority,
+                EstimatedDistance: 0));
+        var plan = TerrainWorkCandidateSelector.SelectShortestReachable(
+            candidates,
+            position => FindActorPath(actor, position));
+        if (plan is null)
         {
             return false;
         }
 
-        actor.JobKind = ActorJobKind.CarveRamp;
-        actor.JobTarget = best.Designation.Target;
-        actor.SourceStackId = best.Designation.Id;
-        BeginJobLeg(actor, best.Route!, GetCarveRampWorkTicks(actor));
-        reservedDesignations.Add(best.Designation.Id);
-        return true;
+        var designation = _workDesignations[plan.Value.DesignationId];
+        return TryBeginTerrainWork(
+            actor,
+            CreateTerrainWorkAssignment(designation, plan.Value),
+            reservedDesignations);
     }
 
     private void UpdateCarveRampJob(ActorState actor)
@@ -2960,46 +2862,27 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        if (World.TryCarveVerticalRamp(
-                designation.Target,
-                designation.Kind == WorkDesignationKind.CarveRampDown,
-                CurrentTick,
-                out var rock,
-                out var change))
+        CompleteTerrainWork(actor, designation);
+    }
+
+    private void CompleteTerrainWork(
+        ActorState actor,
+        WorkDesignationSnapshot designation)
+    {
+        var result = TerrainWorkExecutionService.TryExecute(
+            TerrainModificationCatalog.Get(designation.Kind),
+            World,
+            designation.Target,
+            actor.Position,
+            WorldSeed,
+            actor.Id,
+            CurrentTick,
+            designation.Id);
+        if (result is not null)
         {
-            _undeliveredWorldChanges.Add(change);
-            var quantity = DeterministicRandom.NextInt(
-                WorldSeed,
-                RandomDomain.Stone,
-                actor.Id,
-                CurrentTick,
-                sampleKey: designation.Id.Value ^ 0x52414D5053544F4EUL,
-                minimumInclusive: 6,
-                maximumExclusive: 11);
-            var variant = rock switch
-            {
-                RockKind.Granite => ResourceVariant.Granite,
-                RockKind.Basalt => ResourceVariant.Basalt,
-                RockKind.Obsidian => ResourceVariant.Obsidian,
-                _ => ResourceVariant.Sandstone,
-            };
-            var existing = FindMergeableGroundStack(
-                ResourceKind.Stone,
-                designation.Target,
-                variant: variant);
-            if (existing is null)
-            {
-                AllocateItemStack(
-                    ResourceKind.Stone,
-                    quantity,
-                    ItemLocation.OnGround(designation.Target),
-                    variant: variant);
-            }
-            else
-            {
-                existing.Quantity = checked(existing.Quantity + quantity);
-            }
-            GainBuildingExperience(actor, Math.Max(20, quantity * 3));
+            _undeliveredWorldChanges.Add(result.WorldChange);
+            StoreTerrainYield(result.OutputPosition, result.Yield);
+            GainBuildingExperience(actor, result.Yield.BuildingExperience);
         }
 
         _workDesignations.Remove(designation.Id);
@@ -3018,6 +2901,31 @@ public sealed partial class SimulationEngine
         }
 
         return reservations;
+    }
+
+    private void StoreTerrainYield(
+        GridPosition position,
+        TerrainWorkYield yield)
+    {
+        foreach (var stack in yield.Stacks)
+        {
+            var existing = FindMergeableGroundStack(
+                stack.Resource,
+                position,
+                variant: stack.Variant);
+            if (existing is null)
+            {
+                AllocateItemStack(
+                    stack.Resource,
+                    stack.Quantity,
+                    ItemLocation.OnGround(position),
+                    variant: stack.Variant);
+            }
+            else
+            {
+                existing.Quantity = checked(existing.Quantity + stack.Quantity);
+            }
+        }
     }
 
     private bool TryPlanConstructionClearance(
@@ -4104,7 +4012,14 @@ public sealed partial class SimulationEngine
     private void RemoveExhaustedWorkDesignations()
     {
         var completed = _workDesignations.Values
-            .Where(designation => designation.Kind switch
+            .Where(designation =>
+                TerrainModificationCatalog.TryGet(designation.Kind, out var terrain)
+                    ? TerrainWorkPolicy.IsTargetExhausted(
+                        terrain,
+                        designation.Target,
+                        World,
+                        Visibility)
+                    : designation.Kind switch
             {
                 WorkDesignationKind.GatherFood =>
                     World.GetPlantPatch(designation.Target) is not
@@ -4126,19 +4041,11 @@ public sealed partial class SimulationEngine
                 WorkDesignationKind.FellTree => World.GetFellableWood(designation.Target) is null,
                 WorkDesignationKind.QuarryBoulder =>
                     World.GetQuarriableBoulder(designation.Target) is null,
-                WorkDesignationKind.MineRock =>
-                    Visibility.Get(designation.Target) != CellVisibility.Unknown &&
-                    !World.IsSolidRock(designation.Target) &&
-                    !World.IsTerrainRampIntact(designation.Target),
-                WorkDesignationKind.CarveRampDown =>
-                    !World.CanCarveRampDown(designation.Target),
-                WorkDesignationKind.CarveRampUp =>
-                    !World.CanCarveRampUp(designation.Target),
                 WorkDesignationKind.Scout =>
                     Visibility.Get(designation.Target) != CellVisibility.Unknown,
                 WorkDesignationKind.HuntAnimal =>
                     !_animals.ContainsKey(designation.TargetEntityId.Value),
-                WorkDesignationKind.CleanBlood => !HasCleanableBlood(designation.Target),
+                WorkDesignationKind.CleanBlood => !HasCleanableSurface(designation.Target),
                 _ => false,
             })
             .Select(designation => designation.Id)
@@ -4369,7 +4276,10 @@ public sealed partial class SimulationEngine
     {
         var canBuild = actor.KnownSkills.HasFlag(GoblinSkill.Building);
         return canBuild && _workDesignations.Values.Any(designation =>
-            !designation.IsSuspended && designation.Kind switch
+            !designation.IsSuspended &&
+            (TerrainModificationCatalog.TryGet(designation.Kind, out var terrain)
+                ? CanActorPerformTerrainWork(actor, terrain, designation.Target)
+                : designation.Kind switch
             {
                 WorkDesignationKind.FellTree =>
                     actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) &&
@@ -4377,14 +4287,8 @@ public sealed partial class SimulationEngine
                 WorkDesignationKind.QuarryBoulder =>
                     MiningCapabilityPolicy.HasPickaxe(actor.Equipment) &&
                     World.GetQuarriableBoulder(designation.Target) is not null,
-                WorkDesignationKind.MineRock =>
-                    CanActorMineRock(actor, designation.Target),
-                WorkDesignationKind.CarveRampDown =>
-                    CanActorCarveRamp(actor, designation),
-                WorkDesignationKind.CarveRampUp =>
-                    CanActorCarveRamp(actor, designation),
                 _ => false,
-            });
+            }));
     }
 
     private bool DropCarriedStack(ActorState actor)
@@ -5064,7 +4968,7 @@ public sealed partial class SimulationEngine
             !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
             designation.Kind != WorkDesignationKind.CleanBlood ||
             designation.Target != actor.JobTarget ||
-            !HasCleanableBlood(actor.JobTarget))
+            !HasCleanableSurface(actor.JobTarget))
         {
             throw new InvalidDataException("The save contains an invalid blood-cleaning job.");
         }
@@ -5545,7 +5449,7 @@ public sealed partial class SimulationEngine
         ActorJobKind.Craft when
             _craftingOrders.TryGetValue(actor.DestinationZoneId, out var craftingOrder) =>
             craftingOrder.RemainingWorkTicks,
-        ActorJobKind.CleanBlood => GetBloodCleaningWorkTicks(actor.JobTarget),
+        ActorJobKind.CleanBlood => GetSurfaceCleaningWorkTicks(actor.JobTarget),
         ActorJobKind.LootRaid => Definitions.HaulHandlingTicks,
         ActorJobKind.RecoverRaidCorpse => Definitions.HaulHandlingTicks,
         ActorJobKind.ConsumeRaidCorpse => Definitions.EatWorkTicks,
@@ -5568,50 +5472,123 @@ public sealed partial class SimulationEngine
 
     private int GetMineRockWorkTicks(ActorState actor)
     {
-        var rock = _workDesignations.TryGetValue(actor.SourceStackId, out var designation)
-            ? Map.IsRockPosition(designation.Target)
-                ? Map.GetRockCell(designation.Target).Rock
-                : RockKind.Sandstone
-            : RockKind.Obsidian;
-        var multiplier = MiningCapabilityPolicy.WorkMultiplier(rock);
-        return checked(Definitions.ForageWorkTicks * 8 * multiplier);
+        var definition = TerrainModificationCatalog.Get(WorkDesignationKind.MineRock);
+        var excavationCell = _workDesignations.TryGetValue(
+            actor.SourceStackId,
+            out var designation)
+                ? GetTerrainExcavationCell(definition, designation.Target)
+                : new CaveCell(RockKind.Obsidian, CaveCellKind.SolidRock);
+        return TerrainWorkPolicy.GetWorkTicks(
+            definition,
+            excavationCell,
+            Definitions.ForageWorkTicks);
     }
 
     private int GetCarveRampWorkTicks(ActorState actor)
     {
-        var multiplier = _workDesignations.TryGetValue(actor.SourceStackId, out var designation) &&
-            designation.Kind is WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp
-                ? MiningCapabilityPolicy.WorkMultiplier(World.GetRampExcavationCell(
-                    designation.Target,
-                    designation.Kind == WorkDesignationKind.CarveRampDown).Rock)
-                : MiningCapabilityPolicy.WorkMultiplier(RockKind.Obsidian);
-        return checked(Definitions.ForageWorkTicks * 12 * multiplier);
+        if (_workDesignations.TryGetValue(actor.SourceStackId, out var designation) &&
+            TerrainModificationCatalog.TryGet(designation.Kind, out var definition) &&
+            definition.LegacyDesignation is WorkDesignationKind.CarveRampDown or
+                WorkDesignationKind.CarveRampUp)
+        {
+            return GetTerrainWorkTicks(definition, designation.Target);
+        }
+
+        return TerrainWorkPolicy.GetWorkTicks(
+            TerrainModificationCatalog.Get(WorkDesignationKind.CarveRampDown),
+            new CaveCell(RockKind.Obsidian, CaveCellKind.SolidRock),
+            Definitions.ForageWorkTicks);
+    }
+
+    private TerrainWorkAssignment CreateTerrainWorkAssignment(
+        WorkDesignationSnapshot designation,
+        TerrainWorkPlan plan)
+    {
+        var definition = TerrainModificationCatalog.Get(designation.Kind);
+        return TerrainWorkAssignmentFactory.Create(
+            definition,
+            plan,
+            GetTerrainWorkTicks(definition, designation.Target));
+    }
+
+    private TerrainWorkAssignment CreateTerrainWorkAssignment(
+        WorkDesignationSnapshot designation,
+        GridPosition jobTarget,
+        IReadOnlyList<GridPosition> route) => CreateTerrainWorkAssignment(
+            designation,
+            new TerrainWorkPlan(designation.Id, jobTarget, route));
+
+    private int GetTerrainWorkTicks(
+        TerrainModificationDefinition definition,
+        GridPosition designationTarget) => TerrainWorkPolicy.GetWorkTicks(
+            definition,
+            GetTerrainExcavationCell(definition, designationTarget),
+            Definitions.ForageWorkTicks);
+
+    private CaveCell GetTerrainExcavationCell(
+        TerrainModificationDefinition definition,
+        GridPosition target) => definition.LegacyDesignation switch
+    {
+        WorkDesignationKind.MineRock => Map.IsRockPosition(target)
+            ? Map.GetRockCell(target)
+            : new CaveCell(RockKind.Sandstone, CaveCellKind.SolidRock),
+        WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
+            World.GetRampExcavationCell(
+                target,
+                definition.LegacyDesignation == WorkDesignationKind.CarveRampDown),
+        _ => throw new ArgumentException(
+            $"Terrain modification '{definition.Id}' has no excavation cell.",
+            nameof(definition)),
+    };
+
+    private bool TryBeginTerrainWork(
+        ActorState actor,
+        TerrainWorkAssignment assignment,
+        ISet<EntityId> reservedDesignations)
+    {
+        if (!reservedDesignations.Add(assignment.DesignationId))
+        {
+            return false;
+        }
+
+        BeginTerrainWork(actor, assignment);
+        return true;
+    }
+
+    private void BeginTerrainWork(
+        ActorState actor,
+        TerrainWorkAssignment assignment)
+    {
+        actor.JobKind = assignment.JobKind;
+        actor.JobTarget = assignment.JobTarget;
+        actor.SourceStackId = assignment.DesignationId;
+        BeginJobLeg(actor, assignment.Route, assignment.WorkTicks);
     }
 
     private bool CanActorMineRock(ActorState actor, GridPosition target) =>
-        actor.KnownSkills.HasFlag(GoblinSkill.Building) &&
-        World.CanExcavateRock(target) &&
-        MiningCapabilityPolicy.CanMine(
-            Map.IsRockPosition(target)
-                ? Map.GetRockCell(target)
-                : new CaveCell(RockKind.Sandstone, CaveCellKind.SolidRock),
-            actor.Equipment,
-            actor.BuildingExperience);
+        CanActorPerformTerrainWork(
+            actor,
+            TerrainModificationCatalog.Get(WorkDesignationKind.MineRock),
+            target);
 
     private bool CanActorCarveRamp(
         ActorState actor,
-        WorkDesignationSnapshot designation)
-    {
-        var carveDown = designation.Kind == WorkDesignationKind.CarveRampDown;
-        return actor.KnownSkills.HasFlag(GoblinSkill.Building) &&
-            (carveDown
-                ? World.CanCarveRampDown(designation.Target)
-                : World.CanCarveRampUp(designation.Target)) &&
-            MiningCapabilityPolicy.CanMine(
-                World.GetRampExcavationCell(designation.Target, carveDown),
-                actor.Equipment,
-                actor.BuildingExperience);
-    }
+        WorkDesignationSnapshot designation) =>
+        CanActorPerformTerrainWork(
+            actor,
+            TerrainModificationCatalog.Get(designation.Kind),
+            designation.Target);
+
+    private bool CanActorPerformTerrainWork(
+        ActorState actor,
+        TerrainModificationDefinition definition,
+        GridPosition target) => TerrainWorkPolicy.CanActorPerform(
+            definition,
+            target,
+            World,
+            actor.KnownSkills,
+            actor.Equipment,
+            actor.BuildingExperience);
 
     private int GetHuntWorkTicks() => checked(Definitions.ForageWorkTicks * 2);
 

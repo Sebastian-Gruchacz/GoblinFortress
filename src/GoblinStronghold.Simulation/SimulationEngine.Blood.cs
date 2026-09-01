@@ -94,41 +94,6 @@ public sealed partial class SimulationEngine
         }
     }
 
-    private void MoveActor(ActorState actor, GridPosition destination)
-    {
-        if (_bloodStains.TryGetValue(actor.Position, out var source) &&
-            source.Volume >= BloodFootprintSourceThreshold)
-        {
-            actor.BloodFootprintSteps = Math.Max(
-                actor.BloodFootprintSteps,
-                BloodFootprintMaximumSteps);
-            source.Volume--;
-            source.LastChangedAt = CurrentTick;
-        }
-
-        actor.Position = destination;
-        if (actor.CarriedCorpseId != EntityId.None &&
-            _corpses.TryGetValue(actor.CarriedCorpseId, out var carriedCorpse))
-        {
-            carriedCorpse.Position = destination;
-        }
-        if (Map.IsTerrainSurfacePosition(destination) &&
-            Map.GetColumnCell(destination).Terrain is
-                TerrainKind.ShallowWater or TerrainKind.DeepWater)
-        {
-            actor.BloodFootprintSteps = 0;
-            return;
-        }
-
-        if (actor.BloodFootprintSteps <= 0)
-        {
-            return;
-        }
-
-        AddBloodVolume(destination, actor.BloodFootprintSteps, allowSpill: false);
-        actor.BloodFootprintSteps--;
-    }
-
     private void ApplyTraumaDamage(ActorState actor, int damage)
     {
         if (damage <= 0 || actor.Health <= 0)
@@ -169,7 +134,7 @@ public sealed partial class SimulationEngine
             ? BloodSurfaceKind.ConstructedFloor
             : BloodSurfaceKind.AbsorbentGround;
 
-    private bool HasCleanableBlood(GridPosition position) =>
+    private bool HasCleanableBloodOnly(GridPosition position) =>
         _bloodStains.TryGetValue(position, out var stain) &&
         stain.Volume > 0;
 
@@ -179,7 +144,7 @@ public sealed partial class SimulationEngine
             ? BloodCleaningWorkTicks / 2
             : BloodCleaningWorkTicks;
 
-    private int CleanBlood(GridPosition position)
+    private int CleanBloodOnly(GridPosition position)
     {
         if (!_bloodStains.TryGetValue(position, out var stain) || stain.Volume <= 0)
         {
@@ -192,7 +157,6 @@ public sealed partial class SimulationEngine
         if (stain.Volume == 0)
         {
             _bloodStains.Remove(position);
-            RemoveBloodCleaningDesignations(position);
         }
 
         return cleaned;
@@ -215,7 +179,10 @@ public sealed partial class SimulationEngine
             if (stain.Volume <= 0)
             {
                 _bloodStains.Remove(stain.Position);
-                RemoveBloodCleaningDesignations(stain.Position);
+                if (!HasSurfaceGrime(stain.Position))
+                {
+                    RemoveBloodCleaningDesignations(stain.Position);
+                }
             }
         }
     }

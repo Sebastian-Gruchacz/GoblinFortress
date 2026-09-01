@@ -14,8 +14,12 @@
                       LogicalName="GoblinStronghold.Simulation.Content.crafting-recipes.json" />
     <EmbeddedResource Include="Content\animal-species.json"
                       LogicalName="GoblinStronghold.Simulation.Content.animal-species.json" />
+    <EmbeddedResource Include="Content\construction-blueprints.json"
+                      LogicalName="GoblinStronghold.Simulation.Content.construction-blueprints.json" />
     <EmbeddedResource Include="Content\materials.json"
                       LogicalName="GoblinStronghold.Simulation.Content.materials.json" />
+    <EmbeddedResource Include="Content\terrain-modifications.json"
+                      LogicalName="GoblinStronghold.Simulation.Content.terrain-modifications.json" />
     <EmbeddedResource Include="Content\workshops.json"
                       LogicalName="GoblinStronghold.Simulation.Content.workshops.json" />
     <EmbeddedResource Include="Localization\en\interface.json"

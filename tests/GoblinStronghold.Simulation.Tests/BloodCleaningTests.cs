@@ -7,6 +7,185 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class BloodCleaningTests
 {
     [Fact]
+    public void LooseGroundIsTrackedAcrossConstructedFloorsAndPersists()
+    {
+        var seed = new WorldSeed(0xD17F1002UL);
+        var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 20);
+        var snapshot = engine.CreateSnapshot();
+        var constructedSurfaces = snapshot.WorldObjects
+            .Where(worldObject => worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(part => part.Part.Kind is WorldObjectPartKind.Floor or
+                WorldObjectPartKind.Walkway)
+            .Select(part => part.Position)
+            .ToHashSet();
+        var routePlan =
+            (from destination in constructedSurfaces
+             from offsetY in Enumerable.Range(-4, 9)
+             from offsetX in Enumerable.Range(-4, 9)
+             let column = new GridPosition(
+                 destination.X + offsetX,
+                 destination.Y + offsetY)
+             where map.IsColumnWithin(column)
+             let source = map.GetTerrainSurfacePosition(column)
+             where engine.World.IsTerrainTraversable(source) &&
+                 !constructedSurfaces.Contains(source) &&
+                 map.GetColumnCell(source).Terrain is
+                     TerrainKind.SolidGround or TerrainKind.Mud
+             let route = engine.Navigation.FindPath(source, destination)
+             where route is { Count: >= 2 } &&
+                 route.TakeLast(2).All(constructedSurfaces.Contains)
+             orderby route.Count
+             select (source, destination, route)).First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["actors"]![0]!["x"] = routePlan.source.X;
+        save["actors"]![0]!["y"] = routePlan.source.Y;
+        save["actors"]![0]!["z"] = routePlan.source.Z;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        engine.QueueCommand(SimulationCommand.Move(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            actor.Id,
+            routePlan.destination));
+
+        engine.AdvanceTicks(
+            routePlan.route!.Count * SimulationDefinitions.Foundation.ActorMovementIntervalTicks);
+
+        var grime = engine.CreateSnapshot().SurfaceGrime;
+        Assert.True(grime.Count >= 2);
+        Assert.All(grime, stain => Assert.InRange(stain.Volume, 1, 48));
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(grime, restored.CreateSnapshot().SurfaceGrime);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void AnimalsCarryGrimeThroughTheirEcologyMovementLoop()
+    {
+        var seed = new WorldSeed(0xA11AC70FUL);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            SwampMapGenerator.Generate(seed, width: 64, height: 64),
+            initialGoblinCount: 1,
+            initialFoodStock: 20);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        foreach (var animalModel in save["animals"]!.AsArray())
+        {
+            animalModel!["carriedGrime"] = 6;
+        }
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+
+        for (var index = 0; index < 5_000 &&
+             engine.CreateSnapshot().Animals.All(animal => animal.CarriedGrime == 6);
+             index++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var movedAnimal = engine.CreateSnapshot().Animals.First(animal =>
+            animal.CarriedGrime < 6);
+        Assert.InRange(movedAnimal.CarriedGrime, 0, 5);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(
+            movedAnimal.CarriedGrime,
+            restored.CreateSnapshot().Animals.Single(animal => animal.Id == movedAnimal.Id)
+                .CarriedGrime);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void ExistingCleaningOrderRemovesTrackedDirt()
+    {
+        var seed = new WorldSeed(0xC1EA4D17UL);
+        var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 4,
+            initialFoodStock: 20);
+        engine.AdvanceTicks(1);
+        var initial = engine.CreateSnapshot();
+        var origin = initial.Actors[0].Position;
+        var floor = initial.WorldObjects
+            .Where(worldObject => worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
+            .Select(part => part.Position)
+            .Where(position => engine.Navigation.FindPath(origin, position) is not null)
+            .First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["surfaceGrime"] = CreateSurfaceGrime(floor, engine.CurrentTick, volume: 32);
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateBloodCleaning(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            floor,
+            floor));
+
+        for (var index = 0; index < 5_000 &&
+             (engine.CreateSnapshot().SurfaceGrime.Count > 0 || index == 0); index++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        Assert.Empty(engine.CreateSnapshot().SurfaceGrime);
+        Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.CleanBlood && designation.Target == floor);
+    }
+
+    [Fact]
+    public void NaturalGroundCannotBeDesignatedForCleaning()
+    {
+        var seed = new WorldSeed(0xC1EA4D18UL);
+        var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 4,
+            initialFoodStock: 20);
+        engine.AdvanceTicks(1);
+        var snapshot = engine.CreateSnapshot();
+        var naturalGround =
+            (from y in Enumerable.Range(0, map.Height)
+             from x in Enumerable.Range(0, map.Width)
+             let position = map.GetTerrainSurfacePosition(new GridPosition(x, y))
+             where snapshot.GetVisibility(position, map.Width).IsDiscovered() &&
+                 engine.World.IsTerrainTraversable(position) &&
+                 !engine.World.HasConstructedFloorSurface(position)
+             select position).First();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["bloodStains"] = CreateBloodStains(
+            naturalGround,
+            engine.CurrentTick,
+            volume: 32,
+            surface: BloodSurfaceKind.AbsorbentGround);
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateBloodCleaning(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            naturalGround,
+            naturalGround));
+
+        engine.AdvanceTicks(1);
+
+        Assert.Contains(engine.CreateSnapshot().BloodStains, stain =>
+            stain.Position == naturalGround);
+        Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations, designation =>
+            designation.Kind == WorkDesignationKind.CleanBlood &&
+            designation.Target == naturalGround);
+    }
+
+    [Fact]
     public void PersistedBleedingAddsBoundedBloodPulsesAndExpires()
     {
         var seed = new WorldSeed(0xB1EED1A6UL);
@@ -223,8 +402,12 @@ public sealed class BloodCleaningTests
 
         Assert.True(observedPartialCleaning);
         Assert.Empty(engine.CreateSnapshot().BloodStains);
-        Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations, designation =>
-            designation.Kind == WorkDesignationKind.CleanBlood);
+        var cleanedSnapshot = engine.CreateSnapshot();
+        Assert.All(
+            cleanedSnapshot.WorkDesignations.Where(designation =>
+                designation.Kind == WorkDesignationKind.CleanBlood),
+            designation => Assert.Contains(cleanedSnapshot.SurfaceGrime, grime =>
+                grime.Position == designation.Target));
 
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
@@ -243,6 +426,22 @@ public sealed class BloodCleaningTests
             ["z"] = position.Z,
             ["volume"] = volume,
             ["surface"] = (int)surface,
+            ["createdAtTick"] = currentTick.Value,
+            ["lastChangedAtTick"] = currentTick.Value,
+        },
+    ];
+
+    private static JsonArray CreateSurfaceGrime(
+        GridPosition position,
+        SimulationTick currentTick,
+        int volume) =>
+    [
+        new JsonObject
+        {
+            ["x"] = position.X,
+            ["y"] = position.Y,
+            ["z"] = position.Z,
+            ["volume"] = volume,
             ["createdAtTick"] = currentTick.Value,
             ["lastChangedAtTick"] = currentTick.Value,
         },

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\CaveWallTopologyTests.cs" Link="CaveWallTopologyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\ConstructedSurfaceTests.cs" Link="ConstructedSurfaceTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\DeepGeologyTests.cs" Link="DeepGeologyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\FloorConstructionTests.cs" Link="FloorConstructionTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\GeneratedStructureTests.cs" Link="GeneratedStructureTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\NavigationKnowledgeTests.cs" Link="NavigationKnowledgeTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\ResourceSpatialIndexTests.cs" Link="ResourceSpatialIndexTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\SwampMapGeneratorTests.cs" Link="SwampMapGeneratorTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\TerrainWorkCandidateSelectorTests.cs" Link="TerrainWorkCandidateSelectorTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\TerrainWorkExecutionServiceTests.cs" Link="TerrainWorkExecutionServiceTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\TerrainWorkPolicyTests.cs" Link="TerrainWorkPolicyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\TerrainWorkYieldPolicyTests.cs" Link="TerrainWorkYieldPolicyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\VerticalRampTests.cs" Link="VerticalRampTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\VisibilityTests.cs" Link="VisibilityTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\WallEnclosureAnalysisTests.cs" Link="WallEnclosureAnalysisTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\WorldMapStateTests.cs" Link="WorldMapStateTests.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GoblinStronghold.Simulation.TestSupport\GoblinStronghold.Simulation.TestSupport.csproj" />
+  </ItemGroup>
+</Project>

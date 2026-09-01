@@ -71,6 +71,65 @@ public sealed class ConstructedSurfaceTests
     }
 
     [Fact]
+    public void FloorCanBePlannedOnExcavatedHillRock()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var excavatedHill = EnumerateWorldPositions(engine)
+            .First(position =>
+                position.Z >= 0 &&
+                engine.Map.IsHillMassPosition(position) &&
+                engine.World.CanExcavateRock(position));
+        Assert.True(engine.World.TryExcavateRock(
+            excavatedHill,
+            new SimulationTick(1),
+            out _,
+            out _,
+            out _));
+
+        Assert.True(engine.World.CanPlanFloorConstruction([excavatedHill]));
+        engine.QueueCommand(SimulationCommand.BuildStoneFloor(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            excavatedHill,
+            excavatedHill,
+            ResourceVariant.Granite));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(excavatedHill, site.Anchor);
+        Assert.Equal(ConstructionKind.StoneFloor, site.Kind);
+    }
+
+    [Fact]
+    public void FloorAtLevelZeroDoesNotBlockFloorOneLevelBelow()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var lower = EnumerateWorldPositions(engine)
+            .Where(position => position.Z == -1)
+            .First(position =>
+                engine.World.CanBuildFloors([position]) &&
+                engine.World.CanBuildFloors([position with { Z = 0 }]));
+        var upper = lower with { Z = 0 };
+        engine.World.BuildFloor(
+            upper,
+            new SimulationTick(1),
+            stone: false,
+            ResourceVariant.OakWood);
+
+        Assert.True(engine.World.CanPlanFloorConstruction([lower]));
+        engine.World.BuildFloor(
+            lower,
+            new SimulationTick(2),
+            stone: true,
+            ResourceVariant.Granite);
+
+        Assert.Contains(engine.World.GetWorldObjectsAt(upper), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenFloor);
+        Assert.Contains(engine.World.GetWorldObjectsAt(lower), worldObject =>
+            worldObject.Kind == WorldObjectKind.StoneFloor);
+    }
+
+    [Fact]
     public void FloorAreaKeepsNaturalCaveGroundAndSkipsAdjacentSolidRock()
     {
         var engine = CreateEngine(initialWoodStock: 0);

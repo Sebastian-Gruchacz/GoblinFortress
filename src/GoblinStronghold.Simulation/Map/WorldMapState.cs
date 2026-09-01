@@ -589,10 +589,16 @@ public sealed class WorldMapState
             return true;
         }
 
-        return position.Z != 0 && Baseline.IsTerrainSurfacePosition(position) &&
-            _occupancy.TryGetValue(
+        if (position.Z == 0 || !Baseline.IsTerrainSurfacePosition(position) ||
+            !_occupancy.TryGetValue(
                 new SpatialOccupancyKey(position with { Z = 0 }, channel),
-                out claim);
+                out claim))
+        {
+            return false;
+        }
+
+        return _worldObjects.TryGetValue(claim.ObjectId, out var worldObject) &&
+            worldObject.Owner is WorldObjectOwner.Nature or WorldObjectOwner.HumanVillage;
     }
 
     public bool TryGetFluid(

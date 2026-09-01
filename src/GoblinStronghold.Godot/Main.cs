@@ -333,6 +333,10 @@ public partial class Main : Node
 
     public override void _Ready()
     {
+        _localeSettings = new LocaleSettings(
+            ProjectSettings.GlobalizePath("user://settings/locale.json"),
+            SteamLocaleProvider.TryGetCurrentGameLanguage);
+        _currentLocale = _localeSettings.Locale;
         _saveStore = new GameSaveStore(
             ProjectSettings.GlobalizePath("user://saves"),
             SimulationSaveFormat.CurrentVersion);
@@ -367,7 +371,9 @@ public partial class Main : Node
             "Interface/MainMenu/Center/Panel/Margin/Controls/ChooseSave");
         var titleSplash = GetNode<Label>("Interface/MainMenu/Center/Panel/Margin/Controls/Subtitle");
         titleSplash.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        titleSplash.Text = TitleSplashCatalog.Pick("Plemię pamięta to, co zdoła pożreć.");
+        titleSplash.Text = TitleSplashCatalog.Pick(
+            _currentLocale,
+            Ui("main-menu", "splash-fallback"));
         _titleMusic = GetNode<AudioStreamPlayer>("TitleMusic");
         _titleMusic.Finished += ReplayTitleMusic;
         _viewModeButton = GetNode<Button>("Interface/RightHud/SessionPanel/Controls/ViewMode");
@@ -409,14 +415,14 @@ public partial class Main : Node
             _managementMenuGrid,
             _managementMenu,
             _commandingHandIcon,
-            "Planer plemienia\nPriorytety, obszary i stan zleceń",
+            Ui("action-tiles", "tribe-planner"),
             ShowPlanner,
             GameShortcutId.ShowPlanner);
         CreateTextureTileButton(
             _managementMenuGrid,
             _managementMenu,
             CreateStorageIcon(ItemIcon.Cargo),
-            "Logistyka\nSieci, tragarze, źródła, obszary i filtry pojemników",
+            Ui("action-tiles", "logistics"),
             ShowLogistics);
         CreateBuildCategoryMenus();
         var storageBuild = _buildCategoryMenus[BuildCategory.Storage];
@@ -424,207 +430,207 @@ public partial class Main : Node
         var habitationBuild = _buildCategoryMenus[BuildCategory.Habitation];
         var productionBuild = _buildCategoryMenus[BuildCategory.Production];
         CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateStorageIcon(ItemIcon.Cargo),
-            "Magazyny i logistyka\nSkłady, pojemniki i obszary magazynowe",
+            Ui("action-tiles", "storage-category"),
             () => ShowBuildCategory(BuildCategory.Storage));
         CreateTextureTileButton(_buildMenuGrid, _buildMenu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneWall),
-            "Infrastruktura\nPodłogi, pomosty, ściany, drzwi i oświetlenie",
+            Ui("action-tiles", "infrastructure-category"),
             () => ShowBuildCategory(BuildCategory.Infrastructure));
         CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreateGoblinHutIcon(),
-            "Osada i wyprawy\nChaty oraz obozowiska wypadowe",
+            Ui("action-tiles", "habitation-category"),
             () => ShowBuildCategory(BuildCategory.Habitation));
         CreateTextureTileButton(_buildMenuGrid, _buildMenu, CreatePrimitiveWorkshopIcon(),
-            "Warsztaty i produkcja\nRzemiosło oraz piece hutnicze",
+            Ui("action-tiles", "production-category"),
             () => ShowBuildCategory(BuildCategory.Production));
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Food),
-            "Skład żywności\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.FoodStorage),
+            Ui("action-tiles", "food-storage"), () => SelectBuildMode((long)BuildMode.FoodStorage),
             GameShortcutId.BuildFoodStorage);
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Wood),
-            "Skład drewna\nKoszt: 2 drewna", () => SelectBuildMode((long)BuildMode.WoodStorage),
+            Ui("action-tiles", "wood-storage"), () => SelectBuildMode((long)BuildMode.WoodStorage),
             GameShortcutId.BuildWoodStorage);
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Stone),
-            "Skład kamienia i urobku\nKoszt: 2 drewna",
+            Ui("action-tiles", "stone-storage"),
             () => SelectBuildMode((long)BuildMode.StoneStorage),
             GameShortcutId.BuildStoneStorage);
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Cargo),
-            "Skład sprzętu\nKoszt: 2 drewna • wspólna pojemność 32",
+            Ui("action-tiles", "equipment-storage"),
             () => SelectBuildMode((long)BuildMode.EquipmentStorage),
             GameShortcutId.BuildEquipmentStorage);
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu, CreateStorageIcon(ItemIcon.Reeds),
-            "Skład materiałów\nKoszt: 2 drewna • skóry, kości i sitowie",
+            Ui("action-tiles", "materials-storage"),
             () => SelectBuildMode((long)BuildMode.MaterialsStorage),
             GameShortcutId.BuildMaterialsStorage);
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
             _woodenBarrelIcon,
-            "Beczka na wodę\nWymaga gotowej beczki z warsztatu • pojemność 32",
+            Ui("action-tiles", "water-barrel"),
             () => SelectBuildMode((long)BuildMode.WaterBarrel));
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
             CreateStorageIcon(ItemIcon.Cargo),
-            "Drewniana skrzynka\n4 typy × 8 • wymaga gotowej skrzynki z warsztatu",
+            Ui("action-tiles", "wooden-box"),
             () => SelectBuildMode((long)BuildMode.WoodenBox));
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
             CreateStorageIcon(ItemIcon.Cargo),
-            "Drewniana skrzynia\n8 typów × 8 • wymaga gotowej skrzyni z warsztatu",
+            Ui("action-tiles", "wooden-chest"),
             () => SelectBuildMode((long)BuildMode.WoodenChest));
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
             CreateStorageIcon(ItemIcon.Stone),
-            "Zasobnik masowy\n1 typ × 64 • wymaga gotowego zasobnika z warsztatu",
+            Ui("action-tiles", "bulk-bin"),
             () => SelectBuildMode((long)BuildMode.WoodenBulkBin));
         CreateTextureTileButton(storageBuild.Grid, storageBuild.Menu,
             CreateStorageIcon(ItemIcon.Cargo),
-            "Obszar magazynowy\nPrzeciągnij do 256 pól • pojemność zapewniają ustawione pojemniki",
+            Ui("action-tiles", "storage-area"),
             () => SelectBuildMode((long)BuildMode.StorageArea));
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenBridge),
-            "Pomost\nKoszt: 1 drewno za segment", () => ChooseConstructionMaterial(
+            Ui("action-tiles", "walkway"), () => ChooseConstructionMaterial(
                 BuildMode.Walkway, MaterialType.Wood),
             GameShortcutId.BuildWalkway);
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.BasaltBridge),
-            "Bazaltowy pomost\nKoszt: 1 bazalt za segment • odporny na lawę • wymaga budowania 2 i kilofa",
+            Ui("action-tiles", "basalt-walkway"),
             () => SelectBuildMode((long)BuildMode.BasaltWalkway));
         CreateTileButton(habitationBuild.Grid, habitationBuild.Menu, UiIcon.FieldCamp,
-            "Obozowisko wypadowe\nKoszt: 6 drewna", () => SelectBuildMode((long)BuildMode.FieldCamp),
+            Ui("action-tiles", "field-camp"), () => SelectBuildMode((long)BuildMode.FieldCamp),
             GameShortcutId.BuildFieldCamp);
         CreateTextureTileButton(habitationBuild.Grid, habitationBuild.Menu, CreateGoblinHutIcon(),
-            "Chata goblinów\nKoszt: 8 drewna • zwiększa pojemność plemienia",
+            Ui("action-tiles", "goblin-hut"),
             () => SelectBuildMode((long)BuildMode.GoblinHut),
             GameShortcutId.BuildGoblinHut);
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenFloor),
-            "Drewniana podłoga / strop\nMoże przykrywać pustą przestrzeń • koszt: 1 drewno za pole",
+            Ui("action-tiles", "wooden-floor"),
             () => ChooseConstructionMaterial(BuildMode.WoodenFloor, MaterialType.Wood));
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneFloor),
-            "Kamienna posadzka / strop\nMoże przykrywać pustą przestrzeń • koszt: 1 kamień za pole • wymaga kilofa",
+            Ui("action-tiles", "stone-floor"),
             () => ChooseConstructionMaterial(BuildMode.StoneFloor, MaterialType.Stone));
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenRamp),
-            "Drewniana pochylnia\nŁączy sąsiedni poziom • koszt: 2 drewna",
+            Ui("action-tiles", "wooden-ramp"),
             () => ChooseConstructionMaterial(BuildMode.WoodenRamp, MaterialType.Wood));
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneRamp),
-            "Kamienna pochylnia\nŁączy sąsiedni poziom • koszt: 3 kamienie • wymaga kilofa",
+            Ui("action-tiles", "stone-ramp"),
             () => ChooseConstructionMaterial(BuildMode.StoneRamp, MaterialType.Stone));
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenWall),
-            "Drewniana ściana\nKoszt: 2 drewna", () => ChooseConstructionMaterial(
+            Ui("action-tiles", "wooden-wall"), () => ChooseConstructionMaterial(
                 BuildMode.WoodenWall, MaterialType.Wood),
             GameShortcutId.BuildWoodenWall);
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneWall),
-            "Kamienny mur\nKoszt: 2 jednostki kamienia • wymaga kilofa",
+            Ui("action-tiles", "stone-wall"),
             () => ChooseConstructionMaterial(BuildMode.StoneWall, MaterialType.Stone),
             GameShortcutId.BuildStoneWall);
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenDoorFrame),
-            "Drewniana ościeżnica\nKoszt: 1 drewno", () => SelectBuildMode((long)BuildMode.WoodenDoorFrame));
+            Ui("action-tiles", "wooden-door-frame"), () => SelectBuildMode((long)BuildMode.WoodenDoorFrame));
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneDoorFrame),
-            "Kamienna ościeżnica\nKoszt: 1 kamień • wymaga kilofa",
+            Ui("action-tiles", "stone-door-frame"),
             () => SelectBuildMode((long)BuildMode.StoneDoorFrame));
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WoodenDoor),
-            "Drewniane drzwi\nKoszt: 1 drewno", () => SelectBuildMode((long)BuildMode.WoodenDoor),
+            Ui("action-tiles", "wooden-door"), () => SelectBuildMode((long)BuildMode.WoodenDoor),
             GameShortcutId.BuildWoodenDoor);
         CreateTextureTileButton(infrastructureBuild.Grid, infrastructureBuild.Menu,
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WallTorch),
-            "Pochodnia ścienna\nKoszt: 1 drewno • wskaż ścianę",
+            Ui("action-tiles", "wall-torch"),
             () => SelectBuildMode((long)BuildMode.WallTorch));
         CreateTextureTileButton(productionBuild.Grid, productionBuild.Menu, CreatePrimitiveWorkshopIcon(),
-            "Prymitywny warsztat\nKoszt: 4 drewna",
+            Ui("action-tiles", "primitive-workshop"),
             () => SelectBuildMode((long)BuildMode.PrimitiveWorkshop),
             GameShortcutId.BuildPrimitiveWorkshop);
         CreateTextureTileButton(productionBuild.Grid, productionBuild.Menu,
             CreateFurnaceIcon(WorkshopKind.Bloomery),
-            "Dymarka\nKoszt: 12 odpowiednich kamieni • żelazo",
+            Ui("action-tiles", "bloomery"),
             () => SelectBuildMode((long)BuildMode.Bloomery));
         CreateTextureTileButton(productionBuild.Grid, productionBuild.Menu,
             CreateFurnaceIcon(WorkshopKind.SmeltingFurnace),
-            "Piec hutniczy\nKoszt: 16 mocnych kamieni • miedź",
+            Ui("action-tiles", "smelting-furnace"),
             () => SelectBuildMode((long)BuildMode.SmeltingFurnace));
         CreateTextureTileButton(productionBuild.Grid, productionBuild.Menu,
             CreateFurnaceIcon(WorkshopKind.CrucibleFurnace),
-            "Piec tyglowy\nKoszt: 20 trwałych kamieni • srebro i złoto",
+            Ui("action-tiles", "crucible-furnace"),
             () => SelectBuildMode((long)BuildMode.CrucibleFurnace));
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherFood,
-            "Zbierz żywność\nJagody, grzyby, korzonki i ryby",
+            Ui("action-tiles", "gather-food"),
             () => SelectWorkMode((long)WorkMode.GatherFood),
             GameShortcutId.GatherFood);
         CreateTextureTileButton(_workMenuGrid, _workMenu, CreateGatherIcon(ItemIcon.Reeds),
-            "Zbierz sitowie\nWskaż trzcinowiska na płytkiej wodzie",
+            Ui("action-tiles", "gather-reeds"),
             () => SelectWorkMode((long)WorkMode.GatherReeds),
             GameShortcutId.GatherReeds);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.GatherBrushwood,
-            "Zbierz chrust\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.GatherBrushwood),
+            Ui("action-tiles", "gather-brushwood"), () => SelectWorkMode((long)WorkMode.GatherBrushwood),
             GameShortcutId.GatherBrushwood);
         CreateTextureTileButton(_workMenuGrid, _workMenu, CreateGatherIcon(ItemIcon.Stone),
-            "Zbierz kamienie i urobek\nPrzeciągnij obszar",
+            Ui("action-tiles", "gather-stone"),
             () => SelectWorkMode((long)WorkMode.GatherStone),
             GameShortcutId.GatherStone);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.UprootBush,
-            "Wykarcz krzaki\nTrwale usuwa źródła jagód", () => SelectWorkMode((long)WorkMode.UprootBerryBushes),
+            Ui("action-tiles", "uproot-bushes"), () => SelectWorkMode((long)WorkMode.UprootBerryBushes),
             GameShortcutId.UprootBushes);
         CreateTextureTileButton(_workMenuGrid, _workMenu,
             ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.WoodenAxe),
-            "Wyrąb drzew i pni\nWymaga goblina z siekierą", () => SelectWorkMode((long)WorkMode.FellTrees),
+            Ui("action-tiles", "fell-trees"), () => SelectWorkMode((long)WorkMode.FellTrees),
             GameShortcutId.FellTrees);
         CreateTextureTileButton(_workMenuGrid, _workMenu,
             CreateBadgedIcon(_pickaxeIcon, ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone)),
-            "Rozbij głazy\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.QuarryBoulders),
+            Ui("action-tiles", "quarry-boulders"), () => SelectWorkMode((long)WorkMode.QuarryBoulders),
             GameShortcutId.QuarryBoulders);
         CreateTextureTileButton(_workMenuGrid, _workMenu,
             CreateBadgedIcon(_pickaxeIcon, CreateMineBadgeIcon()),
-            "Kop w skale\nWymaga goblina z kilofem", () => SelectWorkMode((long)WorkMode.MineRock),
+            Ui("action-tiles", "mine-rock"), () => SelectWorkMode((long)WorkMode.MineRock),
             GameShortcutId.MineRock);
         CreateTextureTileButton(_workMenuGrid, _workMenu,
             CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: false)),
-            "Wykop pochylnię w dół\nWskaż odkrytą podłogę; wymaga kilofa",
+            Ui("action-tiles", "carve-ramp-down"),
             () => SelectWorkMode((long)WorkMode.CarveRampDown),
             GameShortcutId.CarveRampDown);
         CreateTextureTileButton(_workMenuGrid, _workMenu,
             CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: true)),
-            "Wykop pochylnię w górę\nWskaż odkrytą podłogę jaskini; wymaga kilofa",
+            Ui("action-tiles", "carve-ramp-up"),
             () => SelectWorkMode((long)WorkMode.CarveRampUp),
             GameShortcutId.CarveRampUp);
         CreateTextureTileButton(_workMenuGrid, _workMenu, CreateSlingIcon(),
-            "Poluj na zwierzęta\nPrzeciągnij obszar; pozostaną konkretne cele",
+            Ui("action-tiles", "hunt-animals"),
             () => SelectWorkMode((long)WorkMode.HuntAnimals),
             GameShortcutId.HuntAnimals);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.Expedition,
-            "Wyznacz obszar zwiadu\nSkauci nie wejdą w nieznany teren poza zaznaczeniem",
+            Ui("action-tiles", "scout"),
             () => SelectWorkMode((long)WorkMode.Scout),
             GameShortcutId.Scout);
         CreateTextureTileButton(_workMenuGrid, _workMenu, CreateCleanBloodIcon(),
-            "Zmyj zaschniętą krew\nWskaż plamy na podłogach i pomostach",
+            Ui("action-tiles", "clean-blood"),
             () => SelectWorkMode((long)WorkMode.CleanBlood),
             GameShortcutId.CleanBlood);
         CreateTileButton(_workMenuGrid, _workMenu, UiIcon.ClearOrders,
-            "Usuń zlecenia\nPrzeciągnij obszar", () => SelectWorkMode((long)WorkMode.Clear),
+            Ui("action-tiles", "clear-orders"), () => SelectWorkMode((long)WorkMode.Clear),
             GameShortcutId.ClearOrders);
         CreateTextureTileButton(
             _statisticsMenuGrid,
             _statisticsMenu,
             CreateStoredResourcesOverviewIcon(),
-            "Łączne zapasy w magazynach",
+            Ui("action-tiles", "stored-resources"),
             ShowStoredResources);
         CreateTextureTileButton(
             _statisticsMenuGrid,
             _statisticsMenu,
             CreateLooseResourcesOverviewIcon(),
-            "Znane towary leżące na ziemi",
+            Ui("action-tiles", "loose-resources"),
             ShowLooseResources);
         CreateTileButton(
             _statisticsMenuGrid,
             _statisticsMenu,
             UiIcon.Health,
-            "Lista goblinów",
+            Ui("action-tiles", "goblin-roster"),
             ShowGoblinRoster);
         CreateTextTileButton(
             _statisticsMenuGrid,
             _statisticsMenu,
             "Σ",
-            "Statystyki plemienia",
+            Ui("action-tiles", "tribal-statistics"),
             ShowStatistics);
         CreateNeedIndicators();
         _goblinDetails.CloseRequested += _goblinDetails.Hide;
@@ -653,7 +659,7 @@ public partial class Main : Node
             new Label
             {
                 Name = "ContentsLabel",
-                Text = "Zawartość: pusty",
+                Text = Ui("windows", "contents-empty"),
             };
         if (_storageContentsLabel.GetParent() is null)
         {
@@ -743,20 +749,20 @@ public partial class Main : Node
         BindButton("Speed2", 2);
         BindButton("Speed4", 4);
         BindButton("Speed8", 8);
-        ConfigureActionButton("Pause", UiIcon.Pause, "Pauza • ~ lub Spacja");
-        ConfigureActionButton("Speed1", UiIcon.Play, "Normalna prędkość • klawisz 1 • 1×");
-        ConfigureActionButton("Speed2", UiIcon.Faster, "Przyspieszenie • klawisz 2 • 2×");
-        ConfigureActionButton("Speed4", UiIcon.Fastest, "Przyspieszenie • klawisz 3 • 4×");
-        ConfigureActionButton("Speed8", UiIcon.Fastest, "Maksymalne przyspieszenie • klawisz 4 • 8×");
+        ConfigureActionButton("Pause", UiIcon.Pause, Ui("toolbar", "pause"));
+        ConfigureActionButton("Speed1", UiIcon.Play, Ui("toolbar", "speed-1"));
+        ConfigureActionButton("Speed2", UiIcon.Faster, Ui("toolbar", "speed-2"));
+        ConfigureActionButton("Speed4", UiIcon.Fastest, Ui("toolbar", "speed-4"));
+        ConfigureActionButton("Speed8", UiIcon.Fastest, Ui("toolbar", "speed-8"));
         GetToolbarButton("Speed8").Icon = UiIcons.LoadSpeed8Texture();
-        ConfigureActionButton("Management", UiIcon.Work, "Zarządzanie plemieniem");
+        ConfigureActionButton("Management", UiIcon.Work, Ui("toolbar", "management"));
         GetToolbarButton("Management").Icon = _commandingHandIcon;
-        ConfigureActionButton("Build", UiIcon.Build, "Budowanie");
-        ConfigureActionButton("Work", UiIcon.Work, "Zlecenia pracy");
-        ConfigureActionButton("Move", UiIcon.Expedition, "Rozkazy wybranych goblinów • M/A/H/P");
+        ConfigureActionButton("Build", UiIcon.Build, Ui("toolbar", "build"));
+        ConfigureActionButton("Work", UiIcon.Work, Ui("toolbar", "work"));
+        ConfigureActionButton("Move", UiIcon.Expedition, Ui("toolbar", "unit-orders"));
         var statisticsButton = GetToolbarButton("Statistics");
         statisticsButton.FocusMode = Control.FocusModeEnum.None;
-        statisticsButton.TooltipText = "Zestawienia i statystyki";
+        statisticsButton.TooltipText = Ui("toolbar", "statistics");
         GetToolbarButton("Management").Pressed += ShowManagementMenu;
         GetToolbarButton("Build").Pressed += ShowBuildMenu;
         GetToolbarButton("Work").Pressed += ShowWorkMenu;
@@ -787,31 +793,31 @@ public partial class Main : Node
         RegisterShortcutTile(
             GameShortcutId.OpenManagement,
             GetToolbarButton("Management"),
-            "Zarządzanie plemieniem");
+            Ui("toolbar", "management"));
         RegisterShortcutTile(
             GameShortcutId.OpenConstruction,
             GetToolbarButton("Build"),
-            "Budowanie");
+            Ui("toolbar", "build"));
         RegisterShortcutTile(
             GameShortcutId.OpenWork,
             GetToolbarButton("Work"),
-            "Zlecenia pracy");
+            Ui("toolbar", "work"));
         RegisterShortcutTile(
             GameShortcutId.OpenStatistics,
             statisticsButton,
-            "Zestawienia i statystyki");
+            Ui("toolbar", "statistics"));
         RegisterShortcutTile(
             GameShortcutId.OpenUnitOrders,
             GetToolbarButton("Move"),
-            "Rozkazy wybranych goblinów");
+            Ui("toolbar", "selected-unit-orders"));
         RegisterShortcutTile(
             GameShortcutId.CameraLevelUp,
             levelUpButton,
-            "Pokaż poziom mapy wyżej");
+            Ui("toolbar", "level-up"));
         RegisterShortcutTile(
             GameShortcutId.CameraLevelDown,
             levelDownButton,
-            "Pokaż poziom mapy niżej");
+            Ui("toolbar", "level-down"));
         UpdateLevelButtonLabels();
         CreatePlannerWindow();
         CreateLogisticsWindow();
@@ -823,6 +829,7 @@ public partial class Main : Node
         CreateOptionsWindow();
         CreateRecoveryWindow();
         ApplyGameThemeToWindows();
+        ApplyStaticTranslations();
         UpdateSpeedButtons();
         ShowMainMenu();
     }
@@ -1222,8 +1229,8 @@ public partial class Main : Node
         }
 
         _inspector.Text = preferredFailure is null
-            ? "Nie znaleziono zapisu do wczytania."
-            : $"Nie znaleziono zgodnego zapisu • {preferredFailure}";
+            ? Ui("save-load", "no-save-to-load")
+            : UiFormat("save-load", "no-compatible-save", preferredFailure);
         ShowLoadFailure(_inspector.Text);
     }
 
@@ -1233,15 +1240,15 @@ public partial class Main : Node
             .FirstOrDefault(item => StringComparer.OrdinalIgnoreCase.Equals(item.Path, path));
         if (candidate.Path is null)
         {
-            _recoverySummary.Text = "Wybrany punkt zapisu już nie istnieje.";
+            _recoverySummary.Text = Ui("save-load", "save-point-missing");
             ShowLoadFailure(_recoverySummary.Text);
             return;
         }
 
         if (!TryLoadGameCandidate(candidate.Path, candidate.Json, out var failure))
         {
-            _recoverySummary.Text = $"Nie udało się wczytać {Path.GetFileName(path)}: " +
-                failure;
+            _recoverySummary.Text = UiFormat(
+                "save-load", "specific-load-failed", Path.GetFileName(path), failure);
             ShowLoadFailure(_recoverySummary.Text);
         }
     }
@@ -1263,10 +1270,10 @@ public partial class Main : Node
             _hasActiveSession = true;
             _recoveryWindow.Hide();
             CloseMainMenu();
-            _inspector.Text = $"Gra wczytana • tick {_engine.CurrentTick.Value:N0} • " +
-                Path.GetFileName(path) +
+            _inspector.Text = UiFormat("save-load", "game-loaded",
+                    _engine.CurrentTick.Value, Path.GetFileName(path)) +
                 (protectedCurrentSession
-                    ? " • poprzednia sesja zachowana przed wczytaniem"
+                    ? Ui("save-load", "previous-session-preserved")
                     : string.Empty);
             failure = string.Empty;
             return true;
@@ -1306,51 +1313,53 @@ public partial class Main : Node
         _chooseSaveButton.Disabled = candidates.Count == 0;
         if (candidates.Count == 0)
         {
-            _loadMenuButton.Text = "Brak zapisów";
-            _loadMenuButton.TooltipText = "Nie znaleziono żadnego punktu zapisu.";
-            _chooseSaveButton.TooltipText = "Nie znaleziono żadnego punktu zapisu.";
+            _loadMenuButton.Text = Ui("save-load", "no-saves");
+            _loadMenuButton.TooltipText = Ui("save-load", "no-save-points");
+            _chooseSaveButton.TooltipText = Ui("save-load", "no-save-points");
             return;
         }
 
         var selected = candidates[0];
         var selectedName = Path.GetFileNameWithoutExtension(selected.Path);
         _loadMenuButton.Text = selected.CurrentTick is { } tick
-            ? $"Wczytaj • {selectedName} • tick {tick:N0}"
-            : $"Wczytaj • {selectedName}";
-        _loadMenuButton.TooltipText = "Wybrany punkt zapisu:\n" +
+            ? UiFormat("save-load", "load-selected-tick", selectedName, tick)
+            : UiFormat("save-load", "load-selected", selectedName);
+        _loadMenuButton.TooltipText = Ui("save-load", "selected-save") + "\n" +
             string.Join("\n", candidates.Select((candidate, index) =>
                 $"{index + 1}. {DescribeSaveCandidate(candidate)}"));
-        _chooseSaveButton.TooltipText =
-            "Otwórz listę wszystkich ręcznych zapisów, kopii i autozapisów.";
+        _chooseSaveButton.TooltipText = Ui("save-load", "open-all-saves");
     }
 
-    private static string DescribeSaveCandidate(GameSaveSummary candidate)
+    private string DescribeSaveCandidate(GameSaveSummary candidate)
     {
         var fileName = Path.GetFileName(candidate.Path);
         var savedAt = candidate.LastWriteTimeUtc.ToLocalTime()
             .ToString("yyyy-MM-dd HH:mm:ss");
         if (!candidate.HasReadableHeader)
         {
-            return $"{fileName} • nieczytelny nagłówek • {savedAt}";
+            return UiFormat("save-load", "unreadable-save", fileName, savedAt);
         }
 
-        return $"{fileName} • tick {candidate.CurrentTick!.Value:N0} • " +
-            $"najniżej z={candidate.LowestSavedZ!.Value} • " +
-            $"świat {candidate.WorldSeed!.Value:X16} • {savedAt}";
+        return UiFormat("save-load", "save-summary",
+            fileName,
+            candidate.CurrentTick!.Value,
+            candidate.LowestSavedZ!.Value,
+            candidate.WorldSeed!.Value,
+            savedAt);
     }
 
     private void CreateRecoveryWindow()
     {
         _loadFailureDialog = new AcceptDialog
         {
-            Title = "Nie udało się wczytać gry",
+            Title = Ui("save-load", "load-failed-title"),
             OkButtonText = "OK",
         };
         AddChild(_loadFailureDialog);
 
         _recoveryWindow = new Window
         {
-            Title = "Punkty zapisu",
+            Title = Ui("save-load", "save-points-title"),
             Size = new Vector2I(760, 500),
             MinSize = new Vector2I(560, 360),
             Visible = false,
@@ -1371,8 +1380,7 @@ public partial class Main : Node
         margin.AddChild(content);
         content.AddChild(new Label
         {
-            Text = "Wybierz dokładny punkt odzyskiwania. Pierwszy wpis jest używany " +
-                "przez zwykłe Wczytaj.",
+            Text = Ui("save-load", "recovery-help"),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
         _recoverySummary = new Label
@@ -1394,7 +1402,7 @@ public partial class Main : Node
         _recoveryRows.AddThemeConstantOverride("separation", 6);
         scroll.AddChild(_recoveryRows);
 
-        var close = new Button { Text = "Zamknij" };
+        var close = new Button { Text = Ui("common", "close") };
         close.Pressed += _recoveryWindow.Hide;
         content.AddChild(close);
         _chooseSaveButton.Pressed += ShowRecoveryWindow;
@@ -1416,23 +1424,22 @@ public partial class Main : Node
 
         var candidates = _saveStore.InspectCandidates();
         _recoverySummary.Text = candidates.Count == 0
-            ? "Nie znaleziono żadnego punktu zapisu."
-            : $"Dostępne punkty: {candidates.Count}. " +
-              "Nieczytelne pliki pozostają widoczne, ale nie można ich wybrać.";
+            ? Ui("save-load", "no-save-points")
+            : UiFormat("save-load", "available-save-points", candidates.Count);
         Button? firstEnabled = null;
         for (var index = 0; index < candidates.Count; index++)
         {
             var candidate = candidates[index];
             var button = new Button
             {
-                Text = (index == 0 ? "Domyślny • " : string.Empty) +
+                Text = (index == 0 ? Ui("save-load", "default-prefix") : string.Empty) +
                     DescribeSaveCandidate(candidate),
                 Alignment = HorizontalAlignment.Left,
                 CustomMinimumSize = new Vector2(0, 44),
                 Disabled = !candidate.HasReadableHeader,
                 TooltipText = candidate.HasReadableHeader
-                    ? "Wczytaj dokładnie ten punkt zapisu."
-                    : "Nagłówek pliku jest uszkodzony lub niekompletny.",
+                    ? Ui("save-load", "load-exact")
+                    : Ui("save-load", "damaged-header"),
             };
             var path = candidate.Path;
             button.Pressed += () => LoadSpecificGame(path);
@@ -1448,7 +1455,7 @@ public partial class Main : Node
     {
         _optionsWindow = new Window
         {
-            Title = "Opcje",
+            Title = Ui("options", "title"),
             Size = new Vector2I(650, 680),
             MinSize = new Vector2I(520, 420),
             Visible = false,
@@ -1469,13 +1476,43 @@ public partial class Main : Node
         margin.AddChild(content);
         content.AddChild(new Label
         {
-            Text = "Skróty klawiaturowe",
+            Text = Ui("options", "language"),
+            ThemeTypeVariation = "HeaderSmall",
+        });
+        var language = new OptionButton();
+        foreach (var locale in TranslationCatalog.SupportedLocales)
+        {
+            language.AddItem(TranslationCatalog.Get(
+                _currentLocale,
+                "interface",
+                "language",
+                locale));
+            language.SetItemMetadata(language.ItemCount - 1, locale);
+            if (locale == _currentLocale)
+            {
+                language.Select(language.ItemCount - 1);
+            }
+        }
+        language.ItemSelected += index =>
+        {
+            var locale = language.GetItemMetadata((int)index).AsString();
+            _localeSettings.Set(locale);
+        };
+        content.AddChild(language);
+        content.AddChild(new Label
+        {
+            Text = Ui("options", "language-restart"),
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
+        content.AddChild(new HSeparator());
+        content.AddChild(new Label
+        {
+            Text = Ui("options", "shortcuts"),
             ThemeTypeVariation = "HeaderSmall",
         });
         content.AddChild(new Label
         {
-            Text = "Kliknij skrót i naciśnij nowy klawisz. Pozycje wcięte działają " +
-                "po wcześniejszym otwarciu nadrzędnego menu.",
+            Text = Ui("options", "shortcuts-help"),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
 
@@ -1501,29 +1538,24 @@ public partial class Main : Node
         content.AddChild(new HSeparator());
         content.AddChild(new Label
         {
-            Text = "O grze",
+            Text = Ui("options", "about"),
             ThemeTypeVariation = "HeaderSmall",
         });
         content.AddChild(new Label
         {
-            Text = "Autor: Sebastian Gruchacz\n" +
-                "Wsparcie projektowe i programistyczne: OpenAI Codex\n" +
-                "ObscureWare Solutions",
+            Text = Ui("options", "credits"),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
         var musicNotice = new Label
         {
-            Text = "Muzyka „The Hollow Council” jest tymczasowym utworem " +
-                "wygenerowanym przez AI, używanym wyłącznie w tym wewnętrznym demie. " +
-                "Nie posiada zgody na wykorzystanie komercyjne i musi zostać " +
-                "zastąpiona przed publiczną lub komercyjną dystrybucją.",
+            Text = Ui("options", "music-notice"),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         };
         musicNotice.AddThemeColorOverride("font_color", GameUiTheme.MutedText);
         musicNotice.AddThemeFontSizeOverride("font_size", 10);
         content.AddChild(musicNotice);
 
-        var close = new Button { Text = "Zamknij" };
+        var close = new Button { Text = Ui("common", "close") };
         close.Pressed += CloseOptions;
         content.AddChild(close);
 
@@ -1559,7 +1591,10 @@ public partial class Main : Node
             if (definition.Section != currentSection)
             {
                 currentSection = definition.Section;
-                var section = new Label { Text = currentSection };
+                var section = new Label
+                {
+                    Text = Ui("shortcut-sections", ShortcutSectionKey(currentSection)),
+                };
                 section.AddThemeColorOverride("font_color", GameUiTheme.Accent);
                 section.AddThemeFontSizeOverride("font_size", 17);
                 _shortcutRows.AddChild(section);
@@ -1569,9 +1604,8 @@ public partial class Main : Node
             row.AddThemeConstantOverride("separation", 8);
             row.AddChild(new Label
             {
-                Text = definition.Parent is null
-                    ? definition.Label
-                    : $"    {definition.Label}",
+                Text = (definition.Parent is null ? string.Empty : "    ") +
+                    Ui("shortcuts", definition.Id.ToString()),
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 VerticalAlignment = VerticalAlignment.Center,
             });
@@ -1596,7 +1630,7 @@ public partial class Main : Node
             previousButton.Text = _shortcutSettings.Describe(previous);
         }
         _capturedShortcut = shortcut;
-        _shortcutBindingButtons[shortcut].Text = "Naciśnij klawisz…";
+        _shortcutBindingButtons[shortcut].Text = Ui("options", "press-key");
     }
 
     private bool TryHandleShortcutInput(InputEventKey key)
@@ -1618,7 +1652,9 @@ public partial class Main : Node
             if (FindShortcutConflict(captured, stroke) is { } conflict)
             {
                 _shortcutBindingButtons[captured].Text =
-                    $"Zajęty: {ShortcutSettings.Definitions.First(item => item.Id == conflict).Label}";
+                    string.Format(
+                        Ui("options", "shortcut-conflict"),
+                        Ui("shortcuts", conflict.ToString()));
                 return true;
             }
 
@@ -1666,6 +1702,17 @@ public partial class Main : Node
         _shortcutMenuExpiresAt = now + 3000;
         return true;
     }
+
+    private static string ShortcutSectionKey(string section) => section switch
+    {
+        "Menu główne" => "main-menu",
+        "Kamera" => "camera",
+        "Zarządzanie" => "management",
+        "Rozkazy jednostek" => "unit-orders",
+        "Konstrukcje" => "construction",
+        "Prace i obszary" => "work",
+        _ => section,
+    };
 
     private GameShortcutId? FindShortcutConflict(GameShortcutId changed, ShortcutStroke stroke)
     {
@@ -1982,10 +2029,10 @@ public partial class Main : Node
             {
                 Text = category switch
                 {
-                    BuildCategory.Storage => "Magazyny i logistyka",
-                    BuildCategory.Infrastructure => "Infrastruktura",
-                    BuildCategory.Habitation => "Osada i wyprawy",
-                    BuildCategory.Production => "Warsztaty i produkcja",
+                    BuildCategory.Storage => Ui("build-categories", "storage"),
+                    BuildCategory.Infrastructure => Ui("build-categories", "infrastructure"),
+                    BuildCategory.Habitation => Ui("build-categories", "habitation"),
+                    BuildCategory.Production => Ui("build-categories", "production"),
                     _ => throw new ArgumentOutOfRangeException(nameof(category)),
                 },
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -2736,35 +2783,42 @@ public partial class Main : Node
         UpdateActiveToolCursor();
         _inspector.Text = _buildMode switch
         {
-            BuildMode.FoodStorage => "Budowa składu żywności: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
-            BuildMode.WoodStorage => "Budowa składu drewna: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
-            BuildMode.StoneStorage => "Budowa składu kamienia: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
-            BuildMode.EquipmentStorage => "Budowa składu sprzętu: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
-            BuildMode.MaterialsStorage => "Budowa składu materiałów: wskaż pole LPM • koszt 2 drewna • PPM lub Esc anuluje",
-            BuildMode.WaterBarrel => "Ustaw beczkę na wodę: wskaż odkryte pole LPM • gotowa beczka zostanie przyniesiona z warsztatu lub składu • PPM lub Esc anuluje",
-            BuildMode.WoodenBox => "Ustaw skrzynkę w obszarze magazynowym: 4 typy po 8 sztuk • gotowa skrzynka zostanie dostarczona • PPM lub Esc anuluje",
-            BuildMode.WoodenChest => "Ustaw skrzynię w obszarze magazynowym: 8 typów po 8 sztuk • gotowa skrzynia zostanie dostarczona • PPM lub Esc anuluje",
-            BuildMode.WoodenBulkBin => "Ustaw zasobnik masowy: jeden typ do 64 sztuk • gotowy zasobnik zostanie dostarczony • PPM lub Esc anuluje",
-            BuildMode.StorageArea => "Wyznacz obszar magazynowy: przeciągnij prostokąt do 256 odkrytych pól • sam obszar nie daje pojemności • PPM lub Esc anuluje",
-            BuildMode.Walkway => $"Budowa pomostu: {DescribeResourceVariant(_selectedConstructionMaterial)} • przeciągnij LPM od początku do końca • 1 drewno/segment • drewno nie może przykrywać lawy • PPM lub Esc anuluje",
-            BuildMode.BasaltWalkway => "Budowa bazaltowego pomostu: przeciągnij LPM od początku do końca • 1 bazalt/segment • odporny na lawę • PPM lub Esc anuluje",
-            BuildMode.FieldCamp => "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu • PPM lub Esc anuluje",
-            BuildMode.GoblinHut => $"Chata 3×3: wskaż lewy górny narożnik • koszt 8 drewna • " +
-                $"daje {SimulationDefinitions.GoblinHutCapacity} miejsc i podnosi cel populacji • PPM lub Esc anuluje",
-            BuildMode.WoodenWall => $"Budowa drewnianej ściany: {DescribeResourceVariant(_selectedConstructionMaterial)} • przeciągnij LPM od początku do końca • 2 drewna/segment • blokuje przejście • PPM lub Esc anuluje",
-            BuildMode.StoneWall => $"Budowa kamiennego muru: {DescribeResourceVariant(_selectedConstructionMaterial)} • przeciągnij LPM od początku do końca • 2 jednostki kamienia/segment • wymaga kilofa • PPM lub Esc anuluje",
-            BuildMode.WoodenFloor => $"Budowa drewnianej podłogi lub stropu z materiału: {DescribeResourceVariant(_selectedConstructionMaterial)} • może przykrywać pustą przestrzeń • przeciągnij prostokąt do 256 pól • 1 drewno/pole • PPM lub Esc anuluje",
-            BuildMode.StoneFloor => $"Budowa kamiennej posadzki lub stropu z materiału: {DescribeResourceVariant(_selectedConstructionMaterial)} • może przykrywać pustą przestrzeń • przeciągnij prostokąt do 256 pól • 1 kamień/pole • wymaga kilofa • PPM lub Esc anuluje",
-            BuildMode.WoodenRamp => $"Budowa drewnianej pochylni z materiału: {DescribeResourceVariant(_selectedConstructionMaterial)} • wskaż dolne pole; kierunek ku sąsiedniemu poziomowi zostanie rozpoznany automatycznie • koszt 2 drewna • PPM lub Esc anuluje",
-            BuildMode.StoneRamp => $"Budowa kamiennej pochylni z materiału: {DescribeResourceVariant(_selectedConstructionMaterial)} • wskaż dolne pole; kierunek ku sąsiedniemu poziomowi zostanie rozpoznany automatycznie • koszt 3 kamienie • wymaga kilofa • PPM lub Esc anuluje",
-            BuildMode.WoodenDoorFrame => "Budowa drewnianej ościeżnicy: wskaż pole LPM • koszt 1 drewna • może zastąpić gotową ścianę • PPM lub Esc anuluje",
-            BuildMode.StoneDoorFrame => "Budowa kamiennej ościeżnicy: wskaż pole LPM • koszt 1 kamienia • wymaga kilofa • może zastąpić gotowy kamienny mur • PPM lub Esc anuluje",
-            BuildMode.WoodenDoor => "Budowa drewnianych drzwi: wskaż gotową ościeżnicę LPM • koszt 1 drewna • po budowie kliknij skrzydło, aby je otworzyć • PPM lub Esc anuluje",
-            BuildMode.WallTorch => "Budowa pochodni: wskaż odkrytą ścianę LPM • koszt 1 drewna • strona montażu wynika z wnętrza i sąsiedztwa • PPM lub Esc anuluje",
-            BuildMode.PrimitiveWorkshop => "Budowa prymitywnego warsztatu: wskaż pole LPM • koszt 4 drewna • PPM lub Esc anuluje",
-            BuildMode.Bloomery => "Budowa dymarki: wskaż pole LPM • koszt 12 kamieni o sile i trwałości co najmniej 35 • wymaga budowniczego z kilofem • PPM lub Esc anuluje",
-            BuildMode.SmeltingFurnace => "Budowa pieca hutniczego: wskaż pole LPM • koszt 16 kamieni o sile i trwałości co najmniej 45 • PPM lub Esc anuluje",
-            BuildMode.CrucibleFurnace => "Budowa pieca tyglowego: wskaż pole LPM • koszt 20 kamieni o sile co najmniej 60 i trwałości 65 • wymaga budownictwa 2 • PPM lub Esc anuluje",
+            BuildMode.FoodStorage => Ui("build-prompts", "food-storage"),
+            BuildMode.WoodStorage => Ui("build-prompts", "wood-storage"),
+            BuildMode.StoneStorage => Ui("build-prompts", "stone-storage"),
+            BuildMode.EquipmentStorage => Ui("build-prompts", "equipment-storage"),
+            BuildMode.MaterialsStorage => Ui("build-prompts", "materials-storage"),
+            BuildMode.WaterBarrel => Ui("build-prompts", "water-barrel"),
+            BuildMode.WoodenBox => Ui("build-prompts", "wooden-box"),
+            BuildMode.WoodenChest => Ui("build-prompts", "wooden-chest"),
+            BuildMode.WoodenBulkBin => Ui("build-prompts", "bulk-bin"),
+            BuildMode.StorageArea => Ui("build-prompts", "storage-area"),
+            BuildMode.Walkway => UiFormat(
+                "build-prompts", "walkway", DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.BasaltWalkway => Ui("build-prompts", "basalt-walkway"),
+            BuildMode.FieldCamp => Ui("build-prompts", "field-camp"),
+            BuildMode.GoblinHut => UiFormat(
+                "build-prompts", "goblin-hut", SimulationDefinitions.GoblinHutCapacity),
+            BuildMode.WoodenWall => UiFormat(
+                "build-prompts", "wooden-wall", DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.StoneWall => UiFormat(
+                "build-prompts", "stone-wall", DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.WoodenFloor => UiFormat(
+                "build-prompts", "wooden-floor", DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.StoneFloor => UiFormat(
+                "build-prompts", "stone-floor", DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.WoodenRamp => UiFormat(
+                "build-prompts", "wooden-ramp", DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.StoneRamp => UiFormat(
+                "build-prompts", "stone-ramp", DescribeResourceVariant(_selectedConstructionMaterial)),
+            BuildMode.WoodenDoorFrame => Ui("build-prompts", "wooden-door-frame"),
+            BuildMode.StoneDoorFrame => Ui("build-prompts", "stone-door-frame"),
+            BuildMode.WoodenDoor => Ui("build-prompts", "wooden-door"),
+            BuildMode.WallTorch => Ui("build-prompts", "wall-torch"),
+            BuildMode.PrimitiveWorkshop => Ui("build-prompts", "primitive-workshop"),
+            BuildMode.Bloomery => Ui("build-prompts", "bloomery"),
+            BuildMode.SmeltingFurnace => Ui("build-prompts", "smelting-furnace"),
+            BuildMode.CrucibleFurnace => Ui("build-prompts", "crucible-furnace"),
             _ => _inspector.Text,
         };
     }
@@ -2781,20 +2835,20 @@ public partial class Main : Node
         UpdateActiveToolCursor();
         _inspector.Text = _workMode switch
         {
-            WorkMode.GatherFood => "Praca: przeciągnij obszar zbierania żywności • PPM lub Esc anuluje",
-            WorkMode.GatherReeds => "Praca: przeciągnij obszar zbierania sitowia • PPM lub Esc anuluje",
-            WorkMode.GatherBrushwood => "Praca: przeciągnij obszar zbierania chrustu • PPM lub Esc anuluje",
-            WorkMode.GatherStone => "Praca: przeciągnij obszar zbierania małych kamieni • PPM lub Esc anuluje",
-            WorkMode.UprootBerryBushes => "Praca: przeciągnij obszar karczowania krzaków • usuwa je trwale • PPM lub Esc anuluje",
-            WorkMode.FellTrees => "Praca: przeciągnij obszar wyrębu • pozostaną konkretne drzewa i martwe pnie • PPM lub Esc anuluje",
-            WorkMode.QuarryBoulders => "Praca: przeciągnij obszar wydobycia • pozostaną konkretne głazy • wymaga kilofa • PPM lub Esc anuluje",
-            WorkMode.MineRock => "Praca: przeciągnij obszar tunelu • nieznane pola pozostaną w planie aż front kopania je odsłoni • wymaga kilofa • PPM lub Esc anuluje",
-            WorkMode.CarveRampDown => "Praca: wskaż odkrytą podłogę • goblin z kilofem wykopie pochylnię na poziom niżej • PPM lub Esc anuluje",
-            WorkMode.CarveRampUp => "Praca: wskaż odkrytą podłogę jaskini • goblin z kilofem wykopie pochylnię na poziom wyżej • PPM lub Esc anuluje",
-            WorkMode.HuntAnimals => "Polowanie: przeciągnij obszar • pozostaną konkretne zwierzęta • PPM lub Esc anuluje",
-            WorkMode.Scout => "Zwiad: przeciągnij dozwolony obszar • skauci mogą przechodzić przez znany teren, ale nie wejdą w nieznany teren poza zaznaczeniem • PPM lub Esc anuluje",
-            WorkMode.CleanBlood => "Praca: przeciągnij obszar sprzątania zaschniętej krwi z dowolnej dostępnej powierzchni • PPM lub Esc anuluje",
-            WorkMode.Clear => "Praca: przeciągnij obszar usuwania zleceń • PPM lub Esc anuluje",
+            WorkMode.GatherFood => Ui("work-prompts", "gather-food"),
+            WorkMode.GatherReeds => Ui("work-prompts", "gather-reeds"),
+            WorkMode.GatherBrushwood => Ui("work-prompts", "gather-brushwood"),
+            WorkMode.GatherStone => Ui("work-prompts", "gather-stone"),
+            WorkMode.UprootBerryBushes => Ui("work-prompts", "uproot-bushes"),
+            WorkMode.FellTrees => Ui("work-prompts", "fell-trees"),
+            WorkMode.QuarryBoulders => Ui("work-prompts", "quarry-boulders"),
+            WorkMode.MineRock => Ui("work-prompts", "mine-rock"),
+            WorkMode.CarveRampDown => Ui("work-prompts", "carve-ramp-down"),
+            WorkMode.CarveRampUp => Ui("work-prompts", "carve-ramp-up"),
+            WorkMode.HuntAnimals => Ui("work-prompts", "hunt-animals"),
+            WorkMode.Scout => Ui("work-prompts", "scout"),
+            WorkMode.CleanBlood => Ui("work-prompts", "clean-blood"),
+            WorkMode.Clear => Ui("work-prompts", "clear-orders"),
             _ => _inspector.Text,
         };
     }
@@ -2849,7 +2903,7 @@ public partial class Main : Node
             if (!_engine.Visibility.Get(cell).IsDiscovered() ||
                 !TryInferDiscoveredRamp(cell, out var upper))
             {
-                _inspector.Text = "Nie znaleziono poprawnego kierunku pochylni. Dolne pole musi mieć dojście, a sąsiednie pole poziom wyżej — przechodnią podłogę lub grunt.";
+                _inspector.Text = Ui("construction-feedback", "ramp-direction-invalid");
                 UpdateBuildPreview(screenPosition);
                 return;
             }
@@ -2861,11 +2915,12 @@ public partial class Main : Node
                 : SimulationCommand.BuildWoodenRamp(
                     _engine.CurrentTick.Next(), _commandSequence++, cell, upper,
                     _selectedConstructionMaterial));
-            _inspector.Text = $"Zlecono {_buildMode switch
-            {
-                BuildMode.StoneRamp => "kamienną pochylnię",
-                _ => "drewnianą pochylnię",
-            }}: {cell} → {upper} • kierunek {DescribeRampDirection(cell, upper)}";
+            _inspector.Text = UiFormat(
+                "construction-feedback",
+                _buildMode == BuildMode.StoneRamp ? "stone-ramp-ordered" : "wooden-ramp-ordered",
+                cell,
+                upper,
+                DescribeRampDirection(cell, upper));
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -2876,7 +2931,7 @@ public partial class Main : Node
         {
             if (!_engine.Visibility.Get(cell).IsDiscovered())
             {
-                _inspector.Text = "Konstrukcja musi stanąć na odkrytym polu.";
+                _inspector.Text = Ui("construction-feedback", "discovered-cell-required");
                 return;
             }
 
@@ -2905,19 +2960,19 @@ public partial class Main : Node
             _inspector.Text = _buildMode switch
             {
                 BuildMode.WoodenDoorFrame =>
-                    "Zlecono przechodnią drewnianą ościeżnicę • koszt 1 drewna",
+                    Ui("construction-feedback", "wooden-door-frame-ordered"),
                 BuildMode.StoneDoorFrame =>
-                    "Zlecono przechodnią kamienną ościeżnicę • koszt 1 kamienia",
+                    Ui("construction-feedback", "stone-door-frame-ordered"),
                 BuildMode.WallTorch =>
-                    "Zlecono pochodnię ścienną • koszt 1 drewna",
+                    Ui("construction-feedback", "wall-torch-ordered"),
                 BuildMode.PrimitiveWorkshop =>
-                    "Zlecono prymitywny warsztat • koszt 4 drewna",
-                BuildMode.Bloomery => "Zlecono dymarkę • koszt 12 odpowiednich kamieni",
+                    Ui("construction-feedback", "primitive-workshop-ordered"),
+                BuildMode.Bloomery => Ui("construction-feedback", "bloomery-ordered"),
                 BuildMode.SmeltingFurnace =>
-                    "Zlecono piec hutniczy • koszt 16 odpowiednich kamieni",
+                    Ui("construction-feedback", "smelting-furnace-ordered"),
                 BuildMode.CrucibleFurnace =>
-                    "Zlecono piec tyglowy • koszt 20 odpowiednich kamieni",
-                _ => "Zlecono zamknięte drewniane drzwi w ościeżnicy • koszt 1 drewna",
+                    Ui("construction-feedback", "crucible-furnace-ordered"),
+                _ => Ui("construction-feedback", "wooden-door-ordered"),
             };
             UpdateBuildPreview(screenPosition);
             return;
@@ -2930,12 +2985,12 @@ public partial class Main : Node
                     !IsBuildableLayerCell(item) ||
                     !_engine.Visibility.Get(item).IsDiscovered()))
             {
-                _inspector.Text = "Całe obozowisko musi mieścić się na odkrytej, dostępnej warstwie.";
+                _inspector.Text = Ui("construction-feedback", "field-camp-invalid");
                 return;
             }
             _engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
                 _engine.CurrentTick.Next(), _commandSequence++, cell));
-            _inspector.Text = "Zlecono obozowisko 2×2 • koszt 6 drewna • skład prowiantu do 48, cel zależny od liczebności plemienia";
+            _inspector.Text = Ui("construction-feedback", "field-camp-ordered");
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -2946,7 +3001,7 @@ public partial class Main : Node
                 _engine.CurrentTick.Next(),
                 _commandSequence++,
                 cell));
-            _inspector.Text = "Zlecono budowę chaty goblinów. Materiały mogą zostać dostarczone później.";
+            _inspector.Text = Ui("construction-feedback", "goblin-hut-ordered");
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -2962,7 +3017,7 @@ public partial class Main : Node
         _isDraggingLinearBuild = false;
         if (!IsBuildableLayerCell(end) || end.Z != _linearBuildStart.Z)
         {
-            _inspector.Text = "Cała konstrukcja musi leżeć na jednym dostępnym poziomie.";
+            _inspector.Text = Ui("construction-feedback", "single-level");
             return;
         }
 
@@ -2973,7 +3028,7 @@ public partial class Main : Node
         if (_buildMode is BuildMode.StorageArea or BuildMode.WoodenFloor or
                 BuildMode.StoneFloor && cells.Count > 256)
         {
-            _inspector.Text = "Jedno zlecenie obszarowe może obejmować najwyżej 256 pól.";
+            _inspector.Text = Ui("construction-feedback", "area-too-large");
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -2982,16 +3037,16 @@ public partial class Main : Node
             _inspector.Text = _buildMode switch
             {
                 BuildMode.Walkway when ContainsLava(cells) =>
-                    "Drewniany pomost nie może przebiegać nad lawą. Użyj pomostu bazaltowego.",
+                    Ui("construction-feedback", "wooden-walkway-lava"),
                 BuildMode.Walkway or BuildMode.BasaltWalkway =>
-                    "Pomost musi mieścić się w wolnej przestrzeni i stykać odkryte krawędzie terenu.",
+                    Ui("construction-feedback", "walkway-invalid"),
                 BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
-                    "Nowy obszar nie może nachodzić na inny ani pozostawić istniejącego pojemnika poza granicą.",
+                    Ui("construction-feedback", "storage-resize-invalid"),
                 BuildMode.StorageArea =>
-                    "Obszar magazynowy musi obejmować odkryte pola i nie może nachodzić na inny obszar.",
+                    Ui("construction-feedback", "storage-area-invalid"),
                 BuildMode.WoodenFloor or BuildMode.StoneFloor =>
-                    "Podłoga lub strop musi obejmować odkryte, wolne pola bez skały, cieczy ani innej powierzchni.",
-                _ => "Cała liniowa konstrukcja musi przebiegać przez odkryty teren.",
+                    Ui("construction-feedback", "floor-invalid"),
+                _ => Ui("construction-feedback", "linear-invalid"),
             };
             UpdateBuildPreview(screenPosition);
             return;
@@ -3030,20 +3085,23 @@ public partial class Main : Node
         _inspector.Text = _buildMode switch
         {
             BuildMode.WoodenWall =>
-                $"Zlecono drewnianą ścianę: {cells.Count} segmentów • koszt {cells.Count * 2} drewna",
+                UiFormat("construction-feedback", "wooden-wall-ordered", cells.Count, cells.Count * 2),
             BuildMode.StoneWall =>
-                $"Zlecono kamienny mur: {cells.Count} segmentów • koszt {cells.Count * 2} jednostek kamienia",
+                UiFormat("construction-feedback", "stone-wall-ordered", cells.Count, cells.Count * 2),
             BuildMode.WoodenFloor =>
-                $"Zlecono drewnianą podłogę: {cells.Count} pól • {DescribeResourceVariant(_selectedConstructionMaterial)} ×{cells.Count}",
+                UiFormat("construction-feedback", "wooden-floor-ordered", cells.Count,
+                    DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.StoneFloor =>
-                $"Zlecono kamienną posadzkę: {cells.Count} pól • {DescribeResourceVariant(_selectedConstructionMaterial)} ×{cells.Count}",
+                UiFormat("construction-feedback", "stone-floor-ordered", cells.Count,
+                    DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.BasaltWalkway =>
-                $"Zlecono bazaltowy pomost: {cells.Count} segmentów • koszt {cells.Count} bazaltu",
+                UiFormat("construction-feedback", "basalt-walkway-ordered", cells.Count),
             BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
-                $"Zlecono zmianę rozmiaru obszaru {_resizingStorageAreaId}: {cells.Count} pól",
+                UiFormat("construction-feedback", "storage-resize-ordered",
+                    _resizingStorageAreaId, cells.Count),
             BuildMode.StorageArea =>
-                $"Wyznaczono obszar magazynowy: {cells.Count} pól • pojemność 0 do czasu ustawienia pojemników",
-            _ => $"Zlecono pomost: {cells.Count} segmentów • koszt {cells.Count} drewna",
+                UiFormat("construction-feedback", "storage-area-ordered", cells.Count),
+            _ => UiFormat("construction-feedback", "walkway-ordered", cells.Count),
         };
         UpdateBuildPreview(screenPosition);
     }
@@ -3076,23 +3134,26 @@ public partial class Main : Node
         {
             _inspector.Text = _buildMode switch
             {
-                BuildMode.WoodenWall =>
-                    $"Drewniana ściana: {cells.Count} segmentów • koszt {cells.Count * 2} drewna",
+            BuildMode.WoodenWall =>
+                    UiFormat("construction-feedback", "wooden-wall-preview", cells.Count, cells.Count * 2),
                 BuildMode.StoneWall =>
-                    $"Kamienny mur: {cells.Count} segmentów • koszt {cells.Count * 2} jednostek kamienia",
+                    UiFormat("construction-feedback", "stone-wall-preview", cells.Count, cells.Count * 2),
                 BuildMode.WoodenFloor =>
-                    $"Drewniana podłoga: {cells.Count}/256 pól • {DescribeResourceVariant(_selectedConstructionMaterial)} ×{cells.Count}",
+                    UiFormat("construction-feedback", "wooden-floor-preview", cells.Count,
+                        DescribeResourceVariant(_selectedConstructionMaterial)),
                 BuildMode.StoneFloor =>
-                    $"Kamienna posadzka: {cells.Count}/256 pól • {DescribeResourceVariant(_selectedConstructionMaterial)} ×{cells.Count}",
+                    UiFormat("construction-feedback", "stone-floor-preview", cells.Count,
+                        DescribeResourceVariant(_selectedConstructionMaterial)),
                 BuildMode.BasaltWalkway =>
-                    $"Bazaltowy pomost: {cells.Count} segmentów • koszt {cells.Count} bazaltu • odporny na lawę",
+                    UiFormat("construction-feedback", "basalt-walkway-preview", cells.Count),
                 BuildMode.Walkway when ContainsLava(cells) =>
-                    "Pomost niedostępny: lawa spali drewnianą konstrukcję.",
+                    Ui("construction-feedback", "walkway-lava-preview"),
                 BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
-                    $"Nowy rozmiar obszaru {_resizingStorageAreaId}: {cells.Count}/256 pól • wszystkie pojemniki muszą pozostać wewnątrz",
+                    UiFormat("construction-feedback", "storage-resize-preview",
+                        _resizingStorageAreaId, cells.Count),
                 BuildMode.StorageArea =>
-                    $"Obszar magazynowy: {cells.Count}/256 pól • pojemność zapewnią pojemniki",
-                _ => $"Pomost: {cells.Count} segmentów • koszt {cells.Count} drewna",
+                    UiFormat("construction-feedback", "storage-area-preview", cells.Count),
+                _ => UiFormat("construction-feedback", "walkway-preview", cells.Count),
             };
         }
     }
@@ -3107,7 +3168,7 @@ public partial class Main : Node
         UpdateActiveToolCursor();
         if (clearInspector && wasActive)
         {
-            _inspector.Text = "Tryb budowy anulowany.";
+            _inspector.Text = Ui("work-feedback", "build-mode-cancelled");
         }
     }
 
@@ -3123,14 +3184,14 @@ public partial class Main : Node
                 ? IsLinearConstructionPlacementValid(cells)
                 : cells.All(IsDiscoveredConstructionCell));
 
-    private static string DescribeRampDirection(GridPosition lower, GridPosition upper) =>
+    private string DescribeRampDirection(GridPosition lower, GridPosition upper) =>
         (upper.X - lower.X, upper.Y - lower.Y) switch
         {
-            (0, -1) => "północ",
-            (1, 0) => "wschód",
-            (0, 1) => "południe",
-            (-1, 0) => "zachód",
-            _ => "nieznany",
+            (0, -1) => Ui("directions", "north"),
+            (1, 0) => Ui("directions", "east"),
+            (0, 1) => Ui("directions", "south"),
+            (-1, 0) => Ui("directions", "west"),
+            _ => Ui("directions", "unknown"),
         };
 
     private bool TryInferDiscoveredRamp(GridPosition lower, out GridPosition upper)
@@ -3272,19 +3333,19 @@ public partial class Main : Node
         {
             _inspector.Text = _workMode switch
             {
-                WorkMode.MineRock => $"Planowany obszar tunelu: {cells.Count} pól; nieznane komórki będą rozstrzygane wraz z odsłanianiem.",
+                WorkMode.MineRock => UiFormat("work-feedback", "tunnel-preview", cells.Count),
                 WorkMode.CarveRampDown or WorkMode.CarveRampUp
                     when cells.Count == 0 && _engine.World.TryGetRampDestinationFluid(
                         candidates[0],
                         _workMode == WorkMode.CarveRampDown,
                         out var fluid) =>
-                    $"Nie można wykopać pochylni: po drugiej stronie jest {DescribeFluid(fluid)}.",
+                    UiFormat("work-feedback", "ramp-fluid", DescribeFluid(fluid)),
                 WorkMode.CarveRampDown or WorkMode.CarveRampUp => cells.Count == 1
-                    ? "Pochylnia połączy tę komórkę z sąsiednim poziomem."
-                    : "Tu nie można wykopać pochylni: potrzebna jest wolna podłoga oraz skała albo sucha jaskinia po drugiej stronie.",
+                    ? Ui("work-feedback", "ramp-valid")
+                    : Ui("work-feedback", "ramp-invalid"),
                 _ when behavior == WorkAreaSelectionBehavior.FilterTargets =>
-                    $"Zaznaczanie pracy: filtr znalazł {cells.Count} pasujących celów.",
-                _ => $"Zaznaczanie pracy: {cells.Count} pasujących pól.",
+                    UiFormat("work-feedback", "matching-targets", cells.Count),
+                _ => UiFormat("work-feedback", "matching-cells", cells.Count),
             };
         }
     }
@@ -3298,8 +3359,8 @@ public partial class Main : Node
         {
             _worldView.SetWorkPreview(default, []);
             _inspector.Text = _workAreaStart.Z != end.Z
-                ? "Zlecenie pracy musi mieścić się na jednym poziomie."
-                : "Zaznaczenie wychodzi poza obszar mapy na oglądanym poziomie.";
+                ? Ui("work-feedback", "single-level")
+                : Ui("work-feedback", "outside-map");
             return;
         }
 
@@ -3404,20 +3465,20 @@ public partial class Main : Node
                 $"Odrzucono zlecenie {_workMode} z {_workAreaStart} do {end}: " +
                 exception.Message);
             _worldView.SetWorkPreview(default, []);
-            _inspector.Text = "Nie można utworzyć tego zlecenia na wskazanym obszarze.";
+            _inspector.Text = Ui("work-feedback", "create-failed");
             return;
         }
         _inspector.Text = _workMode switch
         {
-            WorkMode.Clear => "Zlecono usunięcie celów pracy z zaznaczenia.",
+            WorkMode.Clear => Ui("work-feedback", "clear-ordered"),
             WorkMode.MineRock =>
-                "Zlecono obszar tunelu; dispatcher będzie udostępniał kolejne ściany wraz z postępem kopania.",
-            WorkMode.CarveRampDown => "Zlecono wykopanie pochylni na poziom niżej.",
-            WorkMode.CarveRampUp => "Zlecono wykopanie pochylni na poziom wyżej.",
-            WorkMode.CleanBlood => "Zlecono sprzątanie zaznaczonych plam krwi.",
+                Ui("work-feedback", "tunnel-ordered"),
+            WorkMode.CarveRampDown => Ui("work-feedback", "ramp-down-ordered"),
+            WorkMode.CarveRampUp => Ui("work-feedback", "ramp-up-ordered"),
+            WorkMode.CleanBlood => Ui("work-feedback", "clean-blood-ordered"),
             _ => _speed == 0
-                ? "Zlecono wskazanie pasujących obiektów; cele dodano bez wznawiania czasu."
-                : "Zlecono wskazanie pasujących obiektów; cele pojawią się po następnym ticku.",
+                ? Ui("work-feedback", "targets-ordered-paused")
+                : Ui("work-feedback", "targets-ordered-running"),
         };
         _replacingWorkOrderId = EntityId.None;
         _replacementWorkPriority = null;
@@ -3463,7 +3524,7 @@ public partial class Main : Node
         UpdateActiveToolCursor();
         if (clearInspector && wasActive)
         {
-            _inspector.Text = "Narzędzie obszaru pracy anulowane.";
+            _inspector.Text = Ui("work-feedback", "tool-cancelled");
         }
     }
 
@@ -3479,7 +3540,7 @@ public partial class Main : Node
         _worldView.SetRaidTargetPreview(null, 0);
         if (hadActiveTool)
         {
-            _inspector.Text = "Aktywne narzędzie anulowane.";
+            _inspector.Text = Ui("work-feedback", "active-tool-cancelled");
         }
     }
 
@@ -3602,17 +3663,17 @@ public partial class Main : Node
         var discovered = _engine.Visibility.Get(cell).IsDiscovered();
         if (!discovered)
         {
-            _inspector.Text = $"{cell} • skład można zaplanować dopiero na odkrytym polu.";
+            _inspector.Text = UiFormat("construction-feedback", "storage-undiscovered", cell);
             return;
         }
         if (cell.Z < 0 && _engine.World.IsSolidCaveRock(cell))
         {
-            _inspector.Text = $"{cell} • to ściana jaskini; najpierw oznacz ją do wykopania.";
+            _inspector.Text = UiFormat("construction-feedback", "storage-cave-wall", cell);
             return;
         }
         if (!terrainAvailable)
         {
-            _inspector.Text = $"{cell} • pole jest zablokowane i nie może przyjąć składu.";
+            _inspector.Text = UiFormat("construction-feedback", "storage-blocked", cell);
             return;
         }
 
@@ -3654,8 +3715,10 @@ public partial class Main : Node
             _ => 64,
         };
         _inspector.Text = providerKind == StorageProviderKind.OpenPile
-            ? $"{cell} • wyznaczono plac pod skład {DescribeResource(resource)} 0/{capacity} • blueprint żąda 2 drewna"
-            : $"{cell} • wyznaczono miejsce na {DescribeStorageProvider(providerKind)} 0/{capacity} • zlecenie żąda gotowego pojemnika z warsztatu lub składu";
+            ? UiFormat("construction-feedback", "storage-ordered", cell,
+                Ui("storage-resources", resource.ToString()), capacity)
+            : UiFormat("construction-feedback", "container-ordered", cell,
+                Ui("storage-providers", providerKind.ToString()), capacity);
     }
 
     private void HandleEvents(
@@ -3679,32 +3742,18 @@ public partial class Main : Node
                 SimulationEventKind.ResourcePriorityConfigured);
         if (workEvent.Kind == SimulationEventKind.WorkDesignationCreated)
         {
-            _inspector.Text = (WorkDesignationKind)workEvent.Amount switch
-            {
-                WorkDesignationKind.GatherFood => "Dispatcher dodał wskazane źródło żywności do zebrania.",
-                WorkDesignationKind.GatherReeds => "Dispatcher dodał wskazane trzcinowisko do zebrania.",
-                WorkDesignationKind.GatherBrushwood => "Dispatcher dodał wskazany stos chrustu do transportu.",
-                WorkDesignationKind.GatherStone => "Dispatcher dodał wskazany stos kamieni do transportu.",
-                WorkDesignationKind.UprootBerryBush => "Dispatcher dodał krzak do trwałego wykarczowania.",
-                WorkDesignationKind.FellTree => "Dispatcher dodał drzewo lub martwy pień do wyrębu.",
-                WorkDesignationKind.QuarryBoulder => "Dispatcher dodał głaz do rozbicia kilofem.",
-                WorkDesignationKind.MineRock => "Dispatcher dodał ścianę jaskini do wykopania.",
-                WorkDesignationKind.CarveRampDown => "Dispatcher dodał pochylnię w dół do wykopania.",
-                WorkDesignationKind.CarveRampUp => "Dispatcher dodał pochylnię w górę do wykopania.",
-                WorkDesignationKind.Scout => "Dispatcher ograniczył zwiad do wskazanego obszaru.",
-                WorkDesignationKind.HuntAnimal => "Dispatcher dodał wskazane zwierzę do upolowania.",
-                WorkDesignationKind.CleanBlood => "Dispatcher dodał zaschniętą plamę do sprzątnięcia.",
-                _ => "Dispatcher dodał cel pracy.",
-            };
+            _inspector.Text = Ui(
+                "work-created",
+                ((WorkDesignationKind)workEvent.Amount).ToString());
         }
         else if (workEvent.Kind == SimulationEventKind.WorkDesignationRemoved)
         {
-            _inspector.Text = "Cel pracy został zakończony lub usunięty.";
+            _inspector.Text = Ui("events", "work-removed");
         }
         else if (workEvent.Kind == SimulationEventKind.MiningHazardDiscovered)
         {
-            _inspector.Text =
-                $"Wstrzymano front tunelu: za ścianą odkryto {DescribeFluid((CellFluidKind)workEvent.Amount)}.";
+            _inspector.Text = UiFormat(
+                "events", "mining-hazard", DescribeFluid((CellFluidKind)workEvent.Amount));
         }
         else if (workEvent.Kind is SimulationEventKind.StoragePullConfigured or
                  SimulationEventKind.StorageHaulerConfigured or
@@ -3747,7 +3796,7 @@ public partial class Main : Node
              item.Amount == (int)SimulationCommandKind.Build));
         if (constructionEvent.Kind == SimulationEventKind.CommandRejected)
         {
-            _inspector.Text = "Nie można wyznaczyć placu budowy: teren jest niedostępny albo zajęty.";
+            _inspector.Text = Ui("events", "construction-rejected");
         }
         else if (constructionEvent.Kind is SimulationEventKind.ConstructionOrdered or
                  SimulationEventKind.ConstructionMaterialDelivered or
@@ -3764,22 +3813,26 @@ public partial class Main : Node
         {
             var zone = snapshot.StorageZones
                 .FirstOrDefault(item => item.Id == constructionEvent.Target);
-            var material = constructionEvent.Construction switch
+            var materialKey = constructionEvent.Construction switch
             {
-                ConstructionKind.BasaltWalkway => "bazaltu",
+                ConstructionKind.BasaltWalkway => "basalt",
                 ConstructionKind.StoneWall or ConstructionKind.StoneFloor or
                     ConstructionKind.StoneRamp or
-                    ConstructionKind.StoneDoorFrame => "kamienia",
-                ConstructionKind.WaterBarrel => "gotową drewnianą beczkę",
-                _ => "drewna",
+                    ConstructionKind.StoneDoorFrame => "stone",
+                ConstructionKind.WaterBarrel => "finished-barrel",
+                _ => "wood",
             };
             _inspector.Text = constructionEvent.Construction is not null
-                ? $"Budowa {DescribeConstruction(constructionEvent.Construction.Value)} ukończona • " +
-                  $"zużyto {constructionEvent.Amount} {material}"
+                ? UiFormat("events", "construction-completed",
+                    Ui("construction-names", constructionEvent.Construction.Value.ToString()),
+                    constructionEvent.Amount,
+                    Ui("construction-materials", materialKey))
                 : zone.Id != EntityId.None
-                    ? $"Skład {DescribeResource(zone.AcceptedResource)} ukończony • " +
-                      $"zużyto {constructionEvent.Amount} {material}"
-                    : "Budowa ukończona.";
+                    ? UiFormat("events", "storage-completed",
+                        Ui("storage-resources", zone.AcceptedResource.ToString()),
+                        constructionEvent.Amount,
+                        Ui("construction-materials", materialKey))
+                    : Ui("events", "construction-completed-generic");
         }
 
         if (_selectedConstructionId != EntityId.None &&
@@ -3808,22 +3861,23 @@ public partial class Main : Node
                 item.Amount == (int)SimulationCommandKind.QueueCraftingOrder);
         if (craftingEvent.Kind == SimulationEventKind.CraftingOrdered)
         {
-            _inspector.Text = $"Warsztat przyjął zlecenie: " +
-                DescribeCraftingRecipe((CraftingRecipeKind)craftingEvent.Amount) + ".";
+            _inspector.Text = UiFormat(
+                "events", "crafting-ordered",
+                DescribeCraftingRecipe((CraftingRecipeKind)craftingEvent.Amount));
         }
         else if (craftingEvent.Kind == SimulationEventKind.CraftingMaterialDelivered)
         {
-            _inspector.Text = "Dostarczono składnik do prymitywnego warsztatu.";
+            _inspector.Text = Ui("events", "crafting-material-delivered");
         }
         else if (craftingEvent.Kind == SimulationEventKind.CraftingCompleted)
         {
-            _inspector.Text = $"Goblin ukończył: " +
-                DescribeCraftingRecipe((CraftingRecipeKind)craftingEvent.Amount) +
-                " • przedmiot trafił do osobistego ekwipunku.";
+            _inspector.Text = UiFormat(
+                "events", "crafting-completed",
+                DescribeCraftingRecipe((CraftingRecipeKind)craftingEvent.Amount));
         }
         else if (craftingEvent.Kind == SimulationEventKind.CommandRejected)
         {
-            _inspector.Text = "Nie można dodać receptury: we wskazanym miejscu nie ma warsztatu.";
+            _inspector.Text = Ui("events", "crafting-rejected");
         }
 
         var selectedEvent = events.LastOrDefault(item =>
@@ -3836,27 +3890,30 @@ public partial class Main : Node
             item.Kind == SimulationEventKind.HumanGuardHitGoblin);
         if (selectedHit.Kind == SimulationEventKind.HumanGuardHitGoblin)
         {
-            _inspector.Text = $"{selectedHit.Target} • trafiony przez straż • −{selectedHit.Amount} zdrowia";
+            _inspector.Text = UiFormat(
+                "events", "guard-hit", selectedHit.Target, selectedHit.Amount);
         }
         else if (selectedEvent.Kind == SimulationEventKind.CommandRejected &&
             selectedEvent.Amount == (int)SimulationCommandKind.Move)
         {
-            _inspector.Text = $"{selectedEvent.Subject} • cel marszu jest niedostępny";
+            _inspector.Text = UiFormat(
+                "events", "move-rejected", selectedEvent.Subject);
         }
         else if (selectedEvent.Kind == SimulationEventKind.MoveCompleted)
         {
-            _inspector.Text = $"{selectedEvent.Subject} • dotarł do celu marszu";
+            _inspector.Text = UiFormat(
+                "events", "move-completed", selectedEvent.Subject);
         }
 
         var raidEvent = events.LastOrDefault(item => item.Kind is
             SimulationEventKind.RaidVictory or SimulationEventKind.RaidDefeated);
         if (raidEvent.Kind == SimulationEventKind.RaidVictory)
         {
-            _inspector.Text = $"Najazd zakończony zwycięstwem • wróciło {raidEvent.Amount} goblinów.";
+            _inspector.Text = UiFormat("events", "raid-victory", raidEvent.Amount);
         }
         else if (raidEvent.Kind == SimulationEventKind.RaidDefeated)
         {
-            _inspector.Text = "Najazd zakończony klęską • oddział został rozbity.";
+            _inspector.Text = Ui("events", "raid-defeated");
         }
 
         var contextEvent = events.LastOrDefault(item =>
@@ -3876,34 +3933,33 @@ public partial class Main : Node
             _inspector.Text = (SimulationCommandKind)contextEvent.Amount switch
             {
                 SimulationCommandKind.OrderActorFlee =>
-                    "Nie można wykonać ucieczki: goblin albo bezpieczna droga już nie istnieje.",
+                    Ui("events", "flee-rejected"),
                 SimulationCommandKind.OrderActorSleep =>
-                    "Nie można wysłać goblina spać: brak dostępnego miejsca albo niesie ładunek.",
+                    Ui("events", "sleep-rejected"),
                 SimulationCommandKind.SuspendActorDispatcher =>
-                    "Nie można wyłączyć tego goblina z dispatchera.",
+                    Ui("events", "dispatcher-suspend-rejected"),
                 SimulationCommandKind.EquipItem =>
-                    "Nie można założyć przedmiotu: jest niedostępny, niepasujący albo goblin niesie ładunek.",
+                    Ui("events", "equip-rejected"),
                 SimulationCommandKind.PrioritizeItemHauling =>
-                    "Nie można zlecić transportu: nie ma zgodnego składu z wolnym miejscem.",
-                _ => "Nie można podnieść stosu: goblin, stos albo droga są już niedostępne.",
+                    Ui("events", "haul-priority-rejected"),
+                _ => Ui("events", "pickup-rejected"),
             };
         }
         else if (contextEvent.Kind == SimulationEventKind.ActorOrderedToRest)
         {
-            _inspector.Text = "Goblin idzie do dostępnego miejsca do spania.";
+            _inspector.Text = Ui("events", "actor-resting");
         }
         else if (contextEvent.Kind == SimulationEventKind.ActorDispatcherSuspended)
         {
-            _inspector.Text =
-                "Goblin odpoczywa od publicznego dispatchera przez 1 godzinę czasu gry.";
+            _inspector.Text = Ui("events", "dispatcher-suspended");
         }
         else if (contextEvent.Kind == SimulationEventKind.ActorEquippedItem)
         {
-            _inspector.Text = "Goblin założył wskazany przedmiot; poprzedni wrócił na miejsce źródłowe.";
+            _inspector.Text = Ui("events", "item-equipped");
         }
         else if (contextEvent.Kind == SimulationEventKind.ItemHaulPrioritized)
         {
-            _inspector.Text = "Stos czeka na pilny transport do zgodnego składu.";
+            _inspector.Text = Ui("events", "haul-prioritized");
         }
     }
 
@@ -3928,7 +3984,7 @@ public partial class Main : Node
                 if (!snapshot.GetVisibility(levelPosition, _engine.Map.Width).IsDiscovered())
                 {
                     SelectActor(EntityId.None);
-                    _inspector.Text = $"{levelPosition} • nieznany teren";
+                    _inspector.Text = UiFormat("inspection", "unknown-terrain", levelPosition);
                     return;
                 }
 
@@ -3973,18 +4029,18 @@ public partial class Main : Node
                 var caveCell = _engine.Map.GetCaveCell(levelPosition);
                 var passages = _engine.World.CreateVerticalPassageSnapshot()
                     .Where(passage => passage.Upper == levelPosition || passage.Lower == levelPosition)
-                    .Select(passage => passage.Kind == VerticalPassageKind.CaveMouth
-                        ? "wejście na powierzchnię"
-                        : "pochylnia między poziomami")
+                    .Select(passage => Ui("passages", passage.Kind == VerticalPassageKind.CaveMouth
+                        ? "cave-mouth"
+                        : "ramp-between-levels"))
                     .ToArray();
                 SelectActor(EntityId.None);
                 var excavated = _engine.World.ExcavatedCaveCells.Contains(levelPosition);
                 var excavatedTerrainRamp =
                     _engine.World.ExcavatedTerrainRamps.Contains(levelPosition);
                 var caveKind = excavatedTerrainRamp
-                    ? "wykopana dawna pochylnia • pionowa ściana, brak przejścia"
+                    ? Ui("cave-kinds", "excavated-ramp")
                     : excavated
-                        ? "wykopany korytarz"
+                        ? Ui("cave-kinds", "excavated-corridor")
                         : DescribeCaveKind(caveCell.Kind);
                 _inspector.Text = $"{levelPosition} • {DescribeCaveRock(caveCell.Rock)} • " +
                     caveKind + DescribeCaveFluid(caveCell.Fluid) +
@@ -3998,21 +4054,25 @@ public partial class Main : Node
                         : $" • {string.Join(", ", displayedWorldObjects)}") +
                     (undergroundAnimals.Length == 0
                         ? string.Empty
-                        : $" • zwierzęta: {string.Join(", ", undergroundAnimals.Select(DescribeAnimal))}") +
+                        : UiFormat("inspection", "animals",
+                            string.Join(", ", undergroundAnimals.Select(DescribeAnimal)))) +
                     (undergroundCorpses.Length == 0
                         ? string.Empty
-                        : $" • zwłoki: {string.Join(", ", undergroundCorpses.Select(DescribeCorpse))}") +
+                        : UiFormat("inspection", "corpses",
+                            string.Join(", ", undergroundCorpses.Select(DescribeCorpse)))) +
                     (undergroundGroundStacks.Length == 0
                         ? string.Empty
-                        : $" • na ziemi: " +
-                          $"{string.Join(", ", undergroundGroundStacks.Select(DescribeStack))}");
+                        : UiFormat("inspection", "on-ground",
+                            string.Join(", ", undergroundGroundStacks.Select(DescribeStack))));
                 return;
             }
 
             var mapCell = _engine.Map.GetCell(cell);
             SelectActor(EntityId.None);
-            _inspector.Text = $"{levelPosition} • warstwa z={_visibleLevel}" +
-                (mapCell.FloorLevel == _visibleLevel ? " • dno terenu" : " • pusta przestrzeń") +
+            _inspector.Text = UiFormat("inspection", "level", levelPosition, _visibleLevel) +
+                Ui("inspection", mapCell.FloorLevel == _visibleLevel
+                    ? "terrain-floor"
+                    : "empty-space") +
                 (displayedWorldObjects.Length == 0
                     ? string.Empty
                     : $" • {string.Join(", ", displayedWorldObjects)}");
@@ -4023,7 +4083,7 @@ public partial class Main : Node
         if (!visibility.IsDiscovered())
         {
             SelectActor(EntityId.None);
-            _inspector.Text = $"{cell} • nieznany teren";
+            _inspector.Text = UiFormat("inspection", "unknown-terrain", cell);
             return;
         }
 
@@ -4060,11 +4120,9 @@ public partial class Main : Node
             _engine.QueueCommand(SimulationCommand.ToggleWoodenDoor(
                 _engine.CurrentTick.Next(), _commandSequence++, cell));
             SelectActor(EntityId.None);
-            _inspector.Text = isDoorOpen
-                ? $"{cell} • polecenie zamknięcia drzwi" +
-                  (_speed == 0 ? " • zostanie wykonane po wznowieniu czasu" : string.Empty)
-                : $"{cell} • polecenie otwarcia drzwi" +
-                  (_speed == 0 ? " • zostanie wykonane po wznowieniu czasu" : string.Empty);
+            _inspector.Text = UiFormat("inspection",
+                    isDoorOpen ? "door-close-command" : "door-open-command", cell) +
+                (_speed == 0 ? Ui("inspection", "after-resume") : string.Empty);
             return;
         }
         var clickedActor = actors.OrderBy(actor => actor.Id).FirstOrDefault();
@@ -4089,17 +4147,23 @@ public partial class Main : Node
             ShowWorkshopDetails(cell);
         }
 
-        _inspector.Text = $"{cell}" +
-            (visibility == CellVisibility.Explored ? " • odkryte, obecnie niewidoczne" : string.Empty) +
-            $" • {terrain.Terrain}{DescribeWaterDepth(terrain)} • wilgoć {terrain.Moisture} • żyzność {terrain.Fertility}" +
+        _inspector.Text = UiFormat("inspection", "surface", cell,
+                Ui("terrain-kinds", terrain.Terrain.ToString()),
+                terrain.Moisture,
+                terrain.Fertility) +
+            (visibility == CellVisibility.Explored ? Ui("inspection", "explored-hidden") : string.Empty) +
+            DescribeWaterDepth(terrain) +
             (plant is null
                 ? string.Empty
-                : $" • {DescribeFoodSource(plant.Value.Kind)} {plant.Value.Biomass}/{plant.Value.Capacity}") +
+                : UiFormat("inspection", "food-source",
+                    DescribeFoodSource(plant.Value.Kind),
+                    plant.Value.Biomass,
+                    plant.Value.Capacity)) +
             (objects.Count == 0
                 ? string.Empty
                 : $" • {string.Join(", ", objects.Select(DescribeWorldObject))}") +
             (objects.Any(item => item.Kind == WorldObjectKind.GoblinFieldCamp)
-                ? " • PPM: menu obozu"
+                ? Ui("inspection", "camp-menu")
                 : string.Empty) +
             (humanVillagers.Length == 0
                 ? string.Empty
@@ -4188,7 +4252,8 @@ public partial class Main : Node
                 worldObject.Anchor.Y == position.Y &&
                 worldObject.Anchor.Z + surfaceOffset - 1 == position.Z)
             {
-                descriptions.Add($"korzenie — {DescribeTreeSpecies(GetWoodVariant(worldObject))}");
+                descriptions.Add(UiFormat("world-objects", "roots",
+                    DescribeTreeSpecies(GetWoodVariant(worldObject))));
             }
         }
 
@@ -4197,30 +4262,34 @@ public partial class Main : Node
 
     private string DescribeWorldObject(WorldObjectSnapshot worldObject) => worldObject.Kind switch
     {
-        WorldObjectKind.Tree => $"drzewo — {DescribeTreeSpecies(GetWoodVariant(worldObject))}",
+        WorldObjectKind.Tree => UiFormat("world-objects", "Tree",
+            DescribeTreeSpecies(GetWoodVariant(worldObject))),
         WorldObjectKind.DeadTreeStump when worldObject.Parts.Any(part =>
             part.Kind == WorldObjectPartKind.FelledTreeRemains) =>
-            $"ścięte drzewo — {DescribeTreeSpecies(GetWoodVariant(worldObject))}; " +
-            "pniak, kłoda i gałęzie",
+            UiFormat("world-objects", "FelledTree",
+                DescribeTreeSpecies(GetWoodVariant(worldObject))),
         WorldObjectKind.DeadTreeStump =>
-            $"stary pniak — {DescribeTreeSpecies(GetWoodVariant(worldObject))}",
-        WorldObjectKind.Boulder => "duży głaz",
+            UiFormat("world-objects", "DeadTreeStump",
+                DescribeTreeSpecies(GetWoodVariant(worldObject))),
+        WorldObjectKind.Boulder => Ui("world-objects", "Boulder"),
         WorldObjectKind.PrimitiveWorkshop =>
-            $"prymitywny warsztat{DescribeWorkshopMaterial(worldObject)}",
-        WorldObjectKind.Bloomery => $"dymarka{DescribeWorkshopMaterial(worldObject)}",
+            Ui("world-objects", "PrimitiveWorkshop") + DescribeWorkshopMaterial(worldObject),
+        WorldObjectKind.Bloomery =>
+            Ui("world-objects", "Bloomery") + DescribeWorkshopMaterial(worldObject),
         WorldObjectKind.SmeltingFurnace =>
-            $"piec hutniczy{DescribeWorkshopMaterial(worldObject)}",
+            Ui("world-objects", "SmeltingFurnace") + DescribeWorkshopMaterial(worldObject),
         WorldObjectKind.CrucibleFurnace =>
-            $"piec tyglowy{DescribeWorkshopMaterial(worldObject)}",
-        WorldObjectKind.WoodenRamp => "drewniana pochylnia",
-        WorldObjectKind.StoneRamp => "kamienna pochylnia",
-        _ => worldObject.Kind.ToString(),
+            Ui("world-objects", "CrucibleFurnace") + DescribeWorkshopMaterial(worldObject),
+        WorldObjectKind.WoodenRamp => Ui("world-objects", "WoodenRamp"),
+        WorldObjectKind.StoneRamp => Ui("world-objects", "StoneRamp"),
+        _ => Ui("world-objects", worldObject.Kind.ToString()),
     };
 
-    private static string DescribeWorkshopMaterial(WorldObjectSnapshot workshop) =>
+    private string DescribeWorkshopMaterial(WorldObjectSnapshot workshop) =>
         workshop.MaterialVariant == ResourceVariant.None
             ? string.Empty
-            : $" • materiał: {DescribeResourceVariant(workshop.MaterialVariant)}";
+            : UiFormat("world-objects", "material",
+                DescribeResourceVariant(workshop.MaterialVariant));
 
     private string DescribeWorldObjectPart(
         WorldObjectSnapshot worldObject,
@@ -4231,18 +4300,18 @@ public partial class Main : Node
             var species = DescribeTreeSpecies(GetWoodVariant(worldObject));
             return partKind switch
             {
-                WorldObjectPartKind.TreeTrunk => $"pień — {species}",
-                WorldObjectPartKind.TreeCrown => $"korona — {species}",
-                WorldObjectPartKind.TreeStump => $"pniak — {species}",
+                WorldObjectPartKind.TreeTrunk => UiFormat("world-object-parts", "TreeTrunk", species),
+                WorldObjectPartKind.TreeCrown => UiFormat("world-object-parts", "TreeCrown", species),
+                WorldObjectPartKind.TreeStump => UiFormat("world-object-parts", "TreeStump", species),
                 WorldObjectPartKind.FelledTreeRemains =>
-                    $"ścięta kłoda i gałęzie — {species}",
-                _ => $"{worldObject.Kind}: {partKind}",
+                    UiFormat("world-object-parts", "FelledTreeRemains", species),
+                _ => Ui("world-object-parts", partKind.ToString()),
             };
         }
 
         return worldObject.Kind == WorldObjectKind.Boulder
-            ? "duży głaz"
-            : $"{worldObject.Kind}: {partKind}";
+            ? Ui("world-objects", "Boulder")
+            : Ui("world-object-parts", partKind.ToString());
     }
 
     private ResourceVariant GetWoodVariant(WorldObjectSnapshot worldObject) =>
@@ -4251,15 +4320,15 @@ public partial class Main : Node
             _engine.Map.Width,
             worldObject.Anchor);
 
-    private static string DescribeTreeSpecies(ResourceVariant variant) => variant switch
+    private string DescribeTreeSpecies(ResourceVariant variant) => variant switch
     {
-        ResourceVariant.OakWood => "dąb",
-        ResourceVariant.ChestnutWood => "kasztanowiec",
-        ResourceVariant.BirchWood => "brzoza",
-        ResourceVariant.WalnutWood => "orzech",
-        ResourceVariant.AppleWood => "jabłoń",
-        ResourceVariant.PineWood => "sosna",
-        _ => "nieznany gatunek",
+        ResourceVariant.OakWood => Ui("tree-species", "OakWood"),
+        ResourceVariant.ChestnutWood => Ui("tree-species", "ChestnutWood"),
+        ResourceVariant.BirchWood => Ui("tree-species", "BirchWood"),
+        ResourceVariant.WalnutWood => Ui("tree-species", "WalnutWood"),
+        ResourceVariant.AppleWood => Ui("tree-species", "AppleWood"),
+        ResourceVariant.PineWood => Ui("tree-species", "PineWood"),
+        _ => Ui("tree-species", "unknown"),
     };
 
     private static string DescribeCraftingOrder(CraftingOrderSnapshot order)
@@ -4306,27 +4375,14 @@ public partial class Main : Node
         _ => DescribeResource(resource),
     };
 
-    private static string DescribeCaveRock(RockKind rock) => rock switch
-    {
-        RockKind.Sandstone => "piaskowiec",
-        RockKind.Granite => "granit",
-        RockKind.Basalt => "bazalt",
-        RockKind.Obsidian => "obsydian",
-        _ => rock.ToString(),
-    };
+    private string DescribeCaveRock(RockKind rock) => Ui("cave-rocks", rock.ToString());
 
-    private static string DescribeCaveKind(CaveCellKind kind) => kind switch
-    {
-        CaveCellKind.SolidRock => "lita skała",
-        CaveCellKind.Floor => "podłoga jaskini • przejście dostępne",
-        CaveCellKind.Ramp => "naturalna pochylnia • przejście dostępne",
-        _ => kind.ToString(),
-    };
+    private string DescribeCaveKind(CaveCellKind kind) => Ui("cave-kinds", kind.ToString());
 
-    private static string DescribeCaveFluid(CellFluidKind fluid) => fluid switch
+    private string DescribeCaveFluid(CellFluidKind fluid) => fluid switch
     {
-        CellFluidKind.Lava => " • lawa: nieprzekraczalna, drewniane pomosty niedostępne",
-        CellFluidKind.Water => " • woda",
+        CellFluidKind.Lava => Ui("cave-fluids", "Lava"),
+        CellFluidKind.Water => Ui("cave-fluids", "Water"),
         _ => string.Empty,
     };
 
@@ -4352,109 +4408,50 @@ public partial class Main : Node
                 ? DescribeResourceVariant(stack.Variant)
                 : DescribeResource(stack.Resource))} ×{stack.Quantity}";
 
-    private static string DescribeFood(FoodKind food) => food switch
-    {
-        FoodKind.DriedRations => "suszone racje",
-        FoodKind.Berries => "jagody",
-        FoodKind.Mushrooms => "grzyby",
-        FoodKind.EdibleRoots => "jadalne korzonki",
-        FoodKind.Fish => "ryby",
-        FoodKind.RawMeat => "surowe mięso",
-        _ => "żywność",
-    };
+    private static string DescribeFood(FoodKind food) =>
+        TranslationCatalog.Get(_currentLocale, "interface", "food-names", food.ToString());
 
-    private static string DescribeResource(ResourceKind resource) => resource switch
-    {
-        ResourceKind.Food => "żywności",
-        ResourceKind.Wood => "drewna",
-        ResourceKind.Reeds => "sitowia",
-        ResourceKind.Stone => "kamienia",
-        ResourceKind.Coal => "węgla",
-        ResourceKind.Ore => "rudy",
-        ResourceKind.Bone => "kości",
-        ResourceKind.Hide => "skór",
-        ResourceKind.Vegetation => "roślinności",
-        ResourceKind.Equipment => "sprzętu",
-        ResourceKind.Materials => "materiałów",
-        ResourceKind.Water => "wody",
-        _ => "towarów",
-    };
+    private static string DescribeResource(ResourceKind resource) =>
+        TranslationCatalog.Get(_currentLocale, "interface", "resource-names", resource.ToString());
 
     private static string DescribeCraftingRecipe(CraftingRecipeKind recipe) =>
-        TranslationCatalog.Get("pl", "recipes", "names", recipe.ToString());
+        TranslationCatalog.Get(_currentLocale, "recipes", "names", recipe.ToString());
 
     private static string DescribeStorageProvider(StorageProviderKind providerKind) =>
-        providerKind switch
-        {
-            StorageProviderKind.WaterBarrel => "beczkę na wodę",
-            StorageProviderKind.WoodenBox => "drewnianą skrzynkę",
-            StorageProviderKind.WoodenChest => "drewnianą skrzynię",
-            StorageProviderKind.WoodenBulkBin => "drewniany zasobnik masowy",
-            _ => "skład",
-        };
+        TranslationCatalog.Get(
+            _currentLocale, "interface", "storage-providers", providerKind.ToString());
 
     private static string DescribeResourceVariant(ResourceVariant variant)
     {
         if (MaterialCatalog.TryGet(variant, out var material))
         {
-            return TranslationCatalog.Get("pl", "materials", "names", material.Id);
+            return TranslationCatalog.Get(_currentLocale, "materials", "names", material.Id);
         }
 
-        return variant switch
-        {
-            ResourceVariant.EquipmentPrimitiveSling => "prymitywna proca",
-            ResourceVariant.EquipmentBoneKnife => "kościany nóż",
-            ResourceVariant.EquipmentFightingStick => "kij bojowy",
-            ResourceVariant.EquipmentStoneClub => "kamienna maczuga",
-            ResourceVariant.EquipmentHideClothes => "skórzany ubiór",
-            ResourceVariant.EquipmentReedClothes => "sitowiowy ubiór",
-            ResourceVariant.EquipmentPrimitiveWaterskin => "prymitywny bukłak",
-            ResourceVariant.EquipmentRagClothes => "łachmany",
-            ResourceVariant.EquipmentWoodenAxe => "prymitywna siekiera",
-            ResourceVariant.EquipmentPrimitivePickaxe => "prymitywny kilof",
-            ResourceVariant.EquipmentWoodenHoe => "drewniana motyka",
-            ResourceVariant.EquipmentHumanWoodenAxe => "ludzka drewniana siekiera",
-            ResourceVariant.EquipmentWoodenBucket => "drewniane wiadro",
-            ResourceVariant.EquipmentWoodenSpear => "drewniana włócznia",
-            ResourceVariant.EquipmentReinforcedPickaxe => "wzmocniony kilof",
-            ResourceVariant.EquipmentWoodenBarrel => "drewniana beczka",
-            ResourceVariant.EquipmentWoodenBox => "drewniana skrzynka",
-            ResourceVariant.EquipmentWoodenChest => "drewniana skrzynia",
-            ResourceVariant.EquipmentWoodenBulkBin => "drewniany zasobnik masowy",
-            _ => "towar",
-        };
+        var key = EquipmentCatalog.FindDefinition(variant) is null
+            ? "unknown"
+            : variant.ToString();
+        return TranslationCatalog.Get(_currentLocale, "interface", "equipment-names", key);
     }
 
-    private static string DescribeMineralDeposit(MineralDepositKind deposit) => deposit switch
-    {
-        MineralDepositKind.Coal => " • żyła węgla",
-        MineralDepositKind.IronOre => " • żyła rudy żelaza",
-        MineralDepositKind.CopperOre => " • żyła rudy miedzi",
-        MineralDepositKind.SilverOre => " • żyła srebra",
-        MineralDepositKind.GoldOre => " • żyła złota",
-        MineralDepositKind.Ruby => " • rubiny",
-        MineralDepositKind.Emerald => " • szmaragdy",
-        MineralDepositKind.Diamond => " • diamenty",
-        _ => string.Empty,
-    };
+    private string DescribeMineralDeposit(MineralDepositKind deposit) =>
+        deposit == MineralDepositKind.None
+            ? string.Empty
+            : Ui("mineral-deposits", deposit.ToString());
 
-    private static string DescribeMiningRequirement(RockKind rock)
+    private string DescribeMiningRequirement(RockKind rock)
     {
         var requiredLevel = MiningCapabilityPolicy.RequiredSkillLevel(rock);
-        var tool = rock == RockKind.Obsidian ? "wzmocniony kilof" : "kilof";
+        var tool = Ui("mining", rock == RockKind.Obsidian
+            ? "reinforced-pickaxe"
+            : "pickaxe");
         return requiredLevel > 0
-            ? $" • kopanie: {tool}, poziom budowania {requiredLevel}"
-            : $" • kopanie: {tool}";
+            ? UiFormat("mining", "requirement-with-level", tool, requiredLevel)
+            : UiFormat("mining", "requirement", tool);
     }
 
-    private static string DescribeStoragePriority(StoragePriority priority) => priority switch
-    {
-        StoragePriority.Low => "Niski",
-        StoragePriority.Normal => "Normalny",
-        StoragePriority.High => "Wysoki",
-        StoragePriority.Urgent => "Pilny",
-        _ => "Nieznany",
-    };
+    private string DescribeStoragePriority(StoragePriority priority) =>
+        Ui("storage-priorities", priority.ToString());
 
     private static string DescribeCohort(HumanCohortSnapshot cohort) =>
         $"{cohort.Role switch
@@ -4628,88 +4625,61 @@ public partial class Main : Node
             $"{(material.DeliveredQuantity > 0
                 ? DescribeResourceVariant(material.DeliveredVariant)
                 : material.Variant == ResourceVariant.None
-                ? DescribeResource(material.Resource)
+                ? Ui("storage-resources", material.Resource.ToString())
                 : DescribeResourceVariant(material.Variant))} " +
             $"{material.DeliveredQuantity}/{material.RequiredQuantity}"));
         var workDone = site.TotalWorkTicks - site.RemainingWorkTicks;
         var readiness = DescribeConstructionReadiness(
             _engine.InspectConstructionReadiness(site.Id, evaluateReachability: false));
-        return $"plac budowy {DescribeConstruction(site.Kind)} • " +
-            $"priorytet: {DescribeStoragePriority(site.Priority)} • materiały: {materials} • " +
-            $"praca {workDone}/{site.TotalWorkTicks} • {readiness}";
+        return UiFormat(
+            "construction-site",
+            "summary",
+            DescribeConstruction(site.Kind),
+            DescribeStoragePriority(site.Priority),
+            materials,
+            workDone,
+            site.TotalWorkTicks,
+            readiness);
     }
 
-    private static string DescribeConstructionReadiness(
+    private string DescribeConstructionReadiness(
         ConstructionReadinessDiagnostic diagnostic) => diagnostic.State switch
     {
         ConstructionReadinessState.NoAvailableMaterials =>
-            $"wstrzymana: brak wolnego materiału ({diagnostic.MatchingSourceCount} źródeł)",
+            UiFormat("construction-site", "no-materials", diagnostic.MatchingSourceCount),
         ConstructionReadinessState.NoAvailableSupplier =>
-            "wstrzymana: brak goblina mogącego dostarczyć materiały",
+            Ui("construction-site", "no-supplier"),
         ConstructionReadinessState.NoReachableMaterialSource =>
-            $"wstrzymana: dostępny materiał ({diagnostic.AvailableMaterialQuantity}) jest nieosiągalny",
+            UiFormat("construction-site", "material-unreachable",
+                diagnostic.AvailableMaterialQuantity),
         ConstructionReadinessState.WaitingForSupplier =>
-            $"oczekuje na dostawcę; dostępny materiał: {diagnostic.AvailableMaterialQuantity}",
+            UiFormat("construction-site", "waiting-for-supplier",
+                diagnostic.AvailableMaterialQuantity),
         ConstructionReadinessState.MaterialsInTransit =>
-            $"materiały w drodze: {diagnostic.InTransitQuantity}",
+            UiFormat("construction-site", "materials-in-transit", diagnostic.InTransitQuantity),
         ConstructionReadinessState.AwaitingSiteClearance =>
-            "oczekuje na uprzątnięcie luźnych przedmiotów z placu",
+            Ui("construction-site", "awaiting-clearance"),
         ConstructionReadinessState.NoCapableBuilder =>
-            "wstrzymana: brak budowniczego z wymaganą wiedzą, umiejętnością lub narzędziem",
+            Ui("construction-site", "no-capable-builder"),
         ConstructionReadinessState.NoReachableBuilder =>
-            "wstrzymana: żaden zdolny budowniczy nie ma dojścia",
+            Ui("construction-site", "no-reachable-builder"),
         ConstructionReadinessState.WaitingForBuilder =>
-            $"gotowa; oczekuje na budowniczego ({diagnostic.CapableBuilderCount} zdolnych)",
-        ConstructionReadinessState.Building => "budowa trwa",
-        _ => "stan budowy nieznany",
+            UiFormat("construction-site", "waiting-for-builder",
+                diagnostic.CapableBuilderCount),
+        ConstructionReadinessState.Building => Ui("construction-site", "building"),
+        _ => Ui("construction-site", "unknown"),
     };
 
-    private static string DescribeConstruction(ConstructionKind kind) => kind switch
-    {
-        ConstructionKind.FoodStorage => "składu żywności",
-        ConstructionKind.WoodStorage => "składu drewna",
-        ConstructionKind.StoneStorage => "składu kamienia",
-        ConstructionKind.EquipmentStorage => "składu sprzętu",
-        ConstructionKind.MaterialsStorage => "składu materiałów",
-        ConstructionKind.WaterBarrel => "beczki na wodę",
-        ConstructionKind.WoodenBox => "drewnianej skrzynki",
-        ConstructionKind.WoodenChest => "drewnianej skrzyni",
-        ConstructionKind.WoodenBulkBin => "drewnianego zasobnika masowego",
-        ConstructionKind.WoodenWalkway => "pomostu",
-        ConstructionKind.BasaltWalkway => "bazaltowego pomostu",
-        ConstructionKind.GoblinFieldCamp => "obozu wypadowego",
-        ConstructionKind.GoblinHut => "chaty goblinów",
-        ConstructionKind.WoodenWall => "drewnianej ściany",
-        ConstructionKind.StoneWall => "kamiennego muru",
-        ConstructionKind.WoodenFloor => "drewnianej podłogi",
-        ConstructionKind.StoneFloor => "kamiennej posadzki",
-        ConstructionKind.WoodenRamp => "drewnianej pochylni",
-        ConstructionKind.StoneRamp => "kamiennej pochylni",
-        ConstructionKind.WoodenDoorFrame => "drewnianej ościeżnicy",
-        ConstructionKind.StoneDoorFrame => "kamiennej ościeżnicy",
-        ConstructionKind.WoodenDoor => "drewnianych drzwi",
-        ConstructionKind.WallTorch => "pochodni ściennej",
-        ConstructionKind.PrimitiveWorkshop => "prymitywnego warsztatu",
-        ConstructionKind.Bloomery => "dymarki",
-        ConstructionKind.SmeltingFurnace => "pieca hutniczego",
-        ConstructionKind.CrucibleFurnace => "pieca tyglowego",
-        _ => "konstrukcji",
-    };
+    private string DescribeConstruction(ConstructionKind kind) =>
+        Ui("construction-names", kind.ToString());
 
-    private static string DescribeFoodSource(PlantKind kind) => kind switch
-    {
-        PlantKind.BerryBush => "jagody",
-        PlantKind.MushroomCluster => "grzyby",
-        PlantKind.EdibleRoots => "korzonki",
-        PlantKind.FishShoal => "ryby",
-        PlantKind.ReedBed => "sitowie",
-        _ => "żywność",
-    };
+    private string DescribeFoodSource(PlantKind kind) => Ui("food-sources", kind.ToString());
 
-    private static string DescribeWaterDepth(MapCell cell) => cell.Terrain switch
+    private string DescribeWaterDepth(MapCell cell) => cell.Terrain switch
     {
-        TerrainKind.ShallowWater => " • bród, dno z=0",
-        TerrainKind.DeepWater => $" • głębokość ≥{cell.WaterDepthLevels}, dno z={cell.FloorLevel}",
+        TerrainKind.ShallowWater => Ui("water-depth", "shallow"),
+        TerrainKind.DeepWater => UiFormat("water-depth", "deep",
+            cell.WaterDepthLevels, cell.FloorLevel),
         _ => string.Empty,
     };
 
@@ -6540,7 +6510,7 @@ public partial class Main : Node
         }
         _selectedWorkshop = workshop;
         _workshopDetails.Title = TranslationCatalog.Get(
-            "pl",
+            _currentLocale,
             "workshops",
             "names",
             WorkshopCatalog.Get(workshopKind).Id);
@@ -7425,11 +7395,11 @@ public partial class Main : Node
         _ => "praca",
     };
 
-    private static string DescribeFluid(CellFluidKind fluid) => fluid switch
+    private string DescribeFluid(CellFluidKind fluid) => fluid switch
     {
-        CellFluidKind.Water => "wodę",
-        CellFluidKind.Lava => "lawę",
-        _ => "niebezpieczny płyn",
+        CellFluidKind.Water => Ui("fluid-objects", "water"),
+        CellFluidKind.Lava => Ui("fluid-objects", "lava"),
+        _ => Ui("fluid-objects", "dangerous-fluid"),
     };
 
     private void CreateWorldContextMenu()
@@ -7462,7 +7432,7 @@ public partial class Main : Node
         _constructionRemovalDialog = new ConfirmationDialog
         {
             Name = "ConstructionRemovalDialog",
-            Title = "Potwierdź usunięcie",
+            Title = Ui("context-menu", "confirm-removal"),
             MinSize = new Vector2I(430, 0),
         };
         _constructionRemovalDialog.Confirmed += ConfirmConstructionRemoval;
@@ -7537,36 +7507,39 @@ public partial class Main : Node
             zone.Position == camp.Anchor && zone.AcceptedResource == ResourceKind.Food);
 
         _worldContextMenu.Clear();
-        _worldContextMenu.AddItem($"Obóz wypadowy • z={camp.Anchor.Z}");
+        _worldContextMenu.AddItem(UiFormat("context-menu", "camp-heading", camp.Anchor.Z));
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
         _worldContextMenu.AddItem(
             storage.Id == EntityId.None
-                ? $"Prowiant: brak składu • miejsca " + DescribeCampOccupancy(occupants.Length)
-                : $"Prowiant {storage.StoredQuantity}/{storage.Capacity} • miejsca " +
-                  DescribeCampOccupancy(occupants.Length));
+                ? UiFormat("context-menu", "camp-no-storage",
+                    DescribeCampOccupancy(occupants.Length))
+                : UiFormat("context-menu", "camp-storage",
+                    storage.StoredQuantity, storage.Capacity,
+                    DescribeCampOccupancy(occupants.Length)));
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
         _worldContextMenu.AddItem(DescribeCampRaidStatus(snapshot, camp.Anchor));
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
         _worldContextMenu.AddSeparator();
-        _worldContextMenu.AddItem("Edytuj najazd…", (int)WorldContextAction.EditRaid);
+        _worldContextMenu.AddItem(Ui("context-menu", "edit-raid"),
+            (int)WorldContextAction.EditRaid);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.EditRaid),
             snapshot.RaidPhase is GoblinRaidPhase.Marching or GoblinRaidPhase.Looting or
                 GoblinRaidPhase.Returning);
         _worldContextMenu.AddItem(
             snapshot.RaidPhase is GoblinRaidPhase.Preparing or GoblinRaidPhase.Ready
-                ? "Wstrzymaj przygotowania"
+                ? Ui("context-menu", "suspend-raid-preparation")
                 : snapshot.RaidPhase == GoblinRaidPhase.Marching
-                    ? "Odwołaj najazd"
+                    ? Ui("context-menu", "recall-raid")
                 : snapshot.RaidPhase is GoblinRaidPhase.Looting or GoblinRaidPhase.Returning
-                    ? "Najazd w toku"
-                : "Przygotuj najazd",
+                    ? Ui("context-menu", "raid-in-progress")
+                : Ui("context-menu", "prepare-raid"),
             (int)WorldContextAction.ToggleRaidPreparation);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.ToggleRaidPreparation),
             snapshot.RaidPhase is GoblinRaidPhase.Looting or GoblinRaidPhase.Returning);
         _worldContextMenu.AddItem(
-            $"Wybierz cel… (promień {snapshot.RaidPlan.TargetRadius})",
+            UiFormat("context-menu", "select-raid-target", snapshot.RaidPlan.TargetRadius),
             (int)WorldContextAction.SelectRaidTarget);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.SelectRaidTarget),
@@ -7574,26 +7547,27 @@ public partial class Main : Node
                 GoblinRaidPhase.Returning);
         if (snapshot.RaidPhase == GoblinRaidPhase.Ready)
         {
-            _worldContextMenu.AddItem("ATAK!", (int)WorldContextAction.LaunchRaid);
+            _worldContextMenu.AddItem(Ui("context-menu", "attack"),
+                (int)WorldContextAction.LaunchRaid);
         }
         _worldContextMenu.AddSeparator();
         _worldContextMenu.AddItem(
             occupants.Length == 0
-                ? "Brak goblinów w obozie"
-                : $"Zaznacz gobliny w obozie ({occupants.Length})",
+                ? Ui("context-menu", "no-camp-goblins")
+                : UiFormat("context-menu", "select-camp-goblins", occupants.Length),
             (int)WorldContextAction.SelectCampOccupants);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.SelectCampOccupants),
             occupants.Length == 0);
         _worldContextMenu.AddItem(
-            "Otwórz skład prowiantu",
+            Ui("context-menu", "open-camp-storage"),
             (int)WorldContextAction.OpenCampStorage);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.OpenCampStorage),
             storage.Id == EntityId.None);
         _worldContextMenu.AddSeparator();
         _worldContextMenu.AddItem(
-            "Rozbierz obóz…",
+            Ui("context-menu", "dismantle-camp"),
             (int)WorldContextAction.DismantleConstruction);
         _worldContextMenu.SetItemDisabled(
             _worldContextMenu.GetItemIndex((int)WorldContextAction.DismantleConstruction),
@@ -7619,7 +7593,7 @@ public partial class Main : Node
             .OrderBy(actor => actor.Id)
             .Select(actor => new ContextEntityChoice(
                 new ContextEntityTarget(ContextEntityKind.Goblin, actor.Id.Value, clicked),
-                $"{actor.Name} • goblin",
+                UiFormat("context-menu", "goblin-heading", actor.Name),
                 Section: 1,
                 TextColorOverride: GoblinEntitySelectorColor)));
         choices.AddRange(snapshot.ConstructionSites
@@ -7630,14 +7604,16 @@ public partial class Main : Node
                     ContextEntityKind.ConstructionSite,
                     site.Id.Value,
                     site.Anchor),
-                $"Budowa: {DescribeConstruction(site.Kind)}",
+                UiFormat("context-menu", "construction-heading",
+                    DescribeConstruction(site.Kind)),
                 Section: 2)));
         choices.AddRange(snapshot.StorageZones
             .Where(zone => zone.Position == clicked)
             .OrderBy(zone => zone.Id)
             .Select(zone => new ContextEntityChoice(
                 new ContextEntityTarget(ContextEntityKind.StorageZone, zone.Id.Value, clicked),
-                $"Skład: {DescribeStorageProvider(zone.ProviderKind)}",
+                UiFormat("context-menu", "storage-heading",
+                    DescribeStorageProvider(zone.ProviderKind)),
                 Section: 2)));
         choices.AddRange(snapshot.WorldObjects
             .Where(worldObject => worldObject.GetAbsoluteParts().Any(part => part.Position == clicked))
@@ -7654,14 +7630,15 @@ public partial class Main : Node
             .OrderBy(corpse => corpse.Id)
             .Select(corpse => new ContextEntityChoice(
                 new ContextEntityTarget(ContextEntityKind.Corpse, corpse.Id.Value, clicked),
-                $"{corpse.Name} • zwłoki",
+                UiFormat("context-menu", "corpse-heading", corpse.Name),
                 Section: 2)));
         choices.AddRange(snapshot.Animals
             .Where(animal => animal.Position == clicked)
             .OrderBy(animal => animal.Id)
             .Select(animal => new ContextEntityChoice(
                 new ContextEntityTarget(ContextEntityKind.Animal, animal.Id, clicked),
-                DescribeAnimal(animal),
+                UiFormat("context-menu", "animal-heading",
+                    Ui("animal-kinds", animal.Kind.ToString())),
                 Section: 2)));
         choices.AddRange(snapshot.HumanVillage.Villagers
             .Where(villager => villager.Health > 0 && villager.Position == clicked)
@@ -7671,7 +7648,7 @@ public partial class Main : Node
                     ContextEntityKind.HumanVillager,
                     checked((ulong)villager.Id),
                     clicked),
-                $"{villager.Name} • człowiek",
+                UiFormat("context-menu", "human-heading", villager.Name),
                 Section: 2)));
         choices.AddRange(snapshot.ItemStacks
             .Where(stack => stack.Location.Kind is ItemLocationKind.Ground or
@@ -7699,7 +7676,7 @@ public partial class Main : Node
 
         var heading = new Label
         {
-            Text = $"Obiekty na polu {choices[0].Target.Position}",
+            Text = UiFormat("context-menu", "objects-at", choices[0].Target.Position),
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         heading.AddThemeColorOverride("font_color", GameUiTheme.MutedText);
@@ -7713,9 +7690,9 @@ public partial class Main : Node
                 {
                     Text = choice.Section switch
                     {
-                        1 => "Gobliny",
-                        2 => "Budynki, stworzenia i inne obiekty",
-                        _ => "Przedmioty i materiały",
+                        1 => Ui("context-menu", "section-goblins"),
+                        2 => Ui("context-menu", "section-world"),
+                        _ => Ui("context-menu", "section-items"),
                     },
                 };
                 section.AddThemeColorOverride("font_color", GameUiTheme.MutedText);
@@ -7801,13 +7778,16 @@ public partial class Main : Node
                 {
                     return;
                 }
-                AddDisabledContextHeading($"{actor.Name} • goblin");
-                _worldContextMenu.AddItem("Pokaż szczegóły", (int)WorldContextAction.OpenEntityDetails);
-                _worldContextMenu.AddSeparator("Rozkazy bezpośrednie");
-                _worldContextMenu.AddItem("Uciekaj do osady", (int)WorldContextAction.OrderGoblinFlee);
-                _worldContextMenu.AddItem("Idź spać", (int)WorldContextAction.OrderGoblinSleep);
+                AddDisabledContextHeading(UiFormat("context-menu", "goblin-heading", actor.Name));
+                _worldContextMenu.AddItem(Ui("context-menu", "show-details"),
+                    (int)WorldContextAction.OpenEntityDetails);
+                _worldContextMenu.AddSeparator(Ui("context-menu", "direct-orders"));
+                _worldContextMenu.AddItem(Ui("context-menu", "flee"),
+                    (int)WorldContextAction.OrderGoblinFlee);
+                _worldContextMenu.AddItem(Ui("context-menu", "sleep"),
+                    (int)WorldContextAction.OrderGoblinSleep);
                 _worldContextMenu.AddItem(
-                    "Wyłącz z dispatchera na 1 godzinę czasu gry",
+                    Ui("context-menu", "suspend-dispatcher"),
                     (int)WorldContextAction.SuspendGoblinDispatcher);
                 break;
             case ContextEntityKind.ConstructionSite:
@@ -7816,11 +7796,13 @@ public partial class Main : Node
                 {
                     return;
                 }
-                AddDisabledContextHeading($"Budowa: {DescribeConstruction(site.Kind)}");
-                _worldContextMenu.AddItem("Pokaż szczegóły", (int)WorldContextAction.OpenEntityDetails);
+                AddDisabledContextHeading(UiFormat("context-menu", "construction-heading",
+                    DescribeConstruction(site.Kind)));
+                _worldContextMenu.AddItem(Ui("context-menu", "show-details"),
+                    (int)WorldContextAction.OpenEntityDetails);
                 _worldContextMenu.AddSeparator();
                 _worldContextMenu.AddItem(
-                    "Anuluj budowę…",
+                    Ui("context-menu", "cancel-construction"),
                     (int)WorldContextAction.CancelConstruction);
                 _contextRemovalTarget = ConstructionRemovalTarget.PendingConstruction;
                 _contextRemovalEntityId = site.Id;
@@ -7832,10 +7814,13 @@ public partial class Main : Node
                 {
                     return;
                 }
-                AddDisabledContextHeading($"Skład: {DescribeStorageProvider(zone.ProviderKind)}");
-                _worldContextMenu.AddItem("Edytuj szczegóły…", (int)WorldContextAction.OpenEntityDetails);
+                AddDisabledContextHeading(UiFormat("context-menu", "storage-heading",
+                    DescribeStorageProvider(zone.ProviderKind)));
+                _worldContextMenu.AddItem(Ui("context-menu", "edit-details"),
+                    (int)WorldContextAction.OpenEntityDetails);
                 _worldContextMenu.AddSeparator();
-                _worldContextMenu.AddItem("Usuń skład…", (int)WorldContextAction.DismantleConstruction);
+                _worldContextMenu.AddItem(Ui("context-menu", "remove-storage"),
+                    (int)WorldContextAction.DismantleConstruction);
                 _contextRemovalTarget = ConstructionRemovalTarget.StorageZone;
                 _contextRemovalEntityId = zone.Id;
                 _contextRemovalPosition = zone.Position;
@@ -7847,10 +7832,11 @@ public partial class Main : Node
                     return;
                 }
                 AddDisabledContextHeading(DescribeWorldObject(worldObject));
-                _worldContextMenu.AddItem("Edytuj szczegóły…", (int)WorldContextAction.OpenEntityDetails);
+                _worldContextMenu.AddItem(Ui("context-menu", "edit-details"),
+                    (int)WorldContextAction.OpenEntityDetails);
                 _worldContextMenu.AddSeparator();
                 _worldContextMenu.AddItem(
-                    "Rozbierz konstrukcję…",
+                    Ui("context-menu", "dismantle-construction"),
                     (int)WorldContextAction.DismantleConstruction);
                 _contextRemovalTarget = ConstructionRemovalTarget.WorldObject;
                 _contextRemovalEntityId = new EntityId(worldObject.Id.Value);
@@ -7866,36 +7852,37 @@ public partial class Main : Node
                     $"{DescribeResourceVariant(stack.Resource, stack.FoodKind, stack.Variant)} ×{stack.Quantity}");
                 var hasSingleGoblin = _selectedActorIds.Count == 1;
                 _worldContextMenu.AddItem(
-                    "Wyślij zaznaczonego goblina po stos",
+                    Ui("context-menu", "pick-up-stack"),
                     (int)WorldContextAction.PickUpItem);
                 _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, !hasSingleGoblin);
                 if (stack.Resource == ResourceKind.Equipment &&
                     EquipmentCatalog.FindDefinition(stack.Variant) is not null)
                 {
                     _worldContextMenu.AddItem(
-                        "Każ założyć zaznaczonemu goblinowi",
+                        Ui("context-menu", "equip-item"),
                         (int)WorldContextAction.EquipItem);
                     _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, !hasSingleGoblin);
                 }
                 _worldContextMenu.AddItem(
-                    "Pilnie przenieś do właściwego składu",
+                    Ui("context-menu", "prioritize-hauling"),
                     (int)WorldContextAction.PrioritizeItemHauling);
                 if (!hasSingleGoblin)
                 {
                     _worldContextMenu.AddSeparator();
-                    AddDisabledContextHeading("Najpierw zaznacz dokładnie jednego goblina");
+                    AddDisabledContextHeading(Ui("context-menu", "select-one-goblin"));
                 }
                 break;
             case ContextEntityKind.Animal:
                 var animal = snapshot.Animals.FirstOrDefault(item => item.Id == target.Id);
-                AddDisabledContextHeading(DescribeAnimal(animal));
-                AddDisabledContextHeading("Brak bezpośrednich rozkazów dla tego stworzenia");
+                AddDisabledContextHeading(UiFormat("context-menu", "animal-heading",
+                    Ui("animal-kinds", animal.Kind.ToString())));
+                AddDisabledContextHeading(Ui("context-menu", "no-animal-orders"));
                 break;
             case ContextEntityKind.HumanVillager:
                 var villager = snapshot.HumanVillage.Villagers.FirstOrDefault(item =>
                     item.Id == checked((int)target.Id));
-                AddDisabledContextHeading(DescribeVillager(villager));
-                AddDisabledContextHeading("To nie jest członek plemienia");
+                AddDisabledContextHeading(UiFormat("context-menu", "human-heading", villager.Name));
+                AddDisabledContextHeading(Ui("context-menu", "not-tribe-member"));
                 break;
         }
         PositionWorldContextMenu(screenPosition);
@@ -7933,8 +7920,9 @@ public partial class Main : Node
             _contextRemovalPosition = pending.Anchor;
             ShowConstructionRemovalMenu(
                 screenPosition,
-                $"Budowa: {DescribeConstruction(pending.Kind)}",
-                "Anuluj budowę…",
+                UiFormat("context-menu", "construction-heading",
+                    DescribeConstruction(pending.Kind)),
+                Ui("context-menu", "cancel-construction"),
                 WorldContextAction.CancelConstruction);
             return true;
         }
@@ -7963,8 +7951,9 @@ public partial class Main : Node
             _contextRemovalPosition = primaryObject.Anchor;
             ShowConstructionRemovalMenu(
                 screenPosition,
-                $"Konstrukcja: {DescribeWorldObject(primaryObject)}",
-                "Rozbierz konstrukcję…",
+                UiFormat("context-menu", "structure-heading",
+                    DescribeWorldObject(primaryObject)),
+                Ui("context-menu", "dismantle-construction"),
                 WorldContextAction.DismantleConstruction);
             return true;
         }
@@ -7978,8 +7967,9 @@ public partial class Main : Node
             _contextRemovalPosition = storage.Position;
             ShowConstructionRemovalMenu(
                 screenPosition,
-                $"Skład: {DescribeStorageProvider(storage.ProviderKind)}",
-                "Usuń skład…",
+                UiFormat("context-menu", "storage-heading",
+                    DescribeStorageProvider(storage.ProviderKind)),
+                Ui("context-menu", "remove-storage"),
                 WorldContextAction.DismantleConstruction);
             return true;
         }
@@ -8009,39 +7999,40 @@ public partial class Main : Node
         WorldObjectKind.WoodenFloor or WorldObjectKind.StoneFloor or
         WorldObjectKind.WoodenRamp or WorldObjectKind.StoneRamp;
 
-    private static string DescribeCampOccupancy(int occupantCount)
+    private string DescribeCampOccupancy(int occupantCount)
     {
         var capacity = SimulationDefinitions.FieldCampCapacity;
         return occupantCount <= capacity
             ? $"{occupantCount}/{capacity}"
-            : $"{capacity}/{capacity} • opuszcza obóz: {occupantCount - capacity}";
+            : UiFormat("context-menu", "leaving-camp",
+                capacity, occupantCount - capacity);
     }
 
-    private static string DescribeCampRaidStatus(
+    private string DescribeCampRaidStatus(
         SimulationSnapshot snapshot,
         GridPosition campAnchor)
     {
         if (snapshot.RaidPhase == GoblinRaidPhase.None)
         {
             return snapshot.RaidPartyIds.Count == 0
-                ? "Najazd: nieaktywny • brak wybranego oddziału"
-                : $"Najazd: nieaktywny • plan {snapshot.RaidPartyIds.Count}/" +
-                  SimulationDefinitions.FieldCampCapacity;
+                ? Ui("context-menu", "raid-inactive-no-party")
+                : UiFormat("context-menu", "raid-inactive-plan",
+                    snapshot.RaidPartyIds.Count, SimulationDefinitions.FieldCampCapacity);
         }
         if (snapshot.RaidRallyPoint != campAnchor)
         {
-            return "Najazd: inny obóz jest punktem zbiórki";
+            return Ui("context-menu", "raid-other-camp");
         }
 
         return snapshot.RaidPhase switch
         {
-            GoblinRaidPhase.Preparing => "Najazd: przygotowanie oddziału",
-            GoblinRaidPhase.Ready => "Najazd: GOTOWY DO WYMARSZU",
-            GoblinRaidPhase.Suspended => "Najazd: przygotowania wstrzymane",
-            GoblinRaidPhase.Marching => "Najazd: oddział w drodze",
-            GoblinRaidPhase.Looting => "Najazd: plądrowanie",
-            GoblinRaidPhase.Returning => "Najazd: powrót do obozu",
-            _ => "Najazd: stan nieznany",
+            GoblinRaidPhase.Preparing => Ui("context-menu", "raid-party-preparing"),
+            GoblinRaidPhase.Ready => Ui("context-menu", "raid-party-ready"),
+            GoblinRaidPhase.Suspended => Ui("context-menu", "raid-party-suspended"),
+            GoblinRaidPhase.Marching => Ui("context-menu", "raid-party-marching"),
+            GoblinRaidPhase.Looting => Ui("context-menu", "raid-party-looting"),
+            GoblinRaidPhase.Returning => Ui("context-menu", "raid-party-returning"),
+            _ => Ui("context-menu", "raid-party-unknown"),
         };
     }
 
@@ -8056,34 +8047,35 @@ public partial class Main : Node
             item.Kind == WorldObjectKind.GoblinFieldCamp &&
             item.Owner == WorldObjectOwner.GoblinTribe);
         _worldContextMenu.Clear();
-        _worldContextMenu.AddItem($"{corpse.Name} • zwłoki");
+        _worldContextMenu.AddItem(UiFormat("context-menu", "corpse-heading", corpse.Name));
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
         _worldContextMenu.AddItem(
-            $"Mięso: {corpse.EdiblePortions} • przedmioty: {corpse.Contents.Count}");
+            UiFormat("context-menu", "corpse-summary",
+                corpse.EdiblePortions, corpse.Contents.Count));
         _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
-        _worldContextMenu.AddSeparator("Postępowanie ze zwłokami");
+        _worldContextMenu.AddSeparator(Ui("context-menu", "corpse-orders"));
         AddCorpseContextAction(
-            CorpseActionLabel("Przeszukaj wyposażenie i zapasy",
+            CorpseActionLabel(Ui("context-menu", "loot-corpse"),
                 corpse.Directives.HasFlag(CorpseDirective.LootContents)),
             WorldContextAction.LootCorpse,
             corpse.Contents.Count > 0);
         AddCorpseContextAction(
-            CorpseActionLabel("Pożryj zwłoki",
+            CorpseActionLabel(Ui("context-menu", "consume-corpse"),
                 corpse.Directives.HasFlag(CorpseDirective.Consume)),
             WorldContextAction.ConsumeCorpse,
             corpse.EdiblePortions > 0);
         AddCorpseContextAction(
-            CorpseActionLabel("Zanieś do obozu",
+            CorpseActionLabel(Ui("context-menu", "recover-corpse"),
                 corpse.Directives.HasFlag(CorpseDirective.RecoverToCamp)),
             WorldContextAction.RecoverCorpse,
             hasCamp);
         AddCorpseContextAction(
-            CorpseActionLabel("Zanieś i zapyl w obozie",
+            CorpseActionLabel(Ui("context-menu", "recover-and-bud"),
                 corpse.Directives.HasFlag(CorpseDirective.RecoverAndBudAtCamp)),
             WorldContextAction.RecoverAndBudCorpse,
             hasCamp);
         AddCorpseContextAction(
-            CorpseActionLabel("Zapyl na miejscu",
+            CorpseActionLabel(Ui("context-menu", "bud-in-place"),
                 corpse.Directives.HasFlag(CorpseDirective.BudInPlace)),
             WorldContextAction.BudCorpseInPlace,
             enabled: true);
@@ -8091,14 +8083,14 @@ public partial class Main : Node
         {
             _worldContextMenu.AddSeparator();
             AddCorpseContextAction(
-                "Anuluj wszystkie rozkazy dla tych zwłok",
+                Ui("context-menu", "clear-corpse-orders"),
                 WorldContextAction.ClearCorpseDirectives,
                 enabled: true);
         }
         if (!hasCamp)
         {
             _worldContextMenu.AddSeparator();
-            _worldContextMenu.AddItem("Przeniesienie wymaga obozowiska wypadowego");
+            _worldContextMenu.AddItem(Ui("context-menu", "camp-required"));
             _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, true);
         }
         _worldContextMenu.Position = new Vector2I(
@@ -8201,13 +8193,13 @@ public partial class Main : Node
                         _commandSequence++,
                         camp.Anchor));
                 _inspector.Text = snapshot.RaidPhase == GoblinRaidPhase.Marching
-                    ? "Zlecono odwołanie trwającego najazdu."
+                    ? Ui("context-feedback", "raid-recalled")
                     : suspendPreparation
-                    ? "Zlecono wstrzymanie przygotowań do najazdu."
-                    : $"Zlecono przygotowanie najazdu w obozie {camp.Anchor}.";
+                    ? Ui("context-feedback", "raid-suspended")
+                    : UiFormat("context-feedback", "raid-preparing", camp.Anchor);
                 if (_speed == 0)
                 {
-                    _inspector.Text += " Rozkaz zostanie wykonany po wznowieniu czasu.";
+                    _inspector.Text += Ui("context-feedback", "after-resume");
                 }
                 break;
             case WorldContextAction.SelectRaidTarget:
@@ -8217,8 +8209,8 @@ public partial class Main : Node
                 _engine.QueueCommand(SimulationCommand.LaunchRaid(
                     _engine.CurrentTick.Next(),
                     _commandSequence++));
-                _inspector.Text = "Wydano rozkaz ATAK!" +
-                    (_speed == 0 ? " Najazd ruszy po wznowieniu czasu." : string.Empty);
+                _inspector.Text = Ui("context-feedback", "attack-ordered") +
+                    (_speed == 0 ? Ui("context-feedback", "raid-after-resume") : string.Empty);
                 break;
             case WorldContextAction.SelectCampOccupants:
                 SelectCampOccupants(snapshot, camp);
@@ -8279,9 +8271,8 @@ public partial class Main : Node
                         }
                         else
                         {
-                            _inspector.Text = $"{worldObject.Anchor} • " +
-                                DescribeWorldObject(worldObject) +
-                                " • ta konstrukcja nie ma dodatkowych ustawień.";
+                            _inspector.Text = UiFormat("context-feedback", "no-settings",
+                                worldObject.Anchor, DescribeWorldObject(worldObject));
                         }
                         break;
                 }
@@ -8292,7 +8283,7 @@ public partial class Main : Node
                         _engine.CurrentTick.Next(),
                         _commandSequence++,
                         new EntityId(target.Id)),
-                    "Goblin otrzymał rozkaz ucieczki do osady.");
+                    Ui("context-feedback", "flee-ordered"));
                 break;
             case WorldContextAction.OrderGoblinSleep:
                 SubmitContextCommand(
@@ -8300,7 +8291,7 @@ public partial class Main : Node
                         _engine.CurrentTick.Next(),
                         _commandSequence++,
                         new EntityId(target.Id)),
-                    "Goblin otrzymał rozkaz udania się na spoczynek.");
+                    Ui("context-feedback", "sleep-ordered"));
                 break;
             case WorldContextAction.SuspendGoblinDispatcher:
                 SubmitContextCommand(
@@ -8308,7 +8299,7 @@ public partial class Main : Node
                         _engine.CurrentTick.Next(),
                         _commandSequence++,
                         new EntityId(target.Id)),
-                    "Goblin został wyłączony z publicznego dispatchera na 1 godzinę czasu gry.");
+                    Ui("context-feedback", "dispatcher-suspended"));
                 break;
             case WorldContextAction.PickUpItem:
                 if (TryGetSingleSelectedActor(out var pickupActor))
@@ -8319,7 +8310,7 @@ public partial class Main : Node
                             _commandSequence++,
                             pickupActor,
                             new EntityId(target.Id)),
-                        "Zaznaczony goblin otrzymał pilny rozkaz podniesienia stosu.");
+                        Ui("context-feedback", "pickup-ordered"));
                 }
                 break;
             case WorldContextAction.EquipItem:
@@ -8331,7 +8322,7 @@ public partial class Main : Node
                             _commandSequence++,
                             equipActor,
                             new EntityId(target.Id)),
-                        "Zaznaczony goblin otrzymał rozkaz założenia przedmiotu.");
+                        Ui("context-feedback", "equip-ordered"));
                 }
                 break;
             case WorldContextAction.PrioritizeItemHauling:
@@ -8340,7 +8331,7 @@ public partial class Main : Node
                         _engine.CurrentTick.Next(),
                         _commandSequence++,
                         new EntityId(target.Id)),
-                    "Stos otrzymał pilny priorytet transportu do właściwego składu.");
+                    Ui("context-feedback", "haul-prioritized"));
                 break;
         }
         _contextEntityTarget = default;
@@ -8354,7 +8345,7 @@ public partial class Main : Node
             return true;
         }
         actorId = EntityId.None;
-        _inspector.Text = "Ten rozkaz wymaga zaznaczenia dokładnie jednego goblina.";
+        _inspector.Text = Ui("context-feedback", "one-goblin-required");
         return false;
     }
 
@@ -8377,16 +8368,16 @@ public partial class Main : Node
 
         var pending = _contextRemovalTarget == ConstructionRemovalTarget.PendingConstruction;
         _constructionRemovalDialog.Title = pending
-            ? "Potwierdź anulowanie budowy"
-            : "Potwierdź rozbiórkę";
+            ? Ui("context-menu", "confirm-cancel-construction")
+            : Ui("context-menu", "confirm-dismantle");
         _constructionRemovalDialog.DialogText = pending
-            ? "Anulować całe zlecenie budowy?\n\n" +
-              "Wszystkie jego pola zostaną usunięte, a dostarczone materiały wrócą na ziemię."
+            ? Ui("context-menu", "confirm-cancel-construction-text")
             : _contextRemovalTarget == ConstructionRemovalTarget.StorageZone
-                ? "Usunąć ten skład?\n\nZawartość zostanie wyłożona na ziemię."
-                : "Rozebrać tę konstrukcję?\n\n" +
-                  "Powiązane zlecenia warsztatu zostaną anulowane, a ich dostarczone materiały wrócą na ziemię.";
-        _constructionRemovalDialog.OkButtonText = pending ? "Anuluj budowę" : "Rozbierz";
+                ? Ui("context-menu", "confirm-remove-storage-text")
+                : Ui("context-menu", "confirm-dismantle-text");
+        _constructionRemovalDialog.OkButtonText = pending
+            ? Ui("context-menu", "cancel-construction-confirm")
+            : Ui("context-menu", "dismantle-confirm");
         _constructionRemovalDialog.PopupCentered();
     }
 
@@ -8422,11 +8413,11 @@ public partial class Main : Node
         };
         _engine.QueueCommand(command);
         _inspector.Text = _contextRemovalTarget == ConstructionRemovalTarget.PendingConstruction
-            ? "Zlecono anulowanie budowy."
-            : "Zlecono rozbiórkę konstrukcji.";
+            ? Ui("context-feedback", "construction-cancelled")
+            : Ui("context-feedback", "dismantle-ordered");
         if (_speed == 0)
         {
-            _inspector.Text += " Rozkaz zostanie wykonany po wznowieniu czasu.";
+            _inspector.Text += Ui("context-feedback", "after-resume");
         }
         _contextRemovalTarget = ConstructionRemovalTarget.None;
         _contextRemovalEntityId = EntityId.None;
@@ -8478,8 +8469,8 @@ public partial class Main : Node
             corpse.Id,
             directives));
         _inspector.Text = directives == CorpseDirective.None
-            ? $"Anulowano rozkazy dotyczące zwłok: {corpse.Name}."
-            : $"Zmieniono rozkazy dotyczące zwłok: {corpse.Name}.";
+            ? UiFormat("context-feedback", "corpse-orders-cleared", corpse.Name)
+            : UiFormat("context-feedback", "corpse-orders-updated", corpse.Name);
     }
 
     private static CorpseDirective SetCorpseHandling(
@@ -8511,8 +8502,9 @@ public partial class Main : Node
         _selectedActorIds.UnionWith(occupants);
         ApplyActorSelection(occupants.FirstOrDefault());
         _inspector.Text = occupants.Length == 0
-            ? $"Obóz {camp.Anchor} jest pusty."
-            : $"Zaznaczono {occupants.Length} goblinów przebywających w obozie {camp.Anchor}.";
+            ? UiFormat("context-feedback", "camp-empty", camp.Anchor)
+            : UiFormat("context-feedback", "camp-goblins-selected",
+                occupants.Length, camp.Anchor);
     }
 
     private void CreateRaidWindow()
@@ -9035,7 +9027,7 @@ public partial class Main : Node
 
         CancelBuildMode(clearInspector: false);
         _buildMenu.Hide();
-        _inspector.Text = $"Warstwa z={_visibleLevel} leży poza obszarem mapy.";
+        _inspector.Text = UiFormat("layer-tools", "outside-map", _visibleLevel);
         return false;
     }
 
@@ -9062,15 +9054,15 @@ public partial class Main : Node
         work.Disabled = false;
         build.TooltipText = _visibleLevel switch
         {
-            0 => "Budowanie",
-            < 0 => "Budowanie pod ziemią • składy, pomosty, ściany i drzwi",
-            _ => $"Budowanie na warstwie z={_visibleLevel}",
+            0 => Ui("layer-tools", "build-surface"),
+            < 0 => Ui("layer-tools", "build-underground"),
+            _ => UiFormat("layer-tools", "build-level", _visibleLevel),
         };
         work.TooltipText = _visibleLevel switch
         {
-            0 => "Zlecenia pracy",
-            < 0 => "Zlecenia podziemne • zbieranie urobku, kopanie i czyszczenie",
-            _ => $"Zlecenia pracy na warstwie z={_visibleLevel}",
+            0 => Ui("layer-tools", "work-surface"),
+            < 0 => Ui("layer-tools", "work-underground"),
+            _ => UiFormat("layer-tools", "work-level", _visibleLevel),
         };
     }
 
@@ -9107,41 +9099,47 @@ public partial class Main : Node
                 (stack.Location.Kind != ItemLocationKind.Ground ||
                  snapshot.GetVisibility(stack.Location.Position, _engine.Map.Width) == CellVisibility.Visible))
             .Sum(stack => stack.Quantity);
-        _status.Text = $"Tick {snapshot.Tick.Value:N0}  •  z={_visibleLevel}  •  plemię {snapshot.Actors.Count}" +
-            $" + {snapshot.GoblinBuds.Count} pąk." +
-            $" / miejsca {snapshot.TribeNeeds.ShelterCapacity}" +
-            $"  •  żywność {snapshot.FoodStock}" +
-            $" (skł. {storedFood}, racje {personalFood}/{personalWater})" +
-            $"  •  drewno {wood}" +
-            $"  •  odkryte {explored}/{snapshot.Visibility.Count}" +
-            $"  •  cele pracy {snapshot.WorkDesignations.Count}" +
-            $"  •  budowy {snapshot.ConstructionSites.Count} ({constructionWorkers} gobl.)" +
-            $"  •  transport {haulers}  •  w drodze {traveling}  •  pracuje {working}";
+        var statusParts = new List<string>
+        {
+            UiFormat("status", "tick", snapshot.Tick.Value),
+            UiFormat("status", "level", _visibleLevel),
+            UiFormat("status", "tribe", snapshot.Actors.Count, snapshot.GoblinBuds.Count,
+                snapshot.TribeNeeds.ShelterCapacity),
+            UiFormat("status", "food", snapshot.FoodStock, storedFood, personalFood, personalWater),
+            UiFormat("status", "wood", wood),
+            UiFormat("status", "explored", explored, snapshot.Visibility.Count),
+            UiFormat("status", "work-targets", snapshot.WorkDesignations.Count),
+            UiFormat("status", "construction", snapshot.ConstructionSites.Count,
+                constructionWorkers),
+            UiFormat("status", "hauling", haulers),
+            UiFormat("status", "traveling", traveling),
+            UiFormat("status", "working", working),
+        };
         if (_use3DView)
         {
-            _status.Text += "  •  RENDERER 3D: PROTOTYP";
+            statusParts.Add(Ui("status", "renderer-3d"));
         }
         if (_engine.DebugSettings.RevealFogFromNonPlayerUnits)
         {
-            _status.Text += "  •  DEBUG: widok obcych jednostek";
+            statusParts.Add(Ui("status", "debug-foreign-units"));
         }
         if (resting > 0)
         {
-            _status.Text += $"  •  odpoczywa {resting}";
+            statusParts.Add(UiFormat("status", "resting", resting));
         }
         if (eating > 0)
         {
-            _status.Text += $"  •  je {eating}";
+            statusParts.Add(UiFormat("status", "eating", eating));
         }
         if (resupplying > 0)
         {
-            _status.Text += $"  •  pobiera zapasy {resupplying}";
+            statusParts.Add(UiFormat("status", "resupplying", resupplying));
         }
         if (_selectedActorId != EntityId.None)
         {
-            _status.Text += _selectedActorIds.Count <= 1
-                ? $"  •  wybrany {_selectedActorId}"
-                : $"  •  wybrana grupa {_selectedActorIds.Count}";
+            statusParts.Add(_selectedActorIds.Count <= 1
+                ? UiFormat("status", "selected", _selectedActorId)
+                : UiFormat("status", "selected-group", _selectedActorIds.Count));
             UpdateGoblinDetails(snapshot);
         }
         if (_workshopDetails.Visible)
@@ -9154,64 +9152,67 @@ public partial class Main : Node
         }
         if (villageVisibility == CellVisibility.Visible)
         {
-            _status.Text += $"  •  wieś {snapshot.HumanVillage.Population} osób, zapasy " +
-                $"żywność {snapshot.HumanVillage.FoodStock}/{snapshot.HumanVillage.FoodCapacity}, " +
-                $"ziarno siewne {snapshot.HumanVillage.GrainStock}, " +
-                $"woda {snapshot.HumanVillage.WaterStock}, drewno {snapshot.HumanVillage.WoodStock}" +
-                $"  •  pola {snapshot.HumanVillage.Fields.Count}/{snapshot.HumanVillage.PlannedFieldCount}" +
-                $"  •  alarm {snapshot.HumanVillage.Hostility}/100" +
-                (snapshot.HumanVillage.GoblinAttackOrdered ? "  •  NAJAZD" : string.Empty);
+            statusParts.Add(UiFormat("status", "village",
+                snapshot.HumanVillage.Population,
+                snapshot.HumanVillage.FoodStock,
+                snapshot.HumanVillage.FoodCapacity,
+                snapshot.HumanVillage.GrainStock,
+                snapshot.HumanVillage.WaterStock,
+                snapshot.HumanVillage.WoodStock));
+            statusParts.Add(UiFormat("status", "fields",
+                snapshot.HumanVillage.Fields.Count,
+                snapshot.HumanVillage.PlannedFieldCount));
+            statusParts.Add(UiFormat("status", "alarm", snapshot.HumanVillage.Hostility));
+            if (snapshot.HumanVillage.GoblinAttackOrdered)
+            {
+                statusParts.Add(Ui("status", "village-raid"));
+            }
         }
         if (snapshot.RaidPhase == GoblinRaidPhase.Preparing)
         {
-            _status.Text += $"  •  najazd: przygotowanie w {snapshot.RaidRallyPoint}";
+            statusParts.Add(UiFormat("status", "raid-preparing", snapshot.RaidRallyPoint));
         }
         else if (snapshot.RaidPhase == GoblinRaidPhase.Ready)
         {
-            _status.Text += "  •  najazd: GOTOWY";
+            statusParts.Add(Ui("status", "raid-ready"));
         }
         else if (snapshot.RaidPhase == GoblinRaidPhase.Suspended)
         {
-            _status.Text += "  •  najazd: przygotowania wstrzymane";
+            statusParts.Add(Ui("status", "raid-suspended"));
         }
         else if (snapshot.RaidPhase == GoblinRaidPhase.Marching)
         {
-            _status.Text += "  •  najazd: wymarsz";
+            statusParts.Add(Ui("status", "raid-marching"));
         }
         else if (snapshot.RaidPhase == GoblinRaidPhase.Looting)
         {
-            _status.Text += "  •  najazd: plądrowanie";
+            statusParts.Add(Ui("status", "raid-looting"));
         }
         else if (snapshot.RaidPhase == GoblinRaidPhase.Returning)
         {
-            _status.Text += "  •  najazd: powrót do obozu";
+            statusParts.Add(Ui("status", "raid-returning"));
         }
         else if (villageVisibility == CellVisibility.Explored)
         {
-            _status.Text += "  •  wieś odkryta";
+            statusParts.Add(Ui("status", "village-explored"));
         }
+        _status.Text = string.Join("  •  ", statusParts);
     }
 
     private void UpdateCalendar(SimulationSnapshot snapshot)
     {
         var calendar = SimulationCalendar.At(snapshot.Tick, _engine.Definitions.Clock);
-        var seasonName = calendar.Season switch
-        {
-            SeasonKind.Spring => "Wiosna",
-            SeasonKind.Summer => "Lato",
-            SeasonKind.Autumn => "Jesień",
-            SeasonKind.Winter => "Zima",
-            _ => throw new ArgumentOutOfRangeException(),
-        };
-        _clock.Text =
-            $"{calendar.Hour:00}:{calendar.Minute:00}:{calendar.Second:00} • dzień {calendar.DayOfSeason}";
+        var seasonName = Ui("seasons", calendar.Season.ToString());
+        _clock.Text = UiFormat("calendar", "clock",
+            calendar.Hour, calendar.Minute, calendar.Second, calendar.DayOfSeason);
         _clock.TooltipText = calendar.IsNight
-            ? "Noc • gobliny widzą słabiej, ludzie korzystają z latarni"
-            : "Dzień";
+            ? Ui("calendar", "night-tooltip")
+            : Ui("calendar", "day-tooltip");
         _seasonName.Text = seasonName;
         var season = _engine.Definitions.Clock.Climate.GetSeason(calendar.Season);
         _seasonProgress.SetCalendar(_engine.Definitions.Clock.Climate, calendar);
-        _seasonProgress.TooltipText =
-            $"{seasonName} • dzień {calendar.DayOfSeason}/{season.Days} • strefa {_engine.Definitions.Clock.Climate.Id}";
+        _seasonProgress.TooltipText = UiFormat("calendar", "season-tooltip",
+            seasonName, calendar.DayOfSeason, season.Days,
+            _engine.Definitions.Clock.Climate.Id);
     }
 }

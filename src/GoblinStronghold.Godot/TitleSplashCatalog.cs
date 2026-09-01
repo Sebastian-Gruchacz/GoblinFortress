@@ -1,22 +1,31 @@
 using System.Reflection;
+using GoblinStronghold.Simulation.Localization;
 
 namespace GoblinStronghold.GodotClient;
 
 internal static class TitleSplashCatalog
 {
-    private const string ResourceName =
-        "GoblinStronghold.GodotClient.Content.title-splashes.pl.txt";
-
-    private static readonly string[] Entries = LoadEntries();
-
-    public static string Pick(string fallback) => Entries.Length == 0
-        ? fallback
-        : Entries[Random.Shared.Next(Entries.Length)];
-
-    private static string[] LoadEntries()
+    private static readonly Dictionary<string, string[]> EntriesByLocale = new()
     {
+        ["en"] = LoadEntries("en"),
+        ["pl"] = LoadEntries("pl"),
+    };
+
+    public static string Pick(string locale, string fallback)
+    {
+        var normalized = TranslationCatalog.NormalizeLocale(locale);
+        var entries = EntriesByLocale.GetValueOrDefault(normalized) ?? [];
+        return entries.Length == 0
+        ? fallback
+        : entries[Random.Shared.Next(entries.Length)];
+    }
+
+    private static string[] LoadEntries(string locale)
+    {
+        var resourceName =
+            $"GoblinStronghold.GodotClient.Content.title-splashes.{locale}.txt";
         using var stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream(ResourceName);
+            .GetManifestResourceStream(resourceName);
         if (stream is null)
         {
             return [];

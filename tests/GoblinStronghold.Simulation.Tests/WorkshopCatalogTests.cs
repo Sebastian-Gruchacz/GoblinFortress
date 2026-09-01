@@ -48,6 +48,8 @@ public sealed class WorkshopCatalogTests
     public void PolishAndEnglishTranslationsAreSeparateFromGameplayDefinitions()
     {
         Assert.Equal(["en", "pl"], TranslationCatalog.SupportedLocales);
+        Assert.Equal("pl", TranslationCatalog.NormalizeLocale("pl-PL"));
+        Assert.Equal("en", TranslationCatalog.NormalizeLocale("de-DE"));
         Assert.Equal(
             "oak wood",
             TranslationCatalog.Get("en-US", "materials", "names", "oak-wood"));
@@ -63,5 +65,11 @@ public sealed class WorkshopCatalogTests
         Assert.Equal(
             "drewniana beczka",
             TranslationCatalog.Get("pl", "recipes", "names", "WoodenBarrel"));
+        Assert.Equal(
+            "Keyboard shortcuts",
+            TranslationCatalog.Get("en", "interface", "options", "shortcuts"));
+        Assert.Equal(
+            "Skróty klawiaturowe",
+            TranslationCatalog.Get("pl", "interface", "options", "shortcuts"));
     }
 }

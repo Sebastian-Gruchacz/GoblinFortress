@@ -11,5 +11,8 @@
     <EmbeddedResource Include="Content\title-splashes.pl.txt"
                       LogicalName="GoblinStronghold.GodotClient.Content.title-splashes.pl.txt"
                       WithCulture="false" />
+    <EmbeddedResource Include="Content\title-splashes.en.txt"
+                      LogicalName="GoblinStronghold.GodotClient.Content.title-splashes.en.txt"
+                      WithCulture="false" />
   </ItemGroup>
 </Project>

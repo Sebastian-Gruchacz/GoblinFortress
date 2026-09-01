@@ -1,0 +1,70 @@
+# One splash per line. Blank lines and lines beginning with # are ignored.
+# A splash is selected once when the game opens.
+
+# Goblin truths
+The tribe remembers what it can eat.
+Every problem looks better from the safe side of a palisade.
+Nothing is lost. Some things simply have not been found by a goblin yet.
+Today's bud is tomorrow's shift supervisor.
+First the swamp. Then the world.
+Civilization began with a sharp stone and a very bad idea.
+This is not clutter. It is the tribe's material culture.
+Every great stronghold began as a leaky hut.
+If the plan worked, a goblin claims it was theirs.
+If the plan failed, a goblin claims it was human.
+
+# Playful
+Now with more mushrooms!
+Probably edible!
+No goblins were harmed while loading this message.
+The instruction manual was eaten.
+Click responsibly. The goblins are watching.
+Contains trace amounts of common sense.
+One hundred percent organic chaos.
+Premium swamp. Mud without microtransactions.
+Built from wood, stone, and consequences.
+It is not a bug if the tribe turns it into a tradition.
+Goblin Stronghold: because dwarves already had their turn.
+Real-time strategy. Relative-time goblins.
+Manage wisely. Or at least spectacularly.
+The warehouse is full. The floor is a larger warehouse.
+Losing also generates stories.
+
+# Ominous
+The swamp knows your footsteps.
+The humans sleep. The tribe grows.
+Not every light in the forest wants to be found.
+A wall stops the enemy. Hunger needs no gate.
+What waits below can hear the pickaxes.
+Every torch creates new shadows.
+Before winter comes, count the supplies. Then count the goblins.
+Deep water does not return the careless.
+The forest noticed that there are fewer trees.
+Your tribe is not the only hungry thing on the map.
+
+# Mysterious
+Someone left a door beneath the roots.
+The oldest goblin remembers a place that is not on the map.
+In the third tunnel, the echo answers too soon.
+The mushrooms glow only when nobody is looking.
+One night, every bud dreamed the same dream.
+The stone beneath the stronghold is warmer than it should be.
+Someone counted the goblins. The result was one too many.
+The last page of the chronicle was written tomorrow.
+At night, the river flows the other way.
+In the silence, unfamiliar pickaxes can be heard.
+
+# About the game and the genre
+Colony simulator, disaster generator.
+Stories happen between an order and its execution.
+You do not control goblins. You negotiate with reality.
+Every resource has weight. Every decision has a funeral.
+Systems are calm until they meet.
+One map, a thousand bad ideas.
+Build a stronghold. Watch the consequences.
+The simulation has no mercy, but it keeps excellent notes.
+There is no single correct stronghold. Only those still standing.
+Your story is written in mud.
+Pause: the tribe's most powerful technology.
+Difficulty level: goblin.
+Small creatures. Big systems. Very fragile plans.

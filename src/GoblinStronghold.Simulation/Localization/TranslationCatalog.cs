@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using GoblinStronghold.Simulation.ContentPacks;
 
 namespace GoblinStronghold.Simulation.Localization;
 
@@ -45,8 +46,9 @@ public static class TranslationCatalog
         return State.Value.Entries.TryGetValue(path, out value!);
     }
 
-    private static string NormalizeLocale(string locale)
+    public static string NormalizeLocale(string locale)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(locale);
         var separator = locale.IndexOfAny(['-', '_']);
         var normalized = (separator < 0 ? locale : locale[..separator]).ToLowerInvariant();
         return SupportedLocaleCodes.Contains(normalized, StringComparer.OrdinalIgnoreCase)
@@ -57,28 +59,24 @@ public static class TranslationCatalog
     private static CatalogState Load()
     {
         var entries = new Dictionary<TranslationPath, string>();
-        var assembly = typeof(TranslationCatalog).Assembly;
         foreach (var locale in SupportedLocaleCodes)
         {
             foreach (var section in SectionNames)
             {
-                var resourceName =
-                    $"GoblinStronghold.Simulation.Localization.{locale}.{section}.json";
-                using var stream = assembly.GetManifestResourceStream(resourceName)
-                    ?? throw new InvalidOperationException(
-                        $"Embedded translation catalog '{resourceName}' is missing.");
+                var contentPath = $"localization/{locale}/{section}.json";
+                using var stream = CoreContentPack.Pack.OpenRead(contentPath);
                 var document = JsonSerializer.Deserialize<TranslationDocument>(
                     stream,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                     ?? throw new InvalidOperationException(
-                        $"Translation catalog '{resourceName}' is empty.");
+                        $"Translation catalog '{contentPath}' is empty.");
                 if (document.SchemaVersion != 1 ||
                     !string.Equals(document.Locale, locale, StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(document.Section, section, StringComparison.OrdinalIgnoreCase) ||
                     document.Subsections.Count == 0)
                 {
                     throw new InvalidOperationException(
-                        $"Translation catalog '{resourceName}' has an invalid header.");
+                        $"Translation catalog '{contentPath}' has an invalid header.");
                 }
 
                 foreach (var (subsection, subsectionEntries) in document.Subsections)
@@ -86,7 +84,7 @@ public static class TranslationCatalog
                     if (string.IsNullOrWhiteSpace(subsection) || subsectionEntries.Count == 0)
                     {
                         throw new InvalidOperationException(
-                            $"Translation catalog '{resourceName}' has an empty subsection.");
+                            $"Translation catalog '{contentPath}' has an empty subsection.");
                     }
                     foreach (var (key, value) in subsectionEntries)
                     {
@@ -95,7 +93,7 @@ public static class TranslationCatalog
                             !entries.TryAdd(path, value))
                         {
                             throw new InvalidOperationException(
-                                $"Translation catalog '{resourceName}' has an invalid entry.");
+                                $"Translation catalog '{contentPath}' has an invalid entry.");
                         }
                     }
                 }

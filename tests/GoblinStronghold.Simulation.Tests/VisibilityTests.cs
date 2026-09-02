@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using GoblinStronghold.Simulation.Civilizations;
 using GoblinStronghold.Simulation.Map;
 using Xunit;
 
@@ -127,6 +128,86 @@ public sealed class VisibilityTests
 
         Assert.Equal(CellVisibility.Visible, engine.Visibility.Get(hilltop));
         Assert.Equal(CellVisibility.Unknown, engine.Visibility.Get(buried));
+    }
+
+    [Fact]
+    public void UndergroundAndSurfaceNightUseLimitedDarkVision()
+    {
+        var perception = CivilizationCatalog.Core
+            .Get(CivilizationLegacyRole.PlayerGoblins)
+            .Perception!;
+
+        Assert.Equal(
+            perception.DayVisionRadius,
+            WorldVisibilityPolicy.ResolveGoblinVisionRadius(
+                perception,
+                new GridPosition(4, 4, 0),
+                isSurfaceNight: false));
+        Assert.Equal(
+            perception.NightVisionRadius,
+            WorldVisibilityPolicy.ResolveGoblinVisionRadius(
+                perception,
+                new GridPosition(4, 4, 0),
+                isSurfaceNight: true));
+        Assert.Equal(
+            perception.NightVisionRadius,
+            WorldVisibilityPolicy.ResolveGoblinVisionRadius(
+                perception,
+                new GridPosition(4, 4, -1),
+                isSurfaceNight: false));
+    }
+
+    [Fact]
+    public void VisiblePassageEndDiscoversButDoesNotLightTheAdjacentLayer()
+    {
+        var engine = CreateEngine();
+        var passage = engine.Map.VerticalPassages.First(item =>
+            item.Kind == VerticalPassageKind.CaveMouth);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["actors"]![0]!["x"] = passage.Upper.X;
+        save["actors"]![0]!["y"] = passage.Upper.Y;
+        save["actors"]![0]!["z"] = passage.Upper.Z;
+        var visibility = save["visibility"]!.AsArray();
+        for (var index = 0; index < visibility.Count; index++)
+        {
+            visibility[index] = (int)CellVisibility.Unknown;
+        }
+        engine = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        engine.AdvanceTicks(1);
+
+        Assert.Equal(CellVisibility.Visible, engine.Visibility.Get(passage.Upper));
+        Assert.Equal(CellVisibility.Explored, engine.Visibility.Get(passage.Lower));
+        Assert.Contains(
+            engine.World.GetCardinalWorldNeighbors(passage.Lower),
+            neighbor => neighbor.Z == passage.Lower.Z &&
+                engine.Visibility.Get(neighbor) == CellVisibility.Explored);
+    }
+
+    [Fact]
+    public void AdjacentLayerDiscoveryRequiresARealPassageWithAVisibleEnd()
+    {
+        var passage = new VerticalPassage(
+            new GridPosition(3, 3, 0),
+            new GridPosition(3, 3, -1),
+            VerticalPassageKind.CaveMouth);
+
+        var hidden = WorldVisibilityPolicy.SelectAdjacentLayerDiscoveries(
+            [passage],
+            _ => CellVisibility.Explored);
+        var visible = WorldVisibilityPolicy.SelectAdjacentLayerDiscoveries(
+            [passage],
+            position => position == passage.Upper
+                ? CellVisibility.Visible
+                : CellVisibility.Unknown);
+
+        Assert.Empty(hidden);
+        Assert.Equal([(passage.Lower, 1)], visible);
+        Assert.Empty(WorldVisibilityPolicy.SelectAdjacentLayerDiscoveries(
+            [],
+            _ => CellVisibility.Visible));
     }
 
     [Fact]

@@ -87,6 +87,7 @@ public partial class WorldView : Node2D
         _cachedCaveSolids = [];
     private readonly Dictionary<int, StructureRenderCache> _structureRenderCaches = [];
     private readonly ActiveLevelLightIndex _activeLevelLights = new();
+    private readonly ActiveLevelLightMap _activeLevelLightMap = new();
     private readonly LowerLevelPresentationState _lowerLevelPresentation = new();
     private readonly MaterialPaletteTextureCache _materialPaletteTextures = new();
     private readonly AnimalPaletteTextureCache _animalPaletteTextures = new();
@@ -103,6 +104,25 @@ public partial class WorldView : Node2D
     public Vector2 WorldSize => _engine is null
         ? Vector2.Zero
         : new Vector2(_engine.Map.Width * TileSize, _engine.Map.Height * TileSize);
+
+    public WorldPresentationPerformanceMetrics GetPresentationPerformanceMetrics()
+    {
+        var emitterQueries = _activeLevelLights.GetQueryMetrics();
+        var activeLight = _activeLevelLightMap.GetMetrics();
+        var lower = _lowerLevelPresentation.GetPerformanceMetrics();
+        return new WorldPresentationPerformanceMetrics(
+            emitterQueries.Timings,
+            emitterQueries.Results,
+            activeLight.Timings,
+            activeLight.Cells,
+            activeLight.EmitterEvaluations,
+            lower.Timings,
+            lower.Chunks,
+            lower.GeometryTextures,
+            lower.StaticLightTextures,
+            lower.VisibleDirtyChunks,
+            lower.Workload);
+    }
 
     public override void _Ready()
     {
@@ -150,6 +170,7 @@ public partial class WorldView : Node2D
     {
         _materialPaletteTextures.Dispose();
         _animalPaletteTextures.Dispose();
+        _activeLevelLightMap.Dispose();
         _lowerLevelPresentation.Dispose();
     }
 
@@ -164,6 +185,7 @@ public partial class WorldView : Node2D
         _cachedCaveSolids.Clear();
         _structureRenderCaches.Clear();
         _activeLevelLights.Reset();
+        _activeLevelLightMap.Reset();
         _lowerLevelPresentation.Reset();
         _engine = engine;
         Refresh(engine.CreatePresentationSnapshot());
@@ -443,6 +465,7 @@ public partial class WorldView : Node2D
     private void DrawTerrain()
     {
         DrawLowerLevelTextures();
+        DrawLowerLevelActors();
         if (_visibleLevel < 0)
         {
             DrawCaveTerrain();
@@ -519,15 +542,6 @@ public partial class WorldView : Node2D
             var brightness = Math.Max(0.32f, 0.68f - ((depth - 1) * 0.1f));
             var chunkWorldSize = LowerLevelExposureIndex.DefaultChunkSize * TileSize;
             DrawTextureRect(
-                chunk.Geometry,
-                new Rect2(
-                    chunk.Key.X * chunkWorldSize,
-                    chunk.Key.Y * chunkWorldSize,
-                    chunkWorldSize,
-                    chunkWorldSize),
-                tile: false,
-                modulate: new Color(brightness, brightness, brightness, 1f));
-            DrawTextureRect(
                 chunk.Lighting,
                 new Rect2(
                     chunk.Key.X * chunkWorldSize,
@@ -535,7 +549,47 @@ public partial class WorldView : Node2D
                     chunkWorldSize,
                     chunkWorldSize),
                 tile: false,
-                modulate: new Color(1f, 1f, 1f, brightness));
+                modulate: new Color(brightness, brightness, brightness, 1f));
+        }
+    }
+
+    private void DrawLowerLevelActors()
+    {
+        foreach (var group in _lowerLevelPresentation.VisibleActors
+                     .GroupBy(actor => actor.Position))
+        {
+            DrawLowerLevelActorGroup(group.ToArray(), CellCenter(group.Key), compact: false);
+        }
+    }
+
+    private void DrawLowerLevelActorGroup(
+        IReadOnlyList<LowerLevelActorMarker> actors,
+        Vector2 center,
+        bool compact)
+    {
+        var ordered = actors.OrderBy(actor => actor.Id).ToArray();
+        var spacing = compact ? 2.2f : 3.1f;
+        var radius = compact ? 1.55f : 2.15f;
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var angle = ordered.Length == 1 ? 0f : Mathf.Tau * index / ordered.Length;
+            var offset = ordered.Length == 1
+                ? Vector2.Zero
+                : new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * spacing;
+            var markerCenter = center + offset;
+            var healthColor = new Color("71332d").Lerp(
+                new Color("75a747"),
+                ordered[index].HealthRatio);
+            DrawCircle(markerCenter, radius + 0.75f, new Color(0.025f, 0.035f, 0.028f, 0.8f));
+            DrawCircle(markerCenter, radius, healthColor);
+            if (ordered[index].IsElderly && !compact)
+            {
+                DrawLine(
+                    markerCenter + new Vector2(-1f, 1.2f),
+                    markerCenter + new Vector2(1f, 1.2f),
+                    new Color("c5c7c0"),
+                    0.8f);
+            }
         }
     }
 
@@ -881,15 +935,14 @@ public partial class WorldView : Node2D
         var destination = CellRect(upperPosition.X, upperPosition.Y).Grow(-3f);
         DrawRect(destination.Grow(1.5f), new Color("080a0b"));
         DrawTextureRectRegion(
-            opening.Geometry,
-            destination,
-            opening.SourceRegion,
-            new Color(brightness, brightness, brightness, 1f));
-        DrawTextureRectRegion(
             opening.Lighting,
             destination,
             opening.SourceRegion,
-            new Color(1f, 1f, 1f, brightness));
+            new Color(brightness, brightness, brightness, 1f));
+        DrawLowerLevelActorGroup(
+            _lowerLevelPresentation.GetOpeningActors(upperPosition),
+            destination.GetCenter(),
+            compact: true);
     }
 
     private void DrawMineralDeposit(GridPosition position, MineralDepositKind deposit)
@@ -2997,44 +3050,29 @@ public partial class WorldView : Node2D
             bounds.MinimumY * TileSize,
             (bounds.MaximumX - bounds.MinimumX) * TileSize,
             (bounds.MaximumY - bounds.MinimumY) * TileSize);
-        DrawRect(
-            visibleRect,
-            _visibleLevel < 0
-                ? new Color(0.008f, 0.012f, 0.016f, darkness)
-                : new Color(0.025f, 0.055f, 0.12f, darkness));
-
-        foreach (var emitter in QueryVisibleLightEmitters(bounds).Where(emitter =>
-                     _snapshot.GetVisibility(emitter.Position, _engine.Map.Width) !=
-                         CellVisibility.Unknown))
-        {
-            var definition = LightEmitterCatalog.Get(emitter.Handle.DefinitionId);
-            var phase = (_lightingAnimationElapsed / LightingAnimationCycleSeconds) * Mathf.Tau * 7d +
-                (emitter.Handle.InstanceId % 997UL) * 0.173d;
-            var flicker = 1f - definition.FlickerAmount +
-                definition.FlickerAmount * (0.5f + 0.5f * Mathf.Sin((float)phase));
-            var strength = emitter.Intensity * flicker;
-            var color = new Color(
-                definition.Color.Red,
-                definition.Color.Green,
-                definition.Color.Blue);
-            var center = CellCenter(emitter.Position);
-            for (var ring = 4; ring >= 1; ring--)
-            {
-                var radiusFraction = ring / 4f;
-                var alpha = darkness * strength * (0.075f + (4 - ring) * 0.035f);
-                DrawCircle(
-                    center,
-                    emitter.RadiusCells * TileSize * radiusFraction,
-                    color with { A = alpha });
-            }
-        }
+        var emitters = QueryVisibleLightEmitters(bounds)
+            .Where(emitter => _snapshot.GetVisibility(emitter.Position, _engine.Map.Width) !=
+                CellVisibility.Unknown)
+            .ToArray();
+        var texture = _activeLevelLightMap.Render(
+            _engine,
+            _snapshot,
+            _visibleLevel,
+            bounds.MinimumX,
+            bounds.MinimumY,
+            bounds.MaximumX,
+            bounds.MaximumY,
+            emitters,
+            darkness,
+            _lightingAnimationElapsed);
+        DrawTextureRect(texture, visibleRect, tile: false);
     }
 
     private float GetAmbientDarkness()
     {
         if (_visibleLevel < 0)
         {
-            return 0.62f;
+            return 0.74f;
         }
 
         var calendar = SimulationCalendar.At(_snapshot.Tick, _engine.Definitions.Clock);
@@ -3047,17 +3085,19 @@ public partial class WorldView : Node2D
         var twilightTicks = Math.Max(1, Math.Min(600, calendar.NightTicks / 3));
         var fadeIn = Math.Clamp((double)nightTick / twilightTicks, 0d, 1d);
         var fadeOut = Math.Clamp((double)(calendar.NightTicks - nightTick) / twilightTicks, 0d, 1d);
-        return (float)(0.34d * Math.Min(fadeIn, fadeOut));
+        return (float)(0.48d * Math.Min(fadeIn, fadeOut));
     }
 
     private IReadOnlyList<LightEmitterSnapshot> QueryVisibleLightEmitters(
         (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds) =>
         _activeLevelLights.Query(
-            _visibleLevel,
-            bounds.MinimumX,
-            bounds.MinimumY,
-            bounds.MaximumX,
-            bounds.MaximumY);
+                _visibleLevel,
+                bounds.MinimumX,
+                bounds.MinimumY,
+                bounds.MaximumX,
+                bounds.MaximumY)
+            .Concat(_lowerLevelPresentation.ProjectedLightEmitters)
+            .ToArray();
 
     private bool HasVisibleFlickeringLight()
     {

@@ -18,7 +18,7 @@
         "meleeDamageVariance": 160
       },
       "perception": {
-        "dayVisionRadius": 4,
+        "dayVisionRadius": 5,
         "nightVisionRadius": 3,
         "structureVisionRadius": 3
       },

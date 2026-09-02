@@ -1,6 +1,7 @@
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Lighting;
 using GoblinStronghold.Simulation.Map;
+using System.Diagnostics;
 
 namespace GoblinStronghold.GodotClient.UI.WorldRendering;
 
@@ -8,6 +9,8 @@ internal sealed class ActiveLevelLightIndex
 {
     private readonly LightEmitterIndex _emitters = new();
     private readonly HashSet<LightEmitterHandle> _activeWorkshopHandles = [];
+    private readonly TimedPresentationOperationCounter _queries = new();
+    private long _queryResults;
     private ulong _topologyVersion = ulong.MaxValue;
     private int _level = int.MinValue;
 
@@ -17,6 +20,8 @@ internal sealed class ActiveLevelLightIndex
         _activeWorkshopHandles.Clear();
         _topologyVersion = ulong.MaxValue;
         _level = int.MinValue;
+        _queries.Reset();
+        _queryResults = 0;
     }
 
     public void Synchronize(
@@ -35,13 +40,22 @@ internal sealed class ActiveLevelLightIndex
         SynchronizeActiveWorkshops(snapshot, level);
     }
 
+    public (TimedPresentationOperationMetrics Timings, long Results) GetQueryMetrics() =>
+        (_queries.Snapshot, _queryResults);
+
     public IReadOnlyList<LightEmitterSnapshot> Query(
         int level,
         int minimumX,
         int minimumY,
         int maximumX,
-        int maximumY) =>
-        _emitters.Query(level, minimumX, minimumY, maximumX, maximumY);
+        int maximumY)
+    {
+        var startedAt = Stopwatch.GetTimestamp();
+        var result = _emitters.Query(level, minimumX, minimumY, maximumX, maximumY);
+        _queries.Record(startedAt);
+        _queryResults = checked(_queryResults + result.Count);
+        return result;
+    }
 
     private void RebuildStaticEmitters(
         SimulationEngine engine,
@@ -54,7 +68,7 @@ internal sealed class ActiveLevelLightIndex
                      worldObject.Anchor.Z == level))
         {
             if (!LightEmitterCatalog.TryGet(worldObject.Kind, out var definition) ||
-                definition.Activation != LightEmitterActivation.Always)
+                !LightEmitterActivationPolicy.IsStaticallyActive(definition))
             {
                 continue;
             }
@@ -62,7 +76,10 @@ internal sealed class ActiveLevelLightIndex
             _emitters.Upsert(CreateEmitter(
                 definition,
                 worldObject.Id.Value,
-                worldObject.Anchor));
+                worldObject.Anchor,
+                worldObject.Kind == WorldObjectKind.WallTorch
+                    ? worldObject.Orientation
+                    : null));
         }
 
         if (level >= 0)
@@ -103,7 +120,12 @@ internal sealed class ActiveLevelLightIndex
                      activeWorkshops.Contains(worldObject.Anchor)))
         {
             if (!LightEmitterCatalog.TryGet(worldObject.Kind, out var definition) ||
-                definition.Activation != LightEmitterActivation.WhileWorking)
+                definition.Attachment != LightEmitterAttachment.World ||
+                !LightEmitterActivationPolicy.IsActive(
+                    definition,
+                    new LightEmitterActivationContext(
+                        IsWorking: true,
+                        HasWorkOrderFuel: true)))
             {
                 continue;
             }
@@ -128,9 +150,11 @@ internal sealed class ActiveLevelLightIndex
     private static LightEmitterSnapshot CreateEmitter(
         LightEmitterDefinition definition,
         ulong instanceId,
-        GridPosition position) => new(
+        GridPosition position,
+        CardinalOrientation? facing = null) => new(
         new LightEmitterHandle(definition.Id, instanceId),
         position,
         definition.RadiusCells,
-        definition.Intensity);
+        definition.Intensity,
+        facing);
 }

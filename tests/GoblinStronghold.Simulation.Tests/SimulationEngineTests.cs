@@ -33,6 +33,30 @@ public sealed class SimulationEngineTests
     }
 
     [Fact]
+    public void PresentationSnapshotBuildsAreMeasuredSeparatelyFromSimulationTicks()
+    {
+        var seed = new WorldSeed(0x505245534D4554UL);
+        var map = SwampMapGenerator.Generate(seed, 48, 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 2,
+            initialFoodStock: 4);
+
+        engine.CreatePresentationSnapshot();
+        var first = engine.GetMetrics().PresentationSnapshots;
+        engine.CreatePresentationSnapshot();
+        var second = engine.GetMetrics().PresentationSnapshots;
+
+        Assert.Equal(1, first.Builds);
+        Assert.Equal(2, second.Builds);
+        Assert.True(first.LastBuildDuration >= TimeSpan.Zero);
+        Assert.True(second.TotalBuildDuration >= first.TotalBuildDuration);
+        Assert.Equal(0, engine.GetMetrics().TicksExecuted);
+    }
+
+    [Fact]
     public void LoadClearsAStaleTransientJobInsteadOfRejectingTheSave()
     {
         var seed = new WorldSeed(0x5354414C454A4FUL);

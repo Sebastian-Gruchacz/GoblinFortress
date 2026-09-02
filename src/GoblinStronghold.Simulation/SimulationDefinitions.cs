@@ -195,7 +195,7 @@ public sealed class SimulationDefinitions
         fatiguePerTick: 1,
         restThreshold: 10_000,
         restRecoveryPerTick: 3,
-        visionRadius: 4,
+        visionRadius: 5,
         maximumExplorers: 1,
         plantGrowthIntervalTicks: 240,
         plantGrowthPerInterval: 1,

@@ -11,10 +11,13 @@ internal sealed class LowerLevelPresentationState : IDisposable
     private readonly LowerLevelPresentationCacheState _cache = new();
     private readonly LowerLevelChunkTextureCache _textures = new();
     private readonly LowerLevelPresentationChangeTracker _changeTracker = new();
+    private readonly LowerLevelActorOverlayState _actors = new();
+    private readonly VerticalLightPropagationIndex _verticalLights = new();
     private SynchronizationKey? _synchronizationKey;
     private ObservationKey? _observationKey;
     private SimulationSnapshot? _observationSnapshot;
     private LowerLevelExposureIndex? _exposure;
+    private PresentationSliceWorkload _workload;
     private IReadOnlyDictionary<GridPosition, GridPosition> _openingDestinations =
         new Dictionary<GridPosition, GridPosition>();
 
@@ -28,6 +31,29 @@ internal sealed class LowerLevelPresentationState : IDisposable
         ? []
         : _textures.GetVisibleTextures(_exposure);
 
+    public IReadOnlyList<LowerLevelActorMarker> VisibleActors => _actors.Markers;
+
+    public IReadOnlyList<LightEmitterSnapshot> ProjectedLightEmitters =>
+        _verticalLights.Projected;
+
+    public (
+        TimedPresentationOperationMetrics Timings,
+        long Chunks,
+        long GeometryTextures,
+        long StaticLightTextures,
+        int VisibleDirtyChunks,
+        PresentationSliceWorkload Workload) GetPerformanceMetrics()
+    {
+        var textures = _textures.GetMetrics();
+        return (
+            textures.Timings,
+            textures.Chunks,
+            textures.GeometryTextures,
+            textures.StaticLightTextures,
+            _cache.GetVisibleRebuildCandidates().Count,
+            _workload);
+    }
+
     public void Initialize(Texture2D terrainAtlas, Texture2D caveAtlas) =>
         _textures.Initialize(terrainAtlas, caveAtlas);
 
@@ -36,10 +62,13 @@ internal sealed class LowerLevelPresentationState : IDisposable
         _cache.Clear();
         _textures.ResetWorld();
         _changeTracker.Reset();
+        _actors.Reset();
+        _verticalLights.Reset();
         _synchronizationKey = null;
         _observationKey = null;
         _observationSnapshot = null;
         _exposure = null;
+        _workload = default;
         _openingDestinations = new Dictionary<GridPosition, GridPosition>();
     }
 
@@ -56,48 +85,38 @@ internal sealed class LowerLevelPresentationState : IDisposable
             visibleBounds);
         if (_synchronizationKey == key)
         {
-            return _exposure is not null &&
-                _textures.RebuildVisibleDirty(engine, snapshot, _exposure, _cache) > 0;
-        }
-
-        var directlyExposed = new List<GridPosition>();
-        if (activeLevel >= 0)
-        {
-            for (var y = visibleBounds.MinimumY; y < visibleBounds.MaximumY; y++)
+            if (_exposure is null)
             {
-                for (var x = visibleBounds.MinimumX; x < visibleBounds.MaximumX; x++)
-                {
-                    var surface = engine.Map.GetColumnCell(new GridPosition(x, y)).SurfaceLevel;
-                    if (surface < activeLevel)
-                    {
-                        directlyExposed.Add(new GridPosition(x, y, surface));
-                    }
-                }
+                return false;
             }
+
+            var actorsChanged = _actors.Synchronize(
+                snapshot,
+                _exposure,
+                visibleBounds,
+                force: false);
+            var chunksRebuilt =
+                _textures.RebuildVisibleDirty(engine, snapshot, _exposure, _cache) > 0;
+            return actorsChanged || chunksRebuilt;
         }
 
-        var passages = engine.World.CreateVerticalPassageSnapshot()
-            .Where(passage =>
-                passage.Upper.Z <= activeLevel &&
-                visibleBounds.Contains(passage.Upper) &&
-                visibleBounds.Contains(passage.Lower))
-            .ToArray();
-        _openingDestinations = passages
-            .Where(passage => passage.Upper.Z == activeLevel)
-            .GroupBy(passage => passage.Upper)
-            .ToDictionary(
-                group => group.Key,
-                group => group
-                    .OrderBy(passage => passage.Lower.Z)
-                    .ThenBy(passage => passage.Lower.Y)
-                    .ThenBy(passage => passage.Lower.X)
-                    .First().Lower);
-        _exposure = LowerLevelExposureIndex.Build(
-            activeLevel,
-            directlyExposed,
-            passages);
+        var plan = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(activeLevel, visibleBounds),
+            (x, y) => engine.Map.GetColumnCell(new GridPosition(x, y)).SurfaceLevel,
+            engine.World.CreateVerticalPassageSnapshot());
+        _openingDestinations = plan.OpeningDestinations;
+        _exposure = plan.Exposure;
+        _workload = plan.Workload;
         _cache.SynchronizeExposure(_exposure);
         _textures.RebuildVisibleDirty(engine, snapshot, _exposure, _cache);
+        _actors.Synchronize(snapshot, _exposure, visibleBounds, force: true);
+        _verticalLights.Synchronize(
+            engine,
+            snapshot,
+            activeLevel,
+            visibleBounds,
+            _exposure,
+            plan.LightPassages);
         _synchronizationKey = key;
         return true;
     }
@@ -121,6 +140,19 @@ internal sealed class LowerLevelPresentationState : IDisposable
 
         texture = null!;
         return false;
+    }
+
+    public IReadOnlyList<LowerLevelActorMarker> GetOpeningActors(
+        GridPosition upperPosition)
+    {
+        if (!_openingDestinations.TryGetValue(upperPosition, out var lowerPosition))
+        {
+            return [];
+        }
+
+        return _actors.Markers
+            .Where(actor => actor.Position == lowerPosition)
+            .ToArray();
     }
 
     public void Dispose() => _textures.Dispose();
@@ -166,7 +198,7 @@ internal sealed class LowerLevelPresentationState : IDisposable
             {
                 var radius = LightEmitterCatalog.All
                     .Where(definition =>
-                        definition.Activation == LightEmitterActivation.Always)
+                        LightEmitterActivationPolicy.IsStaticallyActive(definition))
                     .Select(definition => definition.RadiusCells)
                     .DefaultIfEmpty(0f)
                     .Max();

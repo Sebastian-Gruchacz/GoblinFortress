@@ -2,6 +2,7 @@ using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Presentation;
+using System.Diagnostics;
 
 namespace GoblinStronghold.GodotClient.UI.WorldRendering;
 
@@ -26,9 +27,23 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
     private readonly Dictionary<PresentationChunkKey, CachedChunk> _chunks = [];
     private readonly Dictionary<TerrainSprite, Image> _surfaceTiles = [];
     private readonly Dictionary<(RockKind Rock, bool IsOpen), Image> _caveTiles = [];
+    private readonly TimedPresentationOperationCounter _rebuildBatches = new();
     private Image? _terrainAtlas;
     private Image? _caveAtlas;
     private Image? _lavaTile;
+    private long _chunksRebuilt;
+    private long _geometryTexturesRebuilt;
+    private long _staticLightTexturesRebuilt;
+
+    public (
+        TimedPresentationOperationMetrics Timings,
+        long Chunks,
+        long GeometryTextures,
+        long StaticLightTextures) GetMetrics() => (
+        _rebuildBatches.Snapshot,
+        _chunksRebuilt,
+        _geometryTexturesRebuilt,
+        _staticLightTexturesRebuilt);
 
     public void Initialize(Texture2D terrainAtlas, Texture2D caveAtlas)
     {
@@ -48,6 +63,10 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             chunk.Dispose();
         }
         _chunks.Clear();
+        _rebuildBatches.Reset();
+        _chunksRebuilt = 0;
+        _geometryTexturesRebuilt = 0;
+        _staticLightTexturesRebuilt = 0;
     }
 
     public int RebuildVisibleDirty(
@@ -70,6 +89,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             return 0;
         }
 
+        var startedAt = Stopwatch.GetTimestamp();
         var cellsByChunk = exposure.VisibleChunkCells;
         foreach (var candidate in candidates)
         {
@@ -87,6 +107,11 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             _chunks.Add(candidate.Key, replacement);
             cacheState.MarkRebuilt(candidate.Key);
         }
+        _chunksRebuilt = checked(_chunksRebuilt + candidates.Length);
+        _geometryTexturesRebuilt = checked(_geometryTexturesRebuilt + candidates.Length);
+        _staticLightTexturesRebuilt = checked(
+            _staticLightTexturesRebuilt + candidates.Length);
+        _rebuildBatches.Record(startedAt);
         return candidates.Length;
     }
 
@@ -198,6 +223,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         var lighting = LowerLevelStaticLightPainter.Paint(
             engine,
             key,
+            geometry,
             mask,
             chunkSize,
             PixelsPerCell);

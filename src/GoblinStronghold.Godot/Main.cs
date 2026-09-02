@@ -2,6 +2,7 @@ using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Civilizations;
 using GoblinStronghold.Simulation.Construction;
+using GoblinStronghold.Simulation.Diagnostics;
 using GoblinStronghold.Simulation.Localization;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Map.Generation;
@@ -25,6 +26,7 @@ public partial class Main : Node
     private const double MaximumSimulationMillisecondsPerFrame = 8d;
     private const double PresentationRefreshIntervalSeconds = 1d / 5d;
     private const double FpsRefreshIntervalSeconds = 0.25d;
+    private const double PerformanceWarningCooldownSeconds = 1d;
     private const double MinimumAutosaveIntervalSeconds = 10d * 60d;
     private const string CameraPanLeftAction = "goblin_camera_left";
     private const string CameraPanRightAction = "goblin_camera_right";
@@ -133,6 +135,8 @@ public partial class Main : Node
     private double _accumulator;
     private double _presentationRefreshElapsed;
     private double _fpsRefreshElapsed;
+    private readonly RuntimeFramePerformanceProfiler _runtimePerformanceProfiler = new();
+    private long _lastPerformanceWarningAt;
     private ulong _commandSequence = 1;
     private EntityId _selectedActorId = EntityId.None;
     private readonly HashSet<EntityId> _selectedActorIds = [];
@@ -753,10 +757,24 @@ public partial class Main : Node
             return;
         }
 
+        var processStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        var simulationDuration = TimeSpan.Zero;
+        var snapshotDuration = TimeSpan.Zero;
+        var presentationRefreshDuration = TimeSpan.Zero;
+        var autosaveDuration = TimeSpan.Zero;
+        var ticksAdvanced = 0;
         UpdateFpsCounter(delta);
         MoveCamera(delta);
         if (_speed == 0)
         {
+            ObserveRuntimeFrame(
+                delta,
+                processStartedAt,
+                simulationDuration,
+                snapshotDuration,
+                presentationRefreshDuration,
+                autosaveDuration,
+                ticksAdvanced);
             return;
         }
 
@@ -767,7 +785,6 @@ public partial class Main : Node
             _accumulator + delta * _speed,
             maximumBacklogSeconds);
         var changed = false;
-        var ticksAdvanced = 0;
         var simulationStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         while (_accumulator >= SecondsPerTick &&
                ticksAdvanced < MaximumSimulationTicksPerFrame)
@@ -782,11 +799,15 @@ public partial class Main : Node
                 break;
             }
         }
+        simulationDuration = System.Diagnostics.Stopwatch.GetElapsedTime(simulationStartedAt);
 
         if (changed && _presentationRefreshElapsed >= PresentationRefreshIntervalSeconds)
         {
             var events = _engine.DrainEvents();
+            var snapshotStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             var snapshot = _engine.CreatePresentationSnapshot();
+            snapshotDuration = System.Diagnostics.Stopwatch.GetElapsedTime(snapshotStartedAt);
+            var refreshStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             _latestSnapshot = snapshot;
             HandleEvents(events, snapshot);
             if (_use3DView)
@@ -800,11 +821,83 @@ public partial class Main : Node
             _minimap.Refresh(snapshot);
             UpdateStatus(snapshot);
             _presentationRefreshElapsed %= PresentationRefreshIntervalSeconds;
+            presentationRefreshDuration =
+                System.Diagnostics.Stopwatch.GetElapsedTime(refreshStartedAt);
         }
         if (changed)
         {
+            var autosaveStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             TryAutosave();
+            autosaveDuration = System.Diagnostics.Stopwatch.GetElapsedTime(autosaveStartedAt);
         }
+
+        ObserveRuntimeFrame(
+            delta,
+            processStartedAt,
+            simulationDuration,
+            snapshotDuration,
+            presentationRefreshDuration,
+            autosaveDuration,
+            ticksAdvanced);
+    }
+
+    public RuntimeFramePerformanceProfile GetRuntimePerformanceProfile() =>
+        _runtimePerformanceProfiler.Snapshot();
+
+    private void ObserveRuntimeFrame(
+        double delta,
+        long processStartedAt,
+        TimeSpan simulationDuration,
+        TimeSpan snapshotDuration,
+        TimeSpan presentationRefreshDuration,
+        TimeSpan autosaveDuration,
+        int ticksAdvanced)
+    {
+        var simulation = _engine.GetMetrics();
+        var presentation = _worldView.GetPresentationPerformanceMetrics();
+        var sample = _runtimePerformanceProfiler.Observe(new RuntimeFramePerformanceSample(
+            FrameIndex: 0,
+            SimulationTick: _engine.CurrentTick.Value,
+            FrameInterval: TimeSpan.FromSeconds(delta),
+            MainProcessDuration: System.Diagnostics.Stopwatch.GetElapsedTime(processStartedAt),
+            SimulationDuration: simulationDuration,
+            SnapshotDuration: snapshotDuration,
+            PresentationRefreshDuration: presentationRefreshDuration,
+            AutosaveDuration: autosaveDuration,
+            TicksAdvanced: ticksAdvanced,
+            ActiveActors: simulation.ActiveActors,
+            EmitterQueryDuration: presentation.EmitterQueries.LastDuration,
+            ActiveLightMapDuration: presentation.ActiveLightMapBuilds.LastDuration,
+            LowerChunkRebuildDuration: presentation.LowerChunkRebuildBatches.LastDuration,
+            VisibleDirtyChunks: presentation.VisibleDirtyChunks,
+            SliceWorkload: presentation.SliceWorkload));
+        if (sample is not { } spike || !OS.IsDebugBuild())
+        {
+            return;
+        }
+
+        var warningAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_lastPerformanceWarningAt != 0 &&
+            System.Diagnostics.Stopwatch.GetElapsedTime(_lastPerformanceWarningAt, warningAt)
+                .TotalSeconds < PerformanceWarningCooldownSeconds)
+        {
+            return;
+        }
+        _lastPerformanceWarningAt = warningAt;
+
+        GD.PushWarning(
+            $"Performance spike frame={spike.FrameIndex} tick={spike.SimulationTick} " +
+            $"interval={spike.FrameInterval.TotalMilliseconds:F1}ms " +
+            $"main={spike.MainProcessDuration.TotalMilliseconds:F1}ms " +
+            $"simulation={spike.SimulationDuration.TotalMilliseconds:F1}ms/" +
+            $"{spike.TicksAdvanced} ticks snapshot={spike.SnapshotDuration.TotalMilliseconds:F1}ms " +
+            $"refresh={spike.PresentationRefreshDuration.TotalMilliseconds:F1}ms " +
+            $"autosave={spike.AutosaveDuration.TotalMilliseconds:F1}ms " +
+            $"emitters={spike.EmitterQueryDuration.TotalMilliseconds:F1}ms " +
+            $"light={spike.ActiveLightMapDuration.TotalMilliseconds:F1}ms " +
+            $"lower={spike.LowerChunkRebuildDuration.TotalMilliseconds:F1}ms " +
+            $"dirty={spike.VisibleDirtyChunks} actors={spike.ActiveActors} " +
+            $"exposed={spike.SliceWorkload.ContinuouslyExposedCells}");
     }
 
     public override void _UnhandledInput(InputEvent inputEvent)

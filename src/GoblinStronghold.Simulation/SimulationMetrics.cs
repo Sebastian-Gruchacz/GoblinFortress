@@ -16,6 +16,7 @@ public readonly record struct SimulationMetrics(
     int UndeliveredEvents,
     int UndeliveredWorldChanges,
     NavigationPathMetrics Navigation,
+    PresentationSnapshotMetrics PresentationSnapshots,
     TimeSpan LastTickDuration,
     TimeSpan TotalTickDuration,
     SimulationTickBreakdown LastTickBreakdown);
@@ -31,6 +32,11 @@ public readonly record struct SimulationTickBreakdown(
     TimeSpan Actors,
     TimeSpan Raid,
     TimeSpan Visibility);
+
+public readonly record struct PresentationSnapshotMetrics(
+    long Builds,
+    TimeSpan LastBuildDuration,
+    TimeSpan TotalBuildDuration);
 
 public readonly record struct ActorJobUpdateProfile(
     TimeSpan Reproduction,

@@ -170,6 +170,46 @@ public sealed class WorldVisibilityState
         }
     }
 
+    internal void Discover(
+        IEnumerable<(GridPosition Position, int Radius)> observations,
+        Func<GridPosition, bool>? exclude = null)
+    {
+        ArgumentNullException.ThrowIfNull(observations);
+        EnsureLayerCapacity();
+        var observationArray = observations.ToArray();
+        if (observationArray.Any(observation => observation.Radius <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(observations));
+        }
+
+        foreach (var (observation, radius) in observationArray)
+        {
+            var radiusSquared = checked(radius * radius);
+            for (var y = observation.Y - radius; y <= observation.Y + radius; y++)
+            {
+                for (var x = observation.X - radius; x <= observation.X + radius; x++)
+                {
+                    var position = new GridPosition(x, y, observation.Z);
+                    var distanceSquared = checked(
+                        ((x - observation.X) * (x - observation.X)) +
+                        ((y - observation.Y) * (y - observation.Y)));
+                    if (distanceSquared > radiusSquared ||
+                        !IsVisibilityPosition(position) ||
+                        (exclude?.Invoke(position) ?? false))
+                    {
+                        continue;
+                    }
+
+                    var index = GetIndex(position);
+                    if (_cells[index] == CellVisibility.Unknown)
+                    {
+                        _cells[index] = CellVisibility.Explored;
+                    }
+                }
+            }
+        }
+    }
+
     private bool IsVisibilityPosition(GridPosition position) =>
         Map.IsWithin(position) || Map.IsCavePosition(position) ||
         Map.IsHillMassPosition(position) ||

@@ -27,7 +27,7 @@ public sealed class CivilizationCatalogTests
         Assert.Equal(260, goblins.Combat!.MinimumMeleeDamage);
         Assert.Equal(160, goblins.Combat.MeleeDamageVariance);
         Assert.Equal(
-            new CivilizationPerceptionDefinition(4, 3, 3),
+            new CivilizationPerceptionDefinition(5, 3, 3),
             goblins.Perception);
         Assert.Equal(
             new CivilizationSpatialBehaviorDefinition(10, 0, 1),

@@ -9,7 +9,8 @@ public readonly record struct LightEmitterSnapshot(
     LightEmitterHandle Handle,
     GridPosition Position,
     float RadiusCells,
-    float Intensity);
+    float Intensity,
+    CardinalOrientation? Facing = null);
 
 public sealed class LightEmitterIndex
 {
@@ -45,11 +46,13 @@ public sealed class LightEmitterIndex
 
     public void Upsert(LightEmitterSnapshot emitter)
     {
-        if (emitter.RadiusCells <= 0f || emitter.Intensity is <= 0f or > 1f)
+        if (emitter.RadiusCells <= 0f ||
+            emitter.Intensity is <= 0f or > LightEmitterCatalog.MaximumSupportedIntensity)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(emitter),
-                "Light radius and intensity must be positive, and intensity cannot exceed one.");
+                $"Light radius and intensity must be positive, and intensity cannot exceed " +
+                $"{LightEmitterCatalog.MaximumSupportedIntensity}.");
         }
 
         if (_emitters.TryGetValue(emitter.Handle, out var existing))

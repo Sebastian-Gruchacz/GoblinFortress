@@ -9,6 +9,7 @@
     <Compile Include="..\GoblinStronghold.Simulation.Tests\LowerLevelPresentationCacheTests.cs" Link="LowerLevelPresentationCacheTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\NavigationKnowledgeTests.cs" Link="NavigationKnowledgeTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\ResourceSpatialIndexTests.cs" Link="ResourceSpatialIndexTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\RuntimeFramePerformanceProfilerTests.cs" Link="RuntimeFramePerformanceProfilerTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\SwampMapGeneratorTests.cs" Link="SwampMapGeneratorTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\TerrainWorkCandidateSelectorTests.cs" Link="TerrainWorkCandidateSelectorTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\TerrainWorkExecutionServiceTests.cs" Link="TerrainWorkExecutionServiceTests.cs" />

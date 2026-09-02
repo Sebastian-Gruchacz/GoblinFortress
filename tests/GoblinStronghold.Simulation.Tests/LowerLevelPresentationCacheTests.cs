@@ -7,6 +7,61 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class LowerLevelPresentationCacheTests
 {
     [Fact]
+    public void SlicePlannerBuildsAStableRequestPlanAndFiltersDistantPassages()
+    {
+        var bounds = new PresentationCellBounds(0, 0, 16, 16);
+        var visible = new VerticalPassage(
+            new GridPosition(4, 4, 1),
+            new GridPosition(5, 4, 0),
+            VerticalPassageKind.NaturalRamp);
+        var distant = new VerticalPassage(
+            new GridPosition(20, 20, 1),
+            new GridPosition(20, 21, 0),
+            VerticalPassageKind.NaturalRamp);
+
+        var plan = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(1, bounds),
+            (_, _) => 1,
+            [visible, distant]);
+
+        Assert.Equal(new PresentationSliceRequest(1, bounds), plan.Request);
+        Assert.Equal([visible], plan.VerticalPassages);
+        Assert.Equal(visible.Lower, plan.OpeningDestinations[visible.Upper]);
+        Assert.True(plan.Exposure.IsContinuouslyExposed(visible.Lower));
+        Assert.False(plan.Exposure.IsContinuouslyExposed(distant.Lower));
+    }
+
+    [Fact]
+    public void SliceWorkloadDistinguishesSingleShaftFromSwissCheeseExposure()
+    {
+        var bounds = new PresentationCellBounds(0, 0, 32, 32);
+        var single = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(1, bounds),
+            (x, y) => x == 4 && y == 4 ? 0 : 1,
+            []);
+        var holes = new HashSet<(int X, int Y)>
+        {
+            (1, 1),
+            (17, 1),
+            (1, 17),
+            (17, 17),
+        };
+        var swissCheese = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(2, bounds),
+            (x, y) => holes.Contains((x, y)) ? 0 : 2,
+            []);
+
+        Assert.Equal(
+            new PresentationSliceWorkload(1, 1, 1, 1, 0, 1),
+            single.Workload);
+        Assert.Equal(
+            new PresentationSliceWorkload(4, 8, 8, 8, 0, 8),
+            swissCheese.Workload);
+        Assert.True(
+            swissCheese.Workload.VisibleChunks > single.Workload.VisibleChunks);
+    }
+
+    [Fact]
     public void ExposureFollowsOnlyContinuousChainsFromActiveLevel()
     {
         var connectedUpper = new GridPosition(3, 3, 2);
@@ -295,6 +350,60 @@ public sealed class LowerLevelPresentationCacheTests
         Assert.Equal(2, cache.GetVisibleRebuildCandidates().Count);
         Assert.All(cache.GetVisibleRebuildCandidates(), candidate =>
             Assert.Equal(PresentationChunkDirtyReason.StaticLighting, candidate.DirtyReasons));
+    }
+
+    [Fact]
+    public void ActorOverlaySelectsOnlyContinuouslyExposedLowerActors()
+    {
+        var visible = new GridPosition(4, 4, 0);
+        var hidden = new GridPosition(8, 8, 0);
+        var active = new GridPosition(4, 4, 1);
+        var exposure = LowerLevelExposureIndex.Build(
+            activeLevel: 1,
+            directlyExposedCells: [visible],
+            verticalPassages: []);
+
+        var selected = LowerLevelActorOverlayPolicy.SelectVisible(
+            [
+                new LowerLevelActorMarker(new EntityId(1), visible, 1f, false),
+                new LowerLevelActorMarker(new EntityId(2), hidden, 1f, false),
+                new LowerLevelActorMarker(new EntityId(3), active, 1f, false),
+            ],
+            exposure,
+            new PresentationCellBounds(0, 0, 12, 12));
+
+        Assert.Equal(new EntityId(1), Assert.Single(selected).Id);
+    }
+
+    [Fact]
+    public void ActorOverlayOrdersDeepestMarkersFirst()
+    {
+        var deepest = new GridPosition(3, 3, -2);
+        var upper = new GridPosition(3, 3, -1);
+        var exposure = LowerLevelExposureIndex.Build(
+            activeLevel: 0,
+            directlyExposedCells: [],
+            verticalPassages:
+            [
+                new VerticalPassage(
+                    new GridPosition(3, 3, 0),
+                    upper,
+                    VerticalPassageKind.NaturalRamp),
+                new VerticalPassage(
+                    upper,
+                    deepest,
+                    VerticalPassageKind.NaturalRamp),
+            ]);
+
+        var selected = LowerLevelActorOverlayPolicy.SelectVisible(
+            [
+                new LowerLevelActorMarker(new EntityId(2), upper, 0.8f, false),
+                new LowerLevelActorMarker(new EntityId(1), deepest, 0.6f, true),
+            ],
+            exposure,
+            new PresentationCellBounds(0, 0, 8, 8));
+
+        Assert.Equal([deepest, upper], selected.Select(actor => actor.Position));
     }
 
     private static LowerLevelPresentationObservation Observation(

@@ -309,15 +309,41 @@ caches.
 - [x] Apply ambient cave darkness and surface night darkness on the active level,
   with low-frequency flame flicker limited to visible indexed emitters. Ordinary
   human villagers no longer act as implicit light sources.
-- [ ] Add terrain and structure light occlusion, door-state transmission, and
-  controlled vertical propagation through open passages. This belongs in a
-  focused lighting policy, not in render-kind conditionals.
-- [ ] Extend content definitions with activity/fuel contracts for cooking fires,
-  torches, furnaces, lava, carried lanterns, luminous creatures, and future mod
-  sources. Dynamic emitters register the same snapshots as static emitters.
-- [ ] Introduce a narrow `PresentationSliceRequest`/result contract containing
-  the active level, visible map rectangle, and explicitly exposed lower regions.
-  Management UI and HUD summaries should use separate snapshots instead of
+- [x] Separate cross-level discovery from active visibility. A currently visible
+  end of a real cave mouth, natural ramp, or excavated passage records a one-cell
+  explored margin on the adjacent layer without lighting it or cascading through
+  covered coordinates. Underground observers always use limited dark vision;
+  surface day and night now have a stronger data-driven contrast.
+- [x] Add hard cell-level terrain and structure light occlusion on active and
+  cached lower slices. Solid rock, constructed walls, and closed door leaves
+  block rays; open doors transmit them, diagonal corner leaks are rejected, and
+  wall-mounted torches emit only toward their facing side. The reusable policy
+  stays outside render-kind conditionals.
+- [x] Add controlled upward light propagation through continuously exposed
+  ramps, cave mouths, shafts, cliffs, and other open vertical columns. A source
+  must reach the lower opening without crossing a blocker, then loses radius and
+  intensity on every projected level; disconnected or covered planes do not
+  receive a projected emitter.
+- [x] Give the active slice a small multi-ray penumbra around blocker edges.
+  Rays traverse full blocking cells instead of blurring the finished mask, so
+  complete walls and closed corners remain opaque. Cached lower slices retain
+  deliberately hard shadows to keep rebuilds inexpensive.
+- [x] Extend light definitions with explicit world/actor attachment plus
+  always-on, working, carried, and actor-trait activity requirements. Fuel is a
+  separate contract covering work-order input, stored fuel, and portable charge.
+  Existing lava and torches remain static; working furnaces now pass through the
+  shared activation policy without changing current gameplay behavior.
+- [ ] Connect stored fuel and portable charge to real cooking-fire, torch, and
+  lantern inventory state once those systems exist. Do not treat the contract
+  alone as fuel simulation.
+- [ ] Register carried lanterns and luminous actor traits as dynamic emitter
+  snapshots on active and exposed lower slices once actors can actually own
+  those definitions.
+- [x] Introduce a narrow `PresentationSliceRequest`/plan contract containing the
+  active level, visible map rectangle, direct exposure columns, continuous
+  passages, opening destinations, light passages, regions, chunks, and a stable
+  workload summary. Godot consumes this plan instead of rebuilding slice rules.
+- [ ] Move management UI and HUD summaries to separate snapshots instead of
   forcing world presentation to copy unrelated simulation collections.
 - [x] Index connected lower-level exposure regions from lower terrain surfaces
   in the visible map rectangle and from vertical openings, then
@@ -335,10 +361,12 @@ caches.
   exposure mask while composing openings in the active plane. Lower slices use
   deliberately reduced structure silhouettes instead of live structure draw
   calls.
-- [x] Add a separate low-resolution light texture for always-active lower-level
-  sources such as wall torches and lava. Cached light remains static and only
-  active-level flames flicker; work-activated and mobile sources stay in the
-  dynamic-light follow-up.
+- [x] Add a separate low-resolution prelit geometry texture for always-active
+  lower-level sources such as wall torches and lava. It copies the terrain and
+  structure pixels and raises their brightness behind the same occlusion policy
+  instead of washing them with translucent colored circles. Cached light remains
+  static and only active-level flames flicker; work-activated and mobile sources
+  stay in the dynamic-light follow-up.
 - [x] Retain chunk cache state when exposure or the camera moves away. Hidden
   dirty chunks are excluded from rebuild candidates and become candidates only
   after the camera descends or a continuous exposure chain makes them visible
@@ -350,18 +378,32 @@ caches.
 - [ ] Route future mutable-fluid events through the same invalidation contract.
   Current underground water and lava belong to immutable generated map
   geometry, so there is no runtime fluid mutation source to register yet.
-- [ ] Add a low-cadence, position-quantized overlay for lower-level moving actors
-  that carry lights or emit light themselves. If an actor leaves an exposed
-  region before the camera changes level, stale cached presence is acceptable;
-  never make lower-level actor animation as expensive as the active slice.
+- [x] Add a low-cadence, position-quantized overlay for lower-level moving
+  actors. Sample once per ten simulation ticks, render compact silhouettes
+  without interpolation, and force a refresh only when exposure or the camera
+  slice changes.
+- [ ] Attach mobile light snapshots to that overlay once carried lanterns,
+  torches, or luminous actor traits have real content definitions. Until then,
+  do not invent implicit light sources for ordinary actors.
 - [x] Keep lower-level simulation free of renderer synchronization and frame
   deadlines. Presentation consumes immutable results at its own cadence, so
   independent lower-level algorithms remain eligible for parallel execution;
   only publication at the simulation boundary requires synchronization.
-- [ ] Add cache counters and timings for dirty chunks, static/light texture
-  rebuilds, emitter queries, and snapshot construction. Characterize both a
-  single shaft and a broad Swiss-cheese exposure map before increasing cache
-  fidelity.
+- [x] Add allocation-free-on-write counters and timings for presentation
+  snapshot construction, emitter queries, active light-map builds, evaluated
+  cells/emitters, dirty lower chunks, and geometry/static-light texture rebuilds.
+  Metrics remain pull-based and do not log every frame.
+- [x] Establish deterministic structural baselines for a single shaft and a
+  broad Swiss-cheese exposure map. The workload summary reports direct columns,
+  continuously exposed cells, regions, chunks, and light passages alongside
+  runtime timings.
+- [x] Add a bounded runtime spike recorder that correlates long frame intervals
+  with main-thread work, simulation batches, snapshot construction, view refresh,
+  autosaves, active lighting, and lower-slice rebuilds. Ordinary frames remain
+  allocation-free and debug-build warnings are rate-limited independently from
+  the bounded sample history.
+- [ ] Capture live wall-clock samples from a representative long-running save
+  for both workloads before increasing cache fidelity or rebuild budgets.
 
 ### Stage F: profiles, saves and mod content
 

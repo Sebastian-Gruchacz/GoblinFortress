@@ -3,11 +3,31 @@ using GoblinStronghold.Simulation.Map;
 
 namespace GoblinStronghold.Simulation.Lighting;
 
-public enum LightEmitterActivation : byte
+public enum LightEmitterActivityRequirement : byte
 {
     Always = 1,
     WhileWorking = 2,
+    WhileCarried = 3,
+    ActorTrait = 4,
 }
+
+public enum LightEmitterFuelRequirement : byte
+{
+    None = 0,
+    WorkOrderInput = 1,
+    StoredFuel = 2,
+    PortableCharge = 3,
+}
+
+public enum LightEmitterAttachment : byte
+{
+    World = 1,
+    Actor = 2,
+}
+
+public readonly record struct LightEmitterActivation(
+    LightEmitterActivityRequirement Activity,
+    LightEmitterFuelRequirement Fuel);
 
 public readonly record struct LightColor(float Red, float Green, float Blue);
 
@@ -17,10 +37,13 @@ public sealed record LightEmitterDefinition(
     float Intensity,
     LightColor Color,
     float FlickerAmount,
-    LightEmitterActivation Activation);
+    LightEmitterActivation Activation,
+    LightEmitterAttachment Attachment);
 
 public static class LightEmitterCatalog
 {
+    public const float MaximumSupportedIntensity = 2f;
+
     public static readonly ContentId WallTorchId = ContentId.Parse("core:wall-torch");
     public static readonly ContentId LavaId = ContentId.Parse("core:lava");
     public static readonly ContentId BloomeryId = ContentId.Parse("core:bloomery-fire");
@@ -69,48 +92,64 @@ public static class LightEmitterCatalog
         {
             new LightEmitterDefinition(
                 WallTorchId,
-                4.2f,
-                0.92f,
+                6.3f,
+                1.38f,
                 new LightColor(1f, 0.52f, 0.14f),
                 0.1f,
-                LightEmitterActivation.Always),
+                new LightEmitterActivation(
+                    LightEmitterActivityRequirement.Always,
+                    LightEmitterFuelRequirement.None),
+                LightEmitterAttachment.World),
             new LightEmitterDefinition(
                 LavaId,
                 2.8f,
                 0.78f,
                 new LightColor(1f, 0.26f, 0.06f),
                 0.04f,
-                LightEmitterActivation.Always),
+                new LightEmitterActivation(
+                    LightEmitterActivityRequirement.Always,
+                    LightEmitterFuelRequirement.None),
+                LightEmitterAttachment.World),
             new LightEmitterDefinition(
                 BloomeryId,
                 3.4f,
                 0.74f,
                 new LightColor(1f, 0.38f, 0.08f),
                 0.08f,
-                LightEmitterActivation.WhileWorking),
+                new LightEmitterActivation(
+                    LightEmitterActivityRequirement.WhileWorking,
+                    LightEmitterFuelRequirement.WorkOrderInput),
+                LightEmitterAttachment.World),
             new LightEmitterDefinition(
                 SmeltingFurnaceId,
                 4.1f,
                 0.88f,
                 new LightColor(1f, 0.3f, 0.06f),
                 0.07f,
-                LightEmitterActivation.WhileWorking),
+                new LightEmitterActivation(
+                    LightEmitterActivityRequirement.WhileWorking,
+                    LightEmitterFuelRequirement.WorkOrderInput),
+                LightEmitterAttachment.World),
             new LightEmitterDefinition(
                 CrucibleFurnaceId,
                 3.8f,
                 0.94f,
                 new LightColor(1f, 0.22f, 0.08f),
                 0.06f,
-                LightEmitterActivation.WhileWorking),
+                new LightEmitterActivation(
+                    LightEmitterActivityRequirement.WhileWorking,
+                    LightEmitterFuelRequirement.WorkOrderInput),
+                LightEmitterAttachment.World),
         };
         foreach (var definition in definitions)
         {
             if (definition.RadiusCells <= 0f ||
-                definition.Intensity is <= 0f or > 1f ||
+                definition.Intensity is <= 0f or > MaximumSupportedIntensity ||
                 definition.FlickerAmount is < 0f or > 1f ||
                 definition.Color.Red is < 0f or > 1f ||
                 definition.Color.Green is < 0f or > 1f ||
-                definition.Color.Blue is < 0f or > 1f)
+                definition.Color.Blue is < 0f or > 1f ||
+                !LightEmitterActivationPolicy.IsValid(definition))
             {
                 throw new InvalidDataException(
                     $"Light emitter definition '{definition.Id}' has invalid parameters.");

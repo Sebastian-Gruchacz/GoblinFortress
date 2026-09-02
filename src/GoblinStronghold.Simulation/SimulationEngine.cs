@@ -74,6 +74,9 @@ public sealed partial class SimulationEngine
     private long _lastConstructionCommandExecutionTick = -1;
     private long _lastTickStopwatchTicks;
     private long _totalTickStopwatchTicks;
+    private long _presentationSnapshotsCreated;
+    private long _lastPresentationSnapshotStopwatchTicks;
+    private long _totalPresentationSnapshotStopwatchTicks;
     private long[] _lastTickStageStopwatchTicks = new long[10];
 
     private SimulationEngine(
@@ -518,8 +521,17 @@ public sealed partial class SimulationEngine
         }
     }
 
-    public SimulationSnapshot CreatePresentationSnapshot() =>
-        CreateSnapshot(includeStateHash: false, includePlanningForecasts: false);
+    public SimulationSnapshot CreatePresentationSnapshot()
+    {
+        var startedAt = Stopwatch.GetTimestamp();
+        var snapshot = CreateSnapshot(includeStateHash: false, includePlanningForecasts: false);
+        _lastPresentationSnapshotStopwatchTicks = Stopwatch.GetTimestamp() - startedAt;
+        _totalPresentationSnapshotStopwatchTicks = checked(
+            _totalPresentationSnapshotStopwatchTicks +
+            _lastPresentationSnapshotStopwatchTicks);
+        _presentationSnapshotsCreated = checked(_presentationSnapshotsCreated + 1);
+        return snapshot;
+    }
 
     public SimulationSnapshot CreateSnapshot(
         bool includeStateHash = true,
@@ -1092,6 +1104,10 @@ public sealed partial class SimulationEngine
         UndeliveredEvents: _undeliveredEvents.Count,
         UndeliveredWorldChanges: _undeliveredWorldChanges.Count,
         Navigation: Navigation.GetMetrics(),
+        PresentationSnapshots: new PresentationSnapshotMetrics(
+            _presentationSnapshotsCreated,
+            StopwatchTicksToTimeSpan(_lastPresentationSnapshotStopwatchTicks),
+            StopwatchTicksToTimeSpan(_totalPresentationSnapshotStopwatchTicks)),
         LastTickDuration: StopwatchTicksToTimeSpan(_lastTickStopwatchTicks),
         TotalTickDuration: StopwatchTicksToTimeSpan(_totalTickStopwatchTicks),
         LastTickBreakdown: new SimulationTickBreakdown(
@@ -2894,27 +2910,15 @@ public sealed partial class SimulationEngine
     private void UpdateVisibility()
     {
         var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
-        var goblinRadius = calendar.IsNight
-            ? GoblinPerception.NightVisionRadius
-            : GoblinPerception.DayVisionRadius;
         var observers = _actors.Values
-            .Select(actor => (actor.Position, goblinRadius))
+            .Select(actor => (
+                actor.Position,
+                WorldVisibilityPolicy.ResolveGoblinVisionRadius(
+                    GoblinPerception,
+                    actor.Position,
+                    calendar.IsNight)))
             .ToList();
         var verticalPassages = World.CreateVerticalPassageSnapshot();
-        foreach (var actor in _actors.Values)
-        {
-            foreach (var passage in verticalPassages)
-            {
-                if (passage.Upper == actor.Position)
-                {
-                    observers.Add((passage.Lower, 1));
-                }
-                else if (passage.Lower == actor.Position)
-                {
-                    observers.Add((passage.Upper, 1));
-                }
-            }
-        }
         if (GoblinPerception.StructureVisionRadius > 0)
         {
             observers.AddRange(World.EnumerateWorldObjects()
@@ -2937,6 +2941,11 @@ public sealed partial class SimulationEngine
         }
 
         Visibility.Reveal(observers, World.IsSolidHillRock);
+        Visibility.Discover(
+            WorldVisibilityPolicy.SelectAdjacentLayerDiscoveries(
+                verticalPassages,
+                Visibility.Get),
+            World.IsSolidHillRock);
         RemoveMiningDesignationsBlockedByRevealedFluid();
         foreach (var actor in _actors.Values.Where(actor =>
                      actor.JobKind == ActorJobKind.Explore &&

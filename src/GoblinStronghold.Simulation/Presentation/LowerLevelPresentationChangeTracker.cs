@@ -226,7 +226,7 @@ public static class LowerLevelPresentationObservationFactory
             .ToArray();
         var signature = HashStructure(worldObject, anchor);
         var emitsStaticLight = LightEmitterCatalog.TryGet(worldObject.Kind, out var light) &&
-            light.Activation == LightEmitterActivation.Always;
+            LightEmitterActivationPolicy.IsStaticallyActive(light);
         return new PresentationStructureObservation(
             worldObject.Id,
             signature,

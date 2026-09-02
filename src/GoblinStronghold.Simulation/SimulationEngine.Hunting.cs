@@ -6,6 +6,46 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
+    private bool TryExecuteDesignateHuntArea(SimulationCommand command)
+    {
+        var animals = _animals.Values
+            .Where(animal =>
+                animal.Position.Z == command.Position.Z &&
+                Distance(animal.Position, command.Position) <= command.Amount &&
+                Visibility.Get(animal.Position) != CellVisibility.Unknown &&
+                !_workDesignations.Values.Any(designation =>
+                    designation.Kind == WorkDesignationKind.HuntAnimal &&
+                    designation.TargetEntityId.Value == animal.Id))
+            .OrderBy(animal => Distance(animal.Position, command.Position))
+            .ThenBy(animal => animal.Id)
+            .ToArray();
+        if (animals.Length == 0)
+        {
+            return true;
+        }
+
+        var orderId = AllocateEntityId();
+        foreach (var animal in animals)
+        {
+            var id = AllocateEntityId();
+            _workDesignations.Add(id, new WorkDesignationSnapshot(
+                id,
+                WorkDesignationKind.HuntAnimal,
+                animal.Position,
+                new EntityId(animal.Id))
+            {
+                OrderId = orderId,
+            });
+            Publish(
+                SimulationEventKind.WorkDesignationCreated,
+                EntityId.None,
+                id,
+                (int)WorkDesignationKind.HuntAnimal);
+        }
+
+        return true;
+    }
+
     private bool TryPlanHuntAnimalJob(ActorState actor, ISet<EntityId> reservedDesignations)
     {
         var best = _workDesignations.Values

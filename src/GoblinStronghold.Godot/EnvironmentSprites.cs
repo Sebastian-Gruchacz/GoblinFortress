@@ -33,14 +33,30 @@ internal static class EnvironmentSprites
         => TextureResources.LoadRequired(AtlasPath, "environment atlas");
 
     public static Rect2 GetRegion(Texture2D atlas, EnvironmentSprite sprite)
+        => GetRegion(atlas.GetWidth(), atlas.GetHeight(), sprite);
+
+    public static Rect2I GetRegionFromImage(Image atlas, EnvironmentSprite sprite)
+    {
+        var region = GetRegion(atlas.GetWidth(), atlas.GetHeight(), sprite);
+        return new Rect2I(
+            Mathf.RoundToInt(region.Position.X),
+            Mathf.RoundToInt(region.Position.Y),
+            Mathf.RoundToInt(region.Size.X),
+            Mathf.RoundToInt(region.Size.Y));
+    }
+
+    private static Rect2 GetRegion(
+        int atlasWidth,
+        int atlasHeight,
+        EnvironmentSprite sprite)
     {
         var index = (int)sprite;
         var column = index % Columns;
         var row = index / Columns;
-        var left = column * atlas.GetWidth() / Columns;
-        var top = row * atlas.GetHeight() / Rows;
-        var right = (column + 1) * atlas.GetWidth() / Columns;
-        var bottom = (row + 1) * atlas.GetHeight() / Rows;
+        var left = column * atlasWidth / Columns;
+        var top = row * atlasHeight / Rows;
+        var right = (column + 1) * atlasWidth / Columns;
+        var bottom = (row + 1) * atlasHeight / Rows;
         var sourcePadding = sprite is
             EnvironmentSprite.GoblinHutGround or
             EnvironmentSprite.GoblinHutRoof or

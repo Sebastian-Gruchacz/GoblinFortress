@@ -2,6 +2,7 @@ using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Lighting;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Presentation;
 
 namespace GoblinStronghold.GodotClient.UI.WorldRendering;
@@ -101,6 +102,7 @@ internal static class LowerLevelStaticLightPainter
         if (key.Level < 0)
         {
             var lava = LightEmitterCatalog.Get(LightEmitterCatalog.LavaId);
+            var glowcap = LightEmitterCatalog.Get(LightEmitterCatalog.CaveGlowcapId);
             var padding = (int)Math.Ceiling(lava.RadiusCells);
             var minimumX = Math.Max(0, chunkMinimumX - padding);
             var minimumY = Math.Max(0, chunkMinimumY - padding);
@@ -116,6 +118,17 @@ internal static class LowerLevelStaticLightPainter
                     {
                         var instanceId = checked((ulong)(y * engine.Map.Width + x) + 1UL);
                         emitters.Add(CreateEmitter(position, lava, instanceId));
+                    }
+                    else if (CaveFloraGenerator.TryGet(
+                                 engine.Map,
+                                 position,
+                                 out var flora) &&
+                             flora.Kind == CaveFloraKind.GlowcapCluster)
+                    {
+                        var instanceId = checked(
+                            (ulong)(-key.Level * engine.Map.CellCount) +
+                            (ulong)(y * engine.Map.Width + x) + 1UL);
+                        emitters.Add(CreateEmitter(position, glowcap, instanceId));
                     }
                 }
             }

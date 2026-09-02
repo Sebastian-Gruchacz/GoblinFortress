@@ -7,6 +7,20 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class LowerLevelPresentationCacheTests
 {
     [Fact]
+    public void LowerLevelVisualDegradationIsGradualAndBounded()
+    {
+        Assert.Equal(
+            LowerLevelVisualDegradationPolicy.NearestLevelBrightness,
+            LowerLevelVisualDegradationPolicy.ResolveBrightness(1));
+        Assert.True(
+            LowerLevelVisualDegradationPolicy.ResolveBrightness(2) <
+            LowerLevelVisualDegradationPolicy.ResolveBrightness(1));
+        Assert.Equal(
+            LowerLevelVisualDegradationPolicy.MinimumBrightness,
+            LowerLevelVisualDegradationPolicy.ResolveBrightness(100));
+    }
+
+    [Fact]
     public void SlicePlannerBuildsAStableRequestPlanAndFiltersDistantPassages()
     {
         var bounds = new PresentationCellBounds(0, 0, 16, 16);
@@ -29,6 +43,71 @@ public sealed class LowerLevelPresentationCacheTests
         Assert.Equal(visible.Lower, plan.OpeningDestinations[visible.Upper]);
         Assert.True(plan.Exposure.IsContinuouslyExposed(visible.Lower));
         Assert.False(plan.Exposure.IsContinuouslyExposed(distant.Lower));
+    }
+
+    [Fact]
+    public void LowerSliceIsClippedToDiscoveredOpeningsOnEveryActiveLevel()
+    {
+        var bounds = new PresentationCellBounds(0, 0, 8, 8);
+        var basin = new GridPosition(3, 3, -1);
+        var opening = new VerticalPassage(
+            new GridPosition(5, 5, 0),
+            new GridPosition(5, 5, -1),
+            VerticalPassageKind.CaveMouth);
+
+        var hidden = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(0, bounds),
+            (x, y) => x == basin.X && y == basin.Y ? basin.Z : 0,
+            [opening],
+            _ => false);
+        var discovered = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(0, bounds),
+            (x, y) => x == basin.X && y == basin.Y ? basin.Z : 0,
+            [opening],
+            position => position.X is 3 or 5 && position.Y == position.X);
+
+        Assert.Empty(hidden.DirectlyExposedCells);
+        Assert.Empty(hidden.VerticalPassages);
+        Assert.False(hidden.Exposure.IsContinuouslyExposed(basin));
+        Assert.Equal([basin], discovered.DirectlyExposedCells);
+        Assert.Equal([opening], discovered.VerticalPassages);
+        Assert.True(discovered.Exposure.IsContinuouslyExposed(basin));
+        Assert.True(discovered.Exposure.IsContinuouslyExposed(opening.Lower));
+    }
+
+    [Fact]
+    public void ConstructedFloorClosesDirectViewToLowerSurface()
+    {
+        var bounds = new PresentationCellBounds(0, 0, 8, 8);
+        var covered = new GridPosition(3, 3, 0);
+        var lowerSurface = covered with { Z = -1 };
+
+        var plan = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(0, bounds),
+            (x, y) => x == covered.X && y == covered.Y ? -1 : 0,
+            [],
+            _ => true,
+            position => position == covered);
+
+        Assert.DoesNotContain(lowerSurface, plan.DirectlyExposedCells);
+        Assert.False(plan.Exposure.IsContinuouslyExposed(lowerSurface));
+    }
+
+    [Fact]
+    public void ConstructedFloorOnVisibleLowerSurfaceDoesNotHideItself()
+    {
+        var bounds = new PresentationCellBounds(0, 0, 8, 8);
+        var lowerSurface = new GridPosition(3, 3, -1);
+
+        var plan = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(0, bounds),
+            (x, y) => x == lowerSurface.X && y == lowerSurface.Y ? -1 : 0,
+            [],
+            _ => true,
+            position => position == lowerSurface);
+
+        Assert.Contains(lowerSurface, plan.DirectlyExposedCells);
+        Assert.True(plan.Exposure.IsContinuouslyExposed(lowerSurface));
     }
 
     [Fact]
@@ -189,6 +268,40 @@ public sealed class LowerLevelPresentationCacheTests
     }
 
     [Fact]
+    public void ChangedExposureAtChunkBoundaryInvalidatesNeighboringVignette()
+    {
+        var first = LowerLevelExposureIndex.Build(
+            activeLevel: 1,
+            directlyExposedCells:
+            [
+                new GridPosition(15, 4, 0),
+                new GridPosition(16, 4, 0),
+                new GridPosition(17, 4, 0),
+            ],
+            verticalPassages: []);
+        var changedAcrossBoundary = LowerLevelExposureIndex.Build(
+            activeLevel: 1,
+            directlyExposedCells:
+            [
+                new GridPosition(15, 4, 0),
+                new GridPosition(17, 4, 0),
+            ],
+            verticalPassages: []);
+        var cache = new LowerLevelPresentationCacheState();
+        cache.SynchronizeExposure(first);
+        foreach (var candidate in cache.GetVisibleRebuildCandidates())
+        {
+            cache.MarkRebuilt(candidate.Key);
+        }
+
+        cache.SynchronizeExposure(changedAcrossBoundary);
+
+        Assert.Equal(2, cache.GetVisibleRebuildCandidates().Count);
+        Assert.All(cache.GetVisibleRebuildCandidates(), candidate =>
+            Assert.Equal(PresentationChunkDirtyReason.ExposureMask, candidate.DirtyReasons));
+    }
+
+    [Fact]
     public void RebuildCandidatesAreOrderedFromDeepestLevelUpward()
     {
         var exposure = LowerLevelExposureIndex.Build(
@@ -277,6 +390,33 @@ public sealed class LowerLevelPresentationCacheTests
         Assert.Equal(
             PresentationChunkDirtyReason.Contamination,
             Assert.Single(changes.Invalidations).Reason);
+    }
+
+    [Fact]
+    public void ChangeTrackerInvalidatesVegetationWhenBushBiomassChanges()
+    {
+        var tracker = new LowerLevelPresentationChangeTracker();
+        var position = new GridPosition(7, 9, 1);
+        tracker.Synchronize(Observation(
+            topologyVersion: 3,
+            plants: [new PresentationPlantObservation(
+                position,
+                PlantKind.BerryBush,
+                Biomass: 3,
+                Capacity: 3)]));
+
+        var changes = tracker.Synchronize(Observation(
+            topologyVersion: 3,
+            plants: [new PresentationPlantObservation(
+                position,
+                PlantKind.BerryBush,
+                Biomass: 0,
+                Capacity: 3)]));
+
+        Assert.False(changes.RequiresFullInvalidation);
+        var invalidation = Assert.Single(changes.Invalidations);
+        Assert.Equal(position, invalidation.Position);
+        Assert.Equal(PresentationChunkDirtyReason.Vegetation, invalidation.Reason);
     }
 
     [Fact]
@@ -410,9 +550,11 @@ public sealed class LowerLevelPresentationCacheTests
         ulong topologyVersion,
         IReadOnlyList<PresentationTopologyObservation>? topology = null,
         IReadOnlyList<PresentationStructureObservation>? structures = null,
+        IReadOnlyList<PresentationPlantObservation>? plants = null,
         IReadOnlyList<PresentationContaminationObservation>? contamination = null) => new(
         topologyVersion,
         topology ?? [],
         structures ?? [],
+        plants ?? [],
         contamination ?? []);
 }

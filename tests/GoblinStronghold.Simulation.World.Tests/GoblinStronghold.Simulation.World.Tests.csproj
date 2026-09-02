@@ -1,13 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <Compile Include="..\GoblinStronghold.Simulation.Tests\CaveWallTopologyTests.cs" Link="CaveWallTopologyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\CaveMacroFeaturePlanTests.cs" Link="CaveMacroFeaturePlanTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\CaveFloraGeneratorTests.cs" Link="CaveFloraGeneratorTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\ConstructedSurfaceTests.cs" Link="ConstructedSurfaceTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\DeepGeologyTests.cs" Link="DeepGeologyTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\FloorConstructionTests.cs" Link="FloorConstructionTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\GeneratedStructureTests.cs" Link="GeneratedStructureTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\LightEmitterIndexTests.cs" Link="LightEmitterIndexTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\LowerLevelOpeningVignettePolicyTests.cs" Link="LowerLevelOpeningVignettePolicyTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\LowerLevelPresentationCacheTests.cs" Link="LowerLevelPresentationCacheTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\NavigationKnowledgeTests.cs" Link="NavigationKnowledgeTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\PlantPresentationPositionPolicyTests.cs" Link="PlantPresentationPositionPolicyTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\ResourceSpatialIndexTests.cs" Link="ResourceSpatialIndexTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\RuntimeFramePerformanceProfilerTests.cs" Link="RuntimeFramePerformanceProfilerTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\SwampMapGeneratorTests.cs" Link="SwampMapGeneratorTests.cs" />
@@ -19,6 +23,7 @@
     <Compile Include="..\GoblinStronghold.Simulation.Tests\VisibilityTests.cs" Link="VisibilityTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\WallEnclosureAnalysisTests.cs" Link="WallEnclosureAnalysisTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\WorldMapStateTests.cs" Link="WorldMapStateTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\WorldAmbientLightPolicyTests.cs" Link="WorldAmbientLightPolicyTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\GoblinStronghold.Simulation.TestSupport\GoblinStronghold.Simulation.TestSupport.csproj" />

@@ -131,6 +131,51 @@ public sealed class TacticalOrderTests
     }
 
     [Fact]
+    public void PublicHuntAreaDesignatesVisibleAnimalsInsideCircleWithoutSelectedGoblin()
+    {
+        var engine = CreateEngine();
+        var initial = engine.CreateSnapshot();
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var visibility = save["visibility"]!.AsArray();
+        foreach (var animal in initial.Animals.Where(animal => animal.Position.Z == 0))
+        {
+            visibility[animal.Position.Y * engine.Map.Width + animal.Position.X] =
+                (int)CellVisibility.Explored;
+        }
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        var snapshot = engine.CreateSnapshot();
+        var center = snapshot.Animals
+            .Where(animal => snapshot.GetVisibility(animal.Position, engine.Map.Width)
+                .IsDiscovered())
+            .Select(animal => animal.Position)
+            .First();
+        const int radius = 4;
+        var expected = snapshot.Animals
+            .Where(animal => animal.Position.Z == center.Z &&
+                Distance(animal.Position, center) <= radius &&
+                snapshot.GetVisibility(animal.Position, engine.Map.Width).IsDiscovered())
+            .Select(animal => animal.Id)
+            .Order()
+            .ToArray();
+        Assert.NotEmpty(expected);
+
+        engine.QueueCommand(SimulationCommand.DesignateHuntArea(
+            new SimulationTick(1), sequence: 1, center, radius));
+        engine.AdvanceTicks(1);
+
+        var designated = engine.CreateSnapshot().WorkDesignations
+            .Where(item => item.Kind == WorkDesignationKind.HuntAnimal)
+            .Select(item => item.TargetEntityId.Value)
+            .Order()
+            .ToArray();
+        Assert.Equal(expected, designated);
+
+        static int Distance(GridPosition left, GridPosition right) =>
+            Math.Abs(left.X - right.X) + Math.Abs(left.Y - right.Y) +
+            Math.Abs(left.Z - right.Z);
+    }
+
+    [Fact]
     public void EmptyAttackAreaClearsOrderAndReturnsGoblinToSettlementWork()
     {
         var engine = CreateEngine();

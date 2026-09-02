@@ -42,10 +42,10 @@ public sealed class TerrainModificationCatalogTests
             WorldToolPlacementMode.Area,
             TerrainModificationCatalog.Get(WorkDesignationKind.MineRock).PlacementMode);
         Assert.Equal(
-            WorldToolPlacementMode.Point,
+            WorldToolPlacementMode.DirectionalConnection,
             TerrainModificationCatalog.Get(WorkDesignationKind.CarveRampDown).PlacementMode);
         Assert.Equal(
-            WorldToolPlacementMode.Point,
+            WorldToolPlacementMode.DirectionalConnection,
             TerrainModificationCatalog.Get(WorkDesignationKind.CarveRampUp).PlacementMode);
     }
 
@@ -88,17 +88,18 @@ public sealed class TerrainModificationCatalogTests
     }
 
     [Theory]
-    [InlineData(WorkDesignationKind.MineRock, 3, 3)]
-    [InlineData(WorkDesignationKind.CarveRampDown, 2, 2)]
-    [InlineData(WorkDesignationKind.CarveRampUp, 2, 2)]
+    [InlineData(WorkDesignationKind.MineRock, 3, 2, -1)]
+    [InlineData(WorkDesignationKind.CarveRampDown, 3, 2, -2)]
+    [InlineData(WorkDesignationKind.CarveRampUp, 3, 2, 0)]
     public void CommandFactoryPreservesLegacyCommandContract(
         WorkDesignationKind kind,
         int expectedEndX,
-        int expectedEndY)
+        int expectedEndY,
+        int expectedEndZ)
     {
         var executeAt = new SimulationTick(17);
         var start = new GridPosition(2, 2, -1);
-        var end = new GridPosition(3, 3, -1);
+        var end = new GridPosition(3, 2, -1);
 
         var command = TerrainModificationCommandFactory.CreateDesignation(
             TerrainModificationCatalog.Get(kind),
@@ -111,7 +112,7 @@ public sealed class TerrainModificationCatalogTests
         Assert.Equal(executeAt, command.ExecuteAt);
         Assert.Equal(9UL, command.Sequence);
         Assert.Equal(start, command.Position);
-        Assert.Equal(new GridPosition(expectedEndX, expectedEndY, -1), command.EndPosition);
+        Assert.Equal(new GridPosition(expectedEndX, expectedEndY, expectedEndZ), command.EndPosition);
         Assert.Equal(ResourceKind.Any, command.Resource);
         Assert.Equal((int)kind, command.Amount);
     }

@@ -8,6 +8,57 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class DeepGeologyTests
 {
     [Fact]
+    public void CurrentGeneratorCarvesAConnectedSlopedCavernAcrossFourLevels()
+    {
+        var map = MaterializeToDepth(new WorldSeed(0x534C4F5045434156UL), depth: 7);
+        var passages = map.VerticalPassages
+            .Where(passage =>
+                passage.Kind == VerticalPassageKind.NaturalRamp &&
+                passage.Upper.Z <= -4 && passage.Lower.Z >= -7)
+            .OrderByDescending(passage => passage.Upper.Z)
+            .ToArray();
+
+        Assert.Equal(3, passages.Length);
+        Assert.Equal([-4, -5, -6], passages.Select(passage => passage.Upper.Z));
+        foreach (var passage in passages)
+        {
+            Assert.Equal(CaveCellKind.Ramp, map.GetCaveCell(passage.Upper).Kind);
+            Assert.True(map.GetCaveCell(passage.Lower).IsOpen);
+            Assert.Equal(passage.Upper.X, passage.Lower.X);
+            Assert.Equal(passage.Upper.Y, passage.Lower.Y);
+        }
+    }
+
+    [Fact]
+    public void ReachingLavaGalleryMaterializesItsWholeMultiLevelLayout()
+    {
+        var map = MaterializeToDepth(new WorldSeed(0x4C41564147414C4CUL), depth: 12);
+
+        Assert.Equal(15, map.CaveLevelCount);
+        var passages = map.VerticalPassages.Where(passage =>
+            passage.Kind == VerticalPassageKind.NaturalRamp &&
+            passage.Upper.Z <= -12 && passage.Lower.Z >= -15);
+        Assert.Equal(3, passages.Count());
+        Assert.True(CountLava(map, depth: 14) > 0);
+        Assert.True(CountLava(map, depth: 15) > 0);
+    }
+
+    [Fact]
+    public void VersionFourteenRetainsLayerByLayerCaveMaterialization()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x56313443415645UL),
+            width: 64,
+            height: 64,
+            generatorVersion: 14);
+
+        map.MaterializeCaveLevel(-3);
+
+        Assert.Equal(3, map.CaveLevelCount);
+        Assert.DoesNotContain(map.VerticalPassages, passage => passage.Upper.Z <= -3);
+    }
+
+    [Fact]
     public void EveryDeepMiningLevelContainsNaturalCaves()
     {
         var map = MaterializeToDepth(new WorldSeed(0x43415645524E53UL), depth: 11);
@@ -235,9 +286,14 @@ public sealed class DeepGeologyTests
             if (map.CaveLevelCount < 16)
             {
                 rampOrigin = engine.World.GetCardinalWorldNeighbors(lower)
-                    .First(candidate => engine.World.CanExcavateRock(candidate) &&
-                        map.GetNextCaveLevelCell(candidate with { Z = candidate.Z - 1 }).Kind ==
-                            CaveCellKind.SolidRock);
+                    .First(candidate =>
+                    {
+                        var below = candidate with { Z = candidate.Z - 1 };
+                        return engine.World.CanExcavateRock(candidate) &&
+                            (map.IsCavePosition(below)
+                                ? map.GetCaveCell(below)
+                                : map.GetNextCaveLevelCell(below)).Kind == CaveCellKind.SolidRock;
+                    });
                 Assert.True(engine.World.TryExcavateRock(
                     rampOrigin,
                     SimulationTick.Zero,

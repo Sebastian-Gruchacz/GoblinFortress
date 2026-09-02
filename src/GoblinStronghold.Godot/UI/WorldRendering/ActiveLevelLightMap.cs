@@ -2,6 +2,7 @@ using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Lighting;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Presentation;
 using System.Diagnostics;
 
 namespace GoblinStronghold.GodotClient.UI.WorldRendering;
@@ -16,6 +17,8 @@ internal sealed class ActiveLevelLightMap : IDisposable
     private readonly TimedPresentationOperationCounter _builds = new();
     private ImageTexture? _texture;
     private Vector2I _textureSize;
+    private readonly Dictionary<GridPosition, bool> _skyExposure = [];
+    private ulong _skyExposureTopologyVersion = ulong.MaxValue;
     private long _cells;
     private long _emitterEvaluations;
 
@@ -31,7 +34,8 @@ internal sealed class ActiveLevelLightMap : IDisposable
         int maximumX,
         int maximumY,
         IReadOnlyList<LightEmitterSnapshot> emitters,
-        float ambientDarkness,
+        WorldAmbientLight surfaceAmbient,
+        WorldAmbientLight undergroundAmbient,
         double animationElapsed)
     {
         var startedAt = Stopwatch.GetTimestamp();
@@ -70,16 +74,23 @@ internal sealed class ActiveLevelLightMap : IDisposable
                     remainingDarkness *= 1f - Math.Clamp(contribution, 0f, 1f);
                 }
 
-                var alpha = ambientDarkness * remainingDarkness;
+                var visibility = snapshot.GetVisibility(position, engine.Map.Width);
+                var darkVisionMultiplier =
+                    ActiveLevelDarkVisionPolicy.ResolveDarknessMultiplier(
+                        position,
+                        level,
+                        visibility);
+                var ambient = level >= 0 || IsOpenToSky(engine, position)
+                    ? surfaceAmbient
+                    : undergroundAmbient;
+                var alpha = ambient.Darkness * remainingDarkness * darkVisionMultiplier;
                 image.FillRect(
                     new Rect2I(
                         localX * PixelsPerCell,
                         localY * PixelsPerCell,
                         PixelsPerCell,
                         PixelsPerCell),
-                    level < 0
-                    ? new Color(0.008f, 0.012f, 0.016f, alpha)
-                    : new Color(0.025f, 0.055f, 0.12f, alpha));
+                    new Color(ambient.Red, ambient.Green, ambient.Blue, alpha));
             }
         }
 
@@ -105,6 +116,8 @@ internal sealed class ActiveLevelLightMap : IDisposable
     public void Reset()
     {
         _blockingCells.Reset();
+        _skyExposure.Clear();
+        _skyExposureTopologyVersion = ulong.MaxValue;
         _builds.Reset();
         _cells = 0;
         _emitterEvaluations = 0;
@@ -116,5 +129,21 @@ internal sealed class ActiveLevelLightMap : IDisposable
         _texture = null;
         _textureSize = default;
         Reset();
+    }
+
+    private bool IsOpenToSky(SimulationEngine engine, GridPosition position)
+    {
+        if (_skyExposureTopologyVersion != engine.World.TopologyVersion)
+        {
+            _skyExposure.Clear();
+            _skyExposureTopologyVersion = engine.World.TopologyVersion;
+        }
+
+        if (!_skyExposure.TryGetValue(position, out var isOpen))
+        {
+            isOpen = engine.World.IsOpenToSky(position);
+            _skyExposure.Add(position, isOpen);
+        }
+        return isOpen;
     }
 }

@@ -4,6 +4,7 @@ using GoblinStronghold.Simulation.Animals;
 using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Lighting;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Presentation;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.GodotClient.UI.WorldRendering;
@@ -142,7 +143,13 @@ public partial class WorldView : Node2D
         _terrainAtlas = TerrainSprites.LoadAtlas();
         _terrainTransitionAtlas = TerrainTransitionSprites.LoadAtlas();
         _caveAtlas = CaveSprites.LoadAtlas();
-        _lowerLevelPresentation.Initialize(_terrainAtlas, _caveAtlas);
+        _lowerLevelPresentation.Initialize(
+            _terrainAtlas,
+            _caveAtlas,
+            _environmentAtlas,
+            _itemIconAtlas,
+            _treePartAtlas,
+            _treeCrownAtlas);
         _caveWallAtlas = CaveSprites.LoadWallAtlas();
         _humanStructureAtlas = HumanStructureSprites.LoadAtlas();
         _walkwayAtlas = WalkwaySprites.LoadAtlas();
@@ -410,9 +417,10 @@ public partial class WorldView : Node2D
         }
 
         DrawTerrain();
+        DrawPlants();
+        DrawCaveFlora();
         if (_visibleLevel >= 0)
         {
-            DrawPlants();
             DrawHumanFields();
         }
 
@@ -539,7 +547,7 @@ public partial class WorldView : Node2D
         foreach (var chunk in _lowerLevelPresentation.VisibleTextures)
         {
             var depth = Math.Max(1, _visibleLevel - chunk.Key.Level);
-            var brightness = Math.Max(0.32f, 0.68f - ((depth - 1) * 0.1f));
+            var brightness = LowerLevelVisualDegradationPolicy.ResolveBrightness(depth);
             var chunkWorldSize = LowerLevelExposureIndex.DefaultChunkSize * TileSize;
             DrawTextureRect(
                 chunk.Lighting,
@@ -550,6 +558,14 @@ public partial class WorldView : Node2D
                     chunkWorldSize),
                 tile: false,
                 modulate: new Color(brightness, brightness, brightness, 1f));
+            DrawTextureRect(
+                chunk.SkyLighting,
+                new Rect2(
+                    chunk.Key.X * chunkWorldSize,
+                    chunk.Key.Y * chunkWorldSize,
+                    chunkWorldSize,
+                    chunkWorldSize),
+                tile: false);
         }
     }
 
@@ -939,6 +955,10 @@ public partial class WorldView : Node2D
             destination,
             opening.SourceRegion,
             new Color(brightness, brightness, brightness, 1f));
+        DrawTextureRectRegion(
+            opening.SkyLighting,
+            destination,
+            opening.SourceRegion);
         DrawLowerLevelActorGroup(
             _lowerLevelPresentation.GetOpeningActors(upperPosition),
             destination.GetCenter(),
@@ -1418,20 +1438,21 @@ public partial class WorldView : Node2D
 
     private void DrawPlants()
     {
-        if (_visibleLevel < 0)
+        foreach (var item in _snapshot.PlantPatches
+                     .Where(plant => plant.Biomass > 0 || plant.Kind == PlantKind.BerryBush)
+                     .Select(plant => (
+                         Plant: plant,
+                         Position: PlantPresentationPositionPolicy.Resolve(
+                             _engine.Map,
+                             plant)))
+                     .Where(item => item.Position.Z == _visibleLevel))
         {
-            return;
-        }
-
-        foreach (var plant in _snapshot.PlantPatches.Where(item =>
-                     (item.Biomass > 0 || item.Kind == PlantKind.BerryBush) &&
-                     _engine.Map.GetTerrainSurfacePosition(item.Position).Z == _visibleLevel))
-        {
-            var center = CellCenter(plant.Position);
+            var plant = item.Plant;
+            var center = CellCenter(item.Position);
             if (plant.Kind == PlantKind.FishShoal)
             {
                 DrawCrossFadedTerrain(
-                    CellRect(plant.Position.X, plant.Position.Y),
+                    CellRect(item.Position.X, item.Position.Y),
                     TerrainSprite.FishShadowsA,
                     TerrainSprite.FishShadowsB,
                     phaseOffset: 0.18f);
@@ -1455,6 +1476,82 @@ public partial class WorldView : Node2D
                 _environmentAtlas,
                 new Rect2(center - new Vector2(size / 2f, size / 2f), new Vector2(size, size)),
                 EnvironmentSprites.GetRegion(_environmentAtlas, sprite));
+        }
+    }
+
+    private void DrawCaveFlora()
+    {
+        if (_visibleLevel is >= 0 or < CaveFloraGenerator.DeepestFloraLevel)
+        {
+            return;
+        }
+
+        var bounds = GetVisibleCellBounds();
+        for (var y = bounds.MinimumY; y < bounds.MaximumY; y++)
+        {
+            for (var x = bounds.MinimumX; x < bounds.MaximumX; x++)
+            {
+                var position = new GridPosition(x, y, _visibleLevel);
+                if (!CaveFloraGenerator.TryGet(_engine.Map, position, out var flora))
+                {
+                    continue;
+                }
+
+                var variantOffset = (flora.Variant % 4) switch
+                {
+                    0 => Vector2.Zero,
+                    1 => new Vector2(1.5f, 0f),
+                    2 => new Vector2(0f, 1.5f),
+                    _ => new Vector2(-1.5f, 0f),
+                };
+                var center = CellCenter(position) + variantOffset;
+                switch (flora.Kind)
+                {
+                    case CaveFloraKind.GlowcapCluster:
+                        DrawCircle(center, 8f, new Color(0.12f, 0.8f, 0.9f, 0.1f));
+                        DrawLine(center + new Vector2(-3f, 4f), center + new Vector2(-2f, -2f),
+                            new Color("a8d8c8"), 1.4f);
+                        DrawLine(center + new Vector2(3f, 4f), center + new Vector2(2f, 0f),
+                            new Color("a8d8c8"), 1.2f);
+                        DrawCircle(center + new Vector2(-2f, -3f), 3.3f, new Color("52d9e8"));
+                        DrawCircle(center + new Vector2(2f, -1f), 2.5f, new Color("8b7ee8"));
+                        break;
+                    case CaveFloraKind.CaveMoss:
+                        DrawCircle(center + new Vector2(-4f, 2f), 3.7f, new Color("527a49"));
+                        DrawCircle(center + new Vector2(1f, 1f), 4.2f, new Color("638f52"));
+                        DrawCircle(center + new Vector2(5f, 3f), 2.8f, new Color("3f6841"));
+                        break;
+                    case CaveFloraKind.LichenPatch:
+                        DrawCircle(center + new Vector2(-3f, 0f), 2.8f, new Color("91a58b"));
+                        DrawCircle(center + new Vector2(1f, 3f), 3.1f, new Color("687f70"));
+                        DrawCircle(center + new Vector2(4f, -2f), 2.2f, new Color("a0ad8d"));
+                        break;
+                    case CaveFloraKind.GnarledCaveTree:
+                        DrawLine(center + new Vector2(0f, 6f), center + new Vector2(0f, -4f),
+                            new Color("756451"), 2.4f);
+                        DrawLine(center + new Vector2(0f, -1f), center + new Vector2(-5f, -6f),
+                            new Color("756451"), 1.7f);
+                        DrawLine(center + new Vector2(0f, -3f), center + new Vector2(5f, -7f),
+                            new Color("756451"), 1.5f);
+                        DrawCircle(center + new Vector2(-5f, -6f), 2.7f, new Color("7b8c72"));
+                        DrawCircle(center + new Vector2(5f, -7f), 2.5f, new Color("96a184"));
+                        break;
+                    case CaveFloraKind.CaveMushroomCluster:
+                        DrawLine(center + new Vector2(-3f, 5f), center + new Vector2(-3f, 0f),
+                            new Color("c3bca8"), 1.3f);
+                        DrawLine(center + new Vector2(3f, 5f), center + new Vector2(3f, -1f),
+                            new Color("aaa38f"), 1.5f);
+                        DrawCircle(center + new Vector2(-3f, -1f), 3.2f,
+                            flora.Variant % 2 == 0
+                                ? new Color("a8785b")
+                                : new Color("956f58"));
+                        DrawCircle(center + new Vector2(3f, -2f), 3.8f,
+                            flora.Variant % 2 == 0
+                                ? new Color("806957")
+                                : new Color("756353"));
+                        break;
+                }
+            }
         }
     }
 
@@ -3038,8 +3135,10 @@ public partial class WorldView : Node2D
 
     private void DrawLighting()
     {
-        var darkness = GetAmbientDarkness();
-        if (darkness <= 0f)
+        var calendar = SimulationCalendar.At(_snapshot.Tick, _engine.Definitions.Clock);
+        var surfaceAmbient = WorldAmbientLightPolicy.ResolveSurface(calendar);
+        var undergroundAmbient = WorldAmbientLightPolicy.Underground;
+        if (surfaceAmbient.Darkness <= 0f && _visibleLevel >= 0)
         {
             return;
         }
@@ -3063,29 +3162,19 @@ public partial class WorldView : Node2D
             bounds.MaximumX,
             bounds.MaximumY,
             emitters,
-            darkness,
+            surfaceAmbient,
+            undergroundAmbient,
             _lightingAnimationElapsed);
         DrawTextureRect(texture, visibleRect, tile: false);
     }
 
     private float GetAmbientDarkness()
     {
-        if (_visibleLevel < 0)
-        {
-            return 0.74f;
-        }
-
         var calendar = SimulationCalendar.At(_snapshot.Tick, _engine.Definitions.Clock);
-        if (!calendar.IsNight)
-        {
-            return 0f;
-        }
-
-        var nightTick = calendar.TickOfDay - calendar.DaylightTicks;
-        var twilightTicks = Math.Max(1, Math.Min(600, calendar.NightTicks / 3));
-        var fadeIn = Math.Clamp((double)nightTick / twilightTicks, 0d, 1d);
-        var fadeOut = Math.Clamp((double)(calendar.NightTicks - nightTick) / twilightTicks, 0d, 1d);
-        return (float)(0.48d * Math.Min(fadeIn, fadeOut));
+        var surfaceDarkness = WorldAmbientLightPolicy.ResolveSurface(calendar).Darkness;
+        return _visibleLevel < 0
+            ? Math.Max(surfaceDarkness, WorldAmbientLightPolicy.Underground.Darkness)
+            : surfaceDarkness;
     }
 
     private IReadOnlyList<LightEmitterSnapshot> QueryVisibleLightEmitters(

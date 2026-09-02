@@ -58,6 +58,42 @@ public sealed class SaveCompatibilityTests
     }
 
     [Fact]
+    public void Format76DropsLegacyGrimeOutsideConstructedFloors()
+    {
+        var source = CreateEngine();
+        var naturalSurface = Enumerable.Range(0, source.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, source.Map.Width)
+                .Select(x => source.Map.GetTerrainSurfacePosition(new GridPosition(x, y, 0))))
+            .First(position =>
+                source.Map.TryGetInitialGeometry(position, out var geometry) &&
+                geometry.Support == CellSupportKind.NaturalFlat &&
+                geometry.FluidDepthLevels == 0);
+        var save = JsonNode.Parse(source.Save())!.AsObject();
+        save["formatVersion"] = SimulationSaveFormat.WorkTypePrioritiesMigrationVersion;
+        save["surfaceGrime"] = new JsonArray
+        {
+            new JsonObject
+            {
+                ["x"] = naturalSurface.X,
+                ["y"] = naturalSurface.Y,
+                ["z"] = naturalSurface.Z,
+                ["volume"] = 24,
+                ["createdAtTick"] = source.CurrentTick.Value,
+                ["lastChangedAtTick"] = source.CurrentTick.Value,
+            },
+        };
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Empty(restored.CreateSnapshot().SurfaceGrime);
+        Assert.Equal(
+            SimulationSaveFormat.CurrentVersion,
+            JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
     public void Format72MigratesToExistingSingleRiverChannel()
     {
         var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();

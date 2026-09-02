@@ -13,7 +13,8 @@ public static class SimulationSaveFormat
     public const int ActorSexMigrationVersion = 73;
     public const int PolityIdMigrationVersion = 74;
     public const int RoadModeMigrationVersion = 75;
-    public const int CurrentVersion = 76;
+    public const int WorkTypePrioritiesMigrationVersion = 76;
+    public const int CurrentVersion = 77;
 
     public static bool IsLoadableVersion(int version) =>
         version is SurfaceGrimeMigrationVersion or
@@ -22,6 +23,7 @@ public static class SimulationSaveFormat
             ActorSexMigrationVersion or
             PolityIdMigrationVersion or
             RoadModeMigrationVersion or
+            WorkTypePrioritiesMigrationVersion or
             CurrentVersion;
 }
 
@@ -44,6 +46,7 @@ internal static class SimulationSaveReader
                 $"{SimulationSaveFormat.ActorSexMigrationVersion} and " +
                 $"{SimulationSaveFormat.PolityIdMigrationVersion} and " +
                 $"{SimulationSaveFormat.RoadModeMigrationVersion} and " +
+                $"{SimulationSaveFormat.WorkTypePrioritiesMigrationVersion} and " +
                 $"{SimulationSaveFormat.CurrentVersion}.");
         }
 
@@ -70,6 +73,10 @@ internal static class SimulationSaveReader
         if (save.FormatVersion == SimulationSaveFormat.RoadModeMigrationVersion)
         {
             MigrateRoadMode(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.WorkTypePrioritiesMigrationVersion)
+        {
+            MigrateWorkTypePriorities(save);
         }
 
         return save;
@@ -136,6 +143,13 @@ internal static class SimulationSaveReader
     private static void MigrateRoadMode(SimulationSaveModel save)
     {
         save.MapRoadMode = RoadGenerationMode.Absent;
+        save.FormatVersion = SimulationSaveFormat.WorkTypePrioritiesMigrationVersion;
+    }
+
+    private static void MigrateWorkTypePriorities(SimulationSaveModel save)
+    {
+        save.WorkTypePriorities.Clear();
+        save.DiscardMisplacedLegacySurfaceGrime = true;
         save.FormatVersion = SimulationSaveFormat.CurrentVersion;
     }
 }

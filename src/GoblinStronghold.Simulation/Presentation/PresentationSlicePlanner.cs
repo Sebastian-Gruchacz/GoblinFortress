@@ -28,22 +28,53 @@ public static class PresentationSlicePlanner
     public static PresentationSlicePlan Create(
         PresentationSliceRequest request,
         Func<int, int, int> surfaceLevelAt,
-        IEnumerable<VerticalPassage> verticalPassages)
+        IEnumerable<VerticalPassage> verticalPassages) => Create(
+            request,
+            surfaceLevelAt,
+            verticalPassages,
+            _ => true,
+            _ => false);
+
+    public static PresentationSlicePlan Create(
+        PresentationSliceRequest request,
+        Func<int, int, int> surfaceLevelAt,
+        IEnumerable<VerticalPassage> verticalPassages,
+        Func<GridPosition, bool> isActiveLevelDiscovered) => Create(
+            request,
+            surfaceLevelAt,
+            verticalPassages,
+            isActiveLevelDiscovered,
+            _ => false);
+
+    public static PresentationSlicePlan Create(
+        PresentationSliceRequest request,
+        Func<int, int, int> surfaceLevelAt,
+        IEnumerable<VerticalPassage> verticalPassages,
+        Func<GridPosition, bool> isActiveLevelDiscovered,
+        Func<GridPosition, bool> isVerticalViewBlocked)
     {
         ArgumentNullException.ThrowIfNull(surfaceLevelAt);
         ArgumentNullException.ThrowIfNull(verticalPassages);
+        ArgumentNullException.ThrowIfNull(isActiveLevelDiscovered);
+        ArgumentNullException.ThrowIfNull(isVerticalViewBlocked);
         if (request.VisibleBounds.MaximumX < request.VisibleBounds.MinimumX ||
             request.VisibleBounds.MaximumY < request.VisibleBounds.MinimumY)
         {
             throw new ArgumentException("Visible presentation bounds are inverted.", nameof(request));
         }
 
-        var directlyExposed = CollectDirectExposure(request, surfaceLevelAt);
+        var directlyExposed = CollectDirectExposure(
+            request,
+            surfaceLevelAt,
+            isActiveLevelDiscovered,
+            isVerticalViewBlocked);
         var passages = verticalPassages
             .Where(passage =>
                 passage.Upper.Z <= request.ActiveLevel &&
                 request.VisibleBounds.Contains(passage.Upper) &&
-                request.VisibleBounds.Contains(passage.Lower))
+                request.VisibleBounds.Contains(passage.Lower) &&
+                (passage.Upper.Z != request.ActiveLevel ||
+                 isActiveLevelDiscovered(passage.Upper)))
             .OrderByDescending(passage => passage.Upper.Z)
             .ThenBy(passage => passage.Upper.Y)
             .ThenBy(passage => passage.Upper.X)
@@ -92,7 +123,9 @@ public static class PresentationSlicePlanner
 
     private static IReadOnlyList<GridPosition> CollectDirectExposure(
         PresentationSliceRequest request,
-        Func<int, int, int> surfaceLevelAt)
+        Func<int, int, int> surfaceLevelAt,
+        Func<GridPosition, bool> isActiveLevelDiscovered,
+        Func<GridPosition, bool> isVerticalViewBlocked)
     {
         if (request.ActiveLevel < 0)
         {
@@ -105,7 +138,13 @@ public static class PresentationSlicePlanner
             for (var x = request.VisibleBounds.MinimumX; x < request.VisibleBounds.MaximumX; x++)
             {
                 var surface = surfaceLevelAt(x, y);
-                if (surface < request.ActiveLevel)
+                if (surface < request.ActiveLevel &&
+                    isActiveLevelDiscovered(new GridPosition(x, y, request.ActiveLevel)) &&
+                    !Enumerable.Range(
+                            surface + 1,
+                            request.ActiveLevel - surface)
+                        .Any(level => isVerticalViewBlocked(
+                            new GridPosition(x, y, level))))
                 {
                     result.Add(new GridPosition(x, y, surface));
                 }

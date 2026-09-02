@@ -14,12 +14,12 @@ public sealed partial class SimulationEngine
     private Contamination.SurfaceGrimeSnapshot[] CreateSurfaceGrimeSnapshot() =>
         _surfaceGrime.CreateSnapshot();
 
-    private bool IsConstructedFloorSurface(GridPosition position) =>
-        World.HasConstructedFloorSurface(position);
+    private bool IsConstructedCleanableSurface(GridPosition position) =>
+        World.HasConstructedCleanableSurface(position);
 
     private bool IsLooseDirtSource(GridPosition position)
     {
-        if (IsConstructedFloorSurface(position))
+        if (IsConstructedCleanableSurface(position))
         {
             return false;
         }
@@ -66,7 +66,7 @@ public sealed partial class SimulationEngine
             return 0;
         }
 
-        if (IsConstructedFloorSurface(destination))
+        if (IsConstructedCleanableSurface(destination))
         {
             _surfaceGrime.Deposit(destination, carriedGrime, CurrentTick);
             RefreshAutonomousCleaningRegistration(destination);
@@ -79,17 +79,17 @@ public sealed partial class SimulationEngine
         _bloodStains.Keys
             .Concat(_surfaceGrime.EnumeratePositions())
             .Distinct()
-            .Where(IsConstructedFloorSurface);
+            .Where(IsConstructedCleanableSurface);
 
     private IEnumerable<Contamination.SurfaceContaminationArea>
         GetAutonomousCleaningAreas() => _autonomousCleaningAreas.EnumerateAreas();
 
     private bool HasCleanableSurface(GridPosition position) =>
-        IsConstructedFloorSurface(position) &&
+        IsConstructedCleanableSurface(position) &&
         (HasCleanableBloodOnly(position) || HasSurfaceGrime(position));
 
     private bool HasAutonomouslyCleanableSurface(GridPosition position) =>
-        IsConstructedFloorSurface(position) &&
+        IsConstructedCleanableSurface(position) &&
         Contamination.SurfaceCleaningPolicy.ShouldStartAutonomousCleaning(
             HasCleanableBloodOnly(position),
             _surfaceGrime.GetVolume(position));
@@ -101,7 +101,7 @@ public sealed partial class SimulationEngine
 
     private int CleanSurface(GridPosition position)
     {
-        if (!IsConstructedFloorSurface(position))
+        if (!IsConstructedCleanableSurface(position))
         {
             RemoveBloodCleaningDesignations(position);
             return 0;

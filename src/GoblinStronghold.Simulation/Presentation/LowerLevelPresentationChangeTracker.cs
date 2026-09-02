@@ -18,10 +18,17 @@ public readonly record struct PresentationContaminationObservation(
     int BloodVolume,
     int GrimeVolume);
 
+public readonly record struct PresentationPlantObservation(
+    GridPosition Position,
+    PlantKind Kind,
+    int Biomass,
+    int Capacity);
+
 public sealed record LowerLevelPresentationObservation(
     ulong TopologyVersion,
     IReadOnlyList<PresentationTopologyObservation> Topology,
     IReadOnlyList<PresentationStructureObservation> Structures,
+    IReadOnlyList<PresentationPlantObservation> Plants,
     IReadOnlyList<PresentationContaminationObservation> Contamination);
 
 public readonly record struct PresentationChunkInvalidation(
@@ -37,6 +44,7 @@ public sealed class LowerLevelPresentationChangeTracker
     private ulong _topologyVersion;
     private Dictionary<ulong, PresentationTopologyObservation> _topology = [];
     private Dictionary<WorldObjectId, PresentationStructureObservation> _structures = [];
+    private Dictionary<GridPosition, PresentationPlantObservation> _plants = [];
     private Dictionary<GridPosition, PresentationContaminationObservation> _contamination = [];
     private bool _initialized;
 
@@ -45,6 +53,7 @@ public sealed class LowerLevelPresentationChangeTracker
         _topologyVersion = 0;
         _topology.Clear();
         _structures.Clear();
+        _plants.Clear();
         _contamination.Clear();
         _initialized = false;
     }
@@ -55,22 +64,24 @@ public sealed class LowerLevelPresentationChangeTracker
         ArgumentNullException.ThrowIfNull(observation);
         var topology = observation.Topology.ToDictionary(item => item.Id);
         var structures = observation.Structures.ToDictionary(item => item.Id);
+        var plants = observation.Plants.ToDictionary(item => item.Position);
         var contamination = observation.Contamination.ToDictionary(item => item.Position);
         if (!_initialized)
         {
-            Capture(observation.TopologyVersion, topology, structures, contamination);
+            Capture(observation.TopologyVersion, topology, structures, plants, contamination);
             return new PresentationInvalidationBatch(false, []);
         }
 
         var invalidations = new Dictionary<GridPosition, PresentationChunkDirtyReason>();
         AddTopologyInvalidations(invalidations, _topology, topology);
         AddStructureInvalidations(invalidations, _structures, structures);
+        AddPlantInvalidations(invalidations, _plants, plants);
         AddContaminationInvalidations(invalidations, _contamination, contamination);
         var topologyChanged = observation.TopologyVersion != _topologyVersion;
         var hasKnownTopologyChange = invalidations.Values.Any(reason =>
             (reason & (PresentationChunkDirtyReason.Topology |
                 PresentationChunkDirtyReason.Structures)) != 0);
-        Capture(observation.TopologyVersion, topology, structures, contamination);
+        Capture(observation.TopologyVersion, topology, structures, plants, contamination);
         return new PresentationInvalidationBatch(
             topologyChanged && !hasKnownTopologyChange,
             invalidations
@@ -85,11 +96,13 @@ public sealed class LowerLevelPresentationChangeTracker
         ulong topologyVersion,
         Dictionary<ulong, PresentationTopologyObservation> topology,
         Dictionary<WorldObjectId, PresentationStructureObservation> structures,
+        Dictionary<GridPosition, PresentationPlantObservation> plants,
         Dictionary<GridPosition, PresentationContaminationObservation> contamination)
     {
         _topologyVersion = topologyVersion;
         _topology = topology;
         _structures = structures;
+        _plants = plants;
         _contamination = contamination;
         _initialized = true;
     }
@@ -162,6 +175,24 @@ public sealed class LowerLevelPresentationChangeTracker
         }
     }
 
+    private static void AddPlantInvalidations(
+        IDictionary<GridPosition, PresentationChunkDirtyReason> invalidations,
+        IReadOnlyDictionary<GridPosition, PresentationPlantObservation> previous,
+        IReadOnlyDictionary<GridPosition, PresentationPlantObservation> current)
+    {
+        foreach (var position in previous.Keys.Union(current.Keys))
+        {
+            previous.TryGetValue(position, out var oldPlant);
+            current.TryGetValue(position, out var newPlant);
+            if (oldPlant == newPlant)
+            {
+                continue;
+            }
+
+            AddReason(invalidations, position, PresentationChunkDirtyReason.Vegetation);
+        }
+    }
+
     private static IEnumerable<GridPosition> PreviousAndCurrentPositions(
         IReadOnlyDictionary<ulong, PresentationTopologyObservation> previous,
         IReadOnlyDictionary<ulong, PresentationTopologyObservation> current,
@@ -193,6 +224,7 @@ public static class LowerLevelPresentationObservationFactory
             CreateTopology(world),
             snapshot.WorldObjects.Select(worldObject => CreateStructure(world, worldObject))
                 .ToArray(),
+            CreatePlants(world, snapshot),
             CreateContamination(snapshot));
     }
 
@@ -249,6 +281,19 @@ public static class LowerLevelPresentationObservationFactory
                 grime.GetValueOrDefault(position)))
             .ToArray();
     }
+
+    private static IReadOnlyList<PresentationPlantObservation> CreatePlants(
+        WorldMapState world,
+        SimulationSnapshot snapshot) => snapshot.PlantPatches
+        .Select(plant => new PresentationPlantObservation(
+            PlantPresentationPositionPolicy.Resolve(world.Baseline, plant),
+            plant.Kind,
+            plant.Biomass,
+            plant.Capacity))
+        .OrderBy(plant => plant.Position.Z)
+        .ThenBy(plant => plant.Position.Y)
+        .ThenBy(plant => plant.Position.X)
+        .ToArray();
 
     private static ulong HashStructure(WorldObjectSnapshot worldObject, GridPosition anchor)
     {

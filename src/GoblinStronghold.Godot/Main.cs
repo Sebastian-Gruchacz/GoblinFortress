@@ -6,6 +6,7 @@ using GoblinStronghold.Simulation.Diagnostics;
 using GoblinStronghold.Simulation.Localization;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Map.Generation;
+using GoblinStronghold.Simulation.Planning;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Workshops;
@@ -26,7 +27,6 @@ public partial class Main : Node
     private const double MaximumSimulationMillisecondsPerFrame = 8d;
     private const double PresentationRefreshIntervalSeconds = 1d / 5d;
     private const double FpsRefreshIntervalSeconds = 0.25d;
-    private const double PerformanceWarningCooldownSeconds = 1d;
     private const double MinimumAutosaveIntervalSeconds = 10d * 60d;
     private const string CameraPanLeftAction = "goblin_camera_left";
     private const string CameraPanRightAction = "goblin_camera_right";
@@ -119,6 +119,7 @@ public partial class Main : Node
     private EntityId _contextRemovalEntityId = EntityId.None;
     private GridPosition _contextRemovalPosition;
     private Window _plannerWindow = null!;
+    private WorkTypePriorityWindow _workTypePriorityWindow = null!;
     private VBoxContainer _plannerRows = null!;
     private Label _plannerSummary = null!;
     private string _plannerSignature = string.Empty;
@@ -136,7 +137,6 @@ public partial class Main : Node
     private double _presentationRefreshElapsed;
     private double _fpsRefreshElapsed;
     private readonly RuntimeFramePerformanceProfiler _runtimePerformanceProfiler = new();
-    private long _lastPerformanceWarningAt;
     private ulong _commandSequence = 1;
     private EntityId _selectedActorId = EntityId.None;
     private readonly HashSet<EntityId> _selectedActorIds = [];
@@ -280,6 +280,7 @@ public partial class Main : Node
         CarveRampDown,
         CarveRampUp,
         HuntAnimals,
+        HuntArea,
         Scout,
         CleanBlood,
         Clear,
@@ -457,6 +458,12 @@ public partial class Main : Node
             CreateStorageIcon(ItemIcon.Cargo),
             Ui("action-tiles", "logistics"),
             ShowLogistics);
+        CreateTextTileButton(
+            _managementMenuGrid,
+            _managementMenu,
+            "⇅",
+            Ui("action-tiles", "work-type-priorities"),
+            ShowWorkTypePriorities);
         CreateWorldPlanningMenus();
         CreateWorldPlanningTools();
         CreateWorkOrderMenus();
@@ -653,7 +660,7 @@ public partial class Main : Node
         RegisterShortcutAction(GameShortcutId.AttackArea,
             () => SelectUnitOrderMode(UnitOrderMode.AttackArea));
         RegisterShortcutAction(GameShortcutId.HuntArea,
-            () => SelectUnitOrderMode(UnitOrderMode.HuntArea));
+            () => SelectWorkMode((long)WorkMode.HuntArea));
         RegisterShortcutAction(GameShortcutId.Patrol,
             () => SelectUnitOrderMode(UnitOrderMode.Patrol));
         RegisterShortcutTile(
@@ -694,6 +701,14 @@ public partial class Main : Node
             Ui("toolbar", "level-down"));
         UpdateLevelButtonLabels();
         CreatePlannerWindow();
+        _workTypePriorityWindow = new WorkTypePriorityWindow(Ui, () =>
+            _engine.GetWorkTypePriorities());
+        _workTypePriorityWindow.PriorityChanged += (id, priority) =>
+        {
+            SubmitCommand(SimulationCommand.ConfigureWorkTypePriority(
+                _engine.CurrentTick.Next(), _commandSequence++, id, priority));
+        };
+        AddChild(_workTypePriorityWindow);
         CreateLogisticsWindow();
         CreateRaidWindow();
         CreateWorkshopWindow();
@@ -855,7 +870,7 @@ public partial class Main : Node
     {
         var simulation = _engine.GetMetrics();
         var presentation = _worldView.GetPresentationPerformanceMetrics();
-        var sample = _runtimePerformanceProfiler.Observe(new RuntimeFramePerformanceSample(
+        _runtimePerformanceProfiler.Observe(new RuntimeFramePerformanceSample(
             FrameIndex: 0,
             SimulationTick: _engine.CurrentTick.Value,
             FrameInterval: TimeSpan.FromSeconds(delta),
@@ -871,33 +886,6 @@ public partial class Main : Node
             LowerChunkRebuildDuration: presentation.LowerChunkRebuildBatches.LastDuration,
             VisibleDirtyChunks: presentation.VisibleDirtyChunks,
             SliceWorkload: presentation.SliceWorkload));
-        if (sample is not { } spike || !OS.IsDebugBuild())
-        {
-            return;
-        }
-
-        var warningAt = System.Diagnostics.Stopwatch.GetTimestamp();
-        if (_lastPerformanceWarningAt != 0 &&
-            System.Diagnostics.Stopwatch.GetElapsedTime(_lastPerformanceWarningAt, warningAt)
-                .TotalSeconds < PerformanceWarningCooldownSeconds)
-        {
-            return;
-        }
-        _lastPerformanceWarningAt = warningAt;
-
-        GD.PushWarning(
-            $"Performance spike frame={spike.FrameIndex} tick={spike.SimulationTick} " +
-            $"interval={spike.FrameInterval.TotalMilliseconds:F1}ms " +
-            $"main={spike.MainProcessDuration.TotalMilliseconds:F1}ms " +
-            $"simulation={spike.SimulationDuration.TotalMilliseconds:F1}ms/" +
-            $"{spike.TicksAdvanced} ticks snapshot={spike.SnapshotDuration.TotalMilliseconds:F1}ms " +
-            $"refresh={spike.PresentationRefreshDuration.TotalMilliseconds:F1}ms " +
-            $"autosave={spike.AutosaveDuration.TotalMilliseconds:F1}ms " +
-            $"emitters={spike.EmitterQueryDuration.TotalMilliseconds:F1}ms " +
-            $"light={spike.ActiveLightMapDuration.TotalMilliseconds:F1}ms " +
-            $"lower={spike.LowerChunkRebuildDuration.TotalMilliseconds:F1}ms " +
-            $"dirty={spike.VisibleDirtyChunks} actors={spike.ActiveActors} " +
-            $"exposed={spike.SliceWorkload.ContinuouslyExposedCells}");
     }
 
     public override void _UnhandledInput(InputEvent inputEvent)
@@ -1011,7 +999,8 @@ public partial class Main : Node
                 {
                     ChangeRaidTargetRadius(1);
                 }
-                else if (_unitOrderMode is UnitOrderMode.AttackArea or UnitOrderMode.HuntArea)
+                else if (_unitOrderMode is UnitOrderMode.AttackArea or UnitOrderMode.HuntArea ||
+                         _workMode == WorkMode.HuntArea)
                 {
                     ChangeUnitOrderRadius(1);
                 }
@@ -1025,7 +1014,8 @@ public partial class Main : Node
                 {
                     ChangeRaidTargetRadius(-1);
                 }
-                else if (_unitOrderMode is UnitOrderMode.AttackArea or UnitOrderMode.HuntArea)
+                else if (_unitOrderMode is UnitOrderMode.AttackArea or UnitOrderMode.HuntArea ||
+                         _workMode == WorkMode.HuntArea)
                 {
                     ChangeUnitOrderRadius(-1);
                 }
@@ -1131,8 +1121,8 @@ public partial class Main : Node
             ? DisplayServer.WindowMode.Windowed
             : DisplayServer.WindowMode.Fullscreen);
         _inspector.Text = isFullscreen
-            ? "Tryb okienkowy • Alt+Enter przełącza pełny ekran."
-            : "Pełny ekran w aktualnej rozdzielczości monitora • Alt+Enter wraca do okna.";
+            ? Ui("session-feedback", "windowed")
+            : Ui("session-feedback", "fullscreen");
     }
 
     private SimulationEngine CreateNewEngine(LocationGenerationRequest request)
@@ -1197,14 +1187,19 @@ public partial class Main : Node
         try
         {
             var receipt = _saveStore.SaveQuick(CreateSaveJson());
-            _inspector.Text = $"Gra zapisana i zweryfikowana • " +
-                $"tick {_engine.CurrentTick.Value:N0} • {Path.GetFileName(receipt.Path)} • " +
-                $"{receipt.ByteCount:N0} B" +
-                (receipt.BackupCreated ? " • poprzedni zapis zachowany" : string.Empty);
+            _inspector.Text = UiFormat(
+                "session-feedback",
+                "saved",
+                _engine.CurrentTick.Value,
+                Path.GetFileName(receipt.Path),
+                receipt.ByteCount,
+                receipt.BackupCreated
+                    ? Ui("session-feedback", "previous-save-preserved")
+                    : string.Empty);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _inspector.Text = $"Zapis nie powiódł się: {exception.Message}";
+            _inspector.Text = UiFormat("session-feedback", "save-failed", exception.Message);
         }
     }
 
@@ -1888,12 +1883,19 @@ public partial class Main : Node
         try
         {
             SaveAutosave();
-            _inspector.Text = $"Autozapis ukończony • początek dnia " +
-                $"{SimulationCalendar.At(_engine.CurrentTick, _engine.Definitions.Clock).AbsoluteDay + 1}.";
+            _inspector.Text = UiFormat(
+                "session-feedback",
+                "autosave-complete",
+                SimulationCalendar.At(
+                    _engine.CurrentTick,
+                    _engine.Definitions.Clock).AbsoluteDay + 1);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _inspector.Text = $"Autozapis nie powiódł się: {exception.Message}";
+            _inspector.Text = UiFormat(
+                "session-feedback",
+                "autosave-failed",
+                exception.Message);
         }
         finally
         {
@@ -2018,7 +2020,7 @@ public partial class Main : Node
         _storageDetails.Hide();
         _constructionDetails.Hide();
         _workshopDetails.Hide();
-        _inspector.Text = "Zaznaczenie wyczyszczone. PPM przeciągnięty przesuwa mapę.";
+        _inspector.Text = Ui("session-feedback", "selection-cleared");
     }
 
     // Keep interaction aligned with the frame the player sees. Creating a full snapshot here
@@ -2253,7 +2255,7 @@ public partial class Main : Node
         Add(_commandingHandIcon, "attack-area",
             () => SelectUnitOrderMode(UnitOrderMode.AttackArea), GameShortcutId.AttackArea);
         Add(PlanningToolIcons.CreateHuntAreaIcon(CreateSlingIcon()), "hunt-area",
-            () => SelectUnitOrderMode(UnitOrderMode.HuntArea), GameShortcutId.HuntArea);
+            () => SelectWorkMode((long)WorkMode.HuntArea), GameShortcutId.HuntArea);
         Add(PlanningToolIcons.CreatePatrolIcon(), "patrol",
             () => SelectUnitOrderMode(UnitOrderMode.Patrol), GameShortcutId.Patrol);
 
@@ -2268,6 +2270,8 @@ public partial class Main : Node
     }
 
     private void ShowManagementMenu() => ShowToolbarMenu(_managementMenu, "Management");
+
+    private void ShowWorkTypePriorities() => _workTypePriorityWindow.ShowPriorities();
 
     private void ShowWorkMenu()
     {
@@ -2440,7 +2444,7 @@ public partial class Main : Node
     {
         if (_selectedActorIds.Count == 0)
         {
-            _inspector.Text = "Najpierw wybierz goblina albo grupę goblinów. Shift+LPM rozszerza zaznaczenie.";
+            _inspector.Text = Ui("unit-order-feedback", "select-first");
             return;
         }
 
@@ -2457,10 +2461,10 @@ public partial class Main : Node
         }
         _inspector.Text = mode switch
         {
-            UnitOrderMode.Move => "Marsz (M): wskaż odkryte, dostępne pole.",
-            UnitOrderMode.AttackArea => "Atak (A): wskaż centrum poszukiwania wrogów • kółko zmienia promień.",
-            UnitOrderMode.HuntArea => "Polowanie (H): wskaż centrum łowiska • kółko zmienia promień.",
-            UnitOrderMode.Patrol => "Patrol (P): wskaż cel; Ctrl+LPM dodaje kolejne punkty, zwykłe LPM kończy trasę.",
+            UnitOrderMode.Move => Ui("unit-order-feedback", "move-prompt"),
+            UnitOrderMode.AttackArea => Ui("unit-order-feedback", "attack-prompt"),
+            UnitOrderMode.HuntArea => Ui("unit-order-feedback", "hunt-prompt"),
+            UnitOrderMode.Patrol => Ui("unit-order-feedback", "patrol-prompt"),
             _ => string.Empty,
         };
     }
@@ -2476,7 +2480,7 @@ public partial class Main : Node
         if (!IsBuildableLayerCell(clickedDestination) ||
             !snapshot.GetVisibility(clickedDestination, _engine.Map.Width).IsDiscovered())
         {
-            _inspector.Text = "Cel marszu musi być odkrytym, dostępnym polem.";
+            _inspector.Text = Ui("unit-order-feedback", "move-invalid");
             return;
         }
 
@@ -2507,17 +2511,22 @@ public partial class Main : Node
         }
         if (ordered == 0)
         {
-            _inspector.Text = "Żaden zaznaczony goblin nie może dotrzeć do wskazanego przejścia.";
+            _inspector.Text = Ui("unit-order-feedback", "move-unreachable");
             return;
         }
         _unitOrderMode = UnitOrderMode.None;
         _inspector.Text = ordered == 1
-            ? $"Wydano rozkaz marszu do {clickedDestination}" +
-              (usedPassage ? " przez przejście między poziomami." : ".")
-            : $"Wydano {ordered} goblinom rozkaz zbiórki przy {clickedDestination}" +
-              (usedPassage ? " z użyciem przejścia między poziomami." : ".");
+            ? UiFormat(
+                "unit-order-feedback",
+                usedPassage ? "move-one-passage" : "move-one",
+                clickedDestination)
+            : UiFormat(
+                "unit-order-feedback",
+                usedPassage ? "move-group-passage" : "move-group",
+                ordered,
+                clickedDestination);
         _inspector.Text +=
-            (_speed == 0 ? " Zostanie wykonany po wznowieniu czasu." : string.Empty);
+            (_speed == 0 ? Ui("unit-order-feedback", "after-resume") : string.Empty);
     }
 
     private void IssueUnitOrder(InputEventMouseButton mouse)
@@ -2543,7 +2552,7 @@ public partial class Main : Node
         var snapshot = _latestSnapshot;
         if (!_engine.Visibility.Get(center).IsDiscovered())
         {
-            _inspector.Text = "Obszar rozkazu musi leżeć na rozpoznanym terenie.";
+            _inspector.Text = Ui("unit-order-feedback", "area-undiscovered");
             return;
         }
 
@@ -2561,11 +2570,18 @@ public partial class Main : Node
             ordered++;
         }
 
-        var name = _unitOrderMode == UnitOrderMode.AttackArea ? "atak" : "polowanie";
+        var name = Ui(
+            "unit-order-feedback",
+            _unitOrderMode == UnitOrderMode.AttackArea ? "attack-name" : "hunt-name");
         _unitOrderMode = UnitOrderMode.None;
         _worldView.SetRaidTargetPreview(null, 0);
-        _inspector.Text = $"Wydano {ordered} goblinom rozkaz: {name} w promieniu " +
-            $"{_unitOrderRadius} od {center}.";
+        _inspector.Text = UiFormat(
+            "unit-order-feedback",
+            "area-issued",
+            ordered,
+            name,
+            _unitOrderRadius,
+            center);
     }
 
     private void AddPatrolPoint(Vector2 screenPosition, bool keepAdding)
@@ -2575,7 +2591,7 @@ public partial class Main : Node
         if (!_engine.Visibility.Get(point).IsDiscovered() ||
             !_engine.World.IsTerrainReachable(point))
         {
-            _inspector.Text = "Punkt patrolu musi być odkryty i dostępny.";
+            _inspector.Text = Ui("unit-order-feedback", "patrol-invalid");
             return;
         }
         if (_patrolDraftPoints.Count == 0 || _patrolDraftPoints[^1] != point)
@@ -2584,8 +2600,10 @@ public partial class Main : Node
         }
         if (keepAdding)
         {
-            _inspector.Text = $"Patrol: dodano punkt {_patrolDraftPoints.Count}. " +
-                "Ctrl+LPM dodaje następny; zwykłe LPM kończy trasę.";
+            _inspector.Text = UiFormat(
+                "unit-order-feedback",
+                "patrol-point-added",
+                _patrolDraftPoints.Count);
             return;
         }
 
@@ -2607,8 +2625,11 @@ public partial class Main : Node
             ordered++;
         }
         _unitOrderMode = UnitOrderMode.None;
-        _inspector.Text = $"Wydano {ordered} goblinom patrol przez " +
-            $"{_patrolDraftPoints.Count + 1} punktów (łącznie z pozycją startową).";
+        _inspector.Text = UiFormat(
+            "unit-order-feedback",
+            "patrol-issued",
+            ordered,
+            _patrolDraftPoints.Count + 1);
         _patrolDraftPoints.Clear();
     }
 
@@ -2622,7 +2643,10 @@ public partial class Main : Node
             SimulationEngine.MinimumRaidTargetRadius,
             SimulationEngine.MaximumRaidTargetRadius);
         UpdateUnitOrderPreview(GetViewport().GetMousePosition());
-        _inspector.Text = $"Promień obszaru rozkazu: {_unitOrderRadius}.";
+        _inspector.Text = UiFormat(
+            "unit-order-feedback",
+            "radius",
+            _unitOrderRadius);
     }
 
     private bool TryIssuePassageMove(Vector2 screenPosition)
@@ -3134,6 +3158,11 @@ public partial class Main : Node
         _workMode = mode;
         _isDraggingWorkArea = false;
         _worldView.SetWorkPreview(default, []);
+        if (_workMode == WorkMode.HuntArea)
+        {
+            _unitOrderRadius = SimulationEngine.DefaultRaidTargetRadius;
+            UpdateUnitOrderPreview(GetViewport().GetMousePosition());
+        }
         UpdateActiveToolCursor();
         _inspector.Text = _workMode switch
         {
@@ -3148,6 +3177,7 @@ public partial class Main : Node
             WorkMode.CarveRampDown => Ui("work-prompts", "carve-ramp-down"),
             WorkMode.CarveRampUp => Ui("work-prompts", "carve-ramp-up"),
             WorkMode.HuntAnimals => Ui("work-prompts", "hunt-animals"),
+            WorkMode.HuntArea => Ui("work-prompts", "hunt-area"),
             WorkMode.Scout => Ui("work-prompts", "scout"),
             WorkMode.CleanBlood => Ui("work-prompts", "clean-blood"),
             WorkMode.Clear => Ui("work-prompts", "clear-orders"),
@@ -3178,27 +3208,8 @@ public partial class Main : Node
 
         if (_buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp)
         {
-            if (!_engine.Visibility.Get(cell).IsDiscovered() ||
-                !TryInferDiscoveredRamp(cell, out var upper))
-            {
-                _inspector.Text = Ui("construction-feedback", "ramp-direction-invalid");
-                UpdateBuildPreview(screenPosition);
-                return;
-            }
-
-            _engine.QueueCommand(_buildMode == BuildMode.StoneRamp
-                ? SimulationCommand.BuildStoneRamp(
-                    _engine.CurrentTick.Next(), _commandSequence++, cell, upper,
-                    _selectedConstructionMaterial)
-                : SimulationCommand.BuildWoodenRamp(
-                    _engine.CurrentTick.Next(), _commandSequence++, cell, upper,
-                    _selectedConstructionMaterial));
-            _inspector.Text = UiFormat(
-                "construction-feedback",
-                _buildMode == BuildMode.StoneRamp ? "stone-ramp-ordered" : "wooden-ramp-ordered",
-                cell,
-                upper,
-                DescribeRampDirection(cell, upper));
+            _linearBuildStart = cell;
+            _isDraggingLinearBuild = true;
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -3296,6 +3307,11 @@ public partial class Main : Node
     {
         var end = ScreenToVisibleCell(screenPosition);
         _isDraggingLinearBuild = false;
+        if (_buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp)
+        {
+            FinishDirectionalRampConstruction(end, screenPosition);
+            return;
+        }
         if (!IsBuildableLayerCell(end) || end.Z != _linearBuildStart.Z)
         {
             _inspector.Text = Ui("construction-feedback", "single-level");
@@ -3416,6 +3432,39 @@ public partial class Main : Node
         UpdateBuildPreview(screenPosition);
     }
 
+    private void FinishDirectionalRampConstruction(
+        GridPosition dragEnd,
+        Vector2 screenPosition)
+    {
+        if (!TryResolveDiscoveredRampDrag(_linearBuildStart, dragEnd, out var placement))
+        {
+            _inspector.Text = Ui("construction-feedback", "ramp-direction-invalid");
+            UpdateBuildPreview(screenPosition);
+            return;
+        }
+
+        _engine.QueueCommand(_buildMode == BuildMode.StoneRamp
+            ? SimulationCommand.BuildStoneRamp(
+                _engine.CurrentTick.Next(),
+                _commandSequence++,
+                placement.Lower,
+                placement.Upper,
+                _selectedConstructionMaterial)
+            : SimulationCommand.BuildWoodenRamp(
+                _engine.CurrentTick.Next(),
+                _commandSequence++,
+                placement.Lower,
+                placement.Upper,
+                _selectedConstructionMaterial));
+        _inspector.Text = UiFormat(
+            "construction-feedback",
+            _buildMode == BuildMode.StoneRamp ? "stone-ramp-ordered" : "wooden-ramp-ordered",
+            placement.Lower,
+            placement.Upper,
+            DescribeRampDirection(placement.Lower, placement.Upper));
+        UpdateBuildPreview(screenPosition);
+    }
+
     private void UpdateBuildPreview(Vector2 screenPosition)
     {
         var cell = ScreenToVisibleCell(screenPosition);
@@ -3437,6 +3486,8 @@ public partial class Main : Node
                 GetAreaCells(_linearBuildStart, cell),
             BuildMode.WoodenFloor or BuildMode.StoneFloor when _isDraggingLinearBuild =>
                 GetAreaCells(_linearBuildStart, cell),
+            BuildMode.WoodenRamp or BuildMode.StoneRamp when _isDraggingLinearBuild =>
+                [_linearBuildStart, cell],
             BuildMode.FieldCamp => GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
             BuildMode.GoblinHut => GetAreaCells(cell, cell with { X = cell.X + 2, Y = cell.Y + 2 }),
             _ => new[] { cell },
@@ -3465,6 +3516,10 @@ public partial class Main : Node
                         DescribeResourceVariant(_selectedConstructionMaterial)),
                 BuildMode.Walkway when ContainsLava(cells) =>
                     Ui("construction-feedback", "walkway-lava-preview"),
+                BuildMode.WoodenRamp or BuildMode.StoneRamp =>
+                    TryResolveDiscoveredRampDrag(_linearBuildStart, cell, out _)
+                        ? Ui("construction-feedback", "ramp-preview-valid")
+                        : Ui("construction-feedback", "ramp-direction-invalid"),
                 BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
                     UiFormat("construction-feedback", "storage-resize-preview",
                         _resizingStorageAreaId, cells.Count),
@@ -3495,8 +3550,8 @@ public partial class Main : Node
             : _buildMode == BuildMode.StorageArea
             ? IsStorageAreaPreviewValid(cells)
             : _buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp
-                ? cells.Count == 1 && IsDiscoveredConstructionCell(cells[0]) &&
-                    TryInferDiscoveredRamp(cells[0], out _)
+                ? cells.Count == 2 &&
+                    TryResolveDiscoveredRampDrag(cells[0], cells[1], out _)
             : _buildMode is BuildMode.Walkway or BuildMode.BasaltWalkway or
                 BuildMode.WoodenWall or BuildMode.StoneWall or
                 BuildMode.WoodenFloor or BuildMode.StoneFloor
@@ -3545,35 +3600,24 @@ public partial class Main : Node
             _ => Ui("directions", "unknown"),
         };
 
-    private bool TryInferDiscoveredRamp(GridPosition lower, out GridPosition upper)
+    private bool TryResolveDiscoveredRampDrag(
+        GridPosition dragStart,
+        GridPosition dragEnd,
+        out DirectionalRampPlacement placement)
     {
-        var candidates = new[]
+        if (!DirectionalRampPlacementPolicy.TryResolve(
+                dragStart,
+                dragEnd,
+                _engine.World.CanBuildRamp,
+                out placement))
         {
-            lower with { Y = lower.Y - 1, Z = lower.Z + 1 },
-            lower with { X = lower.X + 1, Z = lower.Z + 1 },
-            lower with { Y = lower.Y + 1, Z = lower.Z + 1 },
-            lower with { X = lower.X - 1, Z = lower.Z + 1 },
-        };
-        foreach (var candidate in candidates.OrderBy(candidate =>
-                     _engine.World.IsTerrainTraversable(lower with
-                     {
-                         X = lower.X - (candidate.X - lower.X),
-                         Y = lower.Y - (candidate.Y - lower.Y),
-                     })
-                         ? 0
-                         : 1))
-        {
-            if (IsBuildableLayerCell(candidate) &&
-                IsDiscoveredConstructionCell(candidate) &&
-                _engine.World.CanBuildRamp(lower, candidate))
-            {
-                upper = candidate;
-                return true;
-            }
+            return false;
         }
 
-        upper = default;
-        return false;
+        return IsBuildableLayerCell(placement.Lower) &&
+            IsBuildableLayerCell(placement.Upper) &&
+            IsDiscoveredConstructionCell(placement.Lower) &&
+            IsDiscoveredConstructionCell(placement.Upper);
     }
 
     private bool IsStorageAreaPreviewValid(IReadOnlyList<GridPosition> cells)
@@ -3604,7 +3648,13 @@ public partial class Main : Node
         {
             return cells.Count <= 256 &&
                 cells.All(IsDiscoveredConstructionCell) &&
-                _engine.World.CanBuildFloors(cells);
+                cells.All(cell => FloorCoveringPlacementPolicy.TryResolve(
+                    _engine.World,
+                    _buildMode == BuildMode.StoneFloor
+                        ? ConstructionKind.StoneFloor
+                        : ConstructionKind.WoodenFloor,
+                    cell,
+                    out _));
         }
 
         if (_buildMode is not (BuildMode.Walkway or BuildMode.BasaltWalkway))
@@ -3631,7 +3681,13 @@ public partial class Main : Node
             .Where(cell =>
                 IsDiscoveredConstructionCell(cell) &&
                 !reserved.Contains(cell) &&
-                _engine.World.CanPlanFloorConstruction([cell]))
+                FloorCoveringPlacementPolicy.TryResolve(
+                    _engine.World,
+                    _buildMode == BuildMode.StoneFloor
+                        ? ConstructionKind.StoneFloor
+                        : ConstructionKind.WoodenFloor,
+                    cell,
+                    out _))
             .ToArray();
     }
 
@@ -3669,12 +3725,36 @@ public partial class Main : Node
     private void UpdateWorkPreview(Vector2 screenPosition)
     {
         var cell = ClampToCurrentMapLevel(ScreenToVisibleCell(screenPosition));
+        if (_workMode == WorkMode.HuntArea)
+        {
+            _worldView.SetRaidTargetPreview(cell, _unitOrderRadius);
+            return;
+        }
         _worldView.SetWorkAreaPreview(
             _isDraggingWorkArea ? _workAreaStart : null,
             _isDraggingWorkArea ? cell : null);
         if (!IsBuildableLayerCell(cell))
         {
             _worldView.SetWorkPreview(default, []);
+            return;
+        }
+
+        if (_isDraggingWorkArea &&
+            _workMode is WorkMode.CarveRampDown or WorkMode.CarveRampUp)
+        {
+            var valid = TryResolveCarvedRampDrag(
+                _workAreaStart,
+                cell,
+                out _,
+                out var destination);
+            _worldView.SetWorkPreview(
+                ToDesignationKind(_workMode),
+                valid ? [_workAreaStart, cell] : []);
+            _inspector.Text = valid
+                ? Ui("work-feedback", "ramp-valid")
+                : _engine.World.TryGetRampDestinationFluid(destination, out var fluid)
+                    ? UiFormat("work-feedback", "ramp-fluid", DescribeFluid(fluid))
+                    : Ui("work-feedback", "ramp-invalid");
             return;
         }
 
@@ -3721,12 +3801,40 @@ public partial class Main : Node
         var end = ClampToCurrentMapLevel(ScreenToVisibleCell(screenPosition));
         _isDraggingWorkArea = false;
         _worldView.SetWorkAreaPreview(null, null);
+        if (_workMode == WorkMode.HuntArea)
+        {
+            if (!_engine.Visibility.Get(end).IsDiscovered())
+            {
+                _inspector.Text = Ui("work-feedback", "hunt-area-undiscovered");
+                return;
+            }
+
+            _engine.QueueCommand(SimulationCommand.DesignateHuntArea(
+                _engine.CurrentTick.Next(),
+                _commandSequence++,
+                end,
+                _unitOrderRadius));
+            _worldView.SetRaidTargetPreview(null, 0);
+            _workMode = WorkMode.None;
+            UpdateActiveToolCursor();
+            _inspector.Text = UiFormat(
+                "work-feedback", "hunt-area-designated", _unitOrderRadius, end);
+            return;
+        }
         if (!IsBuildableLayerCell(end) || !IsValidWorkAreaSelection(_workAreaStart, end))
         {
             _worldView.SetWorkPreview(default, []);
             _inspector.Text = _workAreaStart.Z != end.Z
                 ? Ui("work-feedback", "single-level")
                 : Ui("work-feedback", "outside-map");
+            return;
+        }
+
+        if (_workMode is WorkMode.CarveRampDown or WorkMode.CarveRampUp &&
+            !TryResolveCarvedRampDrag(_workAreaStart, end, out _, out _))
+        {
+            _worldView.SetWorkPreview(default, []);
+            _inspector.Text = Ui("work-feedback", "ramp-invalid");
             return;
         }
 
@@ -3847,6 +3955,39 @@ public partial class Main : Node
         UpdateWorkPreview(screenPosition);
     }
 
+    private bool TryResolveCarvedRampDrag(
+        GridPosition dragStart,
+        GridPosition dragEnd,
+        out GridPosition origin,
+        out GridPosition destination)
+    {
+        origin = dragStart;
+        destination = dragEnd;
+        if (dragStart.Z != dragEnd.Z ||
+            Math.Abs(dragEnd.X - dragStart.X) + Math.Abs(dragEnd.Y - dragStart.Y) != 1)
+        {
+            return false;
+        }
+
+        destination = dragEnd with
+        {
+            Z = dragStart.Z + (_workMode == WorkMode.CarveRampDown ? -1 : 1),
+        };
+        var destinationCanBeGenerated = _workMode == WorkMode.CarveRampDown &&
+            destination.Z == _engine.Map.MinimumWorldLevel - 1 &&
+            _engine.Map.IsColumnWithin(destination);
+        if ((!IsBuildableLayerCell(destination) && !destinationCanBeGenerated) ||
+            !IsDiscoveredConstructionCell(dragStart) ||
+            !IsDiscoveredConstructionCell(dragEnd))
+        {
+            return false;
+        }
+
+        return _workMode == WorkMode.CarveRampDown
+            ? _engine.World.CanCarveRampDown(dragStart, destination)
+            : _engine.World.CanCarveRampUp(dragStart, destination);
+    }
+
     private void SubmitCommand(SimulationCommand command)
     {
         if (_speed > 0)
@@ -3882,6 +4023,7 @@ public partial class Main : Node
         _isDraggingWorkArea = false;
         _worldView.SetWorkAreaPreview(null, null);
         _worldView.SetWorkPreview(default, []);
+        _worldView.SetRaidTargetPreview(null, 0);
         UpdateActiveToolCursor();
         if (clearInspector && wasActive)
         {
@@ -3919,8 +4061,7 @@ public partial class Main : Node
         _worldView.SetVisibleLevel(_visibleLevel);
         _minimap.SetVisibleLevel(_visibleLevel);
         _worldView.SetRaidTargetPreview(snapshot.RaidPlan.Target, _raidTargetRadius);
-        _inspector.Text = $"Wskaż centrum najazdu • promień {_raidTargetRadius} • " +
-            "kółko myszy zmienia promień (3–10).";
+        _inspector.Text = UiFormat("raid-targeting", "prompt", _raidTargetRadius);
     }
 
     private void UpdateRaidTargetPreview(Vector2 screenPosition)
@@ -3937,7 +4078,7 @@ public partial class Main : Node
             SimulationEngine.MaximumRaidTargetRadius);
         _worldView.SetRaidTargetPreview(ScreenToVisibleCell(GetViewport().GetMousePosition()),
             _raidTargetRadius);
-        _inspector.Text = $"Promień obszaru najazdu: {_raidTargetRadius}.";
+        _inspector.Text = UiFormat("raid-targeting", "radius", _raidTargetRadius);
     }
 
     private void FinishRaidTargetSelection(Vector2 screenPosition)
@@ -3945,7 +4086,7 @@ public partial class Main : Node
         var target = ScreenToVisibleCell(screenPosition);
         if (!_engine.Visibility.Get(target).IsDiscovered())
         {
-            _inspector.Text = "Cel najazdu musi leżeć na wcześniej rozpoznanym terenie.";
+            _inspector.Text = Ui("raid-targeting", "undiscovered");
             return;
         }
 
@@ -3956,7 +4097,11 @@ public partial class Main : Node
             _raidTargetRadius));
         _isRaidTargetMode = false;
         _worldView.SetRaidTargetPreview(null, 0);
-        _inspector.Text = $"Cel najazdu: {target}, promień {_raidTargetRadius}.";
+        _inspector.Text = UiFormat(
+            "raid-targeting",
+            "selected",
+            target,
+            _raidTargetRadius);
     }
 
     private static WorkDesignationKind ToDesignationKind(WorkMode mode) => mode switch
@@ -4404,8 +4549,15 @@ public partial class Main : Node
                     : excavated
                         ? Ui("cave-kinds", "excavated-corridor")
                         : DescribeCaveKind(caveCell.Kind);
+                var caveFlora = CaveFloraGenerator.TryGet(
+                    _engine.Map,
+                    levelPosition,
+                    out var flora)
+                    ? Ui("cave-flora", flora.Kind.ToString())
+                    : null;
                 _inspector.Text = $"{levelPosition} • {DescribeCaveRock(caveCell.Rock)} • " +
                     caveKind + DescribeCaveFluid(caveCell.Fluid) +
+                    (caveFlora is null ? string.Empty : $" • {caveFlora}") +
                     (excavated ? string.Empty : DescribeMineralDeposit(caveCell.Deposit)) +
                     (caveCell.Kind == CaveCellKind.SolidRock
                         ? DescribeMiningRequirement(caveCell.Rock)
@@ -9203,8 +9355,7 @@ public partial class Main : Node
     {
         if (_use3DView)
         {
-            _inspector.Text = "Prototyp 3D pokazuje obecnie całą powierzchnię wraz z wysokościami. " +
-                "Przekrój jaskiń zostanie podłączony w kolejnej iteracji renderera.";
+            _inspector.Text = Ui("layer-tools", "prototype-3d-surface-only");
             return;
         }
 
@@ -9241,30 +9392,25 @@ public partial class Main : Node
         var selection = selectedActors.Length switch
         {
             0 => string.Empty,
-            1 => $" Zaznaczenie zachowane: {selectedActors[0].Name} jest na z={selectedActors[0].Position.Z}.",
-            _ => $" Zaznaczenie grupy {selectedActors.Length} goblinów zachowane; poziomy: " +
-                 string.Join(", ", selectedActors.Select(actor => actor.Position.Z).Distinct().Order()) + ".",
+            1 => UiFormat(
+                "layer-tools",
+                "selection-one",
+                selectedActors[0].Name,
+                selectedActors[0].Position.Z),
+            _ => UiFormat(
+                "layer-tools",
+                "selection-group",
+                selectedActors.Length,
+                string.Join(", ", selectedActors
+                    .Select(actor => actor.Position.Z)
+                    .Distinct()
+                    .Order())),
         };
         _inspector.Text = (_unitOrderMode == UnitOrderMode.Move
-            ? $"Widoczna warstwa z={next}. Wskaż odkryty cel marszu lub przejście między poziomami."
-            : $"Widoczna warstwa mapy: z={next}. Page Up / Page Down zmienia poziom.") +
+            ? UiFormat("layer-tools", "visible-move", next)
+            : UiFormat("layer-tools", "visible", next)) +
             selection;
         UpdateStatus(snapshot);
-    }
-
-    private bool EnsureSurfaceToolAvailable(string toolName)
-    {
-        if (_visibleLevel == 0)
-        {
-            return true;
-        }
-
-        CancelActiveTool();
-        _buildMenu.Hide();
-        _workMenu.Hide();
-        _inspector.Text = $"{toolName} jest obecnie dostępne tylko na powierzchni (z=0). " +
-            "Podziemne konstrukcje i prace dostaną osobne blueprinty.";
-        return false;
     }
 
     private bool EnsureBuildModeAvailable(BuildMode mode)

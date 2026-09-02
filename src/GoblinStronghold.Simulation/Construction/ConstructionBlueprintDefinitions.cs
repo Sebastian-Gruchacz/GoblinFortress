@@ -237,6 +237,8 @@ public static class ConstructionBlueprintDefinitions
                     definition.Footprint == ConstructionFootprintKind.FixedRectangle,
                 WorldToolPlacementMode.InferredConnection =>
                     definition.Footprint == ConstructionFootprintKind.Single,
+                WorldToolPlacementMode.DirectionalConnection =>
+                    definition.Footprint == ConstructionFootprintKind.Single,
                 _ => false,
             };
             if (!compatiblePlacement)

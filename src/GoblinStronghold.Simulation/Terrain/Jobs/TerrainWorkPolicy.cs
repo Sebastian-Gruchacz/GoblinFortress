@@ -10,7 +10,8 @@ internal static class TerrainWorkPolicy
         WorldMapState world,
         GoblinSkill knownSkills,
         PersonalEquipment equipment,
-        int buildingExperience)
+        int buildingExperience,
+        GridPosition? rampDestination = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(world);
@@ -31,9 +32,21 @@ internal static class TerrainWorkPolicy
                     equipment,
                     buildingExperience),
             WorkDesignationKind.CarveRampDown =>
-                CanCarveRamp(world, target, carveDown: true, equipment, buildingExperience),
+                CanCarveRamp(
+                    world,
+                    target,
+                    rampDestination,
+                    carveDown: true,
+                    equipment,
+                    buildingExperience),
             WorkDesignationKind.CarveRampUp =>
-                CanCarveRamp(world, target, carveDown: false, equipment, buildingExperience),
+                CanCarveRamp(
+                    world,
+                    target,
+                    rampDestination,
+                    carveDown: false,
+                    equipment,
+                    buildingExperience),
             _ => false,
         };
     }
@@ -42,7 +55,8 @@ internal static class TerrainWorkPolicy
         TerrainModificationDefinition definition,
         GridPosition target,
         WorldMapState world,
-        WorldVisibilityState visibility)
+        WorldVisibilityState visibility,
+        GridPosition? rampDestination = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(world);
@@ -54,8 +68,12 @@ internal static class TerrainWorkPolicy
                 visibility.Get(target) != CellVisibility.Unknown &&
                 !world.IsSolidRock(target) &&
                 !world.IsTerrainRampIntact(target),
-            WorkDesignationKind.CarveRampDown => !world.CanCarveRampDown(target),
-            WorkDesignationKind.CarveRampUp => !world.CanCarveRampUp(target),
+            WorkDesignationKind.CarveRampDown => !(rampDestination is { } lower
+                ? world.CanCarveRampDown(target, lower)
+                : world.CanCarveRampDown(target)),
+            WorkDesignationKind.CarveRampUp => !(rampDestination is { } upper
+                ? world.CanCarveRampUp(target, upper)
+                : world.CanCarveRampUp(target)),
             _ => true,
         };
     }
@@ -97,12 +115,21 @@ internal static class TerrainWorkPolicy
     private static bool CanCarveRamp(
         WorldMapState world,
         GridPosition target,
+        GridPosition? rampDestination,
         bool carveDown,
         PersonalEquipment equipment,
         int buildingExperience) =>
-        (carveDown ? world.CanCarveRampDown(target) : world.CanCarveRampUp(target)) &&
+        (carveDown
+            ? rampDestination is { } lower
+                ? world.CanCarveRampDown(target, lower)
+                : world.CanCarveRampDown(target)
+            : rampDestination is { } upper
+                ? world.CanCarveRampUp(target, upper)
+                : world.CanCarveRampUp(target)) &&
         MiningCapabilityPolicy.CanMine(
-            world.GetRampExcavationCell(target, carveDown),
+            rampDestination is { } destination
+                ? world.GetRampExcavationCell(target, destination, carveDown)
+                : world.GetRampExcavationCell(target, carveDown),
             equipment,
             buildingExperience);
 }

@@ -8,6 +8,34 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class WorkDispatcherTests
 {
     [Fact]
+    public void WorkTypePrioritiesDefaultCleaningLowAndSurviveSaveLoad()
+    {
+        var engine = CreateEngine(goblinCount: 1);
+        Assert.Equal(
+            StoragePriority.Low,
+            engine.GetWorkTypePriorities().Single(priority =>
+                priority.Id == "cleaning").Priority);
+
+        engine.QueueCommand(SimulationCommand.ConfigureWorkTypePriority(
+            new SimulationTick(1),
+            sequence: 1,
+            "cleaning",
+            StoragePriority.High));
+        engine.AdvanceTicks(1);
+
+        Assert.Equal(
+            StoragePriority.High,
+            engine.GetWorkTypePriorities().Single(priority =>
+                priority.Id == "cleaning").Priority);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        Assert.Equal(
+            StoragePriority.High,
+            restored.GetWorkTypePriorities().Single(priority =>
+                priority.Id == "cleaning").Priority);
+    }
+
+    [Fact]
     public void SatiatedGoblinsDoNotForageWithoutPlayerDesignation()
     {
         var engine = CreateEngine(goblinCount: 4);
@@ -542,6 +570,84 @@ public sealed class WorkDispatcherTests
         Assert.True(zone.StoredQuantity > 0);
         Assert.DoesNotContain(engine.CreateSnapshot().WorkDesignations, designation =>
             designation.Kind == WorkDesignationKind.GatherBrushwood);
+    }
+
+    [Fact]
+    public void ExplicitBrushwoodDesignationOutranksFarAutomaticWoodPull()
+    {
+        var engine = CreateEngine(goblinCount: 1, initialWood: 2);
+        var spawn = engine.Map.GoblinSpawn;
+        var zonePosition = engine.Map.GetCardinalNeighbors(spawn)
+            .First(engine.World.IsSurfaceTraversable);
+        engine.QueueCommand(SimulationCommand.BuildWoodStorage(
+            new SimulationTick(1), sequence: 1, zonePosition));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        var snapshot = engine.CreateSnapshot();
+        var visibleCandidates = (
+                from y in Enumerable.Range(0, engine.Map.Height)
+                from x in Enumerable.Range(0, engine.Map.Width)
+                let position = new GridPosition(x, y, actor.Position.Z)
+                let estimate = Math.Abs(position.X - actor.Position.X) +
+                    Math.Abs(position.Y - actor.Position.Y)
+                where estimate >= 3 &&
+                    snapshot.GetVisibility(position, engine.Map.Width).IsDiscovered() &&
+                    engine.World.IsTerrainTraversable(position)
+                orderby estimate, position.Y, position.X
+                select position)
+            .Take(64)
+            .ToArray();
+        var candidates = visibleCandidates
+            .Select(position => (Position: position,
+                Route: engine.Navigation.FindPath(actor.Position, position)))
+            .Where(candidate => candidate.Route is { Count: >= 3 })
+            .Select(candidate => (candidate.Position, Distance: candidate.Route!.Count))
+            .OrderBy(candidate => candidate.Distance)
+            .ToArray();
+        Assert.True(candidates.Length >= 2);
+        var near = candidates[0].Position;
+        var far = candidates[^1].Position;
+        Assert.True(candidates[^1].Distance > candidates[0].Distance);
+
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var nextId = save["nextEntityId"]!.GetValue<ulong>();
+        var nearId = nextId++;
+        var farId = nextId++;
+        AddWoodStack(save, nearId, near);
+        AddWoodStack(save, farId, far);
+        save["nextEntityId"] = nextId;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateWork(
+            engine.CurrentTick.Next(), sequence: 2, near, near, ResourceKind.Wood));
+
+        ActorSnapshot? hauling = null;
+        for (var tick = 0; tick < 40 && hauling is null; tick++)
+        {
+            engine.AdvanceTicks(1);
+            hauling = engine.CreateSnapshot().Actors
+                .FirstOrDefault(candidate => candidate.Job.Kind == ActorJobKind.Haul);
+        }
+
+        Assert.NotNull(hauling);
+        Assert.Equal(new EntityId(nearId), hauling.Value.Job.SourceStackId);
+
+        static void AddWoodStack(JsonObject save, ulong id, GridPosition position) =>
+            save["itemStacks"]!.AsArray().Add(new JsonObject
+            {
+                ["id"] = id,
+                ["resource"] = (int)ResourceKind.Wood,
+                ["foodKind"] = 0,
+                ["variant"] = 1,
+                ["quantity"] = 2,
+                ["locationKind"] = (int)ItemLocationKind.Ground,
+                ["x"] = position.X,
+                ["y"] = position.Y,
+                ["z"] = position.Z,
+                ["ownerId"] = 0,
+                ["haulPriority"] = (int)StoragePriority.Normal,
+            });
     }
 
     [Fact]

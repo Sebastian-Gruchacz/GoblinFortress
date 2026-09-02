@@ -52,6 +52,7 @@ public partial class Main
         UpdateModMenuButtonAvailability();
         SetText<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Quit", "main-menu", "quit");
         _newGameSetupWindow.RefreshLocalization();
+        _workTypePriorityWindow?.RefreshLocalization();
 
         SetWindowTitle("GoblinDetails", "windows", "goblin");
         SetWindowTitle("StoredResourcesWindow", "windows", "stored-resources");

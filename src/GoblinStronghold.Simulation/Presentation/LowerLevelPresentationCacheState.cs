@@ -13,6 +13,7 @@ public enum PresentationChunkDirtyReason : byte
     Contamination = 1 << 4,
     StaticLighting = 1 << 5,
     ExposureMask = 1 << 6,
+    Vegetation = 1 << 7,
 }
 
 public readonly record struct PresentationChunkCacheSnapshot(
@@ -60,9 +61,9 @@ public sealed class LowerLevelPresentationCacheState
             state.IsVisible = false;
         }
 
-        foreach (var (key, cells) in exposure.VisibleChunkCells)
+        foreach (var key in exposure.VisibleChunkCells.Keys)
         {
-            var exposureSignature = CreateExposureSignature(cells);
+            var exposureSignature = CreateExposureSignature(key, exposure);
             if (!_chunks.TryGetValue(key, out var state))
             {
                 state = new MutableChunkState(key)
@@ -193,16 +194,25 @@ public sealed class LowerLevelPresentationCacheState
         return value < 0 && value % divisor != 0 ? quotient - 1 : quotient;
     }
 
-    private static ulong CreateExposureSignature(IEnumerable<GridPosition> cells)
+    private static ulong CreateExposureSignature(
+        PresentationChunkKey key,
+        LowerLevelExposureIndex exposure)
     {
         const ulong offset = 14_695_981_039_346_656_037UL;
         const ulong prime = 1_099_511_628_211UL;
         var signature = offset;
-        foreach (var position in cells)
+        var minimumX = key.X * exposure.ChunkSize - 1;
+        var minimumY = key.Y * exposure.ChunkSize - 1;
+        var maximumX = minimumX + exposure.ChunkSize + 2;
+        var maximumY = minimumY + exposure.ChunkSize + 2;
+        for (var y = minimumY; y < maximumY; y++)
         {
-            signature = (signature ^ unchecked((uint)position.X)) * prime;
-            signature = (signature ^ unchecked((uint)position.Y)) * prime;
-            signature = (signature ^ unchecked((uint)position.Z)) * prime;
+            for (var x = minimumX; x < maximumX; x++)
+            {
+                var exposed = exposure.IsContinuouslyExposed(
+                    new GridPosition(x, y, key.Level));
+                signature = (signature ^ (exposed ? 1UL : 0UL)) * prime;
+            }
         }
         return signature;
     }

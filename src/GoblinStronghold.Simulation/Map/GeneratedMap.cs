@@ -9,8 +9,9 @@ public sealed class GeneratedMap
 {
     private readonly MapCell[] _cells;
     private CaveCell[] _caveCells;
-    private readonly VerticalPassage[] _verticalPassages;
+    private readonly List<VerticalPassage> _verticalPassages;
     private readonly Dictionary<GridPosition, GridPosition> _verticalPassageDestinations;
+    private readonly IReadOnlyList<CaveMacroFeatureLayout> _caveMacroFeatures;
     private readonly string _fingerprint;
     private readonly int _minimumTerrainLevel;
     private readonly int _maximumTerrainLevel;
@@ -28,7 +29,8 @@ public sealed class GeneratedMap
         GridPosition goblinSpawn,
         GridPosition humanVillage,
         CaveCell[]? caveCells = null,
-        VerticalPassage[]? verticalPassages = null)
+        VerticalPassage[]? verticalPassages = null,
+        IReadOnlyList<CaveMacroFeatureLayout>? caveMacroFeatures = null)
     {
         ArgumentNullException.ThrowIfNull(surfaceRoutes);
         Width = width;
@@ -41,8 +43,9 @@ public sealed class GeneratedMap
         SurfaceRoutes = surfaceRoutes.ToArray();
         _cells = cells;
         _caveCells = caveCells ?? [];
-        _verticalPassages = verticalPassages ?? [];
+        _verticalPassages = verticalPassages?.ToList() ?? [];
         _verticalPassageDestinations = BuildVerticalPassageIndex(_verticalPassages);
+        _caveMacroFeatures = caveMacroFeatures ?? [];
         _minimumTerrainLevel = _cells.Min(cell => Math.Min(cell.FloorLevel, cell.SurfaceLevel));
         _maximumTerrainLevel = _cells.Max(cell => cell.SurfaceLevel);
         GoblinSpawn = goblinSpawn;
@@ -311,42 +314,81 @@ public sealed class GeneratedMap
         {
             throw new ArgumentOutOfRangeException(nameof(position));
         }
-        return SwampMapGenerator.GenerateSolidCaveCell(
-            Seed,
-            Width,
-            Height,
-            position.X,
-            position.Y,
-            -position.Z - 1,
-            GeneratorVersion);
+        return GenerateCaveCell(position);
     }
 
-    internal void MaterializeCaveLevel(int level)
+    internal IReadOnlyList<VerticalPassage> MaterializeCaveLevel(int level)
     {
         if (level != DeepestCaveLevel - 1)
         {
             throw new ArgumentOutOfRangeException(nameof(level));
         }
 
-        var expanded = new CaveCell[checked(_caveCells.Length + CellCount)];
-        Array.Copy(_caveCells, expanded, _caveCells.Length);
-        var levelIndex = CaveLevelCount;
-        for (var y = 0; y < Height; y++)
+        var targetLevel = _caveMacroFeatures
+            .Where(feature =>
+                feature.Plan.MaterializationPolicy ==
+                    CaveMacroFeatureMaterializationPolicy.CompleteOnExposure &&
+                feature.Plan.TryGetSlice(level, out _))
+            .Select(feature => feature.Plan.LowestLevel)
+            .DefaultIfEmpty(level)
+            .Min();
+        var addedPassages = new List<VerticalPassage>();
+        while (DeepestCaveLevel > targetLevel)
         {
-            for (var x = 0; x < Width; x++)
+            var newLevel = DeepestCaveLevel - 1;
+            var expanded = new CaveCell[checked(_caveCells.Length + CellCount)];
+            Array.Copy(_caveCells, expanded, _caveCells.Length);
+            for (var y = 0; y < Height; y++)
             {
-                expanded[_caveCells.Length + (y * Width) + x] =
-                    SwampMapGenerator.GenerateSolidCaveCell(
-                        Seed,
-                        Width,
-                        Height,
-                        x,
-                        y,
-                        levelIndex,
-                        GeneratorVersion);
+                for (var x = 0; x < Width; x++)
+                {
+                    var position = new GridPosition(x, y, newLevel);
+                    expanded[_caveCells.Length + (y * Width) + x] =
+                        GenerateCaveCell(position);
+                }
+            }
+            _caveCells = expanded;
+
+            foreach (var passage in _caveMacroFeatures
+                         .SelectMany(feature => feature.Plan.Slices)
+                         .SelectMany(slice => slice.VerticalPassages)
+                         .Distinct()
+                         .Where(passage => passage.Lower.Z == newLevel))
+            {
+                AddVerticalPassage(passage);
+                addedPassages.Add(passage);
             }
         }
-        _caveCells = expanded;
+        return addedPassages;
+    }
+
+    private CaveCell GenerateCaveCell(GridPosition position) =>
+        SwampMapGenerator.ApplyCaveMacroFeatures(
+            SwampMapGenerator.GenerateSolidCaveCell(
+                Seed,
+                Width,
+                Height,
+                position.X,
+                position.Y,
+                -position.Z - 1,
+                GeneratorVersion),
+            position,
+            _caveMacroFeatures);
+
+    private void AddVerticalPassage(VerticalPassage passage)
+    {
+        if (_verticalPassages.Contains(passage))
+        {
+            return;
+        }
+        if (_verticalPassageDestinations.ContainsKey(passage.Upper) ||
+            _verticalPassageDestinations.ContainsKey(passage.Lower))
+        {
+            throw new InvalidDataException("Vertical passages must not overlap.");
+        }
+        _verticalPassageDestinations.Add(passage.Upper, passage.Lower);
+        _verticalPassageDestinations.Add(passage.Lower, passage.Upper);
+        _verticalPassages.Add(passage);
     }
 
     public bool IsTerrainTraversable(GridPosition position)

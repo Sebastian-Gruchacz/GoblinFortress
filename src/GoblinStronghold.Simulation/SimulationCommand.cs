@@ -58,6 +58,8 @@ public enum SimulationCommandKind
     PrioritizeItemHauling = 51,
     OrderItemPickup = 52,
     ConfigureRepeatingCraftingOrder = 53,
+    ConfigureWorkTypePriority = 54,
+    DesignateHuntArea = 55,
 }
 
 public enum DismantleTargetKind : byte
@@ -963,15 +965,25 @@ public readonly record struct SimulationCommand(
     public static SimulationCommand DesignateRampDown(
         SimulationTick executeAt,
         ulong sequence,
-        GridPosition position) =>
+        GridPosition position) => DesignateRampDown(
+            executeAt,
+            sequence,
+            position,
+            position with { Z = position.Z - 1 });
+
+    public static SimulationCommand DesignateRampDown(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition upper,
+        GridPosition lower) =>
         new(
             executeAt,
             sequence,
             SimulationCommandKind.DesignateWork,
             EntityId.None,
             EntityId.None,
-            position,
-            position,
+            upper,
+            lower,
             default,
             ResourceKind.Any,
             Amount: (int)WorkDesignationKind.CarveRampDown);
@@ -979,15 +991,25 @@ public readonly record struct SimulationCommand(
     public static SimulationCommand DesignateRampUp(
         SimulationTick executeAt,
         ulong sequence,
-        GridPosition position) =>
+        GridPosition position) => DesignateRampUp(
+            executeAt,
+            sequence,
+            position,
+            position with { Z = position.Z + 1 });
+
+    public static SimulationCommand DesignateRampUp(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition lower,
+        GridPosition upper) =>
         new(
             executeAt,
             sequence,
             SimulationCommandKind.DesignateWork,
             EntityId.None,
             EntityId.None,
-            position,
-            position,
+            lower,
+            upper,
             default,
             ResourceKind.Any,
             Amount: (int)WorkDesignationKind.CarveRampUp);
@@ -1620,6 +1642,41 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: radius);
+
+    public static SimulationCommand DesignateHuntArea(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition center,
+        int radius) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateHuntArea,
+            EntityId.None,
+            EntityId.None,
+            center,
+            center,
+            default,
+            ResourceKind.Any,
+            Amount: radius);
+
+    public static SimulationCommand ConfigureWorkTypePriority(
+        SimulationTick executeAt,
+        ulong sequence,
+        string workTypeId,
+        StoragePriority priority) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureWorkTypePriority,
+            EntityId.None,
+            EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: (int)priority,
+            Text: workTypeId);
 
     public static SimulationCommand CancelConstruction(
         SimulationTick executeAt,

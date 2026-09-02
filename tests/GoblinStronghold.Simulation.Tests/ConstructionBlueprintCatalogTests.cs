@@ -136,7 +136,7 @@ public sealed class ConstructionBlueprintCatalogTests
             WorldToolPlacementMode.FixedFootprint,
             ConstructionBlueprintDefinitions.Get(ConstructionKind.GoblinHut).PlacementMode);
         Assert.Equal(
-            WorldToolPlacementMode.InferredConnection,
+            WorldToolPlacementMode.DirectionalConnection,
             ConstructionBlueprintDefinitions.Get(ConstructionKind.StoneRamp).PlacementMode);
     }
 

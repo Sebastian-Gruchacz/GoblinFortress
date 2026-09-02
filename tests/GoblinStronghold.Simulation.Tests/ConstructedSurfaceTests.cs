@@ -1,3 +1,4 @@
+using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -24,6 +25,28 @@ public sealed class ConstructedSurfaceTests
             worldObject.Kind == WorldObjectKind.WoodenFloor);
         Assert.Contains(engine.World.GetTerrainNeighbors(position), neighbor =>
             engine.World.IsTerrainTraversable(neighbor));
+    }
+
+    [Fact]
+    public void FloorBuiltAboveOpenCaveGroundBlocksItsSkyExposure()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var passage = engine.World.CreateVerticalPassageSnapshot()
+            .First(candidate =>
+                candidate.Kind == VerticalPassageKind.CaveMouth &&
+                candidate.Lower.Z < 0 &&
+                engine.World.CanBuildFloors([candidate.Upper]));
+
+        Assert.True(engine.World.IsOpenToSky(passage.Lower));
+
+        engine.World.BuildFloor(
+            passage.Upper,
+            new SimulationTick(1),
+            stone: false,
+            ResourceVariant.OakWood);
+
+        Assert.False(engine.World.IsOpenToSky(passage.Lower));
+        Assert.True(engine.World.IsOpenToSky(passage.Upper));
     }
 
     [Fact]
@@ -177,6 +200,35 @@ public sealed class ConstructedSurfaceTests
     }
 
     [Fact]
+    public void PrimitiveWorkshopCanBePlannedOnFloorSpanningLevelMinusOneOpening()
+    {
+        var engine = CreateEngine(initialWoodStock: 8);
+        var passage = engine.World.CreateVerticalPassageSnapshot()
+            .First(candidate =>
+                candidate.Upper.Z == 0 &&
+                candidate.Lower.Z == -1 &&
+                engine.World.CanBuildFloors([candidate.Upper]));
+        var upper = passage.Upper;
+        engine.World.BuildFloor(
+            upper,
+            new SimulationTick(1),
+            stone: false,
+            ResourceVariant.OakWood);
+
+        Assert.True(engine.World.CanBuildPrimitiveWorkshop(upper));
+        engine.QueueCommand(SimulationCommand.BuildPrimitiveWorkshop(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            upper));
+        engine.AdvanceTicks(1);
+
+        Assert.True(engine.World.HasConstructedFloorSurface(upper));
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(upper, site.Anchor);
+        Assert.Equal(ConstructionKind.PrimitiveWorkshop, site.Kind);
+    }
+
+    [Fact]
     public void FloorAreaKeepsNaturalCaveGroundAndSkipsAdjacentSolidRock()
     {
         var engine = CreateEngine(initialWoodStock: 0);
@@ -326,6 +378,58 @@ public sealed class ConstructedSurfaceTests
     }
 
     [Fact]
+    public void FloorToolTurnsNaturalSlopeIntoMatchingMaterialRamp()
+    {
+        var engine = CreateEngine(initialWoodStock: 2);
+        var (lower, upper) = FindCoverableNaturalRamp(engine);
+        engine.Visibility.Reveal([lower, upper], radius: 1);
+
+        engine.QueueCommand(SimulationCommand.BuildWoodenFloor(
+            new SimulationTick(1),
+            sequence: 1,
+            lower,
+            lower,
+            ResourceVariant.OakWood));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.WoodenRamp, site.Kind);
+        Assert.Equal(lower, site.Anchor);
+        Assert.Equal(upper, site.End);
+        var material = Assert.Single(site.Materials);
+        Assert.Equal(ResourceVariant.OakWood, material.Variant);
+        Assert.Equal(2, material.RequiredQuantity);
+    }
+
+    [Fact]
+    public void ConstructedCoverMakesNaturalSlopeCleanableInsteadOfLooseDirt()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var (lower, upper) = FindCoverableNaturalRamp(engine);
+        Assert.True(FloorCoveringPlacementPolicy.TryResolve(
+            engine.World,
+            ConstructionKind.StoneFloor,
+            lower,
+            out var placement));
+        Assert.Equal(ConstructionKind.StoneRamp, placement.Kind);
+
+        engine.World.BuildRamp(
+            lower,
+            upper,
+            new SimulationTick(1),
+            stone: true,
+            ResourceVariant.Granite);
+
+        Assert.True(engine.World.HasConstructedCleanableSurface(lower));
+        Assert.Contains(engine.World.GetWorldObjectsAt(lower), worldObject =>
+            worldObject.Kind == WorldObjectKind.StoneRamp &&
+            worldObject.MaterialVariant == ResourceVariant.Granite);
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.True(restored.World.HasConstructedCleanableSurface(lower));
+    }
+
+    [Fact]
     public void RampConstructionCommandKeepsInferredEndpointAndMaterial()
     {
         var engine = CreateEngine(initialWoodStock: 2);
@@ -380,6 +484,24 @@ public sealed class ConstructedSurfaceTests
         }
 
         throw new InvalidOperationException("No inferred ramp placement was found.");
+    }
+
+    private static (GridPosition Lower, GridPosition Upper) FindCoverableNaturalRamp(
+        SimulationEngine engine) =>
+        (from y in Enumerable.Range(0, engine.Map.Height)
+         from x in Enumerable.Range(0, engine.Map.Width)
+         let lower = engine.Map.GetTerrainSurfacePosition(new GridPosition(x, y))
+         where engine.World.TryGetNaturalRampUpper(lower, out _)
+         let upper = GetNaturalRampUpper(engine, lower)
+         where engine.World.CanBuildRamp(lower, upper)
+         select (lower, upper)).First();
+
+    private static GridPosition GetNaturalRampUpper(
+        SimulationEngine engine,
+        GridPosition lower)
+    {
+        Assert.True(engine.World.TryGetNaturalRampUpper(lower, out var upper));
+        return upper;
     }
 
     private static IEnumerable<GridPosition> EnumerateWorldPositions(SimulationEngine engine) =>

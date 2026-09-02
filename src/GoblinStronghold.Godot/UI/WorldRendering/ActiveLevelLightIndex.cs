@@ -1,6 +1,7 @@
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Lighting;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using System.Diagnostics;
 
 namespace GoblinStronghold.GodotClient.UI.WorldRendering;
@@ -88,6 +89,7 @@ internal sealed class ActiveLevelLightIndex
         }
 
         var lava = LightEmitterCatalog.Get(LightEmitterCatalog.LavaId);
+        var glowcap = LightEmitterCatalog.Get(LightEmitterCatalog.CaveGlowcapId);
         for (var y = 0; y < engine.Map.Height; y++)
         {
             for (var x = 0; x < engine.Map.Width; x++)
@@ -96,6 +98,14 @@ internal sealed class ActiveLevelLightIndex
                 if (!engine.World.TryGetFluid(position, out var fluid, out _) ||
                     fluid != CellFluidKind.Lava)
                 {
+                    if (CaveFloraGenerator.TryGet(engine.Map, position, out var flora) &&
+                        flora.Kind == CaveFloraKind.GlowcapCluster)
+                    {
+                        var floraId = checked(
+                            (ulong)(-level * engine.Map.CellCount) +
+                            (ulong)(y * engine.Map.Width + x) + 1UL);
+                        _emitters.Upsert(CreateEmitter(glowcap, floraId, position));
+                    }
                     continue;
                 }
 

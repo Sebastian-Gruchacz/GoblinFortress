@@ -8,7 +8,8 @@ public static class SwampMapGenerator
     public static readonly ContentId DefaultProfileId =
         ContentId.Parse("core:demo-swamp-frontier");
 
-    public const int CurrentVersion = 14;
+    public const int CurrentVersion = 15;
+    public const int MinimumSaveCompatibleVersion = 14;
     public const int MinimumInitialCaveLevelCount = 2;
     public static int DefaultDimension => DefaultProfile.DefaultDimension;
     public static int MinimumDimension => DefaultProfile.MinimumDimension;
@@ -18,6 +19,9 @@ public static class SwampMapGenerator
         LocationGenerationCatalog.Core.Get(DefaultProfileId);
 
     public static bool SupportsVersion(int version) => version is >= 1 and <= CurrentVersion;
+
+    public static bool SupportsSavedVersion(int version) =>
+        version is >= MinimumSaveCompatibleVersion and <= CurrentVersion;
 
     public static GeneratedMap Generate(
         WorldSeed seed,
@@ -175,6 +179,9 @@ public static class SwampMapGenerator
         {
             AssignTerrainRamps(cells, seed, width, height);
         }
+        var caveMacroFeatures = generatorVersion >= 15
+            ? CaveMacroFeaturePlanner.Create(seed, width, height)
+            : [];
         var caves = generatorVersion >= 6
             ? GenerateCaves(
                 cells,
@@ -183,7 +190,8 @@ public static class SwampMapGenerator
                 height,
                 goblinSpawn,
                 humanVillage,
-                generatorVersion)
+                generatorVersion,
+                caveMacroFeatures)
             : new CaveGenerationResult([], []);
 
         var map = new GeneratedMap(
@@ -199,7 +207,8 @@ public static class SwampMapGenerator
             goblinSpawn,
             humanVillage,
             caves.Cells,
-            caves.Passages);
+            caves.Passages,
+            caveMacroFeatures);
         var validation = SwampMapValidator.Validate(map);
         if (!validation.IsValid)
         {
@@ -777,7 +786,8 @@ public static class SwampMapGenerator
         int height,
         GridPosition goblinSpawn,
         GridPosition humanVillage,
-        int generatorVersion)
+        int generatorVersion,
+        IReadOnlyList<CaveMacroFeatureLayout> caveMacroFeatures)
     {
         var depthLevels = generatorVersion >= 13
             ? Math.Max(MinimumInitialCaveLevelCount, -surfaceCells.Min(cell => cell.FloorLevel))
@@ -790,15 +800,19 @@ public static class SwampMapGenerator
             {
                 for (var x = 0; x < width; x++)
                 {
+                    var position = new GridPosition(x, y, -levelIndex - 1);
                     caveCells[(levelIndex * cellCount) + (y * width) + x] =
-                        GenerateSolidCaveCell(
-                            seed,
-                            width,
-                            height,
-                            x,
-                            y,
-                            levelIndex,
-                            generatorVersion);
+                        ApplyCaveMacroFeatures(
+                            GenerateSolidCaveCell(
+                                seed,
+                                width,
+                                height,
+                                x,
+                                y,
+                                levelIndex,
+                                generatorVersion),
+                            position,
+                            caveMacroFeatures);
                 }
             }
         }
@@ -943,12 +957,37 @@ public static class SwampMapGenerator
                     MineralDepositKind.IronOre);
             }
         }
-        return new CaveGenerationResult(
-            caveCells,
-            [
-                new VerticalPassage(entrance, firstRoom, VerticalPassageKind.CaveMouth),
-                new VerticalPassage(descent, deepStart, VerticalPassageKind.NaturalRamp),
-            ]);
+        var passages = new List<VerticalPassage>
+        {
+            new VerticalPassage(entrance, firstRoom, VerticalPassageKind.CaveMouth),
+            new VerticalPassage(descent, deepStart, VerticalPassageKind.NaturalRamp),
+        };
+        passages.AddRange(caveMacroFeatures
+            .SelectMany(feature => feature.Plan.Slices)
+            .SelectMany(slice => slice.VerticalPassages)
+            .Distinct()
+            .Where(passage => passage.Lower.Z >= -depthLevels));
+        return new CaveGenerationResult(caveCells, passages.ToArray());
+    }
+
+    internal static CaveCell ApplyCaveMacroFeatures(
+        CaveCell generated,
+        GridPosition position,
+        IReadOnlyList<CaveMacroFeatureLayout> caveMacroFeatures)
+    {
+        foreach (var feature in caveMacroFeatures)
+        {
+            if (feature.TryGetCell(position, out var cell))
+            {
+                return new CaveCell(
+                    generated.Rock,
+                    cell.Kind,
+                    MineralDepositKind.None,
+                    cell.Fluid);
+            }
+        }
+
+        return generated;
     }
 
     internal static CaveCell GenerateSolidCaveCell(

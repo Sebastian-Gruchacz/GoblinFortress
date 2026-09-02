@@ -7,4 +7,5 @@ public enum WorldToolPlacementMode : byte
     Area = 3,
     FixedFootprint = 4,
     InferredConnection = 5,
+    DirectionalConnection = 6,
 }

@@ -45,15 +45,16 @@ internal static class LowerLevelStaticContaminationPainter
         for (var index = 0; index < count; index++)
         {
             state = Next(state);
-            var x = 1 + (int)(state % 8);
+            var drawableSize = LowerLevelChunkTextureCache.PixelsPerCell - 2;
+            var x = 1 + (int)(state % drawableSize);
             state = Next(state);
-            var y = 1 + (int)(state % 8);
+            var y = 1 + (int)(state % drawableSize);
             var pixel = origin + new Vector2I(x, y);
             target.SetPixel(
                 pixel.X,
                 pixel.Y,
                 target.GetPixel(pixel.X, pixel.Y).Blend(color));
-            if (index >= 2 && x < 8)
+            if (index >= 2 && x < LowerLevelChunkTextureCache.PixelsPerCell - 2)
             {
                 target.SetPixel(
                     pixel.X + 1,

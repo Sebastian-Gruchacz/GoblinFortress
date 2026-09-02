@@ -211,6 +211,30 @@ public sealed class VisibilityTests
     }
 
     [Fact]
+    public void GoblinBesideAnOpenEdgeUsesItsVisionRadiusOnTheImmediateLowerLayer()
+    {
+        var observer = new GridPosition(5, 5, 1);
+        var openEdge = observer with { X = observer.X + 1 };
+        var below = openEdge with { Z = 0 };
+        const int visionRadius = 5;
+
+        var discoveries = WorldVisibilityPolicy.SelectEdgeLookDiscoveries(
+            [(observer, visionRadius)],
+            position => position == observer,
+            position => position == openEdge,
+            position => position == below);
+
+        Assert.Equal([(below, visionRadius)], discoveries);
+        Assert.All(discoveries, discovery =>
+            Assert.Equal(observer.Z - 1, discovery.Position.Z));
+        Assert.Empty(WorldVisibilityPolicy.SelectEdgeLookDiscoveries(
+            [(observer, visionRadius)],
+            position => position == observer,
+            _ => false,
+            _ => true));
+    }
+
+    [Fact]
     public void GoblinStructuresRevealTheirConfiguredSurroundingsWithoutActors()
     {
         var seed = new WorldSeed(0x535452554354UL);

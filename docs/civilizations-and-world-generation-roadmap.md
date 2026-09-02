@@ -125,6 +125,47 @@ The current demo swamp becomes the first embedded location profile. Existing
 `Generate(seed, width, height)` and save generator-version contracts remain as
 adapters until profile IDs and versions are persisted.
 
+### Multi-level cave macro-features
+
+The level is a materialization and simulation boundary, not necessarily a
+generation boundary. A deterministic cave-planning stage may reserve one
+connected feature across several depths before any individual slice is written.
+Examples include sloped complexes, tall chambers, lava chasms, and caverns that
+later host underground settlements.
+
+- [x] Introduce a pure macro-feature plan and materialization registry under
+  `Map/Generation`. Plans use stable content definition IDs, reserve cells and
+  vertical passages across contiguous levels, reject overlapping reservations,
+  and remain pending until every slice has been materialized.
+- [x] Add a deterministic core planner for the first code-native sloped cavern
+  and lava-gallery layouts. It chooses reserved footprints, depth spans,
+  natural ramps, and fluids before their levels are materialized.
+- [ ] Move macro-feature definitions and placement constraints into the
+  deep-geology profile, including settlement-safe reservations and weights.
+- [x] Activate macro-features in generator v15 while retaining v14 geometry and
+  save loading. Migration or regeneration remains explicit.
+- [x] Let an ordinary hidden feature materialize one approached slice at a
+  time, but materialize every outstanding slice of a feature marked
+  `CompleteOnExposure`. The first lava gallery exercises this path and adds its
+  passages only after both endpoint levels exist.
+- [ ] Add unsupported open-volume geometry for true shafts, tall chambers, and
+  chasms without a floor on every intermediate level. Do not represent these as
+  ordinary cave-floor cells.
+- [ ] Run ore veins, crystals, loose stone, fauna, and other per-level
+  decorators after the reserved macro geometry. Decorators may fill eligible
+  solid cells but must neither close passages nor overwrite fluids, structural
+  footprints, or other reservations.
+- [ ] Validate reachable ramps, supported floors, safe reveal boundaries,
+  continuous vertical visibility, and light propagation across the completed
+  feature. A failed validation reports the feature ID and seed domain instead
+  of silently rerolling the map.
+
+The deterministic plan is derived map data. Only mutable consequences need save
+state, while generator version, profile ID, and fingerprint continue to pin the
+original plan. If planning becomes too expensive to reproduce during load, its
+compact reservations may be serialized without exposing renderer state to the
+domain generator.
+
 ## Early Access delivery slices
 
 ### 0. Foundations

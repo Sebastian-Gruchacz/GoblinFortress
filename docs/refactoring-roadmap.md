@@ -200,7 +200,14 @@ and rendering stay outside simulation code.
   `core:demo-swamp-frontier` profile; `SwampMapGenerator` remains the
   save-compatible facade over `LocationGenerationRequest`. Format-73 saves pin
   the stable profile ID and selected absent/single/branching river mode, while
-  deep geology is still code-native. The subsequent route slice lives in the
+  deep geology geometry is still code-native. Its first extraction is the pure
+  `Map/Generation/CaveMacroFeaturePlan` contract and focused planner: stable-ID
+  multi-level plans reserve cells and passages, reject overlaps, and declare
+  either layer-by-layer or complete-on-exposure materialization. Generator v15
+  activates a four-level sloped cavern and complete-on-exposure lava gallery;
+  v14 remains loadable with its original deterministic geometry. True open
+  shafts and data-driven feature definitions remain later stages. The
+  subsequent route slice lives in the
   focused `Map/Generation/SurfaceRouteGenerator`: profile-driven absent,
   through-road and junction modes run after hydrology, create shallow fords,
   reserve their corridor from initial ecology and structures, and are pinned by
@@ -313,7 +320,9 @@ caches.
   end of a real cave mouth, natural ramp, or excavated passage records a one-cell
   explored margin on the adjacent layer without lighting it or cascading through
   covered coordinates. Underground observers always use limited dark vision;
-  surface day and night now have a stronger data-driven contrast.
+  surface day and night now have a stronger data-driven contrast. The active
+  light map reduces darkness over currently visible cells only on its own level;
+  dark vision is not a light emitter and is never projected between levels.
 - [x] Add hard cell-level terrain and structure light occlusion on active and
   cached lower slices. Solid rock, constructed walls, and closed door leaves
   block rays; open doors transmit them, diagonal corner leaks are rejected, and
@@ -353,10 +362,15 @@ caches.
   presentable only while it has a continuous registered exposure chain to the
   active level; an opening hidden behind an intervening closed plane must not
   keep deeper presentation work active.
-- [x] Cache exposed lower terrain and cave geometry as half-resolution color
+- [x] Cache exposed lower terrain and cave geometry as reduced-resolution color
   textures with a separate one-pixel-per-cell exposure mask. Rebuild only
   visible dirty chunks, retain hidden textures, and composite cached geometry
   from the deepest visible level upward before drawing the active level.
+- [x] Increase lower-slice geometry to sixteen pixels per cell and bake plants,
+  effective-height structures, tree trunks, and segmented atlas crowns into the
+  same cached image before applying one distance-based degradation pass. Plant
+  harvest and regrowth invalidate only affected retained chunks; vegetation no
+  longer uses a separate lower-level overlay.
 - [x] Extend cached geometry with simplified static structures and apply the
   exposure mask while composing openings in the active plane. Lower slices use
   deliberately reduced structure silhouettes instead of live structure draw

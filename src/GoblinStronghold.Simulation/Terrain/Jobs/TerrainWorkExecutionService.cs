@@ -17,6 +17,26 @@ internal static class TerrainWorkExecutionService
         WorldSeed worldSeed,
         EntityId actorId,
         SimulationTick tick,
+        EntityId designationId) => TryExecute(
+            definition,
+            world,
+            target,
+            rampDestination: null,
+            actorPosition,
+            worldSeed,
+            actorId,
+            tick,
+            designationId);
+
+    public static TerrainWorkExecutionResult? TryExecute(
+        TerrainModificationDefinition definition,
+        WorldMapState world,
+        GridPosition target,
+        GridPosition? rampDestination,
+        GridPosition actorPosition,
+        WorldSeed worldSeed,
+        EntityId actorId,
+        SimulationTick tick,
         EntityId designationId)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -37,6 +57,7 @@ internal static class TerrainWorkExecutionService
                 definition,
                 world,
                 target,
+                rampDestination,
                 carveDown: true,
                 worldSeed,
                 actorId,
@@ -46,6 +67,7 @@ internal static class TerrainWorkExecutionService
                 definition,
                 world,
                 target,
+                rampDestination,
                 carveDown: false,
                 worldSeed,
                 actorId,
@@ -89,13 +111,28 @@ internal static class TerrainWorkExecutionService
         TerrainModificationDefinition definition,
         WorldMapState world,
         GridPosition target,
+        GridPosition? rampDestination,
         bool carveDown,
         WorldSeed worldSeed,
         EntityId actorId,
         SimulationTick tick,
         EntityId designationId)
     {
-        if (!world.TryCarveVerticalRamp(target, carveDown, tick, out var rock, out var change))
+        var carved = rampDestination is { } destination
+            ? world.TryCarveRamp(
+                carveDown ? target : destination,
+                carveDown ? destination : target,
+                carveDown,
+                tick,
+                out var rock,
+                out var change)
+            : world.TryCarveVerticalRamp(
+                target,
+                carveDown,
+                tick,
+                out rock,
+                out change);
+        if (!carved)
         {
             return null;
         }

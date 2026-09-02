@@ -12,6 +12,7 @@ using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Workshops;
+using GoblinStronghold.Simulation.WorkPriorities;
 
 namespace GoblinStronghold.Simulation;
 
@@ -114,6 +115,7 @@ public sealed partial class SimulationEngine
         {
             _resourcePriorities.Add(resource, StoragePriority.Normal);
         }
+        InitializeWorkTypePriorities();
     }
 
     public WorldSeed WorldSeed { get; }
@@ -428,13 +430,16 @@ public sealed partial class SimulationEngine
                 new SimulationTick(model.CreatedAtTick),
                 new SimulationTick(model.LastChangedAtTick)))
             .ToArray();
-        if (surfaceGrime.Any(stain =>
-                !engine.World.IsTerrainReachable(stain.Position) ||
-                !engine.IsConstructedFloorSurface(stain.Position)))
+        var validSurfaceGrime = surfaceGrime.Where(stain =>
+                engine.World.IsTerrainReachable(stain.Position) &&
+                engine.IsConstructedCleanableSurface(stain.Position))
+            .ToArray();
+        if (validSurfaceGrime.Length != surfaceGrime.Length &&
+            !save.DiscardMisplacedLegacySurfaceGrime)
         {
             throw new InvalidDataException("The save contains misplaced surface grime.");
         }
-        engine._surfaceGrime.Restore(surfaceGrime, engine.CurrentTick);
+        engine._surfaceGrime.Restore(validSurfaceGrime, engine.CurrentTick);
         engine.RebuildAutonomousCleaningAreas();
         engine.Visibility = WorldVisibilityState.Restore(
             map,
@@ -450,6 +455,7 @@ public sealed partial class SimulationEngine
             engine.CurrentTick);
         engine.ValidateLoadedRaidState();
         engine.LoadResourcePriorities(save.ResourcePriorities);
+        engine.LoadWorkTypePriorities(save.WorkTypePriorities);
         engine.LoadStorageZones(save.StorageZones);
         engine.LoadLogisticsNetworks(save.LogisticsNetworks);
         engine.LoadStorageAreas(save.StorageAreas);
@@ -1302,6 +1308,12 @@ public sealed partial class SimulationEngine
                 Resource = pair.Key,
                 Priority = pair.Value,
             }).ToList(),
+            WorkTypePriorities = WorkTypePriorityCatalog.All.Select(definition =>
+                new WorkTypePrioritySaveModel
+                {
+                    Id = definition.Id,
+                    Priority = GetWorkTypePriority(definition.Id),
+                }).ToList(),
             ConstructionSites = _constructionSites.Values.Select(site =>
                 new ConstructionSiteSaveModel
                 {
@@ -1353,6 +1365,10 @@ public sealed partial class SimulationEngine
                     TargetX = designation.Target.X,
                     TargetY = designation.Target.Y,
                     TargetZ = designation.Target.Z,
+                    HasRampDestination = designation.RampDestination is not null,
+                    RampDestinationX = designation.RampDestination?.X ?? 0,
+                    RampDestinationY = designation.RampDestination?.Y ?? 0,
+                    RampDestinationZ = designation.RampDestination?.Z ?? 0,
                     TargetEntityId = designation.TargetEntityId.Value,
                     OrderId = designation.OrderId.Value,
                     Priority = designation.Priority,
@@ -1746,6 +1762,13 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)pair.Value);
         }
 
+        Append(canonical, _workTypePriorities.Count);
+        foreach (var pair in _workTypePriorities)
+        {
+            Append(canonical, pair.Key);
+            Append(canonical, (int)pair.Value);
+        }
+
         Append(canonical, _storageZones.Count);
         foreach (var zone in _storageZones.Values)
         {
@@ -1804,6 +1827,11 @@ public sealed partial class SimulationEngine
             Append(canonical, designation.Id.Value);
             Append(canonical, (int)designation.Kind);
             Append(canonical, designation.Target);
+            Append(canonical, designation.RampDestination is null ? 0 : 1);
+            if (designation.RampDestination is { } rampDestination)
+            {
+                Append(canonical, rampDestination);
+            }
             Append(canonical, designation.TargetEntityId.Value);
             Append(canonical, designation.OrderId.Value);
             Append(canonical, (int)designation.Priority);
@@ -1901,11 +1929,13 @@ public sealed partial class SimulationEngine
                 $"Save requires unsupported player polity '{save.PlayerPolityId}'.");
         }
 
-        if (save.MapGeneratorVersion != SwampMapGenerator.CurrentVersion)
+        if (!SwampMapGenerator.SupportsSavedVersion(save.MapGeneratorVersion))
         {
             throw new InvalidDataException(
                 $"Obsolete or incompatible map generator version " +
-                $"{save.MapGeneratorVersion}; expected {SwampMapGenerator.CurrentVersion}.");
+                $"{save.MapGeneratorVersion}; supported versions are " +
+                $"{SwampMapGenerator.MinimumSaveCompatibleVersion}-" +
+                $"{SwampMapGenerator.CurrentVersion}.");
         }
 
         if (!ContentId.TryParse(save.MapProfileId, out var mapProfileId) ||
@@ -2338,6 +2368,12 @@ public sealed partial class SimulationEngine
         {
             var id = new EntityId(model.Id);
             var target = new GridPosition(model.TargetX, model.TargetY, model.TargetZ);
+            var rampDestination = model.HasRampDestination
+                ? new GridPosition(
+                    model.RampDestinationX,
+                    model.RampDestinationY,
+                    model.RampDestinationZ)
+                : (GridPosition?)null;
             var targetEntityId = new EntityId(model.TargetEntityId);
             var orderId = model.OrderId == 0
                 ? legacyOrders.GetValueOrDefault(model.Kind, id)
@@ -2355,6 +2391,10 @@ public sealed partial class SimulationEngine
                     WorkDesignationKind.Scout or WorkDesignationKind.CarveRampDown or
                     WorkDesignationKind.CarveRampUp or WorkDesignationKind.CleanBlood &&
                  targetEntityId != EntityId.None) ||
+                (rampDestination is not null &&
+                 (model.Kind is not (WorkDesignationKind.CarveRampDown or
+                     WorkDesignationKind.CarveRampUp) ||
+                  !IsValidRampDesignation(model.Kind, target, rampDestination.Value))) ||
                 (model.Kind is WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone or
                     WorkDesignationKind.HuntAnimal or
                     WorkDesignationKind.DismantleWorldObject or
@@ -2367,6 +2407,7 @@ public sealed partial class SimulationEngine
                         OrderId = orderId,
                         Priority = priority,
                         IsSuspended = model.IsSuspended,
+                        RampDestination = rampDestination,
                     }))
             {
                 throw new InvalidDataException("The save contains an invalid work designation.");
@@ -2595,7 +2636,8 @@ public sealed partial class SimulationEngine
                     terrain,
                     World,
                     Visibility,
-                    designation.Target)
+                    designation.Target,
+                    designation.RampDestination)
                 : designation.Kind switch
             {
                 WorkDesignationKind.GatherFood => World.GetPlantPatch(designation.Target) is
@@ -2910,14 +2952,15 @@ public sealed partial class SimulationEngine
     private void UpdateVisibility()
     {
         var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
-        var observers = _actors.Values
+        var goblinObservers = _actors.Values
             .Select(actor => (
                 actor.Position,
                 WorldVisibilityPolicy.ResolveGoblinVisionRadius(
                     GoblinPerception,
                     actor.Position,
                     calendar.IsNight)))
-            .ToList();
+            .ToArray();
+        var observers = goblinObservers.ToList();
         var verticalPassages = World.CreateVerticalPassageSnapshot();
         if (GoblinPerception.StructureVisionRadius > 0)
         {
@@ -2945,6 +2988,13 @@ public sealed partial class SimulationEngine
             WorldVisibilityPolicy.SelectAdjacentLayerDiscoveries(
                 verticalPassages,
                 Visibility.Get),
+            World.IsSolidHillRock);
+        Visibility.Discover(
+            WorldVisibilityPolicy.SelectEdgeLookDiscoveries(
+                goblinObservers,
+                World.IsTerrainTraversable,
+                World.IsOpenUnsupportedVolume,
+                Map.IsWorldPosition),
             World.IsSolidHillRock);
         RemoveMiningDesignationsBlockedByRevealedFluid();
         foreach (var actor in _actors.Values.Where(actor =>
@@ -3037,6 +3087,8 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.ConfigureStorageSource => TryExecuteConfigureStorageSource(command),
         SimulationCommandKind.ConfigureStoragePriority => TryExecuteConfigureStoragePriority(command),
         SimulationCommandKind.ConfigureResourcePriority => TryExecuteConfigureResourcePriority(command),
+        SimulationCommandKind.ConfigureWorkTypePriority =>
+            TryExecuteConfigureWorkTypePriority(command),
         SimulationCommandKind.ConfigureConstructionPriority =>
             TryExecuteConfigureConstructionPriority(command),
         SimulationCommandKind.ConfigureStorageMineralFilter =>
@@ -3077,6 +3129,7 @@ public sealed partial class SimulationEngine
             command, ActorTacticalOrderKind.AttackArea),
         SimulationCommandKind.OrderHuntArea => TryExecuteAreaOrder(
             command, ActorTacticalOrderKind.HuntArea),
+        SimulationCommandKind.DesignateHuntArea => TryExecuteDesignateHuntArea(command),
         SimulationCommandKind.ToggleWoodenDoor => TryExecuteToggleWoodenDoor(command),
         SimulationCommandKind.QueueCraftingOrder => TryExecuteQueueCraftingOrder(command),
         SimulationCommandKind.ConfigureRepeatingCraftingOrder =>
@@ -3833,6 +3886,15 @@ public sealed partial class SimulationEngine
             return false;
         }
 
+        if (kind is WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp)
+        {
+            return TryExecuteDirectionalRampDesignation(
+                command,
+                kind,
+                priority,
+                isSuspended);
+        }
+
         var (minimum, maximum) = NormalizeArea(command.Position, command.EndPosition);
         var targets = ResolveWorkDesignationTargets(kind, minimum, maximum);
         var concreteTargets = targets
@@ -3869,6 +3931,61 @@ public sealed partial class SimulationEngine
             });
             Publish(SimulationEventKind.WorkDesignationCreated, EntityId.None, id, (int)kind);
         }
+        return true;
+    }
+
+    private bool TryExecuteDirectionalRampDesignation(
+        SimulationCommand command,
+        WorkDesignationKind kind,
+        StoragePriority priority,
+        bool isSuspended)
+    {
+        var destination = command.EndPosition == command.Position
+            ? (GridPosition?)null
+            : command.EndPosition;
+        var definition = TerrainModificationCatalog.Get(kind);
+        if (!TerrainModificationTargetPolicy.CanRetainDesignation(
+                definition,
+                World,
+                Visibility,
+                command.Position,
+                destination) ||
+            destination is { } rampDestination &&
+            (rampDestination.X != command.Position.X ||
+             rampDestination.Y != command.Position.Y) &&
+            (!Visibility.TryGet(
+                 rampDestination with { Z = command.Position.Z },
+                 out var destinationVisibility) ||
+             destinationVisibility == CellVisibility.Unknown) ||
+            _workDesignations.Values.Any(existing =>
+                existing.OrderId != command.Subject &&
+                existing.Kind == kind &&
+                existing.Target == command.Position &&
+                existing.RampDestination == destination))
+        {
+            return false;
+        }
+
+        var orderId = command.Subject == EntityId.None
+            ? AllocateEntityId()
+            : command.Subject;
+        if (command.Subject != EntityId.None)
+        {
+            RemoveWorkOrder(command.Subject);
+        }
+        var id = AllocateEntityId();
+        _workDesignations.Add(id, new WorkDesignationSnapshot(
+            id,
+            kind,
+            command.Position,
+            EntityId.None)
+        {
+            OrderId = orderId,
+            Priority = priority,
+            IsSuspended = isSuspended,
+            RampDestination = destination,
+        });
+        Publish(SimulationEventKind.WorkDesignationCreated, EntityId.None, id, (int)kind);
         return true;
     }
 
@@ -4558,20 +4675,30 @@ public sealed partial class SimulationEngine
             command.Construction,
             command.Position,
             command.EndPosition);
+        IReadOnlyList<FloorCoveringPlacement> floorPlacements = [];
         if (command.Construction is ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor)
         {
-            footprint = footprint
-                .Where(position =>
-                    CanPlaceConstruction(
+            var placements = new List<FloorCoveringPlacement>();
+            foreach (var position in footprint)
+            {
+                if (FloorCoveringPlacementPolicy.TryResolve(
+                        World,
                         command.Construction,
                         position,
-                        position,
-                        [position]) &&
-                    World.CanPlanFloorConstruction([position]) &&
+                        out var placement) &&
+                    CanPlaceConstruction(
+                        placement.Kind,
+                        placement.Anchor,
+                        placement.End,
+                        [placement.Anchor]) &&
                     !_constructionSites.Values.Any(site =>
-                        site.GetFootprint().Contains(position)))
-                .ToArray();
-            if (footprint.Count == 0)
+                        site.GetFootprint().Contains(placement.Anchor)))
+                {
+                    placements.Add(placement);
+                }
+            }
+            floorPlacements = placements;
+            if (floorPlacements.Count == 0)
             {
                 return false;
             }
@@ -4587,10 +4714,24 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        if (command.Construction is ConstructionKind.WoodenWalkway or
+        if (command.Construction is ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor)
+        {
+            var orderId = AllocateEntityId();
+            for (var index = 0; index < floorPlacements.Count; index++)
+            {
+                var placement = floorPlacements[index];
+                AddConstructionSite(
+                    placement.Kind,
+                    placement.Anchor,
+                    placement.End,
+                    orderId,
+                    index,
+                    command.MaterialVariant);
+            }
+        }
+        else if (command.Construction is ConstructionKind.WoodenWalkway or
             ConstructionKind.BasaltWalkway or
-            ConstructionKind.WoodenWall or ConstructionKind.StoneWall or
-            ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor)
+            ConstructionKind.WoodenWall or ConstructionKind.StoneWall)
         {
             var orderId = AllocateEntityId();
             for (var index = 0; index < footprint.Count; index++)
@@ -5624,7 +5765,8 @@ public sealed partial class SimulationEngine
         }
 
         if (command.Kind is not (SimulationCommandKind.RenameLogisticsNetwork or
-                SimulationCommandKind.RenameStorageArea) &&
+                SimulationCommandKind.RenameStorageArea or
+                SimulationCommandKind.ConfigureWorkTypePriority) &&
             !string.IsNullOrEmpty(command.Text))
         {
             throw new ArgumentException("This command does not accept text.", nameof(command));
@@ -5922,7 +6064,13 @@ public sealed partial class SimulationEngine
                      !Enum.IsDefined((StoragePriority)(designationPriorityCode - 1))) ||
                     command.Target != EntityId.None ||
                     (command.Subject != EntityId.None && designatedKind == default) ||
-                    !IsValidArea(command.Position, command.EndPosition))
+                    (designatedKind is WorkDesignationKind.CarveRampDown or
+                        WorkDesignationKind.CarveRampUp
+                        ? !IsValidRampDesignation(
+                            designatedKind,
+                            command.Position,
+                            command.EndPosition)
+                        : !IsValidArea(command.Position, command.EndPosition)))
                 {
                     throw new ArgumentException("Work designation command is invalid.", nameof(command));
                 }
@@ -6229,6 +6377,18 @@ public sealed partial class SimulationEngine
                 }
 
                 break;
+            case SimulationCommandKind.ConfigureWorkTypePriority:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    !WorkTypePriorityCatalog.TryGet(command.Text, out _) ||
+                    !Enum.IsDefined((StoragePriority)command.Amount))
+                {
+                    throw new ArgumentException(
+                        "Work-type priority command is invalid.", nameof(command));
+                }
+
+                break;
             case SimulationCommandKind.AttackHumanVillage:
                 if (command.Subject != EntityId.None || command.Target != EntityId.None ||
                     command.Position != command.EndPosition ||
@@ -6312,6 +6472,17 @@ public sealed partial class SimulationEngine
                     !IsAddressableMapPosition(command.Position))
                 {
                     throw new ArgumentException("Tactical-area command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.DesignateHuntArea:
+                if (command.Subject != EntityId.None || command.Target != EntityId.None ||
+                    command.Position != command.EndPosition ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount is < MinimumRaidTargetRadius or > MaximumRaidTargetRadius ||
+                    !IsAddressableMapPosition(command.Position))
+                {
+                    throw new ArgumentException(
+                        "Hunt-area designation command is invalid.", nameof(command));
                 }
                 break;
             case SimulationCommandKind.ToggleWoodenDoor:
@@ -6729,6 +6900,17 @@ public sealed partial class SimulationEngine
         first.Z == second.Z &&
         IsAddressableMapPosition(first) &&
         IsAddressableMapPosition(second);
+
+    private bool IsValidRampDesignation(
+        WorkDesignationKind kind,
+        GridPosition origin,
+        GridPosition destination) =>
+        IsAddressableMapPosition(origin) &&
+        (IsAddressableMapPosition(destination) ||
+         destination.Z == Map.MinimumWorldLevel - 1 && Map.IsColumnWithin(destination)) &&
+        Math.Abs(destination.X - origin.X) + Math.Abs(destination.Y - origin.Y) <= 1 &&
+        destination.Z == origin.Z +
+            (kind == WorkDesignationKind.CarveRampDown ? -1 : 1);
 
     private bool IsAddressableMapPosition(GridPosition position) =>
         Map.IsWorldPosition(position);

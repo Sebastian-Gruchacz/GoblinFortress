@@ -18,9 +18,17 @@ public static class TerrainModificationCommandFactory
             WorkDesignationKind.MineRock =>
                 SimulationCommand.DesignateRockMining(executeAt, sequence, start, end),
             WorkDesignationKind.CarveRampDown =>
-                SimulationCommand.DesignateRampDown(executeAt, sequence, start),
+                SimulationCommand.DesignateRampDown(
+                    executeAt,
+                    sequence,
+                    start,
+                    end with { Z = start.Z - 1 }),
             WorkDesignationKind.CarveRampUp =>
-                SimulationCommand.DesignateRampUp(executeAt, sequence, start),
+                SimulationCommand.DesignateRampUp(
+                    executeAt,
+                    sequence,
+                    start,
+                    end with { Z = start.Z + 1 }),
             _ => throw new ArgumentException(
                 $"Terrain modification '{definition.Id}' has no command adapter.",
                 nameof(definition)),

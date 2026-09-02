@@ -34,5 +34,7 @@ public readonly record struct WorkDesignationSnapshot(
 
     public bool IsSuspended { get; init; }
 
+    public GridPosition? RampDestination { get; init; }
+
     public bool Matches(GridPosition position) => Target == position;
 }

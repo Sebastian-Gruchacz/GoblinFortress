@@ -46,6 +46,7 @@ public static class LightEmitterCatalog
 
     public static readonly ContentId WallTorchId = ContentId.Parse("core:wall-torch");
     public static readonly ContentId LavaId = ContentId.Parse("core:lava");
+    public static readonly ContentId CaveGlowcapId = ContentId.Parse("core:cave-glowcap");
     public static readonly ContentId BloomeryId = ContentId.Parse("core:bloomery-fire");
     public static readonly ContentId SmeltingFurnaceId =
         ContentId.Parse("core:smelting-furnace-fire");
@@ -106,6 +107,16 @@ public static class LightEmitterCatalog
                 0.78f,
                 new LightColor(1f, 0.26f, 0.06f),
                 0.04f,
+                new LightEmitterActivation(
+                    LightEmitterActivityRequirement.Always,
+                    LightEmitterFuelRequirement.None),
+                LightEmitterAttachment.World),
+            new LightEmitterDefinition(
+                CaveGlowcapId,
+                2.2f,
+                0.36f,
+                new LightColor(0.2f, 0.82f, 0.92f),
+                0.02f,
                 new LightEmitterActivation(
                     LightEmitterActivityRequirement.Always,
                     LightEmitterFuelRequirement.None),

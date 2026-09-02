@@ -7,6 +7,63 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class VerticalRampTests
 {
     [Fact]
+    public void DirectionalRampDesignationPreservesItsSlopeAcrossSaveLoad()
+    {
+        var seed = new WorldSeed(0x44495252414D5053UL);
+        var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 30);
+        var (upper, lower) = FindDirectionalRampDown(engine.World, map);
+        var indicatedDirection = lower with { Z = upper.Z };
+        engine.Visibility.Reveal([upper, indicatedDirection], radius: 1);
+
+        engine.ApplyCommandImmediately(SimulationCommand.DesignateRampDown(
+            engine.CurrentTick,
+            sequence: 1,
+            upper,
+            lower));
+
+        var designation = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(upper, designation.Target);
+        Assert.Equal(lower, designation.RampDestination);
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        var restoredDesignation = Assert.Single(restored.CreateSnapshot().WorkDesignations);
+        Assert.Equal(lower, restoredDesignation.RampDestination);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void DirectionalRampConnectsCardinalCellsOnAdjacentLevels()
+    {
+        var seed = new WorldSeed(0x534C4F5045524F55UL);
+        var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 30);
+        var (upper, lower) = FindDirectionalRampDown(engine.World, map);
+
+        Assert.True(engine.World.TryCarveRamp(
+            upper,
+            lower,
+            carveDown: true,
+            SimulationTick.Zero,
+            out _,
+            out _));
+
+        Assert.Contains(engine.World.ExcavatedVerticalPassages, passage =>
+            passage.Upper == upper && passage.Lower == lower);
+        Assert.NotNull(engine.Navigation.FindPath(upper, lower));
+    }
+
+    [Fact]
     public void RampCanBeCarvedBelowTheFormerLevelMinusTwoBoundary()
     {
         var seed = new WorldSeed(0x4445455052414D50UL);
@@ -224,4 +281,20 @@ public sealed class VerticalRampTests
         Assert.Contains(upper, engine.World.ExcavatedCaveCells);
         Assert.NotNull(engine.Navigation.FindPath(target, upper));
     }
+
+    private static (GridPosition Upper, GridPosition Lower) FindDirectionalRampDown(
+        WorldMapState world,
+        GeneratedMap map) =>
+        (from y in Enumerable.Range(0, map.Height)
+         from x in Enumerable.Range(0, map.Width)
+         let upper = new GridPosition(x, y, -1)
+         from lower in new[]
+         {
+             new GridPosition(x - 1, y, -2),
+             new GridPosition(x + 1, y, -2),
+             new GridPosition(x, y - 1, -2),
+             new GridPosition(x, y + 1, -2),
+         }
+         where world.CanCarveRampDown(upper, lower)
+         select (upper, lower)).First();
 }

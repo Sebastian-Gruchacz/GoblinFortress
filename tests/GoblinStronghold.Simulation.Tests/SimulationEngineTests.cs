@@ -1603,7 +1603,7 @@ public sealed class SimulationEngineTests
 
         foreach (var incompatibleVersion in new[]
                  {
-                     SwampMapGenerator.CurrentVersion - 1,
+                     SwampMapGenerator.MinimumSaveCompatibleVersion - 1,
                      SwampMapGenerator.CurrentVersion + 1,
                  })
         {
@@ -1615,6 +1615,28 @@ public sealed class SimulationEngineTests
                 exception.Message,
                 StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    [Fact]
+    public void PreviousCompatibleMapGeneratorSaveStillLoads()
+    {
+        var seed = new WorldSeed(0x56313453415645UL);
+        var map = SwampMapGenerator.Generate(
+            seed,
+            width: 48,
+            height: 48,
+            generatorVersion: SwampMapGenerator.MinimumSaveCompatibleVersion);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 3,
+            initialFoodStock: 30);
+
+        var restored = SimulationEngine.Load(engine.Save(), engine.Definitions);
+
+        Assert.Equal(SwampMapGenerator.MinimumSaveCompatibleVersion, restored.Map.GeneratorVersion);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
 
     [Fact]

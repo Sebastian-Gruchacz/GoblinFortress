@@ -22,10 +22,23 @@ internal static class TreePartSprites
         => TextureResources.LoadRequired(AtlasPath, "tree-parts atlas");
 
     public static Rect2 GetRegion(Texture2D atlas, TreePartSprite sprite)
+        => GetRegion(atlas.GetWidth(), atlas.GetHeight(), sprite);
+
+    public static Rect2I GetRegionFromImage(Image atlas, TreePartSprite sprite)
+    {
+        var region = GetRegion(atlas.GetWidth(), atlas.GetHeight(), sprite);
+        return new Rect2I(
+            Mathf.RoundToInt(region.Position.X),
+            Mathf.RoundToInt(region.Position.Y),
+            Mathf.RoundToInt(region.Size.X),
+            Mathf.RoundToInt(region.Size.Y));
+    }
+
+    private static Rect2 GetRegion(int atlasWidth, int atlasHeight, TreePartSprite sprite)
     {
         var index = (int)sprite;
-        var width = atlas.GetWidth() / Columns;
-        var height = atlas.GetHeight() / Rows;
+        var width = atlasWidth / Columns;
+        var height = atlasHeight / Rows;
         return new Rect2(
             ((index % Columns) * width) + SourcePadding,
             ((index / Columns) * height) + SourcePadding,

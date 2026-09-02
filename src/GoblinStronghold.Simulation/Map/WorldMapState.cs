@@ -240,8 +240,8 @@ public sealed class WorldMapState
         var allPassages = baseline.VerticalPassages.Concat(passages).ToArray();
         if (passages.Any(passage =>
                 passage.Kind != VerticalPassageKind.ExcavatedRamp ||
-                passage.Upper.X != passage.Lower.X ||
-                passage.Upper.Y != passage.Lower.Y ||
+                Math.Abs(passage.Upper.X - passage.Lower.X) +
+                    Math.Abs(passage.Upper.Y - passage.Lower.Y) > 1 ||
                 passage.Upper.Z != passage.Lower.Z + 1 ||
                 passage.Upper.Z > 0 ||
                 !baseline.IsCavePosition(passage.Lower) ||
@@ -493,6 +493,42 @@ public sealed class WorldMapState
 
     public bool IsTerrainTraversable(GridPosition position) =>
         IsTerrainReachable(position) && !HasClosedDoorLeaf(position);
+
+    public bool IsOpenUnsupportedVolume(GridPosition position) =>
+        Baseline.TryGetInitialGeometry(position, out var geometry) &&
+        !geometry.IsSolid &&
+        !geometry.IsSupported &&
+        !HasConstructedSurface(position) &&
+        !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _);
+
+    public bool IsOpenToSky(GridPosition position)
+    {
+        if (!Baseline.IsWorldPosition(position) || IsSolidRock(position) ||
+            TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _))
+        {
+            return false;
+        }
+
+        for (var z = position.Z + 1; z <= MaximumOccupiedLevel; z++)
+        {
+            var above = position with { Z = z };
+            if (HasConstructedSurface(above) ||
+                TryGetOccupancyClaim(above, SpatialOccupancyChannel.Solid, out _) ||
+                IsSolidRock(above))
+            {
+                return false;
+            }
+
+            if (Baseline.TryGetInitialGeometry(above, out var geometry) &&
+                geometry.IsSupported &&
+                !HasVerticalPassageBetween(above, above with { Z = z - 1 }))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     public bool TryResolveGroundItemPosition(
         GridPosition requested,
@@ -1008,7 +1044,14 @@ public sealed class WorldMapState
         TryGetOccupancyClaim(
                 position,
                 SpatialOccupancyChannel.Surface,
-                out var surface) && surface.PartKind == WorldObjectPartKind.Floor;
+            out var surface) && surface.PartKind == WorldObjectPartKind.Floor;
+
+    public bool HasConstructedCleanableSurface(GridPosition position) =>
+        HasConstructedFloorSurface(position) ||
+        TryGetOccupancyClaim(
+            position,
+            SpatialOccupancyChannel.Surface,
+            out var surface) && surface.PartKind == WorldObjectPartKind.ConstructedRamp;
 
     private bool HasStandaloneFloorAt(GridPosition position) =>
         TryGetOccupancyClaim(
@@ -1042,9 +1085,10 @@ public sealed class WorldMapState
 
     public bool CanBuildRamp(GridPosition lower, GridPosition upper)
     {
+        var coversNaturalRamp = TryGetNaturalRampUpper(lower, out var naturalUpper);
         if (!Baseline.TryGetInitialGeometry(lower, out var lowerGeometry) ||
             lowerGeometry.IsSolid || lowerGeometry.Fluid != CellFluidKind.None ||
-            lowerGeometry.Support == CellSupportKind.NaturalRamp ||
+            coversNaturalRamp && naturalUpper != upper ||
             upper.Z != lower.Z + 1 ||
             Math.Abs(upper.X - lower.X) + Math.Abs(upper.Y - lower.Y) != 1 ||
             !IsTerrainTraversable(upper) ||
@@ -1059,6 +1103,27 @@ public sealed class WorldMapState
 
         return IsTerrainTraversable(lower) ||
             GetCardinalWorldNeighbors(lower).Any(IsTerrainTraversable);
+    }
+
+    public bool TryGetNaturalRampUpper(GridPosition lower, out GridPosition upper)
+    {
+        if (!IsTerrainRampIntact(lower))
+        {
+            upper = default;
+            return false;
+        }
+
+        var direction = Baseline.GetColumnCell(lower).RampDirection;
+        upper = direction switch
+        {
+            TerrainRampDirection.North => lower with { Y = lower.Y - 1, Z = lower.Z + 1 },
+            TerrainRampDirection.East => lower with { X = lower.X + 1, Z = lower.Z + 1 },
+            TerrainRampDirection.South => lower with { Y = lower.Y + 1, Z = lower.Z + 1 },
+            TerrainRampDirection.West => lower with { X = lower.X - 1, Z = lower.Z + 1 },
+            _ => default,
+        };
+        return direction != TerrainRampDirection.None &&
+            Baseline.IsTerrainSurfacePosition(upper);
     }
 
     internal WorldChangeEvent BuildRamp(
@@ -1089,6 +1154,10 @@ public sealed class WorldMapState
         _occupancy.Add(
             new SpatialOccupancyKey(lower, SpatialOccupancyChannel.Surface),
             new SpatialOccupancyClaim(id, WorldObjectPartKind.ConstructedRamp));
+        if (lower.Z == 0)
+        {
+            _plantPatches.Remove(GetIndex(Baseline, lower));
+        }
         return CreateChange(tick, WorldChangeKind.StructureBuilt, lower, 1);
     }
 
@@ -1785,7 +1854,9 @@ public sealed class WorldMapState
 
     public bool CanBuildWorkshop(GridPosition anchor) =>
         IsTerrainTraversable(anchor) &&
-        !_occupancy.Keys.Any(key => key.Position == anchor);
+        !_occupancy.Keys.Any(key =>
+            key.Position == anchor &&
+            key.Channel != SpatialOccupancyChannel.FloorCover);
 
     internal WorldChangeEvent BuildPrimitiveWorkshop(
         GridPosition anchor,
@@ -2314,9 +2385,13 @@ public sealed class WorldMapState
     }
 
     public bool CanCarveRampDown(GridPosition upper)
+        => CanCarveRampDown(upper, upper with { Z = upper.Z - 1 });
+
+    public bool CanCarveRampDown(GridPosition upper, GridPosition lower)
     {
-        var lower = upper with { Z = upper.Z - 1 };
-        return IsTerrainTraversable(upper) &&
+        return lower.Z == upper.Z - 1 &&
+            Math.Abs(lower.X - upper.X) + Math.Abs(lower.Y - upper.Y) <= 1 &&
+            IsTerrainTraversable(upper) &&
             CanOpenCaveLevelForRamp(lower) &&
             !HasVerticalPassageAt(upper) &&
             !HasVerticalPassageAt(lower) &&
@@ -2325,12 +2400,16 @@ public sealed class WorldMapState
     }
 
     public bool CanCarveRampUp(GridPosition lower)
+        => CanCarveRampUp(lower, lower with { Z = lower.Z + 1 });
+
+    public bool CanCarveRampUp(GridPosition lower, GridPosition upper)
     {
-        var upper = lower with { Z = lower.Z + 1 };
         var upperCanBeOpened = upper.Z == 0
             ? IsTerrainTraversable(upper)
             : CanOpenCaveLevelForRamp(upper);
-        return lower.Z < 0 &&
+        return upper.Z == lower.Z + 1 &&
+            Math.Abs(upper.X - lower.X) + Math.Abs(upper.Y - lower.Y) <= 1 &&
+            lower.Z < 0 &&
             IsTerrainTraversable(lower) &&
             upperCanBeOpened &&
             !HasVerticalPassageAt(lower) &&
@@ -2360,8 +2439,14 @@ public sealed class WorldMapState
         GridPosition origin,
         bool carveDown,
         out CellFluidKind fluid)
+        => TryGetRampDestinationFluid(
+            origin with { Z = origin.Z + (carveDown ? -1 : 1) },
+            out fluid);
+
+    public bool TryGetRampDestinationFluid(
+        GridPosition destination,
+        out CellFluidKind fluid)
     {
-        var destination = origin with { Z = origin.Z + (carveDown ? -1 : 1) };
         if (Baseline.IsCavePosition(destination))
         {
             fluid = Baseline.GetCaveCell(destination).Fluid;
@@ -2386,9 +2471,18 @@ public sealed class WorldMapState
     }
 
     public CaveCell GetRampExcavationCell(GridPosition origin, bool carveDown)
+        => GetRampExcavationCell(
+            origin,
+            origin with { Z = origin.Z + (carveDown ? -1 : 1) },
+            carveDown);
+
+    public CaveCell GetRampExcavationCell(
+        GridPosition origin,
+        GridPosition destination,
+        bool carveDown)
     {
-        var upper = carveDown ? origin : origin with { Z = origin.Z + 1 };
-        var lower = carveDown ? origin with { Z = origin.Z - 1 } : origin;
+        var upper = carveDown ? origin : destination;
+        var lower = carveDown ? destination : origin;
         var excavated = carveDown ? lower : upper;
         var rockPosition = excavated.Z < 0 ? excavated : lower;
         return Baseline.IsCavePosition(rockPosition)
@@ -2401,21 +2495,36 @@ public sealed class WorldMapState
         bool carveDown,
         SimulationTick tick,
         out RockKind rock,
+        out WorldChangeEvent change) => TryCarveRamp(
+            carveDown ? origin : origin with { Z = origin.Z + 1 },
+            carveDown ? origin with { Z = origin.Z - 1 } : origin,
+            carveDown,
+            tick,
+            out rock,
+            out change);
+
+    internal bool TryCarveRamp(
+        GridPosition upper,
+        GridPosition lower,
+        bool carveDown,
+        SimulationTick tick,
+        out RockKind rock,
         out WorldChangeEvent change)
     {
-        if (carveDown ? !CanCarveRampDown(origin) : !CanCarveRampUp(origin))
+        if (carveDown ? !CanCarveRampDown(upper, lower) : !CanCarveRampUp(lower, upper))
         {
             rock = default;
             change = default;
             return false;
         }
 
-        var upper = carveDown ? origin : origin with { Z = origin.Z + 1 };
-        var lower = carveDown ? origin with { Z = origin.Z - 1 } : origin;
         var excavated = carveDown ? lower : upper;
         if (excavated.Z < 0 && !Baseline.IsCavePosition(excavated))
         {
-            Baseline.MaterializeCaveLevel(excavated.Z);
+            foreach (var naturalPassage in Baseline.MaterializeCaveLevel(excavated.Z))
+            {
+                IndexVerticalPassage(_verticalPassageDestinations, naturalPassage);
+            }
         }
         if (excavated.Z < 0)
         {
@@ -2433,7 +2542,11 @@ public sealed class WorldMapState
             VerticalPassageKind.ExcavatedRamp);
         _excavatedVerticalPassages.Add(passage);
         IndexVerticalPassage(_verticalPassageDestinations, passage);
-        change = CreateChange(tick, WorldChangeKind.RampExcavated, origin, carveDown ? -1 : 1);
+        change = CreateChange(
+            tick,
+            WorldChangeKind.RampExcavated,
+            carveDown ? upper : lower,
+            carveDown ? -1 : 1);
         return true;
     }
 
@@ -2443,6 +2556,12 @@ public sealed class WorldMapState
     public bool IsVerticalPassageUpper(GridPosition position) =>
         _verticalPassageDestinations.TryGetValue(position, out var destination) &&
         destination.Z < position.Z;
+
+    private bool HasVerticalPassageBetween(GridPosition first, GridPosition second) =>
+        _verticalPassageDestinations.TryGetValue(first, out var destination) &&
+        destination == second ||
+        _verticalPassageDestinations.TryGetValue(second, out destination) &&
+        destination == first;
 
     private static Dictionary<GridPosition, GridPosition> BuildVerticalPassageIndex(
         IEnumerable<VerticalPassage> passages)

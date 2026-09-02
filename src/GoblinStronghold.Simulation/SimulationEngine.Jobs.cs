@@ -222,7 +222,8 @@ public sealed partial class SimulationEngine
                 {
                     // A named hauler services assigned stockpiles before public settlement work.
                 }
-                else if (GetWorkDesignationPriority(WorkDesignationKind.Scout) >= StoragePriority.High &&
+                else if ((GetWorkTypePriority(WorkDesignationKind.Scout) >= StoragePriority.High ||
+                          GetWorkDesignationPriority(WorkDesignationKind.Scout) >= StoragePriority.High) &&
                          activeExplorers < GoblinSpatialBehavior.MaximumExplorers &&
                          TryPlanExploreJob(actor))
                 {
@@ -665,6 +666,8 @@ public sealed partial class SimulationEngine
             .Select(designation => designation.Priority)
             .DefaultIfEmpty(StoragePriority.Low)
             .Max();
+        var dismantlingWorkTypePriority = GetWorkTypePriority(
+            WorkDesignationKind.DismantleWorldObject);
         var haulingPriority = _storageZones.Values
             .Select(zone => zone.Priority)
             .Concat(_workDesignations.Values
@@ -674,6 +677,7 @@ public sealed partial class SimulationEngine
                 .Select(designation => designation.Priority))
             .DefaultIfEmpty(StoragePriority.Low)
             .Max();
+        var haulingWorkTypePriority = GetWorkTypePriority("hauling");
         var hasCraftingSupply = _craftingOrders.Values.Any(order =>
             CraftingRecipeCatalog.Get(order.Recipe).Materials.Any(material =>
                 order.GetMissing(material) - craftingReservations.GetValueOrDefault((
@@ -687,59 +691,73 @@ public sealed partial class SimulationEngine
             .Select(designation => designation.Priority)
             .DefaultIfEmpty(StoragePriority.Normal)
             .Max();
+        var rampWorkTypePriority = GetWorkTypePriority(WorkDesignationKind.CarveRampDown);
+        var constructionWorkTypePriority = GetWorkTypePriority("construction");
+        var craftingWorkTypePriority = GetWorkTypePriority("crafting");
         var options = new (string Name, int Score, int Order, Func<bool> TryPlan)[]
         {
-            ("construction-clearance", Score(constructionClearancePriority, actor.WorkPreferences.Hauling), 0,
+            ("construction-clearance", ScoreWorkPriorities(constructionWorkTypePriority,
+                    constructionClearancePriority, actor.WorkPreferences.Hauling), 0,
                 () => TryPlanConstructionClearance(
                     actor,
                     sourceReservations,
                     destinationReservations)),
-            ("construction-supply", Score(constructionSupplyPriority, actor.WorkPreferences.Hauling), 1,
+            ("construction-supply", ScoreWorkPriorities(constructionWorkTypePriority,
+                    constructionSupplyPriority, actor.WorkPreferences.Hauling), 1,
                 () => TryPlanConstructionSupply(
                     actor,
                     sourceReservations,
                     constructionReservations)),
-            ("construction-work", Score(constructionWorkPriority, actor.WorkPreferences.Building), 2,
+            ("construction-work", ScoreWorkPriorities(constructionWorkTypePriority,
+                    constructionWorkPriority, actor.WorkPreferences.Building), 2,
                 () => TryPlanConstructionWork(actor)),
-            ("construction-dismantling", Score(dismantlingPriority, actor.WorkPreferences.Building), 3,
+            ("construction-dismantling", ScoreWorkPriorities(dismantlingWorkTypePriority,
+                    dismantlingPriority, actor.WorkPreferences.Building), 3,
                 () => TryPlanConstructionDismantling(actor)),
-            ("crafting-supply", Score(hasCraftingSupply ? StoragePriority.Normal : StoragePriority.Low,
+            ("crafting-supply", ScoreWorkPriorities(craftingWorkTypePriority,
+                    hasCraftingSupply ? StoragePriority.Normal : StoragePriority.Low,
                     actor.WorkPreferences.Hauling), 4,
                 () => TryPlanCraftingSupply(actor, sourceReservations, craftingReservations)),
-            ("crafting-work", Score(hasCraftingWork ? StoragePriority.Normal : StoragePriority.Low,
+            ("crafting-work", ScoreWorkPriorities(craftingWorkTypePriority,
+                    hasCraftingWork ? StoragePriority.Normal : StoragePriority.Low,
                     actor.WorkPreferences.Building), 5,
                 () => TryPlanCraftingWork(actor)),
-            ("hauling", Score(haulingPriority, actor.WorkPreferences.Hauling), 5,
+            ("hauling", ScoreWorkPriorities(haulingWorkTypePriority, haulingPriority,
+                    actor.WorkPreferences.Hauling), 5,
                 () => TryPlanHaulCollection(
                     actor,
                     sourceReservations,
                     destinationReservations)),
-            ("clear-vegetation", Score(GetWorkDesignationPriority(WorkDesignationKind.UprootBerryBush), actor.WorkPreferences.Foraging), 6,
+            ("clear-vegetation", ScoreWork(WorkDesignationKind.UprootBerryBush,
+                    actor.WorkPreferences.Foraging), 6,
                 () => TryPlanClearVegetationJob(actor, reservedForageTargets)),
-            ("fell-tree", Score(GetWorkDesignationPriority(WorkDesignationKind.FellTree),
+            ("fell-tree", ScoreWork(WorkDesignationKind.FellTree,
                     actor.WorkPreferences.Building, specialist: true), 7,
                 () => TryPlanFellTreeJob(actor, reservedFellingDesignations)),
-            ("quarry-boulder", Score(GetWorkDesignationPriority(WorkDesignationKind.QuarryBoulder),
+            ("quarry-boulder", ScoreWork(WorkDesignationKind.QuarryBoulder,
                     actor.WorkPreferences.Building, specialist: true), 8,
                 () => TryPlanQuarryBoulderJob(actor, reservedFellingDesignations)),
-            ("mine-rock", Score(GetWorkDesignationPriority(WorkDesignationKind.MineRock),
+            ("mine-rock", ScoreWork(WorkDesignationKind.MineRock,
                     actor.WorkPreferences.Building, specialist: true), 9,
                 () => TryPlanMineRockJob(actor, reservedFellingDesignations)),
-            ("carve-ramp", Score(rampPriority, actor.WorkPreferences.Building, specialist: true), 10,
+            ("carve-ramp", ScoreWorkPriorities(rampWorkTypePriority, rampPriority,
+                    actor.WorkPreferences.Building, specialist: true), 10,
                 () => TryPlanCarveRampJob(actor, reservedFellingDesignations)),
-            ("gather-food", Score(GetWorkDesignationPriority(WorkDesignationKind.GatherFood), actor.WorkPreferences.Foraging), 11,
+            ("gather-food", ScoreWork(WorkDesignationKind.GatherFood,
+                    actor.WorkPreferences.Foraging), 11,
                 () => allowDesignatedForage &&
                     TryPlanForageJob(actor, reservedForageTargets, requireDesignation: true)),
-            ("gather-reeds", Score(GetWorkDesignationPriority(WorkDesignationKind.GatherReeds), actor.WorkPreferences.Foraging), 12,
+            ("gather-reeds", ScoreWork(WorkDesignationKind.GatherReeds,
+                    actor.WorkPreferences.Foraging), 12,
                 () => TryPlanForageJob(
                     actor,
                     reservedForageTargets,
                     requireDesignation: true,
                     designationKind: WorkDesignationKind.GatherReeds)),
-            ("hunt", Score(GetWorkDesignationPriority(WorkDesignationKind.HuntAnimal),
+            ("hunt", ScoreWork(WorkDesignationKind.HuntAnimal,
                     actor.WorkPreferences.Foraging), 13,
                 () => TryPlanHuntAnimalJob(actor, reservedFellingDesignations)),
-            ("clean-blood", Score(GetWorkDesignationPriority(WorkDesignationKind.CleanBlood),
+            ("clean-blood", ScoreWork(WorkDesignationKind.CleanBlood,
                     GetCleaningPreference(actor)), 14,
                 () => TryPlanCleanBloodJob(actor, reservedFellingDesignations)),
         };
@@ -779,13 +797,31 @@ public sealed partial class SimulationEngine
         }
         return false;
 
-        static int Score(
-            StoragePriority priority,
+        int ScoreWork(
+            WorkDesignationKind kind,
+            int preference,
+            bool specialist = false) => ScoreWorkPriorities(
+                GetWorkTypePriority(kind),
+                GetWorkDesignationPriority(kind),
+                preference,
+                specialist);
+
+        static int ScoreWorkPriorities(
+            StoragePriority typePriority,
+            StoragePriority orderPriority,
             int preference,
             bool specialist = false) => checked(
-                (int)priority * 10 + preference +
+                ResolveEffectiveWorkPriority(typePriority, orderPriority) * 10 +
+                preference +
                 (specialist ? SpecialistPublicWorkBonus : 0));
     }
+
+    private static int ResolveEffectiveWorkPriority(
+        StoragePriority typePriority,
+        StoragePriority orderPriority) => Math.Clamp(
+        (int)orderPriority + (int)typePriority - (int)StoragePriority.Normal,
+        (int)StoragePriority.Low,
+        (int)StoragePriority.Urgent);
 
     private StoragePriority GetWorkDesignationPriority(WorkDesignationKind kind) =>
         _workDesignations.Values
@@ -814,7 +850,9 @@ public sealed partial class SimulationEngine
                 .Select(designation => new
                 {
                     Designation = designation,
-                    Score = checked((int)designation.Priority * 10 +
+                    Score = checked(ResolveEffectiveWorkPriority(
+                            GetWorkTypePriority(designation.Kind),
+                            designation.Priority) * 10 +
                         GetForecastWorkPreference(actor, designation.Kind)),
                     Distance = GetForecastDistance(actor.Position, designation.Target),
                 })
@@ -2906,6 +2944,7 @@ public sealed partial class SimulationEngine
             TerrainModificationCatalog.Get(designation.Kind),
             World,
             designation.Target,
+            designation.RampDestination,
             actor.Position,
             WorldSeed,
             actor.Id,
@@ -3980,9 +4019,21 @@ public sealed partial class SimulationEngine
                     WorkDesignationKind.GatherStone,
                 _ => default,
             };
-            var isDesignatedLooseResource = designationKind != default &&
-                source.Location.Kind == ItemLocationKind.Ground &&
-                IsWorkDesignated(designationKind, source.Id, source.Location.Position);
+            WorkDesignationSnapshot[] matchingDesignations = designationKind == default ||
+                source.Location.Kind != ItemLocationKind.Ground
+                ? []
+                : _workDesignations.Values
+                    .Where(designation =>
+                        designation.Kind == designationKind &&
+                        !designation.IsSuspended &&
+                        designation.Target == source.Location.Position &&
+                        designation.TargetEntityId == source.Id)
+                    .ToArray();
+            var isDesignatedLooseResource = matchingDesignations.Length > 0;
+            var designationPriority = matchingDesignations
+                .Select(designation => designation.Priority)
+                .DefaultIfEmpty(StoragePriority.Low)
+                .Max();
             var isPriorityHaul = source.HaulPriority > StoragePriority.Normal;
             var candidateZones = _storageZones.Values.Where(zone =>
                          ZoneAccepts(zone, source) &&
@@ -4043,6 +4094,8 @@ public sealed partial class SimulationEngine
                     source.Id,
                     zone.Id,
                     quantity,
+                    isDesignatedLooseResource,
+                    designationPriority,
                     (StoragePriority)Math.Max(
                         (int)GetResourcePriority(source.Resource),
                         (int)source.HaulPriority),
@@ -4059,18 +4112,31 @@ public sealed partial class SimulationEngine
         }
 
         var orderedCandidates = candidates
-            .OrderByDescending(candidate => candidate.ResourcePriority)
+            .OrderByDescending(candidate => candidate.IsExplicitlyDesignated)
+            .ThenByDescending(candidate => candidate.DesignationPriority)
+            .ThenByDescending(candidate => candidate.ResourcePriority)
             .ThenByDescending(candidate => candidate.DestinationPriority)
             .ThenBy(candidate => candidate.EstimatedDistance)
             .ThenBy(candidate => candidate.SourceStackId)
             .ThenBy(candidate => candidate.DestinationZoneId)
             .ToArray();
-        var highestResourcePriority = orderedCandidates[0].ResourcePriority;
+        var explicitlyDesignated = orderedCandidates[0].IsExplicitlyDesignated;
+        var highestDesignationPriority = orderedCandidates[0].DesignationPriority;
+        var highestResourcePriority = orderedCandidates
+            .Where(candidate =>
+                candidate.IsExplicitlyDesignated == explicitlyDesignated &&
+                candidate.DesignationPriority == highestDesignationPriority)
+            .Max(candidate => candidate.ResourcePriority);
         var highestDestinationPriority = orderedCandidates
-            .Where(candidate => candidate.ResourcePriority == highestResourcePriority)
+            .Where(candidate =>
+                candidate.IsExplicitlyDesignated == explicitlyDesignated &&
+                candidate.DesignationPriority == highestDesignationPriority &&
+                candidate.ResourcePriority == highestResourcePriority)
             .Max(candidate => candidate.DestinationPriority);
         var priorityCandidates = orderedCandidates
             .Where(candidate =>
+                candidate.IsExplicitlyDesignated == explicitlyDesignated &&
+                candidate.DesignationPriority == highestDesignationPriority &&
                 candidate.ResourcePriority == highestResourcePriority &&
                 candidate.DestinationPriority == highestDestinationPriority)
             .ToArray();
@@ -4292,7 +4358,8 @@ public sealed partial class SimulationEngine
                         terrain,
                         designation.Target,
                         World,
-                        Visibility)
+                        Visibility,
+                        designation.RampDestination)
                     : designation.Kind switch
             {
                 WorkDesignationKind.GatherFood =>
@@ -5804,7 +5871,10 @@ public sealed partial class SimulationEngine
             definition.LegacyDesignation is WorkDesignationKind.CarveRampDown or
                 WorkDesignationKind.CarveRampUp)
         {
-            return GetTerrainWorkTicks(definition, designation.Target);
+            return GetTerrainWorkTicks(
+                definition,
+                designation.Target,
+                designation.RampDestination);
         }
 
         return TerrainWorkPolicy.GetWorkTicks(
@@ -5821,7 +5891,10 @@ public sealed partial class SimulationEngine
         return TerrainWorkAssignmentFactory.Create(
             definition,
             plan,
-            GetTerrainWorkTicks(definition, designation.Target));
+            GetTerrainWorkTicks(
+                definition,
+                designation.Target,
+                designation.RampDestination));
     }
 
     private TerrainWorkAssignment CreateTerrainWorkAssignment(
@@ -5833,22 +5906,29 @@ public sealed partial class SimulationEngine
 
     private int GetTerrainWorkTicks(
         TerrainModificationDefinition definition,
-        GridPosition designationTarget) => TerrainWorkPolicy.GetWorkTicks(
+        GridPosition designationTarget,
+        GridPosition? rampDestination = null) => TerrainWorkPolicy.GetWorkTicks(
             definition,
-            GetTerrainExcavationCell(definition, designationTarget),
+            GetTerrainExcavationCell(definition, designationTarget, rampDestination),
             Definitions.ForageWorkTicks);
 
     private CaveCell GetTerrainExcavationCell(
         TerrainModificationDefinition definition,
-        GridPosition target) => definition.LegacyDesignation switch
+        GridPosition target,
+        GridPosition? rampDestination = null) => definition.LegacyDesignation switch
     {
         WorkDesignationKind.MineRock => Map.IsRockPosition(target)
             ? Map.GetRockCell(target)
             : new CaveCell(RockKind.Sandstone, CaveCellKind.SolidRock),
         WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
-            World.GetRampExcavationCell(
-                target,
-                definition.LegacyDesignation == WorkDesignationKind.CarveRampDown),
+            rampDestination is { } destination
+                ? World.GetRampExcavationCell(
+                    target,
+                    destination,
+                    definition.LegacyDesignation == WorkDesignationKind.CarveRampDown)
+                : World.GetRampExcavationCell(
+                    target,
+                    definition.LegacyDesignation == WorkDesignationKind.CarveRampDown),
         _ => throw new ArgumentException(
             $"Terrain modification '{definition.Id}' has no excavation cell.",
             nameof(definition)),
@@ -5890,18 +5970,21 @@ public sealed partial class SimulationEngine
         CanActorPerformTerrainWork(
             actor,
             TerrainModificationCatalog.Get(designation.Kind),
-            designation.Target);
+            designation.Target,
+            designation.RampDestination);
 
     private bool CanActorPerformTerrainWork(
         ActorState actor,
         TerrainModificationDefinition definition,
-        GridPosition target) => TerrainWorkPolicy.CanActorPerform(
+        GridPosition target,
+        GridPosition? rampDestination = null) => TerrainWorkPolicy.CanActorPerform(
             definition,
             target,
             World,
             actor.KnownSkills,
             actor.Equipment,
-            actor.BuildingExperience);
+            actor.BuildingExperience,
+            rampDestination);
 
     private int GetHuntWorkTicks() => checked(Definitions.ForageWorkTicks * 2);
 
@@ -5958,6 +6041,8 @@ public sealed partial class SimulationEngine
         EntityId SourceStackId,
         EntityId DestinationZoneId,
         int Quantity,
+        bool IsExplicitlyDesignated,
+        StoragePriority DesignationPriority,
         StoragePriority ResourcePriority,
         StoragePriority DestinationPriority,
         GridPosition SourcePosition,

@@ -1,12 +1,39 @@
 using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Lighting;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Presentation;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class LightEmitterIndexTests
 {
+    [Fact]
+    public void GoblinDarkVisionBrightensOnlyVisibleCellsOnTheActiveLevel()
+    {
+        var active = new GridPosition(4, 5, -3);
+        var otherLevel = active with { Z = -2 };
+
+        Assert.Equal(
+            ActiveLevelDarkVisionPolicy.VisibleCellDarknessMultiplier,
+            ActiveLevelDarkVisionPolicy.ResolveDarknessMultiplier(
+                active,
+                activeLevel: -3,
+                CellVisibility.Visible));
+        Assert.Equal(
+            1f,
+            ActiveLevelDarkVisionPolicy.ResolveDarknessMultiplier(
+                active,
+                activeLevel: -3,
+                CellVisibility.Explored));
+        Assert.Equal(
+            1f,
+            ActiveLevelDarkVisionPolicy.ResolveDarknessMultiplier(
+                otherLevel,
+                activeLevel: -3,
+                CellVisibility.Visible));
+    }
+
     [Fact]
     public void QueryReturnsOnlyEmittersWhoseInfluenceReachesRequestedLevelAndArea()
     {

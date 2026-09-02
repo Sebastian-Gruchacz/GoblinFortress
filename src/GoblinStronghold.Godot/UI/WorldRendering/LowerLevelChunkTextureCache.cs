@@ -1,6 +1,7 @@
 using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Presentation;
 using System.Diagnostics;
 
@@ -10,18 +11,20 @@ internal sealed record LowerLevelChunkTexture(
     PresentationChunkKey Key,
     Texture2D Geometry,
     Texture2D Lighting,
+    Texture2D SkyLighting,
     Texture2D ExposureMask,
     int PixelsPerCell);
 
 internal sealed record LowerLevelOpeningTexture(
     Texture2D Geometry,
     Texture2D Lighting,
+    Texture2D SkyLighting,
     Rect2 SourceRegion,
     int Level);
 
 internal sealed class LowerLevelChunkTextureCache : IDisposable
 {
-    public const int PixelsPerCell = 10;
+    public const int PixelsPerCell = 16;
     public const int MaximumRebuildsPerFrame = 2;
 
     private readonly Dictionary<PresentationChunkKey, CachedChunk> _chunks = [];
@@ -30,6 +33,10 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
     private readonly TimedPresentationOperationCounter _rebuildBatches = new();
     private Image? _terrainAtlas;
     private Image? _caveAtlas;
+    private Image? _environmentAtlas;
+    private Image? _itemIconAtlas;
+    private Image? _treePartAtlas;
+    private Image? _treeCrownAtlas;
     private Image? _lavaTile;
     private long _chunksRebuilt;
     private long _geometryTexturesRebuilt;
@@ -45,15 +52,33 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         _geometryTexturesRebuilt,
         _staticLightTexturesRebuilt);
 
-    public void Initialize(Texture2D terrainAtlas, Texture2D caveAtlas)
+    public void Initialize(
+        Texture2D terrainAtlas,
+        Texture2D caveAtlas,
+        Texture2D environmentAtlas,
+        Texture2D itemIconAtlas,
+        Texture2D treePartAtlas,
+        Texture2D treeCrownAtlas)
     {
         ArgumentNullException.ThrowIfNull(terrainAtlas);
         ArgumentNullException.ThrowIfNull(caveAtlas);
+        ArgumentNullException.ThrowIfNull(environmentAtlas);
+        ArgumentNullException.ThrowIfNull(itemIconAtlas);
+        ArgumentNullException.ThrowIfNull(treePartAtlas);
+        ArgumentNullException.ThrowIfNull(treeCrownAtlas);
         ClearTiles();
         _terrainAtlas?.Dispose();
         _caveAtlas?.Dispose();
+        _environmentAtlas?.Dispose();
+        _itemIconAtlas?.Dispose();
+        _treePartAtlas?.Dispose();
+        _treeCrownAtlas?.Dispose();
         _terrainAtlas = terrainAtlas.GetImage();
         _caveAtlas = caveAtlas.GetImage();
+        _environmentAtlas = environmentAtlas.GetImage();
+        _itemIconAtlas = itemIconAtlas.GetImage();
+        _treePartAtlas = treePartAtlas.GetImage();
+        _treeCrownAtlas = treeCrownAtlas.GetImage();
     }
 
     public void ResetWorld()
@@ -75,7 +100,10 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         LowerLevelExposureIndex exposure,
         LowerLevelPresentationCacheState cacheState)
     {
-        if (_terrainAtlas is null || _caveAtlas is null)
+        if (_terrainAtlas is null || _caveAtlas is null ||
+            _environmentAtlas is null || _itemIconAtlas is null ||
+            _treePartAtlas is null ||
+            _treeCrownAtlas is null)
         {
             throw new InvalidOperationException(
                 "Lower-level texture atlases must be initialized before rebuilding chunks.");
@@ -99,7 +127,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
                 snapshot,
                 candidate.Key,
                 cells,
-                exposure.ChunkSize);
+                exposure);
             if (_chunks.Remove(candidate.Key, out var previous))
             {
                 previous.Dispose();
@@ -149,6 +177,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         texture = new LowerLevelOpeningTexture(
             chunk.Snapshot.Geometry,
             chunk.Snapshot.Lighting,
+            chunk.Snapshot.SkyLighting,
             new Rect2(
                 localX * PixelsPerCell,
                 localY * PixelsPerCell,
@@ -166,6 +195,14 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         _terrainAtlas = null;
         _caveAtlas?.Dispose();
         _caveAtlas = null;
+        _environmentAtlas?.Dispose();
+        _environmentAtlas = null;
+        _itemIconAtlas?.Dispose();
+        _itemIconAtlas = null;
+        _treePartAtlas?.Dispose();
+        _treePartAtlas = null;
+        _treeCrownAtlas?.Dispose();
+        _treeCrownAtlas = null;
     }
 
     private CachedChunk BuildChunk(
@@ -173,8 +210,9 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         SimulationSnapshot snapshot,
         PresentationChunkKey key,
         IReadOnlyCollection<GridPosition> exposedCells,
-        int chunkSize)
+        LowerLevelExposureIndex exposure)
     {
+        var chunkSize = exposure.ChunkSize;
         var geometry = Image.CreateEmpty(
             chunkSize * PixelsPerCell,
             chunkSize * PixelsPerCell,
@@ -189,30 +227,67 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         var grimeByPosition = snapshot.SurfaceGrime
             .Where(stain => stain.Position.Z == key.Level)
             .ToDictionary(stain => stain.Position, stain => stain.Volume);
+        var structuresByPosition = CreateStructureIndex(engine, snapshot, key.Level);
+        var plantsByPosition = snapshot.PlantPatches
+            .Select(plant => (
+                Position: ResolvePlantPosition(engine, plant),
+                Plant: plant))
+            .Where(item => item.Position.Z == key.Level)
+            .ToDictionary(item => item.Position, item => item.Plant);
+        var livingTrees = snapshot.WorldObjects
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.Tree)
+            .Select(engine.World.GetEffectiveWorldObjectAnchor)
+            .ToHashSet();
         var geometryCells = new HashSet<GridPosition>();
         foreach (var position in exposedCells)
         {
             var localX = position.X - (key.X * chunkSize);
             var localY = position.Y - (key.Y * chunkSize);
             mask.SetPixel(localX, localY, Colors.White);
-            var tile = ResolveGeometryTile(engine, position);
-            if (tile is null)
+            var tile = ResolveGeometryTile(engine, position, livingTrees);
+            var structureParts = structuresByPosition.GetValueOrDefault(position) ?? [];
+            var hasPlant = plantsByPosition.TryGetValue(position, out var plant);
+            if (tile is null && structureParts.Count == 0 && !hasPlant)
             {
                 continue;
             }
 
-            geometry.BlitRect(
-                tile,
-                new Rect2I(0, 0, PixelsPerCell, PixelsPerCell),
-                new Vector2I(localX * PixelsPerCell, localY * PixelsPerCell));
+            var origin = new Vector2I(localX * PixelsPerCell, localY * PixelsPerCell);
+            if (tile is not null)
+            {
+                geometry.BlitRect(
+                    tile,
+                    new Rect2I(0, 0, PixelsPerCell, PixelsPerCell),
+                    origin);
+            }
+            if (CaveFloraGenerator.TryGet(engine.Map, position, out var caveFlora))
+            {
+                LowerLevelStaticCaveFloraPainter.PaintCell(
+                    geometry,
+                    origin,
+                    caveFlora);
+            }
+            if (hasPlant)
+            {
+                LowerLevelStaticVegetationPainter.PaintCell(
+                    geometry,
+                    origin,
+                    plant,
+                    _environmentAtlas!);
+            }
             LowerLevelStaticStructurePainter.PaintCell(
                 geometry,
-                new Vector2I(localX * PixelsPerCell, localY * PixelsPerCell),
-                position,
-                engine.World.GetWorldObjectsAt(position));
+                origin,
+                structureParts,
+                _environmentAtlas!,
+                _itemIconAtlas!,
+                _treePartAtlas!,
+                _treeCrownAtlas!,
+                engine.WorldSeed,
+                engine.Map.Width);
             LowerLevelStaticContaminationPainter.PaintCell(
                 geometry,
-                new Vector2I(localX * PixelsPerCell, localY * PixelsPerCell),
+                origin,
                 position,
                 bloodByPosition.GetValueOrDefault(position),
                 grimeByPosition.GetValueOrDefault(position));
@@ -227,19 +302,67 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             mask,
             chunkSize,
             PixelsPerCell);
+        LowerLevelOpeningVignettePainter.Paint(
+            lighting,
+            key,
+            exposure);
+        var skyLighting = Image.CreateEmpty(
+            lighting.GetWidth(),
+            lighting.GetHeight(),
+            false,
+            Image.Format.Rgba8);
+        skyLighting.Fill(Colors.Transparent);
+        skyLighting.BlitRect(
+            lighting,
+            new Rect2I(Vector2I.Zero, lighting.GetSize()),
+            Vector2I.Zero);
+        ApplySkyExposureMask(engine, key, skyLighting, chunkSize);
 
         var geometryTexture = ImageTexture.CreateFromImage(geometry);
         var lightingTexture = ImageTexture.CreateFromImage(lighting);
+        var skyLightingTexture = ImageTexture.CreateFromImage(skyLighting);
         var maskTexture = ImageTexture.CreateFromImage(mask);
         geometry.Dispose();
         lighting.Dispose();
+        skyLighting.Dispose();
         mask.Dispose();
         return new CachedChunk(
             key,
             geometryTexture,
             lightingTexture,
+            skyLightingTexture,
             maskTexture,
             geometryCells);
+    }
+
+    private static void ApplySkyExposureMask(
+        SimulationEngine engine,
+        PresentationChunkKey key,
+        Image image,
+        int chunkSize)
+    {
+        for (var localY = 0; localY < chunkSize; localY++)
+        {
+            for (var localX = 0; localX < chunkSize; localX++)
+            {
+                var position = new GridPosition(
+                    key.X * chunkSize + localX,
+                    key.Y * chunkSize + localY,
+                    key.Level);
+                if (engine.World.IsOpenToSky(position))
+                {
+                    continue;
+                }
+
+                image.FillRect(
+                    new Rect2I(
+                        localX * PixelsPerCell,
+                        localY * PixelsPerCell,
+                        PixelsPerCell,
+                        PixelsPerCell),
+                    Colors.Transparent);
+            }
+        }
     }
 
     private static void ApplyExposureMask(Image geometry, Image mask)
@@ -273,13 +396,60 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         return value < 0 && value % divisor != 0 ? quotient - 1 : quotient;
     }
 
-    private Image? ResolveGeometryTile(SimulationEngine engine, GridPosition position)
+    private static IReadOnlyDictionary<GridPosition, List<LowerLevelStaticStructurePart>>
+        CreateStructureIndex(
+            SimulationEngine engine,
+            SimulationSnapshot snapshot,
+            int level)
+    {
+        var result = new Dictionary<GridPosition, List<LowerLevelStaticStructurePart>>();
+        foreach (var worldObject in snapshot.WorldObjects)
+        {
+            var anchor = engine.World.GetEffectiveWorldObjectAnchor(worldObject);
+            foreach (var part in worldObject.Parts)
+            {
+                var position = Add(anchor, part.RelativePosition);
+                if (position.Z != level)
+                {
+                    continue;
+                }
+
+                if (!result.TryGetValue(position, out var parts))
+                {
+                    parts = [];
+                    result.Add(position, parts);
+                }
+                parts.Add(new LowerLevelStaticStructurePart(worldObject, part));
+            }
+        }
+        return result;
+    }
+
+    private static GridPosition ResolvePlantPosition(
+        SimulationEngine engine,
+        PlantPatchSnapshot plant) =>
+        PlantPresentationPositionPolicy.Resolve(engine.Map, plant);
+
+    private static GridPosition Add(GridPosition left, GridPosition right) => new(
+        checked(left.X + right.X),
+        checked(left.Y + right.Y),
+        checked(left.Z + right.Z));
+
+    private Image? ResolveGeometryTile(
+        SimulationEngine engine,
+        GridPosition position,
+        IReadOnlySet<GridPosition> livingTrees)
     {
         if (position.Z >= 0)
         {
             var cell = engine.Map.GetColumnCell(position);
             return cell.SurfaceLevel == position.Z
-                ? GetSurfaceTile(cell.Terrain)
+                ? GetSurfaceTile(
+                    cell.Terrain,
+                    position,
+                    livingTrees,
+                    engine.Map.Width,
+                    engine.Map.Height)
                 : null;
         }
 
@@ -291,7 +461,12 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         {
             return fluid == CellFluidKind.Lava
                 ? GetLavaTile()
-                : GetSurfaceTile(TerrainKind.DeepWater);
+                : GetSurfaceTile(
+                    TerrainKind.DeepWater,
+                    position,
+                    livingTrees,
+                    engine.Map.Width,
+                    engine.Map.Height);
         }
 
         var cave = engine.Map.GetCaveCell(position);
@@ -299,12 +474,24 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             engine.World.ExcavatedCaveCells.Contains(position));
     }
 
-    private Image GetSurfaceTile(TerrainKind terrain)
+    private Image GetSurfaceTile(
+        TerrainKind terrain,
+        GridPosition position,
+        IReadOnlySet<GridPosition> livingTrees,
+        int mapWidth,
+        int mapHeight)
     {
         var sprite = terrain switch
         {
+            TerrainKind.SolidGround when IsForestFloor(position, livingTrees) =>
+                IsConiferPatch(position.X, position.Y)
+                    ? TerrainSprite.ConiferForestFloor
+                    : TerrainSprite.DeciduousForestFloor,
             TerrainKind.SolidGround => TerrainSprite.Meadow,
             TerrainKind.Mud => TerrainSprite.BogGround,
+            TerrainKind.ShallowWater when IsSwampWater(
+                position.X, position.Y, mapWidth, mapHeight) =>
+                TerrainSprite.MuddyWaterA,
             TerrainKind.ShallowWater => TerrainSprite.ShallowWaterA,
             TerrainKind.DeepWater => TerrainSprite.DeepWaterA,
             _ => throw new ArgumentOutOfRangeException(nameof(terrain), terrain, null),
@@ -320,6 +507,32 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         _surfaceTiles.Add(sprite, tile);
         return tile;
     }
+
+    private static bool IsSwampWater(int x, int y, int mapWidth, int mapHeight) =>
+        x < mapWidth * 0.38f || y > mapHeight * 0.66f;
+
+    private static bool IsForestFloor(
+        GridPosition position,
+        IReadOnlySet<GridPosition> livingTrees)
+    {
+        for (var offsetY = -2; offsetY <= 2; offsetY++)
+        {
+            for (var offsetX = -2; offsetX <= 2; offsetX++)
+            {
+                if (livingTrees.Contains(new GridPosition(
+                        position.X + offsetX,
+                        position.Y + offsetY,
+                        position.Z)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static bool IsConiferPatch(int x, int y) =>
+        unchecked((((x / 7) * 73_856_093) ^ ((y / 7) * 19_349_663)) & 3) == 0;
 
     private Image GetCaveTile(RockKind rock, bool isOpen)
     {
@@ -424,6 +637,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         PresentationChunkKey key,
         ImageTexture geometry,
         ImageTexture lighting,
+        ImageTexture skyLighting,
         ImageTexture exposureMask,
         HashSet<GridPosition> geometryCells) : IDisposable
     {
@@ -431,6 +645,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             key,
             geometry,
             lighting,
+            skyLighting,
             exposureMask,
             PixelsPerCell);
 
@@ -440,6 +655,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         {
             geometry.Dispose();
             lighting.Dispose();
+            skyLighting.Dispose();
             exposureMask.Dispose();
         }
     }

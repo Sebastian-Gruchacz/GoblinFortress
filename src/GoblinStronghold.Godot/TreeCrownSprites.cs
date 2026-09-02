@@ -14,12 +14,25 @@ internal static class TreeCrownSprites
         => TextureResources.LoadRequired(AtlasPath, "tree-crowns atlas");
 
     public static Rect2 GetRegion(Texture2D atlas, ResourceVariant variant)
+        => GetRegion(atlas.GetWidth(), atlas.GetHeight(), variant);
+
+    public static Rect2I GetRegionFromImage(Image atlas, ResourceVariant variant)
+    {
+        var region = GetRegion(atlas.GetWidth(), atlas.GetHeight(), variant);
+        return new Rect2I(
+            Mathf.RoundToInt(region.Position.X),
+            Mathf.RoundToInt(region.Position.Y),
+            Mathf.RoundToInt(region.Size.X),
+            Mathf.RoundToInt(region.Size.Y));
+    }
+
+    private static Rect2 GetRegion(int atlasWidth, int atlasHeight, ResourceVariant variant)
     {
         var index = variant is >= ResourceVariant.OakWood and <= ResourceVariant.PineWood
             ? (int)variant - (int)ResourceVariant.OakWood
             : 0;
-        var width = atlas.GetWidth() / Columns;
-        var height = atlas.GetHeight() / Rows;
+        var width = atlasWidth / Columns;
+        var height = atlasHeight / Rows;
         return new Rect2(
             ((index % Columns) * width) + SourcePadding,
             ((index / Columns) * height) + SourcePadding,

@@ -51,6 +51,18 @@ internal static class ItemIcons
             cellHeight);
     }
 
+    public static Rect2I GetRegionFromImage(Image atlas, ItemIcon icon)
+    {
+        var cellWidth = atlas.GetWidth() / Columns;
+        var cellHeight = atlas.GetHeight() / Rows;
+        var index = (int)icon;
+        return new Rect2I(
+            index % Columns * cellWidth,
+            index / Columns * cellHeight,
+            cellWidth,
+            cellHeight);
+    }
+
     public static ItemIcon ForResource(ResourceKind resource) => resource switch
     {
         ResourceKind.Food => ItemIcon.Food,

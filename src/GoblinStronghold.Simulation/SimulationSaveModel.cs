@@ -2,6 +2,8 @@ namespace GoblinStronghold.Simulation;
 
 internal sealed class SimulationSaveModel
 {
+    internal bool DiscardMisplacedLegacySurfaceGrime;
+
     public int FormatVersion { get; set; }
 
     public string DefinitionsId { get; set; } = string.Empty;
@@ -99,6 +101,8 @@ internal sealed class SimulationSaveModel
     public List<LogisticsNetworkSaveModel> LogisticsNetworks { get; set; } = [];
 
     public List<ResourcePrioritySaveModel> ResourcePriorities { get; set; } = [];
+
+    public List<WorkTypePrioritySaveModel> WorkTypePriorities { get; set; } = [];
 
     public List<ConstructionSiteSaveModel> ConstructionSites { get; set; } = [];
 
@@ -268,6 +272,13 @@ internal sealed class GoblinBudSaveModel
 internal sealed class ResourcePrioritySaveModel
 {
     public Resources.ResourceKind Resource { get; set; }
+
+    public Resources.StoragePriority Priority { get; set; }
+}
+
+internal sealed class WorkTypePrioritySaveModel
+{
+    public string Id { get; set; } = string.Empty;
 
     public Resources.StoragePriority Priority { get; set; }
 }
@@ -708,6 +719,14 @@ internal sealed class WorkDesignationSaveModel
     public int TargetY { get; set; }
 
     public int TargetZ { get; set; }
+
+    public bool HasRampDestination { get; set; }
+
+    public int RampDestinationX { get; set; }
+
+    public int RampDestinationY { get; set; }
+
+    public int RampDestinationZ { get; set; }
 
     public ulong TargetEntityId { get; set; }
 

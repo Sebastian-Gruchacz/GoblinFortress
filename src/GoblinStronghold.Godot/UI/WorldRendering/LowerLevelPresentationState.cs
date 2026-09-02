@@ -54,8 +54,20 @@ internal sealed class LowerLevelPresentationState : IDisposable
             _workload);
     }
 
-    public void Initialize(Texture2D terrainAtlas, Texture2D caveAtlas) =>
-        _textures.Initialize(terrainAtlas, caveAtlas);
+    public void Initialize(
+        Texture2D terrainAtlas,
+        Texture2D caveAtlas,
+        Texture2D environmentAtlas,
+        Texture2D itemIconAtlas,
+        Texture2D treePartAtlas,
+        Texture2D treeCrownAtlas) =>
+        _textures.Initialize(
+            terrainAtlas,
+            caveAtlas,
+            environmentAtlas,
+            itemIconAtlas,
+            treePartAtlas,
+            treeCrownAtlas);
 
     public void Reset()
     {
@@ -82,7 +94,8 @@ internal sealed class LowerLevelPresentationState : IDisposable
         var key = new SynchronizationKey(
             engine.World.TopologyVersion,
             activeLevel,
-            visibleBounds);
+            visibleBounds,
+            CreateActiveLevelVisibilitySignature(engine, activeLevel, visibleBounds));
         if (_synchronizationKey == key)
         {
             if (_exposure is null)
@@ -103,7 +116,10 @@ internal sealed class LowerLevelPresentationState : IDisposable
         var plan = PresentationSlicePlanner.Create(
             new PresentationSliceRequest(activeLevel, visibleBounds),
             (x, y) => engine.Map.GetColumnCell(new GridPosition(x, y)).SurfaceLevel,
-            engine.World.CreateVerticalPassageSnapshot());
+            engine.World.CreateVerticalPassageSnapshot(),
+            position => engine.Visibility.TryGet(position, out var visibility) &&
+                visibility.IsDiscovered(),
+            engine.World.HasConstructedFloorSurface);
         _openingDestinations = plan.OpeningDestinations;
         _exposure = plan.Exposure;
         _workload = plan.Workload;
@@ -234,10 +250,33 @@ internal sealed class LowerLevelPresentationState : IDisposable
         return signature;
     }
 
+    private static ulong CreateActiveLevelVisibilitySignature(
+        SimulationEngine engine,
+        int activeLevel,
+        PresentationCellBounds visibleBounds)
+    {
+        const ulong offset = 14_695_981_039_346_656_037UL;
+        const ulong prime = 1_099_511_628_211UL;
+        var signature = offset;
+        for (var y = visibleBounds.MinimumY; y < visibleBounds.MaximumY; y++)
+        {
+            for (var x = visibleBounds.MinimumX; x < visibleBounds.MaximumX; x++)
+            {
+                var position = new GridPosition(x, y, activeLevel);
+                var discovered = engine.Visibility.TryGet(position, out var visibility) &&
+                    visibility.IsDiscovered();
+                signature = (signature ^ (discovered ? 1UL : 0UL)) * prime;
+            }
+        }
+
+        return signature;
+    }
+
     private readonly record struct SynchronizationKey(
         ulong TopologyVersion,
         int ActiveLevel,
-        PresentationCellBounds VisibleBounds);
+        PresentationCellBounds VisibleBounds,
+        ulong VisibilitySignature);
 
     private readonly record struct ObservationKey(
         ulong WorldVersion,

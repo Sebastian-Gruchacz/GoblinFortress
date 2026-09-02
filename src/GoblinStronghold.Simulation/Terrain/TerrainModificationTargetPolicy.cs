@@ -35,7 +35,8 @@ public static class TerrainModificationTargetPolicy
         TerrainModificationDefinition definition,
         WorldMapState world,
         WorldVisibilityState visibility,
-        GridPosition target)
+        GridPosition target,
+        GridPosition? rampDestination = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(world);
@@ -48,8 +49,12 @@ public static class TerrainModificationTargetPolicy
                 world.IsSolidRock(target) ||
                 world.IsTerrainRampIntact(target) ||
                 world.TryGetFluid(target, out _, out _),
-            WorkDesignationKind.CarveRampDown => world.CanCarveRampDown(target),
-            WorkDesignationKind.CarveRampUp => world.CanCarveRampUp(target),
+            WorkDesignationKind.CarveRampDown => rampDestination is { } lower
+                ? world.CanCarveRampDown(target, lower)
+                : world.CanCarveRampDown(target),
+            WorkDesignationKind.CarveRampUp => rampDestination is { } upper
+                ? world.CanCarveRampUp(target, upper)
+                : world.CanCarveRampUp(target),
             _ => false,
         };
     }

@@ -137,6 +137,7 @@ public sealed class WorldMapState
                 var position = baseline.GetTerrainSurfacePosition(column);
                 var cell = baseline.GetCell(column);
                 if (!cell.IsTraversable ||
+                    cell.SurfaceRoute != SurfaceRouteKind.None ||
                     cell.RampDirection != TerrainRampDirection.None ||
                     occupiedColumns.Contains(column) ||
                     column == (baseline.GoblinSpawn with { Z = 0 }) ||

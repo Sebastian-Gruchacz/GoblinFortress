@@ -6,6 +6,8 @@ public sealed partial class SimulationEngine
 {
     private const int SurfaceCleaningWorkTicks = 32;
     private readonly Contamination.SurfaceGrimeState _surfaceGrime = new();
+    private readonly Contamination.SurfaceContaminationAreaIndex
+        _autonomousCleaningAreas = new();
 
     private bool HasSurfaceGrime(GridPosition position) => _surfaceGrime.Contains(position);
 
@@ -48,6 +50,7 @@ public sealed partial class SimulationEngine
             source,
             carriedGrime,
             CurrentTick);
+        RefreshAutonomousCleaningRegistration(source);
         if (IsLooseDirtSource(source))
         {
             carriedGrime = Contamination.SurfaceGrimeState.MaximumCarriedAmount;
@@ -66,6 +69,7 @@ public sealed partial class SimulationEngine
         if (IsConstructedFloorSurface(destination))
         {
             _surfaceGrime.Deposit(destination, carriedGrime, CurrentTick);
+            RefreshAutonomousCleaningRegistration(destination);
         }
 
         return carriedGrime - 1;
@@ -73,12 +77,12 @@ public sealed partial class SimulationEngine
 
     private IEnumerable<GridPosition> GetCleanableSurfacePositions() =>
         _bloodStains.Keys
-            .Concat(_surfaceGrime.CreateSnapshot().Select(stain => stain.Position))
+            .Concat(_surfaceGrime.EnumeratePositions())
             .Distinct()
             .Where(IsConstructedFloorSurface);
 
-    private IEnumerable<GridPosition> GetAutonomousCleaningPositions() =>
-        GetCleanableSurfacePositions().Where(HasAutonomouslyCleanableSurface);
+    private IEnumerable<Contamination.SurfaceContaminationArea>
+        GetAutonomousCleaningAreas() => _autonomousCleaningAreas.EnumerateAreas();
 
     private bool HasCleanableSurface(GridPosition position) =>
         IsConstructedFloorSurface(position) &&
@@ -104,11 +108,33 @@ public sealed partial class SimulationEngine
         }
 
         var cleaned = CleanBloodOnly(position) + _surfaceGrime.Clean(position, CurrentTick);
+        RefreshAutonomousCleaningRegistration(position);
         if (!HasCleanableSurface(position))
         {
             RemoveBloodCleaningDesignations(position);
         }
 
         return cleaned;
+    }
+
+    private void RefreshAutonomousCleaningRegistration(GridPosition position)
+    {
+        if (HasAutonomouslyCleanableSurface(position))
+        {
+            _autonomousCleaningAreas.Add(position);
+        }
+        else
+        {
+            _autonomousCleaningAreas.Remove(position);
+        }
+    }
+
+    private void RebuildAutonomousCleaningAreas()
+    {
+        _autonomousCleaningAreas.Clear();
+        foreach (var position in GetCleanableSurfacePositions())
+        {
+            RefreshAutonomousCleaningRegistration(position);
+        }
     }
 }

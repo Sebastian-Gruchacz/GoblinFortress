@@ -23,6 +23,7 @@ public sealed class SaveCompatibilityTests
             JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
         Assert.Equal(SwampMapGenerator.DefaultProfileId, restored.Map.ProfileId);
         Assert.Equal(RiverGenerationMode.SingleChannel, restored.Map.RiverMode);
+        Assert.Equal(RoadGenerationMode.Absent, restored.Map.RoadMode);
         var snapshot = restored.CreateSnapshot();
         Assert.Equal(CorePolityIds.PlayerTribe, snapshot.PlayerPolityId);
         Assert.All(snapshot.Actors, actor =>
@@ -33,6 +34,27 @@ public sealed class SaveCompatibilityTests
         Assert.Equal(
             snapshot.UndergroundFactions.Count,
             snapshot.UndergroundFactions.Select(faction => faction.PolityId).Distinct().Count());
+    }
+
+    [Fact]
+    public void Format75MigratesToNoGeneratedRoad()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = SimulationSaveFormat.RoadModeMigrationVersion;
+        save.Remove("mapRoadMode");
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        var migrated = JsonNode.Parse(restored.Save())!.AsObject();
+
+        Assert.Equal(RoadGenerationMode.Absent, restored.Map.RoadMode);
+        Assert.Equal(
+            (int)RoadGenerationMode.Absent,
+            migrated["mapRoadMode"]!.GetValue<int>());
+        Assert.Equal(
+            SimulationSaveFormat.CurrentVersion,
+            migrated["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]
@@ -157,6 +179,31 @@ public sealed class SaveCompatibilityTests
     }
 
     [Fact]
+    public void RoadJunctionModeRoundTripsInCurrentFormat()
+    {
+        var seed = new WorldSeed(0x53415645524F4144UL);
+        var map = SwampMapGenerator.Generate(
+            LocationGenerationRequest.CreateDefault(seed, 64, 64) with
+            {
+                RoadMode = RoadGenerationMode.Junction,
+            });
+        var source = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 4,
+            initialFoodStock: 40);
+
+        var restored = SimulationEngine.Load(
+            source.Save(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Equal(RoadGenerationMode.Junction, restored.Map.RoadMode);
+        Assert.Equal(source.Map.ComputeFingerprint(), restored.Map.ComputeFingerprint());
+        Assert.Equal(source.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
     public void Format71MigratesToExplicitDefaultLocationProfile()
     {
         var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
@@ -256,6 +303,20 @@ public sealed class SaveCompatibilityTests
                 SimulationDefinitions.Foundation));
 
         Assert.Contains("unsupported river mode", exception.Message);
+    }
+
+    [Fact]
+    public void UnknownRoadModeIsRejectedBeforeMapRegeneration()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["mapRoadMode"] = 255;
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            SimulationEngine.Load(
+                save.ToJsonString(),
+                SimulationDefinitions.Foundation));
+
+        Assert.Contains("unsupported road mode", exception.Message);
     }
 
     [Fact]

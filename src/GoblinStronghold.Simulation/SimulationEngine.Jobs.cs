@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Construction;
+using GoblinStronghold.Simulation.Contamination;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Terrain;
@@ -596,8 +597,8 @@ public sealed partial class SimulationEngine
         var request = RequestActorPathToNearest(
             actor,
             scoutingTargets,
-            (_, to) => to.Z >= 0 &&
-                (Visibility.Get(to) != CellVisibility.Unknown || scoutingTargets.Contains(to)),
+            (_, to) => Visibility.Get(to) != CellVisibility.Unknown ||
+                scoutingTargets.Contains(to),
             constraintKey: 1);
         if (request.Status == NavigationPathRequestStatus.Pending)
         {
@@ -2306,31 +2307,42 @@ public sealed partial class SimulationEngine
         ActorState actor,
         ISet<EntityId> reservedDesignations)
     {
-        var best = _workDesignations.Values
+        var candidates = _workDesignations.Values
             .Where(designation => designation.Kind == WorkDesignationKind.CleanBlood &&
                 !designation.IsSuspended &&
                 !reservedDesignations.Contains(designation.Id) &&
                 HasCleanableSurface(designation.Target))
-            .Select(designation => new
-            {
-                Designation = designation,
-                Route = FindActorPath(actor, designation.Target),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Designation.Id)
-            .FirstOrDefault();
-        if (best is null)
+            .OrderByDescending(designation => designation.Priority)
+            .ThenBy(designation => ManhattanDistance(actor.Position, designation.Target))
+            .ThenBy(designation => designation.Id);
+        foreach (var designation in candidates)
         {
-            return false;
+            var navigationBefore = Navigation.GetMetrics();
+            var routeRequest = RequestActorPath(actor, designation.Target);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+            {
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Complete &&
+                routeRequest.Path is { } route)
+            {
+                actor.JobKind = ActorJobKind.CleanBlood;
+                actor.JobTarget = designation.Target;
+                actor.SourceStackId = designation.Id;
+                BeginJobLeg(actor, route, GetSurfaceCleaningWorkTicks(designation.Target));
+                reservedDesignations.Add(designation.Id);
+                return true;
+            }
+
+            if (Navigation.GetMetrics().Searches != navigationBefore.Searches)
+            {
+                // Do not turn a single cleaning option into a full scan of every stain.
+                // Cached unreachable candidates remain cheap to skip on later rounds.
+                return true;
+            }
         }
 
-        actor.JobKind = ActorJobKind.CleanBlood;
-        actor.JobTarget = best.Designation.Target;
-        actor.SourceStackId = best.Designation.Id;
-        BeginJobLeg(actor, best.Route!, GetSurfaceCleaningWorkTicks(best.Designation.Target));
-        reservedDesignations.Add(best.Designation.Id);
-        return true;
+        return false;
     }
 
     private bool TryPlanFastidiousCleaning(
@@ -2343,54 +2355,15 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var best = GetAutonomousCleaningPositions()
-            .Where(position =>
+        var designatedPositions = GetCleaningDesignationPositions();
+        return TryPlanAutonomousCleaning(
+            actor,
+            reservedDesignations,
+            GetAutonomousCleaningAreas(),
+            position =>
                 Visibility.Get(position).IsDiscovered() &&
                 IsGoblinOwnedFloor(position) &&
-                !_workDesignations.Values.Any(designation =>
-                    designation.Kind == WorkDesignationKind.CleanBlood &&
-                    designation.Target == position))
-            .Select(position => new
-            {
-                Position = position,
-                Route = FindActorPath(actor, position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Position.Z)
-            .ThenBy(candidate => candidate.Position.Y)
-            .ThenBy(candidate => candidate.Position.X)
-            .FirstOrDefault();
-        if (best is null)
-        {
-            return false;
-        }
-
-        var orderId = AllocateEntityId();
-        var designationId = AllocateEntityId();
-        _workDesignations.Add(
-            designationId,
-            new WorkDesignationSnapshot(
-                designationId,
-                WorkDesignationKind.CleanBlood,
-                best.Position,
-                EntityId.None)
-            {
-                OrderId = orderId,
-                Priority = StoragePriority.Low,
-            });
-        Publish(
-            SimulationEventKind.WorkDesignationCreated,
-            actor.Id,
-            designationId,
-            (int)WorkDesignationKind.CleanBlood);
-
-        actor.JobKind = ActorJobKind.CleanBlood;
-        actor.JobTarget = best.Position;
-        actor.SourceStackId = designationId;
-        BeginJobLeg(actor, best.Route!, GetSurfaceCleaningWorkTicks(best.Position));
-        reservedDesignations.Add(designationId);
-        return true;
+                !designatedPositions.Contains(position));
     }
 
     private bool TryPlanIdleHousekeeping(
@@ -2416,56 +2389,95 @@ public sealed partial class SimulationEngine
         ActorState actor,
         ISet<EntityId> reservedDesignations)
     {
-        var best = GetAutonomousCleaningPositions()
-            .Where(position =>
+        var designatedPositions = GetCleaningDesignationPositions();
+        return TryPlanAutonomousCleaning(
+            actor,
+            reservedDesignations,
+            GetAutonomousCleaningAreas(),
+            position =>
                 ManhattanDistance(actor.Position, position) <=
                     IdleHousekeepingMaximumRouteLength &&
                 Visibility.Get(position).IsDiscovered() &&
-                !_workDesignations.Values.Any(designation =>
-                    designation.Kind == WorkDesignationKind.CleanBlood &&
-                    designation.Target == position))
-            .Select(position => new
-            {
-                Position = position,
-                Route = FindActorPath(actor, position),
-            })
-            .Where(candidate => candidate.Route is { Count: <= IdleHousekeepingMaximumRouteLength })
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Position.Z)
-            .ThenBy(candidate => candidate.Position.Y)
-            .ThenBy(candidate => candidate.Position.X)
-            .FirstOrDefault();
-        if (best is null)
+                !designatedPositions.Contains(position),
+            IdleHousekeepingMaximumRouteLength);
+    }
+
+    private bool TryPlanAutonomousCleaning(
+        ActorState actor,
+        ISet<EntityId> reservedDesignations,
+        IEnumerable<SurfaceContaminationArea> areas,
+        Func<GridPosition, bool> isEligible,
+        int? maximumRouteLength = null)
+    {
+        var orderedAreas = areas
+            .OrderBy(area => ManhattanDistance(actor.Position, area.Anchor))
+            .ThenBy(area => area.Anchor.Z)
+            .ThenBy(area => area.Anchor.Y)
+            .ThenBy(area => area.Anchor.X);
+        foreach (var area in orderedAreas)
         {
-            return false;
+            var positions = area.Positions
+                .Where(position =>
+                    HasAutonomouslyCleanableSurface(position) &&
+                    isEligible(position))
+                .OrderBy(position => ManhattanDistance(actor.Position, position))
+                .ThenBy(position => position.Z)
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X);
+            foreach (var position in positions)
+            {
+                var navigationBefore = Navigation.GetMetrics();
+                var routeRequest = RequestActorPath(actor, position);
+                if (routeRequest.Status == NavigationPathRequestStatus.Pending)
+                {
+                    return true;
+                }
+                if (routeRequest.Status == NavigationPathRequestStatus.Complete &&
+                    routeRequest.Path is { } route &&
+                    (maximumRouteLength is null || route.Count <= maximumRouteLength))
+                {
+                    var orderId = AllocateEntityId();
+                    var designationId = AllocateEntityId();
+                    _workDesignations.Add(
+                        designationId,
+                        new WorkDesignationSnapshot(
+                            designationId,
+                            WorkDesignationKind.CleanBlood,
+                            position,
+                            EntityId.None)
+                        {
+                            OrderId = orderId,
+                            Priority = StoragePriority.Low,
+                        });
+                    Publish(
+                        SimulationEventKind.WorkDesignationCreated,
+                        actor.Id,
+                        designationId,
+                        (int)WorkDesignationKind.CleanBlood);
+
+                    actor.JobKind = ActorJobKind.CleanBlood;
+                    actor.JobTarget = position;
+                    actor.SourceStackId = designationId;
+                    BeginJobLeg(actor, route, GetSurfaceCleaningWorkTicks(position));
+                    reservedDesignations.Add(designationId);
+                    return true;
+                }
+
+                if (Navigation.GetMetrics().Searches != navigationBefore.Searches)
+                {
+                    return true;
+                }
+            }
         }
 
-        var orderId = AllocateEntityId();
-        var designationId = AllocateEntityId();
-        _workDesignations.Add(
-            designationId,
-            new WorkDesignationSnapshot(
-                designationId,
-                WorkDesignationKind.CleanBlood,
-                best.Position,
-                EntityId.None)
-            {
-                OrderId = orderId,
-                Priority = StoragePriority.Low,
-            });
-        Publish(
-            SimulationEventKind.WorkDesignationCreated,
-            actor.Id,
-            designationId,
-            (int)WorkDesignationKind.CleanBlood);
-
-        actor.JobKind = ActorJobKind.CleanBlood;
-        actor.JobTarget = best.Position;
-        actor.SourceStackId = designationId;
-        BeginJobLeg(actor, best.Route!, GetSurfaceCleaningWorkTicks(best.Position));
-        reservedDesignations.Add(designationId);
-        return true;
+        return false;
     }
+
+    private HashSet<GridPosition> GetCleaningDesignationPositions() =>
+        _workDesignations.Values
+            .Where(designation => designation.Kind == WorkDesignationKind.CleanBlood)
+            .Select(designation => designation.Target)
+            .ToHashSet();
 
     private bool IsGoblinOwnedFloor(GridPosition position) =>
         World.GetWorldObjectsAt(position).Any(worldObject =>
@@ -3765,6 +3777,12 @@ public sealed partial class SimulationEngine
         }
 
         _undeliveredWorldChanges.Add(World.DismantleWorldObject(id, CurrentTick));
+        foreach (var position in worldObject.GetAbsoluteParts()
+                     .Select(part => part.Position)
+                     .Distinct())
+        {
+            RefreshAutonomousCleaningRegistration(position);
+        }
         _workDesignations.Remove(designation.Id);
         ResolveUnsupportedOccupants(unsupportedPositions);
         GainBuildingExperience(actor, 3);

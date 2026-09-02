@@ -563,6 +563,7 @@ public sealed class SimulationSnapshot
         int mapGeneratorVersion,
         ContentId mapProfileId,
         RiverGenerationMode mapRiverMode,
+        RoadGenerationMode mapRoadMode,
         string mapFingerprint,
         string stateHash)
     {
@@ -611,6 +612,7 @@ public sealed class SimulationSnapshot
         MapGeneratorVersion = mapGeneratorVersion;
         MapProfileId = mapProfileId;
         MapRiverMode = mapRiverMode;
+        MapRoadMode = mapRoadMode;
         MapFingerprint = mapFingerprint;
         StateHash = stateHash;
     }
@@ -719,6 +721,8 @@ public sealed class SimulationSnapshot
     public ContentId MapProfileId { get; }
 
     public RiverGenerationMode MapRiverMode { get; }
+
+    public RoadGenerationMode MapRoadMode { get; }
 
     public string MapFingerprint { get; }
 

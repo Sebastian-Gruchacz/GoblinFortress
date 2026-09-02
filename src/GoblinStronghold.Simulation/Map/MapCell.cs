@@ -17,6 +17,13 @@ public enum TerrainRampDirection : byte
     West = 4,
 }
 
+public enum SurfaceRouteKind : byte
+{
+    None = 0,
+    Road = 1,
+    Ford = 2,
+}
+
 public readonly record struct MapCell(
     TerrainKind Terrain,
     byte Moisture,
@@ -24,7 +31,8 @@ public readonly record struct MapCell(
     byte TraversalCost,
     sbyte FloorLevel = 0,
     sbyte SurfaceLevel = 0,
-    TerrainRampDirection RampDirection = TerrainRampDirection.None)
+    TerrainRampDirection RampDirection = TerrainRampDirection.None,
+    SurfaceRouteKind SurfaceRoute = SurfaceRouteKind.None)
 {
     public bool HasFloorAtSurface => FloorLevel == SurfaceLevel;
 

@@ -12,7 +12,8 @@ public static class SimulationSaveFormat
     public const int RiverModeMigrationVersion = 72;
     public const int ActorSexMigrationVersion = 73;
     public const int PolityIdMigrationVersion = 74;
-    public const int CurrentVersion = 75;
+    public const int RoadModeMigrationVersion = 75;
+    public const int CurrentVersion = 76;
 
     public static bool IsLoadableVersion(int version) =>
         version is SurfaceGrimeMigrationVersion or
@@ -20,6 +21,7 @@ public static class SimulationSaveFormat
             RiverModeMigrationVersion or
             ActorSexMigrationVersion or
             PolityIdMigrationVersion or
+            RoadModeMigrationVersion or
             CurrentVersion;
 }
 
@@ -41,6 +43,7 @@ internal static class SimulationSaveReader
                 $"{SimulationSaveFormat.RiverModeMigrationVersion} and " +
                 $"{SimulationSaveFormat.ActorSexMigrationVersion} and " +
                 $"{SimulationSaveFormat.PolityIdMigrationVersion} and " +
+                $"{SimulationSaveFormat.RoadModeMigrationVersion} and " +
                 $"{SimulationSaveFormat.CurrentVersion}.");
         }
 
@@ -63,6 +66,10 @@ internal static class SimulationSaveReader
         if (save.FormatVersion == SimulationSaveFormat.PolityIdMigrationVersion)
         {
             MigratePolityIds(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.RoadModeMigrationVersion)
+        {
+            MigrateRoadMode(save);
         }
 
         return save;
@@ -123,6 +130,12 @@ internal static class SimulationSaveReader
         {
             faction.PolityId = CorePolityIds.CaveDwarfClan(faction.Id).Value;
         }
+        save.FormatVersion = SimulationSaveFormat.RoadModeMigrationVersion;
+    }
+
+    private static void MigrateRoadMode(SimulationSaveModel save)
+    {
+        save.MapRoadMode = RoadGenerationMode.Absent;
         save.FormatVersion = SimulationSaveFormat.CurrentVersion;
     }
 }

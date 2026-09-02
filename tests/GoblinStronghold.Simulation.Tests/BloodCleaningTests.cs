@@ -7,6 +7,35 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class BloodCleaningTests
 {
+    [Fact]
+    public void ContaminationAreaIndexMergesNeighborsAndSplitsAfterBridgeRemoval()
+    {
+        var index = new SurfaceContaminationAreaIndex();
+        var left = new GridPosition(4, 8, -1);
+        var bridge = new GridPosition(5, 8, -1);
+        var right = new GridPosition(6, 8, -1);
+        var detached = new GridPosition(20, 12, -1);
+
+        Assert.True(index.Add(left));
+        Assert.True(index.Add(right));
+        Assert.True(index.Add(bridge));
+        Assert.True(index.Add(detached));
+        Assert.False(index.Add(bridge));
+
+        Assert.Equal(4, index.PositionCount);
+        Assert.Equal(2, index.AreaCount);
+        var merged = index.EnumerateAreas().Single(area => area.Positions.Count == 3);
+        Assert.Equal(bridge, merged.Anchor);
+        Assert.Equal([left, bridge, right], merged.Positions.OrderBy(position => position.X));
+
+        Assert.True(index.Remove(bridge));
+
+        Assert.Equal(3, index.PositionCount);
+        Assert.Equal(3, index.AreaCount);
+        Assert.All(index.EnumerateAreas(), area => Assert.Single(area.Positions));
+        Assert.False(index.Remove(bridge));
+    }
+
     [Theory]
     [InlineData(1, false)]
     [InlineData(12, false)]
@@ -396,6 +425,61 @@ public sealed class BloodCleaningTests
             simulationEvent.Amount == (int)WorkDesignationKind.CleanBlood);
     }
 
+    [Fact]
+    public void DesignatedCleaningStartsAtMostOneRouteSearchPerPlanningAttempt()
+    {
+        var seed = new WorldSeed(0xC1EA4B0DUL);
+        var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 20);
+        engine.AdvanceTicks(1);
+        var floors = engine.CreateSnapshot().WorldObjects
+            .Where(worldObject =>
+                worldObject.Kind == WorldObjectKind.GoblinHut &&
+                worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
+            .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
+            .Select(part => part.Position)
+            .Where(position =>
+                engine.World.HasConstructedFloorSurface(position) &&
+                engine.World.IsTerrainReachable(position))
+            .Distinct()
+            .ToArray();
+        Assert.True(floors.Length >= 3);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["surfaceGrime"] = CreateSurfaceGrime(
+            floors,
+            engine.CurrentTick,
+            SurfaceCleaningPolicy.AutomaticCleaningMinimumGrimeVolume);
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DesignateBloodCleaning(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            new GridPosition(floors.Min(position => position.X), floors.Min(position => position.Y)),
+            new GridPosition(floors.Max(position => position.X), floors.Max(position => position.Y))));
+
+        ActorPlanningAttemptProfile? cleaningAttempt = null;
+        for (var index = 0; index < 200 && cleaningAttempt is null; index++)
+        {
+            engine.AdvanceTicks(1);
+            var attempt = engine.GetLastActorPlanningAttempts()
+                .FirstOrDefault(candidate => candidate.Category == "clean-blood");
+            if (attempt.Category is not null)
+            {
+                cleaningAttempt = attempt;
+            }
+        }
+
+        Assert.True(cleaningAttempt.HasValue);
+        var observed = cleaningAttempt.Value;
+        Assert.InRange(observed.PathRequests, 0, 1);
+        Assert.InRange(observed.PathSearches, 0, 1);
+    }
+
     [Theory]
     [InlineData(BloodSurfaceKind.ConstructedFloor)]
     [InlineData(BloodSurfaceKind.AbsorbentGround)]
@@ -522,4 +606,17 @@ public sealed class BloodCleaningTests
             ["lastChangedAtTick"] = currentTick.Value,
         },
     ];
+
+    private static JsonArray CreateSurfaceGrime(
+        IEnumerable<GridPosition> positions,
+        SimulationTick currentTick,
+        int volume) => new(positions.Select(position => (JsonNode)new JsonObject
+        {
+            ["x"] = position.X,
+            ["y"] = position.Y,
+            ["z"] = position.Z,
+            ["volume"] = volume,
+            ["createdAtTick"] = currentTick.Value,
+            ["lastChangedAtTick"] = currentTick.Value,
+        }).ToArray());
 }

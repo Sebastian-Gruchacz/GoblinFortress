@@ -148,6 +148,12 @@ public partial class MinimapView : Control
         if (_engine.Map.IsTerrainSurfacePosition(position))
         {
             var cell = _engine.Map.GetColumnCell(position);
+            if (cell.SurfaceRoute != SurfaceRouteKind.None)
+            {
+                return cell.SurfaceRoute == SurfaceRouteKind.Ford
+                    ? new Color("b28a50")
+                    : new Color("85633e");
+            }
             return cell.Terrain switch
             {
                 TerrainKind.SolidGround => new Color("668b4d"),

@@ -150,6 +150,7 @@ internal static class GeneratedSettlementStructureGenerator
 
         var cell = map.GetCell(position);
         return cell.Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
+            cell.SurfaceRoute == SurfaceRouteKind.None &&
             cell.RampDirection == TerrainRampDirection.None &&
             map.GetCardinalNeighbors(position).Any(neighbor =>
                 map.GetCell(neighbor).IsTraversable && !reservedCells.Contains(neighbor));
@@ -209,6 +210,7 @@ internal static class GeneratedSettlementStructureGenerator
                     x <= map.Width * 0.42d || y >= map.Height * 0.64d;
                 if (!inSwampRegion || reservedCells.Contains(position) ||
                     map.GetCell(position).Terrain != TerrainKind.Mud ||
+                    map.GetCell(position).SurfaceRoute != SurfaceRouteKind.None ||
                     map.GetCell(position).RampDirection != TerrainRampDirection.None ||
                     SamplePercent(map, position, sampleKey: 31_002) >= 5)
                 {
@@ -233,6 +235,7 @@ internal static class GeneratedSettlementStructureGenerator
                 var position = new GridPosition(anchor.X + x, anchor.Y + y);
                 if (!map.IsWithin(position) || reservedCells.Contains(position) ||
                     map.GetCell(position).Terrain != TerrainKind.SolidGround ||
+                    map.GetCell(position).SurfaceRoute != SurfaceRouteKind.None ||
                     map.GetCell(position).SurfaceLevel != anchorCell.SurfaceLevel ||
                     map.GetCell(position).RampDirection != TerrainRampDirection.None)
                 {
@@ -505,6 +508,7 @@ internal static class GeneratedSettlementStructureGenerator
                 if (reservedCells.Contains(position) ||
                     !cell.IsTraversable ||
                     cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater ||
+                    cell.SurfaceRoute != SurfaceRouteKind.None ||
                     cell.RampDirection != TerrainRampDirection.None ||
                     (owner == WorldObjectOwner.HumanVillage &&
                         Math.Min(map.Width, map.Height) >= 32 &&

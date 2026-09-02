@@ -22,18 +22,23 @@ public sealed class GeneratedMap
         int generatorVersion,
         ContentId profileId,
         RiverGenerationMode riverMode,
+        RoadGenerationMode roadMode,
+        IReadOnlyList<GeneratedSurfaceRoute> surfaceRoutes,
         MapCell[] cells,
         GridPosition goblinSpawn,
         GridPosition humanVillage,
         CaveCell[]? caveCells = null,
         VerticalPassage[]? verticalPassages = null)
     {
+        ArgumentNullException.ThrowIfNull(surfaceRoutes);
         Width = width;
         Height = height;
         Seed = seed;
         GeneratorVersion = generatorVersion;
         ProfileId = profileId;
         RiverMode = riverMode;
+        RoadMode = roadMode;
+        SurfaceRoutes = surfaceRoutes.ToArray();
         _cells = cells;
         _caveCells = caveCells ?? [];
         _verticalPassages = verticalPassages ?? [];
@@ -83,6 +88,13 @@ public sealed class GeneratedMap
     public ContentId ProfileId { get; }
 
     public RiverGenerationMode RiverMode { get; }
+
+    public RoadGenerationMode RoadMode { get; }
+
+    public IReadOnlyList<GeneratedSurfaceRoute> SurfaceRoutes { get; }
+
+    public GeneratedSurfaceRoute? FindSurfaceRoute(GeneratedSurfaceRouteRole role) =>
+        SurfaceRoutes.FirstOrDefault(route => route.Role == role);
 
     public GridPosition GoblinSpawn { get; }
 
@@ -596,7 +608,7 @@ public sealed class GeneratedMap
         AppendPosition(hash, GoblinSpawn);
         AppendPosition(hash, HumanVillage);
 
-        Span<byte> cellBuffer = stackalloc byte[7];
+        Span<byte> cellBuffer = stackalloc byte[8];
         foreach (var cell in _cells)
         {
             cellBuffer[0] = (byte)cell.Terrain;
@@ -606,12 +618,33 @@ public sealed class GeneratedMap
             cellBuffer[4] = unchecked((byte)cell.FloorLevel);
             cellBuffer[5] = unchecked((byte)cell.SurfaceLevel);
             cellBuffer[6] = (byte)cell.RampDirection;
+            cellBuffer[7] = (byte)cell.SurfaceRoute;
             hash.AppendData(GeneratorVersion switch
             {
-                >= 5 => cellBuffer,
+                >= 5 when RoadMode != RoadGenerationMode.Absent => cellBuffer,
+                >= 5 => cellBuffer[..7],
                 >= 3 => cellBuffer[..5],
                 _ => cellBuffer[..4],
             });
+        }
+        if (RoadMode != RoadGenerationMode.Absent)
+        {
+            Span<byte> routeBuffer = stackalloc byte[3];
+            BinaryPrimitives.WriteInt32LittleEndian(scalarBuffer[..4], SurfaceRoutes.Count);
+            hash.AppendData(scalarBuffer[..4]);
+            foreach (var route in SurfaceRoutes)
+            {
+                routeBuffer[0] = (byte)route.Role;
+                routeBuffer[1] = (byte)route.Entry;
+                routeBuffer[2] = (byte)route.Exit;
+                hash.AppendData(routeBuffer);
+                BinaryPrimitives.WriteInt32LittleEndian(scalarBuffer[..4], route.Path.Count);
+                hash.AppendData(scalarBuffer[..4]);
+                foreach (var position in route.Path)
+                {
+                    AppendPosition(hash, position);
+                }
+            }
         }
         if (GeneratorVersion >= 6)
         {

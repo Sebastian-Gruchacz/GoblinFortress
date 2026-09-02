@@ -39,9 +39,103 @@ public sealed class SwampMapGeneratorTests
 
         Assert.Equal(SwampMapGenerator.CurrentVersion, first.GeneratorVersion);
         Assert.Equal(SwampMapGenerator.DefaultProfileId, first.ProfileId);
+        Assert.Equal(RoadGenerationMode.Absent, first.RoadMode);
+        Assert.Empty(first.SurfaceRoutes);
         Assert.Equal(first.ComputeFingerprint(), second.ComputeFingerprint());
         Assert.Equal(first.GoblinSpawn, second.GoblinSpawn);
         Assert.Equal(first.HumanVillage, second.HumanVillage);
+    }
+
+    [Fact]
+    public void ThroughRoadConnectsOppositeEdgesAndCreatesFordsAfterHydrology()
+    {
+        var seed = new WorldSeed(0x524F4144464F5244UL);
+        var request = LocationGenerationRequest.CreateDefault(seed, 96, 96) with
+        {
+            RoadMode = RoadGenerationMode.ThroughRoad,
+        };
+
+        var first = SwampMapGenerator.Generate(request);
+        var repeated = SwampMapGenerator.Generate(request);
+        var routeCells = Positions(first)
+            .Where(position => first.GetCell(position).SurfaceRoute != SurfaceRouteKind.None)
+            .ToArray();
+        var world = WorldMapState.CreateInitial(first);
+        var route = Assert.Single(first.SurfaceRoutes);
+
+        Assert.Equal(RoadGenerationMode.ThroughRoad, first.RoadMode);
+        Assert.Equal(GeneratedSurfaceRouteRole.ThroughRoad, route.Role);
+        Assert.Equal(SurfaceRouteEndpoint.NorthEdge, route.Entry);
+        Assert.Equal(SurfaceRouteEndpoint.SouthEdge, route.Exit);
+        Assert.Equal(0, route.EntryPosition.Y);
+        Assert.Equal(first.Height - 1, route.ExitPosition.Y);
+        Assert.Equal(route.Path.Take(8), route.CreateApproach(route.Entry, 8));
+        Assert.Equal(route.Path.Reverse().Take(8), route.CreateApproach(route.Exit, 8));
+        Assert.Equal(first.ComputeFingerprint(), repeated.ComputeFingerprint());
+        Assert.Contains(routeCells, position => position.Y == 0);
+        Assert.Contains(routeCells, position => position.Y == first.Height - 1);
+        Assert.Contains(routeCells, position =>
+            first.GetCell(position).SurfaceRoute == SurfaceRouteKind.Ford);
+        Assert.All(routeCells, position => Assert.True(first.GetCell(position).IsTraversable));
+        Assert.DoesNotContain(world.CreatePlantSnapshot(), patch =>
+            first.GetColumnCell(patch.Position).SurfaceRoute != SurfaceRouteKind.None);
+        Assert.DoesNotContain(world.CreateWorldObjectSnapshot(), worldObject =>
+            worldObject.GetAbsoluteParts().Any(part =>
+                first.GetColumnCell(part.Position).SurfaceRoute != SurfaceRouteKind.None));
+    }
+
+    [Theory]
+    [InlineData(RoadGenerationMode.ThroughRoad)]
+    [InlineData(RoadGenerationMode.Junction)]
+    public void GeneratedRoadModesRemainValidAcrossSeeds(RoadGenerationMode mode)
+    {
+        for (ulong seed = 0; seed < 16; seed++)
+        {
+            var map = SwampMapGenerator.Generate(
+                LocationGenerationRequest.CreateDefault(new WorldSeed(seed), 48, 48) with
+                {
+                    RoadMode = mode,
+                });
+            var validation = SwampMapValidator.Validate(map);
+
+            Assert.True(
+                validation.IsValid,
+                $"Mode {mode}, seed {seed}: {string.Join("; ", validation.Errors)}");
+            Assert.Contains(Positions(map), position =>
+                position.Y == 0 &&
+                map.GetCell(position).SurfaceRoute != SurfaceRouteKind.None);
+            Assert.Contains(Positions(map), position =>
+                position.Y == map.Height - 1 &&
+                map.GetCell(position).SurfaceRoute != SurfaceRouteKind.None);
+        }
+    }
+
+    [Fact]
+    public void JunctionAddsAThirdMapEdgeWithoutChangingTheCompatibilityMap()
+    {
+        var seed = new WorldSeed(0x4A554E4354494F4EUL);
+        var compatible = SwampMapGenerator.Generate(seed, 96, 96);
+        var junction = SwampMapGenerator.Generate(
+            LocationGenerationRequest.CreateDefault(seed, 96, 96) with
+            {
+                RoadMode = RoadGenerationMode.Junction,
+            });
+        var throughRoad = junction.FindSurfaceRoute(GeneratedSurfaceRouteRole.ThroughRoad);
+        var branch = junction.FindSurfaceRoute(GeneratedSurfaceRouteRole.JunctionBranch);
+
+        Assert.DoesNotContain(Positions(compatible), position =>
+            compatible.GetCell(position).SurfaceRoute != SurfaceRouteKind.None);
+        Assert.Equal(2, junction.SurfaceRoutes.Count);
+        Assert.NotNull(throughRoad);
+        Assert.NotNull(branch);
+        Assert.Equal(SurfaceRouteEndpoint.Junction, branch.Entry);
+        Assert.Equal(SurfaceRouteEndpoint.EastEdge, branch.Exit);
+        Assert.Contains(branch.EntryPosition, throughRoad.Path);
+        Assert.Equal(junction.Width - 1, branch.ExitPosition.X);
+        Assert.Contains(Positions(junction), position =>
+            position.X == junction.Width - 1 &&
+            junction.GetCell(position).SurfaceRoute != SurfaceRouteKind.None);
+        Assert.NotEqual(compatible.ComputeFingerprint(), junction.ComputeFingerprint());
     }
 
     [Fact]

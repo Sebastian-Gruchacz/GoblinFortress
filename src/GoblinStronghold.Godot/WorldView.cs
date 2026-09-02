@@ -10,6 +10,13 @@ namespace GoblinStronghold.GodotClient;
 
 public partial class WorldView : Node2D
 {
+    private static readonly Vector2I[] CardinalOffsets =
+    [
+        Vector2I.Up,
+        Vector2I.Right,
+        Vector2I.Down,
+        Vector2I.Left,
+    ];
     private static readonly Vector2[] ElderlyBeardShape =
     [
         new(-2.35f, 1.25f),
@@ -427,6 +434,7 @@ public partial class WorldView : Node2D
                     if (cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater)
                     {
                         DrawWaterTile(x, y, cell.Terrain);
+                        DrawSurfaceRoute(x, y, cell);
                         continue;
                     }
 
@@ -446,6 +454,7 @@ public partial class WorldView : Node2D
                     {
                         DrawTerrainRampSteps(CellRect(x, y), cell.RampDirection);
                     }
+                    DrawSurfaceRoute(x, y, cell);
                     DrawCaveMouth(x, y, caveMouths);
                     continue;
                 }
@@ -492,6 +501,8 @@ public partial class WorldView : Node2D
                 cell.RampDirection);
         }
 
+        DrawSurfaceRoute(x, y, cell);
+
         var levelDifference = _visibleLevel - cell.SurfaceLevel;
         var darkness = levelDifference == 1 && terrainRampIntact
             ? 0.44f
@@ -500,6 +511,48 @@ public partial class WorldView : Node2D
         if (terrainRampIntact)
         {
             DrawTerrainRampSteps(rect, cell.RampDirection, 0.82f);
+        }
+    }
+
+    private void DrawSurfaceRoute(int x, int y, MapCell cell)
+    {
+        if (cell.SurfaceRoute == SurfaceRouteKind.None)
+        {
+            return;
+        }
+
+        var center = CellCenter(new GridPosition(x, y));
+        var width = cell.SurfaceRoute == SurfaceRouteKind.Ford ? 7f : 8.5f;
+        var color = cell.SurfaceRoute == SurfaceRouteKind.Ford
+            ? new Color(0.68f, 0.48f, 0.25f, 0.94f)
+            : new Color(0.34f, 0.23f, 0.13f, 0.76f);
+        DrawCircle(center, width / 2f, color);
+
+        foreach (var offset in CardinalOffsets)
+        {
+            var neighborPosition = new GridPosition(x + offset.X, y + offset.Y);
+            if (!_engine.Map.IsColumnWithin(neighborPosition))
+            {
+                continue;
+            }
+            var neighbor = _engine.Map.GetColumnCell(neighborPosition);
+            if (neighbor.SurfaceRoute == SurfaceRouteKind.None ||
+                neighbor.SurfaceLevel != cell.SurfaceLevel)
+            {
+                continue;
+            }
+            DrawLine(center, center + new Vector2(offset.X, offset.Y) * (TileSize / 2f),
+                color, width, true);
+        }
+
+        if (cell.SurfaceRoute == SurfaceRouteKind.Ford)
+        {
+            DrawLine(center + new Vector2(-4f, -3f), center + new Vector2(4f, -3f),
+                new Color(0.24f, 0.15f, 0.08f, 0.9f), 1f, true);
+            DrawLine(center + new Vector2(-4f, 0f), center + new Vector2(4f, 0f),
+                new Color(0.24f, 0.15f, 0.08f, 0.9f), 1f, true);
+            DrawLine(center + new Vector2(-4f, 3f), center + new Vector2(4f, 3f),
+                new Color(0.24f, 0.15f, 0.08f, 0.9f), 1f, true);
         }
     }
 

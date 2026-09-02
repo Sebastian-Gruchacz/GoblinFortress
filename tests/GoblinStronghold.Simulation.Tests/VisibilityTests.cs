@@ -198,6 +198,52 @@ public sealed class VisibilityTests
     }
 
     [Fact]
+    public void ExplorerTraversesSelectedUnknownUndergroundTerrain()
+    {
+        var engine = CreateEngine();
+        var origin = FindUndergroundExplorationOrigin(engine);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["actors"]![0]!["x"] = origin.X;
+        save["actors"]![0]!["y"] = origin.Y;
+        save["actors"]![0]!["z"] = origin.Z;
+        engine = SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+        engine.AdvanceTicks(1);
+        var initiallyDiscovered = CountDiscoveredAtLevel(engine, origin.Z);
+        engine.QueueCommand(SimulationCommand.DesignateScouting(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            new GridPosition(0, 0, origin.Z),
+            new GridPosition(engine.Map.Width - 1, engine.Map.Height - 1, origin.Z)));
+
+        var receivedExploreJob = false;
+        var restoredActiveExplore = false;
+        for (var tick = 0; tick < 200; tick++)
+        {
+            engine.AdvanceTicks(1);
+            var isExploring = Assert.Single(engine.CreateSnapshot().Actors).Job.Kind ==
+                ActorJobKind.Explore;
+            receivedExploreJob |= isExploring;
+            if (isExploring && !restoredActiveExplore)
+            {
+                var restored = SimulationEngine.Load(
+                    engine.Save(),
+                    SimulationDefinitions.Foundation);
+                Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+                engine = restored;
+                restoredActiveExplore = true;
+            }
+            if (CountDiscoveredAtLevel(engine, origin.Z) > initiallyDiscovered)
+            {
+                break;
+            }
+        }
+
+        Assert.True(receivedExploreJob);
+        Assert.True(restoredActiveExplore);
+        Assert.True(CountDiscoveredAtLevel(engine, origin.Z) > initiallyDiscovered);
+    }
+
+    [Fact]
     public void GoblinsDoNotEnterUnknownTerrainWithoutScoutingDesignation()
     {
         var engine = CreateEngine();
@@ -252,4 +298,51 @@ public sealed class VisibilityTests
             initialGoblinCount: 1,
             initialFoodStock: 0);
     }
+
+    private static GridPosition FindUndergroundExplorationOrigin(SimulationEngine engine)
+    {
+        for (var z = -1; z >= engine.Map.MinimumWorldLevel; z--)
+        {
+            var remaining = (
+                    from y in Enumerable.Range(0, engine.Map.Height)
+                    from x in Enumerable.Range(0, engine.Map.Width)
+                    let position = new GridPosition(x, y, z)
+                    where engine.World.IsTerrainTraversable(position)
+                    select position)
+                .ToHashSet();
+            while (remaining.Count > 0)
+            {
+                var start = remaining.OrderBy(position => position.Y)
+                    .ThenBy(position => position.X)
+                    .First();
+                var component = new List<GridPosition>();
+                var frontier = new Queue<GridPosition>();
+                remaining.Remove(start);
+                frontier.Enqueue(start);
+                while (frontier.TryDequeue(out var current))
+                {
+                    component.Add(current);
+                    foreach (var neighbor in engine.World.GetCardinalWorldNeighbors(current)
+                                 .Where(neighbor => neighbor.Z == z && remaining.Remove(neighbor)))
+                    {
+                        frontier.Enqueue(neighbor);
+                    }
+                }
+
+                if (component.Any(position =>
+                        Math.Abs(position.X - start.X) + Math.Abs(position.Y - start.Y) > 8))
+                {
+                    return start;
+                }
+            }
+        }
+
+        throw new InvalidOperationException("The generated map has no suitable underground cave.");
+    }
+
+    private static int CountDiscoveredAtLevel(SimulationEngine engine, int z) => (
+        from y in Enumerable.Range(0, engine.Map.Height)
+        from x in Enumerable.Range(0, engine.Map.Width)
+        where engine.Visibility.Get(new GridPosition(x, y, z)).IsDiscovered()
+        select 1).Count();
 }

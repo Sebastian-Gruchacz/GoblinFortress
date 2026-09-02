@@ -42,6 +42,14 @@ public sealed record SettlementGenerationProfile(
     byte Moisture,
     byte Fertility);
 
+public sealed record RoadGenerationProfile(
+    double NorthEntryX,
+    double SouthEntryX,
+    double MeanderAmplitude,
+    double JunctionY,
+    double JunctionEndX,
+    int HalfWidth);
+
 public sealed record ReliefGenerationProfile(
     double DeepFloorThreshold,
     double ValleyWidthRatio,
@@ -69,6 +77,7 @@ public sealed record LocationGenerationProfile(
     int MinimumDimension,
     int MaximumDimension,
     RiverGenerationProfile River,
+    RoadGenerationProfile Road,
     WetlandGenerationProfile Wetland,
     SettlementGenerationProfile GoblinSettlement,
     SettlementGenerationProfile HumanSettlement,

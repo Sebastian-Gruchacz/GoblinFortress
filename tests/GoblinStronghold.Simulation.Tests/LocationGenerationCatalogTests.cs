@@ -20,6 +20,8 @@ public sealed class LocationGenerationCatalogTests
         Assert.Equal(16, profile.MinimumDimension);
         Assert.Equal(2_048, profile.MaximumDimension);
         Assert.Equal(0.48d, profile.River.DeepWaterRatio);
+        Assert.Equal(0.66d, profile.Road.NorthEntryX);
+        Assert.Equal(0, profile.Road.HalfWidth);
         Assert.Equal(8, profile.GoblinSettlement.PadWidth);
         Assert.Equal(9, profile.HumanSettlement.PadHeight);
     }

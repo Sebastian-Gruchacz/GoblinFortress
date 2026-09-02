@@ -18,6 +18,8 @@ internal sealed class SimulationSaveModel
 
     public Map.Generation.RiverGenerationMode MapRiverMode { get; set; }
 
+    public Map.Generation.RoadGenerationMode MapRoadMode { get; set; }
+
     public int MapWidth { get; set; }
 
     public int MapHeight { get; set; }

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "profiles": [
     {
       "id": "core:demo-swamp-frontier",
@@ -20,6 +20,14 @@
         "branchEndY": 0.82,
         "branchHalfWidthScale": 0.82,
         "branchMeanderAmplitude": 0.075
+      },
+      "road": {
+        "northEntryX": 0.66,
+        "southEntryX": 0.58,
+        "meanderAmplitude": 0.045,
+        "junctionY": 0.48,
+        "junctionEndX": 1.0,
+        "halfWidth": 0
       },
       "wetland": {
         "leftBoundary": 0.48,

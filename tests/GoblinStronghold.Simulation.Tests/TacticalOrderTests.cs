@@ -29,6 +29,31 @@ public sealed class TacticalOrderTests
     }
 
     [Fact]
+    public void ClearingOrdersAtPatrolWaypointCancelsPersistentPatrol()
+    {
+        var engine = CreateEngine();
+        var actor = Assert.Single(engine.CreateSnapshot().Actors);
+        var destination = FindReachableDestination(engine, actor.Position);
+
+        engine.QueueCommand(SimulationCommand.OrderPatrol(
+            new SimulationTick(1), sequence: 1, actor.Id, destination, append: false));
+        engine.AdvanceTicks(1);
+        Assert.Equal(
+            ActorTacticalOrderKind.Patrol,
+            Assert.Single(engine.CreateSnapshot().Actors).TacticalOrder.Kind);
+
+        engine.QueueCommand(SimulationCommand.ClearWorkDesignations(
+            new SimulationTick(2), sequence: 2, destination, destination));
+        engine.AdvanceTicks(1);
+
+        var cancelled = Assert.Single(engine.CreateSnapshot().Actors);
+        Assert.Equal(ActorTacticalOrderKind.None, cancelled.TacticalOrder.Kind);
+        Assert.Empty(cancelled.TacticalOrder.PatrolPoints);
+        Assert.NotEqual(ActorJobKind.Move, cancelled.Job.Kind);
+        Assert.Equal(ActorJobKind.None, cancelled.Job.SuspendedKind);
+    }
+
+    [Fact]
     public void TacticalHuntTargetsOnlyAnimalInsideAreaAndSurvivesSaveLoad()
     {
         var engine = CreateEngine();

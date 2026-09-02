@@ -47,6 +47,13 @@ public static class SwampMapGenerator
                 request.RiverMode,
                 "The requested river generation mode is not supported.");
         }
+        if (!Enum.IsDefined(request.RoadMode))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                request.RoadMode,
+                "The requested road generation mode is not supported.");
+        }
 
         var profile = LocationGenerationCatalog.Core.Get(request.ProfileId);
         var seed = request.Seed;
@@ -157,6 +164,13 @@ public static class SwampMapGenerator
         {
             SetCell(cells, width, new GridPosition(width - 1, height - 1), CreateDeepWater());
         }
+        var surfaceRoutes = SurfaceRouteGenerator.Apply(
+            cells,
+            seed,
+            width,
+            height,
+            request.RoadMode,
+            profile.Road);
         if (generatorVersion >= 5)
         {
             AssignTerrainRamps(cells, seed, width, height);
@@ -179,6 +193,8 @@ public static class SwampMapGenerator
             generatorVersion,
             profile.Id,
             request.RiverMode,
+            request.RoadMode,
+            surfaceRoutes,
             cells,
             goblinSpawn,
             humanVillage,

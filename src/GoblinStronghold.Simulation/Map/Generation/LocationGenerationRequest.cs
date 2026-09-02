@@ -9,13 +9,21 @@ public enum RiverGenerationMode : byte
     BranchingChannels = 2,
 }
 
+public enum RoadGenerationMode : byte
+{
+    Absent = 0,
+    ThroughRoad = 1,
+    Junction = 2,
+}
+
 public readonly record struct LocationGenerationRequest(
     ContentId ProfileId,
     WorldSeed Seed,
     int Width,
     int Height,
     int GeneratorVersion,
-    RiverGenerationMode RiverMode)
+    RiverGenerationMode RiverMode,
+    RoadGenerationMode RoadMode)
 {
     public static LocationGenerationRequest CreateDefault(
         WorldSeed seed,
@@ -28,5 +36,6 @@ public readonly record struct LocationGenerationRequest(
             width,
             height,
             generatorVersion,
-            RiverGenerationMode.SingleChannel);
+            RiverGenerationMode.SingleChannel,
+            RoadGenerationMode.Absent);
 }

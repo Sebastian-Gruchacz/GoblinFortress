@@ -341,7 +341,8 @@ public sealed partial class SimulationEngine
                     save.MapWidth,
                     save.MapHeight,
                     save.MapGeneratorVersion,
-                    save.MapRiverMode));
+                    save.MapRiverMode,
+                    save.MapRoadMode));
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -431,6 +432,7 @@ public sealed partial class SimulationEngine
             throw new InvalidDataException("The save contains misplaced surface grime.");
         }
         engine._surfaceGrime.Restore(surfaceGrime, engine.CurrentTick);
+        engine.RebuildAutonomousCleaningAreas();
         engine.Visibility = WorldVisibilityState.Restore(
             map,
             save.Visibility,
@@ -716,6 +718,7 @@ public sealed partial class SimulationEngine
             Map.GeneratorVersion,
             Map.ProfileId,
             Map.RiverMode,
+            Map.RoadMode,
             Map.ComputeFingerprint(),
             includeStateHash ? ComputeStateHash() : string.Empty)
         {
@@ -1115,6 +1118,7 @@ public sealed partial class SimulationEngine
             MapGeneratorVersion = Map.GeneratorVersion,
             MapProfileId = Map.ProfileId.Value,
             MapRiverMode = Map.RiverMode,
+            MapRoadMode = Map.RoadMode,
             MapWidth = Map.Width,
             MapHeight = Map.Height,
             MapFingerprint = Map.ComputeFingerprint(),
@@ -1367,6 +1371,7 @@ public sealed partial class SimulationEngine
         Append(canonical, Map.GeneratorVersion);
         Append(canonical, Map.ProfileId.Value);
         Append(canonical, (int)Map.RiverMode);
+        Append(canonical, (int)Map.RoadMode);
         Append(canonical, Map.ComputeFingerprint());
         Append(canonical, World.Version);
         Append(canonical, (int)_raidPhase);
@@ -1898,6 +1903,12 @@ public sealed partial class SimulationEngine
         {
             throw new InvalidDataException(
                 $"Save requires unsupported river mode '{save.MapRiverMode}'.");
+        }
+
+        if (!Enum.IsDefined(save.MapRoadMode))
+        {
+            throw new InvalidDataException(
+                $"Save requires unsupported road mode '{save.MapRoadMode}'.");
         }
 
         if (save.CurrentTick < 0 || save.NextEntityId == 0 || save.NextEventSequence == 0)
@@ -2586,8 +2597,7 @@ public sealed partial class SimulationEngine
                 WorkDesignationKind.FellTree => World.GetFellableWood(designation.Target) is not null,
                 WorkDesignationKind.QuarryBoulder =>
                     World.GetQuarriableBoulder(designation.Target) is not null,
-                WorkDesignationKind.Scout => designation.Target.Z == 0 &&
-                    World.IsSurfaceTraversable(designation.Target),
+                WorkDesignationKind.Scout => World.IsTerrainTraversable(designation.Target),
                 WorkDesignationKind.HuntAnimal =>
                     _animals.TryGetValue(designation.TargetEntityId.Value, out var animal) &&
                     animal.Position == designation.Target,
@@ -3868,6 +3878,7 @@ public sealed partial class SimulationEngine
         }
 
         CancelJobsInClearedArea(minimum, maximum, removedIds);
+        CancelTacticalOrdersInArea(minimum, maximum);
         return true;
     }
 
@@ -4914,6 +4925,10 @@ public sealed partial class SimulationEngine
                 throw new InvalidOperationException("Unsupported construction blueprint.");
         }
 
+        foreach (var position in site.GetFootprint())
+        {
+            RefreshAutonomousCleaningRegistration(position);
+        }
         _constructionSites.Remove(site.Id);
         GainBuildingExperience(builder, experience);
         Publish(

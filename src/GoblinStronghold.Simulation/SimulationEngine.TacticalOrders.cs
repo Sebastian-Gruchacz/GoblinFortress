@@ -12,6 +12,34 @@ public sealed partial class SimulationEngine
         _ => false,
     };
 
+    private void CancelTacticalOrdersInArea(
+        GridPosition minimum,
+        GridPosition maximum)
+    {
+        foreach (var actor in _actors.Values.Where(actor =>
+                     actor.TacticalOrderKind != ActorTacticalOrderKind.None &&
+                     TacticalOrderIntersectsArea(actor, minimum, maximum)))
+        {
+            actor.ClearJob();
+            actor.ClearSuspendedJob();
+            actor.ClearTacticalOrder();
+        }
+    }
+
+    private static bool TacticalOrderIntersectsArea(
+        ActorState actor,
+        GridPosition minimum,
+        GridPosition maximum) =>
+        IsInside(actor.Position, minimum, maximum) ||
+        actor.TacticalOrderKind switch
+        {
+            ActorTacticalOrderKind.Patrol => actor.PatrolPoints.Any(point =>
+                IsInside(point, minimum, maximum)),
+            ActorTacticalOrderKind.AttackArea or ActorTacticalOrderKind.HuntArea =>
+                IsInside(actor.TacticalCenter, minimum, maximum),
+            _ => false,
+        };
+
     private bool TryPlanPatrolOrder(ActorState actor)
     {
         if (actor.PatrolPoints.Count < 2)

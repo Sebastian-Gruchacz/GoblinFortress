@@ -187,8 +187,18 @@ adapters until profile IDs and versions are persisted.
   All three are selectable in New Game and persisted in format 73. Branching
   adds a deterministic narrower channel joined to the main river; crossing
   selection remains part of the later road-generation stage.
-- [ ] Add road modes, including an absent road, a through-road, and a junction;
-  select crossings only after hydrology has been generated.
+- [x] Add road modes, including an absent road, a through-road, and a junction;
+  select crossings only after hydrology has been generated. The validated
+  location profile owns route endpoints, meander, junction and width. Roads are
+  a separate surface feature rather than a replacement terrain kind, generate
+  shallow fords across water, remain clear of initial ecology and structures,
+  render in the world and minimap, and are selectable in New Game. The generated
+  map also retains ordered north-to-south and junction-branch logical paths with
+  named endpoints and bounded approach-prefix access for future visitors.
+  Route metadata remains deterministic derived data and participates in the map
+  fingerprint instead of becoming mutable save state. Format-76 saves pin the
+  mode; format-75 worlds migrate to no generated road and preserve their existing
+  map fingerprint.
 - [ ] Parameterize the number and composition of neighboring civilizations and
   keep the generated polity identities in the save.
 - [ ] Make the initial human village optional and replace its rigid coordinates
@@ -200,7 +210,7 @@ adapters until profile IDs and versions are persisted.
   fixed teaching constraints, and its own compatibility identifier.
 - [ ] Increase the default EA map size only after profiling generation,
   navigation, visibility, rendering, and save size.
-- [ ] Add optional road generation with map-edge endpoints and junctions.
+- [x] Add optional road generation with map-edge endpoints and junctions.
 - [ ] Add road bridges selected after river generation.
 - [ ] Add weighted ecology by climate and location character.
 - [ ] Add sparse ruins and reserve their footprints before vegetation and loose
@@ -212,7 +222,8 @@ adapters until profile IDs and versions are persisted.
 
 - [ ] Create human, surface-dwarf, and elven kingdom polity templates.
 - [ ] Add map-edge arrival/departure regions tied to generated roads and
-  traversable wilderness edges.
+  traversable wilderness edges. Ordered road paths and edge endpoint metadata
+  are available; the arrival-region policy and lifecycle remain to implement.
 - [ ] Implement wandering small groups and adventurers first; they need no
   persistent off-map economy.
 - [ ] Add patrols with route, observation, trespass response, and retreat.

@@ -35,6 +35,8 @@ internal sealed class SurfaceGrimeState
     public int GetVolume(GridPosition position) =>
         _entries.TryGetValue(position, out var entry) ? entry.Volume : 0;
 
+    public IEnumerable<GridPosition> EnumeratePositions() => _entries.Keys;
+
     public int PickUp(GridPosition position, int carriedAmount, SimulationTick tick)
     {
         if (!_entries.TryGetValue(position, out var entry) || entry.Volume < PickupThreshold)

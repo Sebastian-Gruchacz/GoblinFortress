@@ -33,7 +33,7 @@ public sealed partial class NewGameSetupWindow : Window
     private readonly Label _riverLabel = new();
     private readonly OptionButton _river = new();
     private readonly Label _roadLabel = new();
-    private readonly CheckButton _road = new();
+    private readonly OptionButton _road = new();
     private readonly Label _neighborsLabel = new();
     private readonly OptionButton _neighbors = new();
     private readonly Label _villageLabel = new();
@@ -88,6 +88,7 @@ public sealed partial class NewGameSetupWindow : Window
         AddRow(activeGrid, _seedLabel, CreateSeedControls());
         AddRow(activeGrid, _climateLabel, _climate);
         AddRow(activeGrid, _riverLabel, _river);
+        AddRow(activeGrid, _roadLabel, _road);
         content.AddChild(_seedError);
 
         content.AddChild(new HSeparator());
@@ -95,7 +96,6 @@ public sealed partial class NewGameSetupWindow : Window
         content.AddChild(_plannedHeading);
         var plannedGrid = CreateGrid();
         content.AddChild(plannedGrid);
-        AddRow(plannedGrid, _roadLabel, _road);
         AddRow(plannedGrid, _neighborsLabel, _neighbors);
         AddRow(plannedGrid, _villageLabel, _village);
         AddRow(plannedGrid, _reliefLabel, _relief);
@@ -160,7 +160,10 @@ public sealed partial class NewGameSetupWindow : Window
         _river.SetItemText(2, T("river-branching"));
         _river.TooltipText = T("river-tooltip");
         _roadLabel.Text = T("road");
-        _road.Text = T("road-absent");
+        _road.SetItemText(0, T("road-none"));
+        _road.SetItemText(1, T("road-through"));
+        _road.SetItemText(2, T("road-junction"));
+        _road.TooltipText = T("road-tooltip");
         _neighborsLabel.Text = T("neighbor-civilizations");
         _neighbors.SetItemText(0, T("neighbor-current"));
         _villageLabel.Text = T("human-village");
@@ -175,7 +178,7 @@ public sealed partial class NewGameSetupWindow : Window
         var plannedTooltip = T("planned-tooltip");
         foreach (var control in new Control[]
                  {
-                     _road, _neighbors, _village, _relief, _difficulty,
+                     _neighbors, _village, _relief, _difficulty,
                  })
         {
             control.TooltipText = plannedTooltip;
@@ -198,8 +201,12 @@ public sealed partial class NewGameSetupWindow : Window
             _river.SetItemMetadata(_river.ItemCount - 1, (int)mode);
         }
         _river.Select((int)RiverGenerationMode.SingleChannel);
-        _road.ButtonPressed = false;
-        _road.Disabled = true;
+        foreach (var mode in Enum.GetValues<RoadGenerationMode>())
+        {
+            _road.AddItem(string.Empty);
+            _road.SetItemMetadata(_road.ItemCount - 1, (int)mode);
+        }
+        _road.Select((int)RoadGenerationMode.ThroughRoad);
         _neighbors.AddItem(string.Empty);
         _neighbors.Disabled = true;
         _village.ButtonPressed = true;
@@ -264,6 +271,9 @@ public sealed partial class NewGameSetupWindow : Window
         {
             RiverMode = (RiverGenerationMode)_river
                 .GetItemMetadata(_river.Selected)
+                .AsInt32(),
+            RoadMode = (RoadGenerationMode)_road
+                .GetItemMetadata(_road.Selected)
                 .AsInt32(),
         };
         StartRequested?.Invoke(new NewGameSetup(profileName, request));

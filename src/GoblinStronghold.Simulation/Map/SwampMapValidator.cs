@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using GoblinStronghold.Simulation.Map.Generation;
 
 namespace GoblinStronghold.Simulation.Map;
 
@@ -98,6 +99,8 @@ public static class SwampMapValidator
             }
         }
 
+        ValidateSurfaceRoutes(map, errors);
+
         if (map.GeneratorVersion >= 6)
         {
             ValidateCaves(map, errors);
@@ -105,6 +108,90 @@ public static class SwampMapValidator
 
         return new MapValidationReport(errors);
     }
+
+    private static void ValidateSurfaceRoutes(GeneratedMap map, List<string> errors)
+    {
+        var expectedRouteCount = map.RoadMode switch
+        {
+            RoadGenerationMode.Absent => 0,
+            RoadGenerationMode.ThroughRoad => 1,
+            RoadGenerationMode.Junction => 2,
+            _ => -1,
+        };
+        if (expectedRouteCount < 0 || map.SurfaceRoutes.Count != expectedRouteCount)
+        {
+            errors.Add("The generated logical route network does not match its road mode.");
+            return;
+        }
+
+        if (map.SurfaceRoutes.Select(route => route.Role).Distinct().Count() !=
+            map.SurfaceRoutes.Count)
+        {
+            errors.Add("Generated logical routes must have unique roles.");
+            return;
+        }
+
+        foreach (var route in map.SurfaceRoutes)
+        {
+            if (!Enum.IsDefined(route.Role) ||
+                !Enum.IsDefined(route.Entry) ||
+                !Enum.IsDefined(route.Exit) ||
+                !MatchesEndpoint(map, route.EntryPosition, route.Entry) ||
+                !MatchesEndpoint(map, route.ExitPosition, route.Exit))
+            {
+                errors.Add("A generated logical route has invalid endpoint metadata.");
+                return;
+            }
+
+            for (var index = 0; index < route.Path.Count; index++)
+            {
+                var position = route.Path[index];
+                if (!map.IsTerrainSurfacePosition(position) ||
+                    !map.GetColumnCell(position).IsTraversable ||
+                    map.GetColumnCell(position).SurfaceRoute == SurfaceRouteKind.None)
+                {
+                    errors.Add("Every logical route position must use traversable road surface.");
+                    return;
+                }
+                if (index == 0)
+                {
+                    continue;
+                }
+
+                var previous = route.Path[index - 1];
+                if (Math.Abs(previous.X - position.X) + Math.Abs(previous.Y - position.Y) != 1 ||
+                    Math.Abs(previous.Z - position.Z) > 1)
+                {
+                    errors.Add("Generated logical route paths must remain cardinally contiguous.");
+                    return;
+                }
+            }
+        }
+
+        if (map.RoadMode == RoadGenerationMode.Junction)
+        {
+            var throughRoad = map.FindSurfaceRoute(GeneratedSurfaceRouteRole.ThroughRoad);
+            var branch = map.FindSurfaceRoute(GeneratedSurfaceRouteRole.JunctionBranch);
+            if (throughRoad is null || branch is null ||
+                !throughRoad.Path.Contains(branch.EntryPosition))
+            {
+                errors.Add("The generated junction branch must start on the through-road.");
+            }
+        }
+    }
+
+    private static bool MatchesEndpoint(
+        GeneratedMap map,
+        GridPosition position,
+        SurfaceRouteEndpoint endpoint) => endpoint switch
+        {
+            SurfaceRouteEndpoint.Junction => true,
+            SurfaceRouteEndpoint.NorthEdge => position.Y == 0,
+            SurfaceRouteEndpoint.EastEdge => position.X == map.Width - 1,
+            SurfaceRouteEndpoint.SouthEdge => position.Y == map.Height - 1,
+            SurfaceRouteEndpoint.WestEdge => position.X == 0,
+            _ => false,
+        };
 
     private static void ValidateCaves(GeneratedMap map, List<string> errors)
     {

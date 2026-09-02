@@ -53,7 +53,7 @@ public sealed class LocationGenerationCatalog
                 $"Location profile catalog in '{pack.Manifest.Id}' is invalid.",
                 exception);
         }
-        if (document.SchemaVersion != 2)
+        if (document.SchemaVersion != 3)
         {
             throw new InvalidDataException(
                 $"Unsupported location profile catalog schema {document.SchemaVersion}.");
@@ -75,6 +75,7 @@ public sealed class LocationGenerationCatalog
     private static bool IsInvalid(LocationGenerationProfile profile)
     {
         var river = profile.River;
+        var road = profile.Road;
         var wetland = profile.Wetland;
         var relief = profile.Relief;
         return !ContentId.TryParse(profile.Id.Value, out _) ||
@@ -96,6 +97,14 @@ public sealed class LocationGenerationCatalog
             !IsUnit(river.BranchEndY) ||
             river.BranchHalfWidthScale is <= 0d or > 1d ||
             river.BranchMeanderAmplitude < 0d ||
+            !IsUnit(road.NorthEntryX) ||
+            !IsUnit(road.SouthEntryX) ||
+            road.MeanderAmplitude < 0d ||
+            road.MeanderAmplitude > 0.25d ||
+            !IsUnit(road.JunctionY) ||
+            road.JunctionY is <= 0d or >= 1d ||
+            !IsUnit(road.JunctionEndX) ||
+            road.HalfWidth is < 0 or > 2 ||
             wetland.LeftBoundary <= 0d ||
             !IsUnit(wetland.LeftBoundary) ||
             wetland.BottomBoundary < 0d ||

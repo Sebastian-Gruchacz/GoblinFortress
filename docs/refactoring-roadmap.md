@@ -200,7 +200,14 @@ and rendering stay outside simulation code.
   `core:demo-swamp-frontier` profile; `SwampMapGenerator` remains the
   save-compatible facade over `LocationGenerationRequest`. Format-73 saves pin
   the stable profile ID and selected absent/single/branching river mode, while
-  deep geology is still code-native.
+  deep geology is still code-native. The subsequent route slice lives in the
+  focused `Map/Generation/SurfaceRouteGenerator`: profile-driven absent,
+  through-road and junction modes run after hydrology, create shallow fords,
+  reserve their corridor from initial ecology and structures, and are pinned by
+  format-76 saves without changing format-75 map fingerprints. Generated maps
+  expose the ordered route centerlines and named endpoints as immutable derived
+  data, so future party directors can consume road approaches without parsing
+  rendered surface features or adding route state to saves.
 - Surface contamination now has a focused `Contamination/SurfaceGrimeState`
   owner with deterministic pickup, deposition, cleaning, snapshot, and restore
   contracts. The goblin, human-villager, and animal movement boundaries all

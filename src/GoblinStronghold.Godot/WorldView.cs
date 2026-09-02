@@ -2,7 +2,9 @@ using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Animals;
 using GoblinStronghold.Simulation.ContentPacks;
+using GoblinStronghold.Simulation.Lighting;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Presentation;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.GodotClient.UI.WorldRendering;
 
@@ -34,6 +36,8 @@ public partial class WorldView : Node2D
     private const double WaterAnimationRedrawSeconds = 1d / 20d;
     private const double WorkAnimationCycleSeconds = 0.68;
     private const double WorkAnimationRedrawSeconds = 1d / 20d;
+    private const double LightingAnimationCycleSeconds = 6.0;
+    private const double LightingAnimationRedrawSeconds = 1d / 12d;
     private const double CombatEffectDurationSeconds = 0.42;
     private const int MaximumCombatEffects = 32;
     private const int CombatAudioPlayerCount = 4;
@@ -76,10 +80,14 @@ public partial class WorldView : Node2D
     private double _waterAnimationRedrawElapsed;
     private double _workAnimationElapsed;
     private double _workAnimationRedrawElapsed;
+    private double _lightingAnimationElapsed;
+    private double _lightingAnimationRedrawElapsed;
     private ulong _snapshotTopologyVersion;
     private readonly Dictionary<int, (ulong TopologyVersion, HashSet<GridPosition> Solids)>
         _cachedCaveSolids = [];
     private readonly Dictionary<int, StructureRenderCache> _structureRenderCaches = [];
+    private readonly ActiveLevelLightIndex _activeLevelLights = new();
+    private readonly LowerLevelPresentationState _lowerLevelPresentation = new();
     private readonly MaterialPaletteTextureCache _materialPaletteTextures = new();
     private readonly AnimalPaletteTextureCache _animalPaletteTextures = new();
     private Dictionary<ContentId,
@@ -114,6 +122,7 @@ public partial class WorldView : Node2D
         _terrainAtlas = TerrainSprites.LoadAtlas();
         _terrainTransitionAtlas = TerrainTransitionSprites.LoadAtlas();
         _caveAtlas = CaveSprites.LoadAtlas();
+        _lowerLevelPresentation.Initialize(_terrainAtlas, _caveAtlas);
         _caveWallAtlas = CaveSprites.LoadWallAtlas();
         _humanStructureAtlas = HumanStructureSprites.LoadAtlas();
         _walkwayAtlas = WalkwaySprites.LoadAtlas();
@@ -141,6 +150,7 @@ public partial class WorldView : Node2D
     {
         _materialPaletteTextures.Dispose();
         _animalPaletteTextures.Dispose();
+        _lowerLevelPresentation.Dispose();
     }
 
     public void SetWorld(SimulationEngine engine)
@@ -153,6 +163,8 @@ public partial class WorldView : Node2D
         _snapshotTopologyVersion = 0;
         _cachedCaveSolids.Clear();
         _structureRenderCaches.Clear();
+        _activeLevelLights.Reset();
+        _lowerLevelPresentation.Reset();
         _engine = engine;
         Refresh(engine.CreatePresentationSnapshot());
     }
@@ -161,6 +173,8 @@ public partial class WorldView : Node2D
     {
         _snapshot = snapshot;
         _snapshotTopologyVersion = _engine.World.TopologyVersion;
+        _activeLevelLights.Synchronize(_engine, _snapshot, _visibleLevel);
+        SynchronizeLowerLevelPresentation();
         SynchronizeActorPositions();
         SynchronizeAnimalPositions();
         QueueRedraw();
@@ -177,6 +191,11 @@ public partial class WorldView : Node2D
     public void SetVisibleLevel(int level)
     {
         _visibleLevel = level;
+        if (_engine is not null && _snapshot is not null)
+        {
+            _activeLevelLights.Synchronize(_engine, _snapshot, _visibleLevel);
+            SynchronizeLowerLevelPresentation();
+        }
         QueueRedraw();
     }
 
@@ -264,7 +283,14 @@ public partial class WorldView : Node2D
             return;
         }
 
+        if (SynchronizeLowerLevelPresentation())
+        {
+            QueueRedraw();
+        }
+
         _waterAnimationElapsed = (_waterAnimationElapsed + delta) % WaterAnimationCycleSeconds;
+        _lightingAnimationElapsed =
+            (_lightingAnimationElapsed + delta) % LightingAnimationCycleSeconds;
         var combatEffectsChanged = false;
         for (var index = _combatEffects.Count - 1; index >= 0; index--)
         {
@@ -280,6 +306,16 @@ public partial class WorldView : Node2D
         {
             _waterAnimationRedrawElapsed %= WaterAnimationRedrawSeconds;
             if (HasVisibleAnimatedWater())
+            {
+                QueueRedraw();
+            }
+        }
+
+        _lightingAnimationRedrawElapsed += delta;
+        if (_lightingAnimationRedrawElapsed >= LightingAnimationRedrawSeconds)
+        {
+            _lightingAnimationRedrawElapsed %= LightingAnimationRedrawSeconds;
+            if (HasVisibleFlickeringLight())
             {
                 QueueRedraw();
             }
@@ -376,7 +412,7 @@ public partial class WorldView : Node2D
         DrawAnimals();
         DrawActors();
         DrawCombatEffects();
-        DrawNightLighting();
+        DrawLighting();
         DrawFog();
         DrawWorkDesignations();
         DrawWorkAreaPreview();
@@ -406,6 +442,7 @@ public partial class WorldView : Node2D
 
     private void DrawTerrain()
     {
+        DrawLowerLevelTextures();
         if (_visibleLevel < 0)
         {
             DrawCaveTerrain();
@@ -465,8 +502,40 @@ public partial class WorldView : Node2D
                     continue;
                 }
 
-                DrawLowerTerrainSurface(x, y, cell, livingTrees);
+                if (!_lowerLevelPresentation.HasCachedGeometryAt(
+                        new GridPosition(x, y, cell.SurfaceLevel)))
+                {
+                    DrawLowerTerrainSurface(x, y, cell, livingTrees);
+                }
             }
+        }
+    }
+
+    private void DrawLowerLevelTextures()
+    {
+        foreach (var chunk in _lowerLevelPresentation.VisibleTextures)
+        {
+            var depth = Math.Max(1, _visibleLevel - chunk.Key.Level);
+            var brightness = Math.Max(0.32f, 0.68f - ((depth - 1) * 0.1f));
+            var chunkWorldSize = LowerLevelExposureIndex.DefaultChunkSize * TileSize;
+            DrawTextureRect(
+                chunk.Geometry,
+                new Rect2(
+                    chunk.Key.X * chunkWorldSize,
+                    chunk.Key.Y * chunkWorldSize,
+                    chunkWorldSize,
+                    chunkWorldSize),
+                tile: false,
+                modulate: new Color(brightness, brightness, brightness, 1f));
+            DrawTextureRect(
+                chunk.Lighting,
+                new Rect2(
+                    chunk.Key.X * chunkWorldSize,
+                    chunk.Key.Y * chunkWorldSize,
+                    chunkWorldSize,
+                    chunkWorldSize),
+                tile: false,
+                modulate: new Color(1f, 1f, 1f, brightness));
         }
     }
 
@@ -706,6 +775,7 @@ public partial class WorldView : Node2D
             return;
         }
 
+        DrawLowerLevelOpening(position);
         var center = CellCenter(position);
         DrawCircle(center + new Vector2(1f, 1.5f), 7.5f, new Color(0.025f, 0.03f, 0.028f, 0.92f));
         DrawArc(center, 7.5f, Mathf.Pi, Mathf.Tau, 16, new Color("8b7654"), 2f);
@@ -757,6 +827,7 @@ public partial class WorldView : Node2D
                     DrawExcavatedTerrainRampCut(
                         position,
                         _engine.Map.GetColumnCell(position).RampDirection);
+                    DrawLowerLevelOpening(position);
                     if (passagePositions.Contains(position))
                     {
                         DrawCavePassage(position);
@@ -794,6 +865,31 @@ public partial class WorldView : Node2D
                 }
             }
         }
+    }
+
+    private void DrawLowerLevelOpening(GridPosition upperPosition)
+    {
+        if (!_lowerLevelPresentation.TryGetOpeningTexture(
+                upperPosition,
+                out var opening))
+        {
+            return;
+        }
+
+        var depth = Math.Max(1, _visibleLevel - opening.Level);
+        var brightness = Math.Max(0.32f, 0.68f - ((depth - 1) * 0.1f));
+        var destination = CellRect(upperPosition.X, upperPosition.Y).Grow(-3f);
+        DrawRect(destination.Grow(1.5f), new Color("080a0b"));
+        DrawTextureRectRegion(
+            opening.Geometry,
+            destination,
+            opening.SourceRegion,
+            new Color(brightness, brightness, brightness, 1f));
+        DrawTextureRectRegion(
+            opening.Lighting,
+            destination,
+            opening.SourceRegion,
+            new Color(1f, 1f, 1f, brightness));
     }
 
     private void DrawMineralDeposit(GridPosition position, MineralDepositKind deposit)
@@ -2887,49 +2983,91 @@ public partial class WorldView : Node2D
         }
     }
 
-    private void DrawNightLighting()
+    private void DrawLighting()
     {
-        if (_visibleLevel != 0)
+        var darkness = GetAmbientDarkness();
+        if (darkness <= 0f)
         {
             return;
+        }
+
+        var bounds = GetVisibleCellBounds(padding: 0);
+        var visibleRect = new Rect2(
+            bounds.MinimumX * TileSize,
+            bounds.MinimumY * TileSize,
+            (bounds.MaximumX - bounds.MinimumX) * TileSize,
+            (bounds.MaximumY - bounds.MinimumY) * TileSize);
+        DrawRect(
+            visibleRect,
+            _visibleLevel < 0
+                ? new Color(0.008f, 0.012f, 0.016f, darkness)
+                : new Color(0.025f, 0.055f, 0.12f, darkness));
+
+        foreach (var emitter in QueryVisibleLightEmitters(bounds).Where(emitter =>
+                     _snapshot.GetVisibility(emitter.Position, _engine.Map.Width) !=
+                         CellVisibility.Unknown))
+        {
+            var definition = LightEmitterCatalog.Get(emitter.Handle.DefinitionId);
+            var phase = (_lightingAnimationElapsed / LightingAnimationCycleSeconds) * Mathf.Tau * 7d +
+                (emitter.Handle.InstanceId % 997UL) * 0.173d;
+            var flicker = 1f - definition.FlickerAmount +
+                definition.FlickerAmount * (0.5f + 0.5f * Mathf.Sin((float)phase));
+            var strength = emitter.Intensity * flicker;
+            var color = new Color(
+                definition.Color.Red,
+                definition.Color.Green,
+                definition.Color.Blue);
+            var center = CellCenter(emitter.Position);
+            for (var ring = 4; ring >= 1; ring--)
+            {
+                var radiusFraction = ring / 4f;
+                var alpha = darkness * strength * (0.075f + (4 - ring) * 0.035f);
+                DrawCircle(
+                    center,
+                    emitter.RadiusCells * TileSize * radiusFraction,
+                    color with { A = alpha });
+            }
+        }
+    }
+
+    private float GetAmbientDarkness()
+    {
+        if (_visibleLevel < 0)
+        {
+            return 0.62f;
         }
 
         var calendar = SimulationCalendar.At(_snapshot.Tick, _engine.Definitions.Clock);
         if (!calendar.IsNight)
         {
-            return;
+            return 0f;
         }
 
         var nightTick = calendar.TickOfDay - calendar.DaylightTicks;
-        var twilightTicks = Math.Min(600, calendar.NightTicks / 3);
+        var twilightTicks = Math.Max(1, Math.Min(600, calendar.NightTicks / 3));
         var fadeIn = Math.Clamp((double)nightTick / twilightTicks, 0d, 1d);
         var fadeOut = Math.Clamp((double)(calendar.NightTicks - nightTick) / twilightTicks, 0d, 1d);
-        var darkness = (float)(0.34d * Math.Min(fadeIn, fadeOut));
-        DrawRect(
-            new Rect2(Vector2.Zero, WorldSize),
-            new Color(0.025f, 0.055f, 0.12f, darkness));
+        return (float)(0.34d * Math.Min(fadeIn, fadeOut));
+    }
 
-        foreach (var villager in _snapshot.HumanVillage.Villagers.Where(villager =>
-                     villager.Health > 0 &&
-                     _snapshot.GetVisibility(villager.Position, _engine.Map.Width) ==
-                         CellVisibility.Visible))
+    private IReadOnlyList<LightEmitterSnapshot> QueryVisibleLightEmitters(
+        (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds) =>
+        _activeLevelLights.Query(
+            _visibleLevel,
+            bounds.MinimumX,
+            bounds.MinimumY,
+            bounds.MaximumX,
+            bounds.MaximumY);
+
+    private bool HasVisibleFlickeringLight()
+    {
+        if (GetAmbientDarkness() <= 0f)
         {
-            var center = CellCenter(villager.Position);
-            DrawCircle(center, TileSize * 1.7f, new Color(1f, 0.63f, 0.18f, darkness * 0.16f));
-            DrawCircle(center + new Vector2(5f, -5f), 1.8f, new Color(1f, 0.78f, 0.3f, 0.9f));
+            return false;
         }
 
-        foreach (var torch in _snapshot.WorldObjects.Where(worldObject =>
-                     worldObject.Kind == WorldObjectKind.WallTorch &&
-                     worldObject.Anchor.Z == 0 &&
-                     _snapshot.GetVisibility(worldObject.Anchor, _engine.Map.Width) !=
-                         CellVisibility.Unknown))
-        {
-            var center = CellCenter(torch.Anchor);
-            DrawCircle(center, TileSize * 1.9f,
-                new Color(1f, 0.48f, 0.12f, darkness * 0.24f));
-            DrawCircle(center, 2.3f, new Color(1f, 0.76f, 0.24f, 0.95f));
-        }
+        return QueryVisibleLightEmitters(GetVisibleCellBounds(padding: 0))
+            .Any(emitter => LightEmitterCatalog.Get(emitter.Handle.DefinitionId).FlickerAmount > 0f);
     }
 
     private void DrawStorageAreas()
@@ -3452,6 +3590,20 @@ public partial class WorldView : Node2D
             0,
             _engine.Map.Height);
         return (minimumX, minimumY, maximumX, maximumY);
+    }
+
+    private bool SynchronizeLowerLevelPresentation()
+    {
+        var bounds = GetVisibleCellBounds();
+        return _lowerLevelPresentation.Synchronize(
+            _engine,
+            _snapshot,
+            _visibleLevel,
+            new PresentationCellBounds(
+                bounds.MinimumX,
+                bounds.MinimumY,
+                bounds.MaximumX,
+                bounds.MaximumY));
     }
 
     private bool HasVisibleAnimatedWater()

@@ -1,0 +1,292 @@
+using GoblinStronghold.Simulation.Lighting;
+using GoblinStronghold.Simulation.Map;
+
+namespace GoblinStronghold.Simulation.Presentation;
+
+public sealed record PresentationTopologyObservation(
+    ulong Id,
+    IReadOnlyList<GridPosition> Positions);
+
+public sealed record PresentationStructureObservation(
+    WorldObjectId Id,
+    ulong Signature,
+    bool EmitsStaticLight,
+    IReadOnlyList<GridPosition> Positions);
+
+public readonly record struct PresentationContaminationObservation(
+    GridPosition Position,
+    int BloodVolume,
+    int GrimeVolume);
+
+public sealed record LowerLevelPresentationObservation(
+    ulong TopologyVersion,
+    IReadOnlyList<PresentationTopologyObservation> Topology,
+    IReadOnlyList<PresentationStructureObservation> Structures,
+    IReadOnlyList<PresentationContaminationObservation> Contamination);
+
+public readonly record struct PresentationChunkInvalidation(
+    GridPosition Position,
+    PresentationChunkDirtyReason Reason);
+
+public sealed record PresentationInvalidationBatch(
+    bool RequiresFullInvalidation,
+    IReadOnlyList<PresentationChunkInvalidation> Invalidations);
+
+public sealed class LowerLevelPresentationChangeTracker
+{
+    private ulong _topologyVersion;
+    private Dictionary<ulong, PresentationTopologyObservation> _topology = [];
+    private Dictionary<WorldObjectId, PresentationStructureObservation> _structures = [];
+    private Dictionary<GridPosition, PresentationContaminationObservation> _contamination = [];
+    private bool _initialized;
+
+    public void Reset()
+    {
+        _topologyVersion = 0;
+        _topology.Clear();
+        _structures.Clear();
+        _contamination.Clear();
+        _initialized = false;
+    }
+
+    public PresentationInvalidationBatch Synchronize(
+        LowerLevelPresentationObservation observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        var topology = observation.Topology.ToDictionary(item => item.Id);
+        var structures = observation.Structures.ToDictionary(item => item.Id);
+        var contamination = observation.Contamination.ToDictionary(item => item.Position);
+        if (!_initialized)
+        {
+            Capture(observation.TopologyVersion, topology, structures, contamination);
+            return new PresentationInvalidationBatch(false, []);
+        }
+
+        var invalidations = new Dictionary<GridPosition, PresentationChunkDirtyReason>();
+        AddTopologyInvalidations(invalidations, _topology, topology);
+        AddStructureInvalidations(invalidations, _structures, structures);
+        AddContaminationInvalidations(invalidations, _contamination, contamination);
+        var topologyChanged = observation.TopologyVersion != _topologyVersion;
+        var hasKnownTopologyChange = invalidations.Values.Any(reason =>
+            (reason & (PresentationChunkDirtyReason.Topology |
+                PresentationChunkDirtyReason.Structures)) != 0);
+        Capture(observation.TopologyVersion, topology, structures, contamination);
+        return new PresentationInvalidationBatch(
+            topologyChanged && !hasKnownTopologyChange,
+            invalidations
+                .OrderBy(item => item.Key.Z)
+                .ThenBy(item => item.Key.Y)
+                .ThenBy(item => item.Key.X)
+                .Select(item => new PresentationChunkInvalidation(item.Key, item.Value))
+                .ToArray());
+    }
+
+    private void Capture(
+        ulong topologyVersion,
+        Dictionary<ulong, PresentationTopologyObservation> topology,
+        Dictionary<WorldObjectId, PresentationStructureObservation> structures,
+        Dictionary<GridPosition, PresentationContaminationObservation> contamination)
+    {
+        _topologyVersion = topologyVersion;
+        _topology = topology;
+        _structures = structures;
+        _contamination = contamination;
+        _initialized = true;
+    }
+
+    private static void AddTopologyInvalidations(
+        IDictionary<GridPosition, PresentationChunkDirtyReason> invalidations,
+        IReadOnlyDictionary<ulong, PresentationTopologyObservation> previous,
+        IReadOnlyDictionary<ulong, PresentationTopologyObservation> current)
+    {
+        foreach (var id in previous.Keys.Union(current.Keys))
+        {
+            if (previous.ContainsKey(id) && current.ContainsKey(id))
+            {
+                continue;
+            }
+
+            foreach (var position in PreviousAndCurrentPositions(previous, current, id))
+            {
+                AddReason(invalidations, position, PresentationChunkDirtyReason.Topology);
+            }
+        }
+    }
+
+    private static void AddStructureInvalidations(
+        IDictionary<GridPosition, PresentationChunkDirtyReason> invalidations,
+        IReadOnlyDictionary<WorldObjectId, PresentationStructureObservation> previous,
+        IReadOnlyDictionary<WorldObjectId, PresentationStructureObservation> current)
+    {
+        foreach (var id in previous.Keys.Union(current.Keys))
+        {
+            previous.TryGetValue(id, out var oldStructure);
+            current.TryGetValue(id, out var newStructure);
+            if (oldStructure?.Signature == newStructure?.Signature)
+            {
+                continue;
+            }
+
+            var reason = PresentationChunkDirtyReason.Structures;
+            if (oldStructure?.EmitsStaticLight == true || newStructure?.EmitsStaticLight == true)
+            {
+                reason |= PresentationChunkDirtyReason.StaticLighting;
+            }
+            foreach (var position in (oldStructure?.Positions ?? [])
+                         .Concat(newStructure?.Positions ?? [])
+                         .Distinct())
+            {
+                AddReason(invalidations, position, reason);
+            }
+        }
+    }
+
+    private static void AddContaminationInvalidations(
+        IDictionary<GridPosition, PresentationChunkDirtyReason> invalidations,
+        IReadOnlyDictionary<GridPosition, PresentationContaminationObservation> previous,
+        IReadOnlyDictionary<GridPosition, PresentationContaminationObservation> current)
+    {
+        foreach (var position in previous.Keys.Union(current.Keys))
+        {
+            previous.TryGetValue(position, out var oldContamination);
+            current.TryGetValue(position, out var newContamination);
+            if (oldContamination == newContamination)
+            {
+                continue;
+            }
+
+            AddReason(
+                invalidations,
+                position,
+                PresentationChunkDirtyReason.Contamination);
+        }
+    }
+
+    private static IEnumerable<GridPosition> PreviousAndCurrentPositions(
+        IReadOnlyDictionary<ulong, PresentationTopologyObservation> previous,
+        IReadOnlyDictionary<ulong, PresentationTopologyObservation> current,
+        ulong id) =>
+        (previous.TryGetValue(id, out var oldItem) ? oldItem.Positions : [])
+        .Concat(current.TryGetValue(id, out var newItem) ? newItem.Positions : [])
+        .Distinct();
+
+    private static void AddReason(
+        IDictionary<GridPosition, PresentationChunkDirtyReason> invalidations,
+        GridPosition position,
+        PresentationChunkDirtyReason reason)
+    {
+        invalidations.TryGetValue(position, out var current);
+        invalidations[position] = current | reason;
+    }
+}
+
+public static class LowerLevelPresentationObservationFactory
+{
+    public static LowerLevelPresentationObservation Create(
+        WorldMapState world,
+        SimulationSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return new LowerLevelPresentationObservation(
+            world.TopologyVersion,
+            CreateTopology(world),
+            snapshot.WorldObjects.Select(worldObject => CreateStructure(world, worldObject))
+                .ToArray(),
+            CreateContamination(snapshot));
+    }
+
+    private static IReadOnlyList<PresentationTopologyObservation> CreateTopology(
+        WorldMapState world)
+    {
+        var result = new List<PresentationTopologyObservation>();
+        result.AddRange(world.ExcavatedCaveCells.Select(position =>
+            new PresentationTopologyObservation(Hash(1, position), [position])));
+        result.AddRange(world.ExcavatedTerrainRamps.Select(position =>
+            new PresentationTopologyObservation(Hash(2, position), [position])));
+        result.AddRange(world.ExcavatedVerticalPassages.Select(passage =>
+            new PresentationTopologyObservation(
+                Hash(3, passage.Upper, passage.Lower),
+                [passage.Upper, passage.Lower])));
+        return result.OrderBy(item => item.Id).ToArray();
+    }
+
+    private static PresentationStructureObservation CreateStructure(
+        WorldMapState world,
+        WorldObjectSnapshot worldObject)
+    {
+        var anchor = world.GetEffectiveWorldObjectAnchor(worldObject);
+        var positions = worldObject.Parts
+            .Select(part => Add(anchor, part.RelativePosition))
+            .Append(anchor)
+            .Distinct()
+            .OrderBy(position => position.Z)
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .ToArray();
+        var signature = HashStructure(worldObject, anchor);
+        var emitsStaticLight = LightEmitterCatalog.TryGet(worldObject.Kind, out var light) &&
+            light.Activation == LightEmitterActivation.Always;
+        return new PresentationStructureObservation(
+            worldObject.Id,
+            signature,
+            emitsStaticLight,
+            positions);
+    }
+
+    private static IReadOnlyList<PresentationContaminationObservation> CreateContamination(
+        SimulationSnapshot snapshot)
+    {
+        var blood = snapshot.BloodStains.ToDictionary(item => item.Position, item => item.Volume);
+        var grime = snapshot.SurfaceGrime.ToDictionary(item => item.Position, item => item.Volume);
+        return blood.Keys.Union(grime.Keys)
+            .OrderBy(position => position.Z)
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .Select(position => new PresentationContaminationObservation(
+                position,
+                blood.GetValueOrDefault(position),
+                grime.GetValueOrDefault(position)))
+            .ToArray();
+    }
+
+    private static ulong HashStructure(WorldObjectSnapshot worldObject, GridPosition anchor)
+    {
+        var signature = Hash(
+            4,
+            anchor,
+            new GridPosition(
+                (int)worldObject.Kind,
+                (int)worldObject.Orientation,
+                (int)worldObject.MaterialVariant));
+        foreach (var part in worldObject.Parts)
+        {
+            signature = Mix(signature, unchecked((uint)part.RelativePosition.X));
+            signature = Mix(signature, unchecked((uint)part.RelativePosition.Y));
+            signature = Mix(signature, unchecked((uint)part.RelativePosition.Z));
+            signature = Mix(signature, (uint)part.Channel);
+            signature = Mix(signature, (uint)part.Kind);
+        }
+        return signature;
+    }
+
+    private static ulong Hash(int kind, params GridPosition[] positions)
+    {
+        var signature = Mix(14_695_981_039_346_656_037UL, (uint)kind);
+        foreach (var position in positions)
+        {
+            signature = Mix(signature, unchecked((uint)position.X));
+            signature = Mix(signature, unchecked((uint)position.Y));
+            signature = Mix(signature, unchecked((uint)position.Z));
+        }
+        return signature;
+    }
+
+    private static ulong Mix(ulong signature, uint value) =>
+        (signature ^ value) * 1_099_511_628_211UL;
+
+    private static GridPosition Add(GridPosition left, GridPosition right) => new(
+        checked(left.X + right.X),
+        checked(left.Y + right.Y),
+        checked(left.Z + right.Z));
+}

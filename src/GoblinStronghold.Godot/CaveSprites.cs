@@ -20,6 +20,19 @@ internal static class CaveSprites
         => TextureResources.LoadRequired(WallAtlasPath, "cave wall atlas");
 
     public static Rect2 GetFloorRegion(Texture2D atlas, RockKind rock)
+        => GetFloorRegion(atlas.GetWidth(), atlas.GetHeight(), rock);
+
+    public static Rect2I GetFloorRegionFromImage(Image atlas, RockKind rock)
+    {
+        var region = GetFloorRegion(atlas.GetWidth(), atlas.GetHeight(), rock);
+        return new Rect2I(
+            Mathf.RoundToInt(region.Position.X),
+            Mathf.RoundToInt(region.Position.Y),
+            Mathf.RoundToInt(region.Size.X),
+            Mathf.RoundToInt(region.Size.Y));
+    }
+
+    private static Rect2 GetFloorRegion(int atlasWidth, int atlasHeight, RockKind rock)
     {
         var row = rock switch
         {
@@ -28,9 +41,9 @@ internal static class CaveSprites
             _ => throw new ArgumentOutOfRangeException(nameof(rock), rock, null),
         };
         var left = 0;
-        var top = row * atlas.GetHeight() / FloorRows;
-        var right = atlas.GetWidth() / FloorColumns;
-        var bottom = (row + 1) * atlas.GetHeight() / FloorRows;
+        var top = row * atlasHeight / FloorRows;
+        var right = atlasWidth / FloorColumns;
+        var bottom = (row + 1) * atlasHeight / FloorRows;
         return new Rect2(left, top, right - left, bottom - top);
     }
 

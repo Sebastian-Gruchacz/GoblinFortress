@@ -11,6 +11,7 @@ using GoblinStronghold.Simulation.Workshops;
 using GoblinStronghold.GodotClient.UI.Actors;
 using GoblinStronghold.GodotClient.UI.Animals;
 using GoblinStronghold.GodotClient.UI.MainMenu;
+using GoblinStronghold.GodotClient.UI.Windows;
 using GoblinStronghold.GodotClient.UI.WorldPlanning;
 using GoblinStronghold.GodotClient.Application.Profiles;
 using GoblinStronghold.GodotClient.Platform.Steam;
@@ -140,6 +141,8 @@ public partial class Main : Node
     private ConstructionMaterialGroup _pendingMaterialGroup;
     private ResourceVariant _selectedConstructionMaterial;
     private GameSessionPreferences _sessionPreferences = new();
+    private WindowLayoutController _windowLayoutController = null!;
+    private MainWindowSettingsController _mainWindowSettingsController = null!;
     private bool _isDraggingLinearBuild;
     private GridPosition _linearBuildStart;
     private WorkMode _workMode;
@@ -705,6 +708,22 @@ public partial class Main : Node
                 DateTimeOffset.Now));
         _newGameSetupWindow.StartRequested += StartNewGame;
         AddChild(_newGameSetupWindow);
+        _windowLayoutController = new WindowLayoutController(
+            this,
+            new PlayerProfileLayoutStore(
+                ProjectSettings.GlobalizePath("user://profiles")))
+        {
+            Name = "WindowLayoutController",
+        };
+        AddChild(_windowLayoutController);
+        _mainWindowSettingsController = new MainWindowSettingsController(
+            new MainWindowSettingsStore(
+                ProjectSettings.GlobalizePath("user://settings/display.json")),
+            enabled: !OS.IsDebugBuild())
+        {
+            Name = "MainWindowSettingsController",
+        };
+        AddChild(_mainWindowSettingsController);
         ApplyGameThemeToWindows();
         ApplyStaticTranslations();
         UpdateSpeedButtons();
@@ -1057,6 +1076,7 @@ public partial class Main : Node
             }
 
             _sessionPreferences = new GameSessionPreferences(setup.ProfileName);
+            _windowLayoutController.ActivateProfile(_sessionPreferences.ProfileName);
             ReplaceEngine(CreateNewEngine(setup.Map));
             _hasActiveSession = true;
             _newGameSetupWindow.Hide();
@@ -1148,6 +1168,14 @@ public partial class Main : Node
                 _saveStore.SaveBeforeLoad(CreateSaveJson(), excludedPath: path);
             }
             _sessionPreferences = loadedPreferences;
+            if (!string.IsNullOrEmpty(_sessionPreferences.ProfileName))
+            {
+                _windowLayoutController.ActivateProfile(_sessionPreferences.ProfileName);
+            }
+            else
+            {
+                _windowLayoutController.DeactivateProfile();
+            }
             ReplaceEngine(loaded);
             _hasActiveSession = true;
             _recoveryWindow.Hide();
@@ -1250,6 +1278,7 @@ public partial class Main : Node
 
         _recoveryWindow = new Window
         {
+            Name = "RecoveryWindow",
             Title = Ui("save-load", "save-points-title"),
             Size = new Vector2I(760, 500),
             MinSize = new Vector2I(560, 360),
@@ -1346,6 +1375,7 @@ public partial class Main : Node
     {
         _optionsWindow = new Window
         {
+            Name = "OptionsWindow",
             Title = Ui("options", "title"),
             Size = new Vector2I(650, 680),
             MinSize = new Vector2I(520, 420),
@@ -5350,9 +5380,9 @@ public partial class Main : Node
     private void HandleViewportSizeChanged()
     {
         ConstrainCameraToMap();
-        if (_goblinDetails.Visible)
+        if (_windowLayoutController is not null)
         {
-            PositionGoblinDetailsWindow();
+            _windowLayoutController.ConstrainVisibleWindows();
         }
     }
 
@@ -6349,6 +6379,7 @@ public partial class Main : Node
     {
         _workshopDetails = new Window
         {
+            Name = "WorkshopDetails",
             Title = "Prymitywny warsztat",
             Size = new Vector2I(480, 500),
             MinSize = new Vector2I(410, 360),
@@ -6741,6 +6772,7 @@ public partial class Main : Node
     {
         _logisticsWindow = new Window
         {
+            Name = "LogisticsWindow",
             Title = "Logistyka twierdzy",
             Size = new Vector2I(920, 700),
             MinSize = new Vector2I(680, 440),
@@ -7097,6 +7129,7 @@ public partial class Main : Node
     {
         _plannerWindow = new Window
         {
+            Name = "PlannerWindow",
             Title = "Planer plemienia",
             Size = new Vector2I(760, 600),
             MinSize = new Vector2I(600, 380),
@@ -8640,6 +8673,7 @@ public partial class Main : Node
     {
         _raidWindow = new Window
         {
+            Name = "RaidWindow",
             Title = "Oddział wyprawy",
             Size = new Vector2I(620, 720),
             MinSize = new Vector2I(420, 420),

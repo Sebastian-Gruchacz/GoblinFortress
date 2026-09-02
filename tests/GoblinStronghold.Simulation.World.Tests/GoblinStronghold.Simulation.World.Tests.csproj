@@ -5,6 +5,8 @@
     <Compile Include="..\GoblinStronghold.Simulation.Tests\DeepGeologyTests.cs" Link="DeepGeologyTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\FloorConstructionTests.cs" Link="FloorConstructionTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\GeneratedStructureTests.cs" Link="GeneratedStructureTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\LightEmitterIndexTests.cs" Link="LightEmitterIndexTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\LowerLevelPresentationCacheTests.cs" Link="LowerLevelPresentationCacheTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\NavigationKnowledgeTests.cs" Link="NavigationKnowledgeTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\ResourceSpatialIndexTests.cs" Link="ResourceSpatialIndexTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\SwampMapGeneratorTests.cs" Link="SwampMapGeneratorTests.cs" />

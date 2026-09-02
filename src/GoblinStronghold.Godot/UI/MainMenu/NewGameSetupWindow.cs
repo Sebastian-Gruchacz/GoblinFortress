@@ -51,6 +51,7 @@ public sealed partial class NewGameSetupWindow : Window
     {
         _translate = translate;
         _defaultProfileNameProvider = defaultProfileNameProvider;
+        Name = "NewGameSetupWindow";
         Size = new Vector2I(760, 690);
         MinSize = new Vector2I(620, 560);
         Visible = false;

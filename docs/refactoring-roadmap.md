@@ -234,6 +234,13 @@ and rendering stay outside simulation code.
   every travel, collection, delivery, work, need, terrain, and raid phase from
   matching English/Polish catalog entries for all UI consumers.
 - Separate selection/input command construction from popup and layout code.
+- Persistent player-profile window geometry now belongs to the focused
+  `UI/Windows/WindowLayoutController` and `Application/Profiles` store. `Main`
+  only activates the selected profile at the session boundary; window node names
+  are stable persistence IDs, and saved rectangles are constrained to the
+  current viewport before use.
+  Global main-window mode and windowed resolution live beside that profile store
+  but are restored only in release builds; minimized state is never restored.
 - Replace the manual build/work button lists with a world-tool controller that
   composes construction, zone, terrain-modification, and general work catalogs
   into localized recursive menus.
@@ -285,6 +292,76 @@ undefined until the food-processing design is agreed.
   The grime layer reuses a recolored atlas mask and is ordered below blood; move
   both into a dedicated contamination renderer when render-layer extraction
   begins.
+
+#### Active slice lighting and lower-level presentation cache
+
+The active level remains the only fully live render slice. Holes, ramps, cliffs,
+and other vertical openings may expose lower levels, but those levels must be
+presented through bounded cached slices rather than complete live world draws.
+Keep simulation state authoritative and independent from these presentation
+caches.
+
+- [x] Define stable core light-emitter IDs and data-driven radius, intensity,
+  color, flicker, and activation parameters outside `WorldView`.
+- [x] Maintain a level-aware spatial emitter index. The first integration covers
+  wall torches, lava, and bloomery/furnace/crucible fires while an eligible
+  crafting order is actually being worked.
+- [x] Apply ambient cave darkness and surface night darkness on the active level,
+  with low-frequency flame flicker limited to visible indexed emitters. Ordinary
+  human villagers no longer act as implicit light sources.
+- [ ] Add terrain and structure light occlusion, door-state transmission, and
+  controlled vertical propagation through open passages. This belongs in a
+  focused lighting policy, not in render-kind conditionals.
+- [ ] Extend content definitions with activity/fuel contracts for cooking fires,
+  torches, furnaces, lava, carried lanterns, luminous creatures, and future mod
+  sources. Dynamic emitters register the same snapshots as static emitters.
+- [ ] Introduce a narrow `PresentationSliceRequest`/result contract containing
+  the active level, visible map rectangle, and explicitly exposed lower regions.
+  Management UI and HUD summaries should use separate snapshots instead of
+  forcing world presentation to copy unrelated simulation collections.
+- [x] Index connected lower-level exposure regions from lower terrain surfaces
+  in the visible map rectangle and from vertical openings, then
+  divide large regions into bounded chunks (start with 16x16 or 32x32 cells).
+  Nearby openings that expose the same lower plane may share a larger cached
+  region instead of producing many tiny textures. A region is dynamically
+  presentable only while it has a continuous registered exposure chain to the
+  active level; an opening hidden behind an intervening closed plane must not
+  keep deeper presentation work active.
+- [x] Cache exposed lower terrain and cave geometry as half-resolution color
+  textures with a separate one-pixel-per-cell exposure mask. Rebuild only
+  visible dirty chunks, retain hidden textures, and composite cached geometry
+  from the deepest visible level upward before drawing the active level.
+- [x] Extend cached geometry with simplified static structures and apply the
+  exposure mask while composing openings in the active plane. Lower slices use
+  deliberately reduced structure silhouettes instead of live structure draw
+  calls.
+- [x] Add a separate low-resolution light texture for always-active lower-level
+  sources such as wall torches and lava. Cached light remains static and only
+  active-level flames flicker; work-activated and mobile sources stay in the
+  dynamic-light follow-up.
+- [x] Retain chunk cache state when exposure or the camera moves away. Hidden
+  dirty chunks are excluded from rebuild candidates and become candidates only
+  after the camera descends or a continuous exposure chain makes them visible
+  again.
+- [x] Route observed topology, structure, contamination, and static-light
+  changes into position-scoped chunk invalidation. Unknown topology changes
+  retain a safe full-cache fallback, while unchanged snapshots do no work and
+  dirty chunks still rebuild from the lowest affected level upward.
+- [ ] Route future mutable-fluid events through the same invalidation contract.
+  Current underground water and lava belong to immutable generated map
+  geometry, so there is no runtime fluid mutation source to register yet.
+- [ ] Add a low-cadence, position-quantized overlay for lower-level moving actors
+  that carry lights or emit light themselves. If an actor leaves an exposed
+  region before the camera changes level, stale cached presence is acceptable;
+  never make lower-level actor animation as expensive as the active slice.
+- [x] Keep lower-level simulation free of renderer synchronization and frame
+  deadlines. Presentation consumes immutable results at its own cadence, so
+  independent lower-level algorithms remain eligible for parallel execution;
+  only publication at the simulation boundary requires synchronization.
+- [ ] Add cache counters and timings for dirty chunks, static/light texture
+  rebuilds, emitter queries, and snapshot construction. Characterize both a
+  single shaft and a broad Swiss-cheese exposure map before increasing cache
+  fidelity.
 
 ### Stage F: profiles, saves and mod content
 

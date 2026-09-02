@@ -134,6 +134,7 @@ public partial class Main
     {
         _modManagerWindow = new Window
         {
+            Name = "ModManagerWindow",
             Title = Ui("mods", "title"),
             Size = new Vector2I(860, 650),
             MinSize = new Vector2I(660, 430),
@@ -195,6 +196,7 @@ public partial class Main
     {
         _modInformationWindow = new Window
         {
+            Name = "ModInformationWindow",
             Size = new Vector2I(720, 560),
             MinSize = new Vector2I(520, 360),
             Visible = false,

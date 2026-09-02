@@ -137,7 +137,7 @@ public sealed class CivilizationCatalog : ICivilizationCatalog
                 $"Civilization catalog in '{pack.Manifest.Id}' is invalid.",
                 exception);
         }
-        if (document.SchemaVersion != 7)
+        if (document.SchemaVersion != 8)
         {
             throw new InvalidDataException(
                 $"Unsupported civilization catalog schema {document.SchemaVersion}.");
@@ -185,6 +185,7 @@ public sealed class CivilizationCatalog : ICivilizationCatalog
         var needs = definition.Needs;
         var populationNeeds = definition.PopulationNeeds;
         var aging = definition.Aging;
+        var actorGeneration = definition.ActorGeneration;
         return !ContentId.TryParse(definition.Id.Value, out _) ||
             definition.LegacyRole is { } role && !Enum.IsDefined(role) ||
             definition.PlayerControllable !=
@@ -228,6 +229,9 @@ public sealed class CivilizationCatalog : ICivilizationCatalog
                 aging.InitialMinimumAgeYears < 0 ||
                 aging.InitialMaximumAgeYearsExclusive <= aging.InitialMinimumAgeYears ||
                 aging.InitialMaximumAgeYearsExclusive > aging.HealthyYears) ||
+            definition.LegacyRole == CivilizationLegacyRole.PlayerGoblins &&
+                actorGeneration is null ||
+            actorGeneration is not null && IsInvalid(actorGeneration) ||
             (generation is null) != (behavior is null) ||
             generation is not null && (
                 !Enum.IsDefined(generation.LegacyKind) ||
@@ -256,7 +260,52 @@ public sealed class CivilizationCatalog : ICivilizationCatalog
                 behavior.ConflictLossFighterDivisor < 1 ||
                 behavior.HostileRelationPercent is < 0 or > 100 ||
                 behavior.WaryRelationPercent is < 0 or > 100 ||
-                behavior.HostileRelationPercent + behavior.WaryRelationPercent > 100);
+            behavior.HostileRelationPercent + behavior.WaryRelationPercent > 100);
+    }
+
+    private static bool IsInvalid(CivilizationActorGenerationDefinition generation) =>
+        !Enum.IsDefined(generation.RandomDomain) ||
+        !IsValidSingleFlagPool(generation.SkillPool) ||
+        generation.SkillSampleKeys.Count == 0 ||
+        generation.SkillSampleKeys.Distinct().Count() !=
+            generation.SkillSampleKeys.Count ||
+        !IsValidSingleFlagPool(generation.TraitPool) ||
+        generation.TraitSampleKeys.Count == 0 ||
+        generation.TraitSampleKeys.Distinct().Count() !=
+            generation.TraitSampleKeys.Count ||
+        !HasOnlyKnownFlags(
+            generation.GuaranteedEquipment,
+            PersonalEquipment.WoodenBucket) ||
+        generation.GuaranteedEquipment == PersonalEquipment.None ||
+        !HasOnlyKnownFlags(
+            generation.OptionalEquipment,
+            PersonalEquipment.WoodenBucket) ||
+        generation.OptionalEquipment == PersonalEquipment.None ||
+        (generation.GuaranteedEquipment & generation.OptionalEquipment) != 0 ||
+        generation.OptionalEquipmentRollMaximumExclusive < 1 ||
+        generation.OptionalEquipmentSuccessValue < 0 ||
+        generation.OptionalEquipmentSuccessValue >=
+            generation.OptionalEquipmentRollMaximumExclusive ||
+        generation.WorkPreferenceMinimum < GoblinWorkPreferences.Minimum ||
+        generation.WorkPreferenceMaximum > GoblinWorkPreferences.Maximum ||
+        generation.WorkPreferenceMaximum < generation.WorkPreferenceMinimum ||
+        generation.WorkPreferenceSampleKeys.Count != 3 ||
+        generation.WorkPreferenceSampleKeys.Distinct().Count() != 3;
+
+    private static bool IsValidSingleFlagPool<T>(IReadOnlyCollection<T> values)
+        where T : struct, Enum => values.Count > 0 &&
+        values.Distinct().Count() == values.Count &&
+        values.All(value =>
+        {
+            var numeric = Convert.ToUInt64(value);
+            return Enum.IsDefined(value) && numeric != 0 && (numeric & (numeric - 1)) == 0;
+        });
+
+    private static bool HasOnlyKnownFlags<T>(T value, T highestKnownFlag)
+        where T : struct, Enum
+    {
+        var mask = (Convert.ToUInt64(highestKnownFlag) << 1) - 1;
+        return (Convert.ToUInt64(value) & ~mask) == 0;
     }
 
     private static bool IsInvalid(CivilizationNeedsDefinition needs) =>

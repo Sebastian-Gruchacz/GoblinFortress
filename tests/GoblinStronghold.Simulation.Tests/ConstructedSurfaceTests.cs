@@ -71,6 +71,53 @@ public sealed class ConstructedSurfaceTests
     }
 
     [Fact]
+    public void WallsCanBeBuiltOnNaturalAndExcavatedCaveGround()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var natural = EnumerateWorldPositions(engine)
+            .First(position =>
+                position.Z < 0 &&
+                engine.Map.IsCavePosition(position) &&
+                engine.Map.GetCaveCell(position).Kind == CaveCellKind.Floor &&
+                !engine.World.ExcavatedCaveCells.Contains(position) &&
+                engine.Map.TryGetInitialGeometry(position, out var geometry) &&
+                geometry.Support == CellSupportKind.NaturalFlat &&
+                geometry.Fluid == CellFluidKind.None &&
+                !engine.World.GetWorldObjectsAt(position).Any());
+        Assert.True(engine.World.CanBuildWoodenWalls([natural]));
+
+        engine.World.BuildFloor(
+            natural,
+            new SimulationTick(1),
+            stone: true,
+            ResourceVariant.Sandstone);
+        Assert.True(engine.World.CanBuildWoodenWalls([natural]));
+        engine.World.BuildWoodenWalls(
+            [natural],
+            new SimulationTick(2),
+            ResourceVariant.OakWood);
+
+        var excavated = EnumerateWorldPositions(engine)
+            .First(engine.World.CanExcavateRock);
+        Assert.True(engine.World.TryExcavateRock(
+            excavated,
+            new SimulationTick(3),
+            out _,
+            out _,
+            out _));
+        Assert.True(engine.World.CanBuildStoneWalls([excavated]));
+        engine.World.BuildStoneWalls(
+            [excavated],
+            new SimulationTick(4),
+            ResourceVariant.Granite);
+
+        Assert.Contains(engine.World.GetWorldObjectsAt(natural), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenWall);
+        Assert.Contains(engine.World.GetWorldObjectsAt(excavated), worldObject =>
+            worldObject.Kind == WorldObjectKind.StoneWall);
+    }
+
+    [Fact]
     public void FloorCanBePlannedOnExcavatedHillRock()
     {
         var engine = CreateEngine(initialWoodStock: 0);

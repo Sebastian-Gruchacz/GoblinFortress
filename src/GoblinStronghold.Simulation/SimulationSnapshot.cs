@@ -320,6 +320,8 @@ public readonly record struct ActorSnapshot(
 {
     public ActorSex Sex { get; init; }
 
+    public PolityId PolityId { get; init; }
+
     public EquipmentLoadoutSnapshot Loadout { get; init; } = new([], 0, 0, 0);
 
     public EntityId CarriedCorpseId { get; init; }
@@ -401,6 +403,8 @@ public readonly record struct HumanVillagerSnapshot(
     int WorkProgress)
 {
     public ActorSex Sex { get; init; }
+
+    public PolityId PolityId { get; init; }
 
     public int CarriedGrime { get; init; }
 }

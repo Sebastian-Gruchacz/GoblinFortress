@@ -36,6 +36,14 @@ public sealed class CivilizationCatalogTests
         Assert.Equal(34_200, goblins.Needs.MaximumThirst);
         Assert.Equal(17_100, goblins.Needs.MaximumFatigue);
         Assert.Equal(5, goblins.Aging!.HealthyYears);
+        Assert.Equal(
+            [GoblinSkill.Foraging, GoblinSkill.Hauling, GoblinSkill.Survival,
+                GoblinSkill.Scouting, GoblinSkill.Building],
+            goblins.ActorGeneration!.SkillPool);
+        Assert.Equal([3UL, 4UL], goblins.ActorGeneration.SkillSampleKeys);
+        Assert.Equal(
+            PersonalEquipment.RagClothes | PersonalEquipment.PrimitiveWaterskin,
+            goblins.ActorGeneration.GuaranteedEquipment);
         Assert.Equal(ContentId.Parse("core:human-village"), humans.Id);
         Assert.False(humans.PlayerControllable);
         Assert.Equal(
@@ -146,6 +154,74 @@ public sealed class CivilizationCatalogTests
 
         Assert.Throws<InvalidDataException>(() =>
             new CivilizationCatalog(definitions));
+    }
+
+    [Fact]
+    public void CivilizationWithInvalidActorGenerationIsRejected()
+    {
+        var definitions = CivilizationCatalog.Core.All
+            .Select(definition => definition.LegacyRole ==
+                    CivilizationLegacyRole.PlayerGoblins
+                ? definition with
+                {
+                    ActorGeneration = definition.ActorGeneration! with
+                    {
+                        SkillPool = [],
+                    },
+                }
+                : definition)
+            .ToArray();
+
+        Assert.Throws<InvalidDataException>(() =>
+            new CivilizationCatalog(definitions));
+    }
+
+    [Fact]
+    public void RuntimeUsesActiveActorGenerationProfile()
+    {
+        var definitions = CivilizationCatalog.Core.All
+            .Select(definition => definition.LegacyRole ==
+                    CivilizationLegacyRole.PlayerGoblins
+                ? definition with
+                {
+                    ActorGeneration = definition.ActorGeneration! with
+                    {
+                        SkillPool = [GoblinSkill.Building],
+                        SkillSampleKeys = [3],
+                        TraitPool = [GoblinTrait.Hardy],
+                        TraitSampleKeys = [5],
+                        GuaranteedEquipment = PersonalEquipment.HideClothes,
+                        OptionalEquipment = PersonalEquipment.BoneKnife,
+                        OptionalEquipmentRollMaximumExclusive = 1,
+                        OptionalEquipmentSuccessValue = 0,
+                        WorkPreferenceMinimum = 2,
+                        WorkPreferenceMaximum = 2,
+                    },
+                }
+                : definition)
+            .ToArray();
+
+        try
+        {
+            CivilizationCatalog.Activate(new CivilizationCatalog(definitions));
+            var actor = Assert.Single(SimulationEngine.Create(
+                new WorldSeed(0x47454E4552415445UL),
+                SimulationDefinitions.Foundation,
+                initialGoblinCount: 1,
+                initialFoodStock: 0).CreateSnapshot().Actors);
+
+            Assert.Equal(GoblinSkill.Building, actor.KnownSkills);
+            Assert.Equal(GoblinTrait.Hardy, actor.KnownTraits);
+            Assert.True(actor.Equipment.HasFlag(PersonalEquipment.HideClothes));
+            Assert.True(actor.Equipment.HasFlag(PersonalEquipment.BoneKnife));
+            Assert.False(actor.Equipment.HasFlag(PersonalEquipment.RagClothes));
+            Assert.False(actor.Equipment.HasFlag(PersonalEquipment.PrimitiveWaterskin));
+            Assert.Equal(new GoblinWorkPreferences(2, 2, 2), actor.WorkPreferences);
+        }
+        finally
+        {
+            CivilizationCatalog.ResetToCore();
+        }
     }
 
     [Fact]

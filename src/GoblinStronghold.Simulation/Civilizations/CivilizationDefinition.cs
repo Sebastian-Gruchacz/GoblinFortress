@@ -108,6 +108,7 @@ public sealed record CivilizationDefinition(
     CivilizationNeedsDefinition? Needs,
     CivilizationPopulationNeedsDefinition? PopulationNeeds,
     CivilizationAgingDefinition? Aging,
+    CivilizationActorGenerationDefinition? ActorGeneration,
     UndergroundCivilizationGenerationDefinition? UndergroundGeneration,
     UndergroundCivilizationBehaviorDefinition? UndergroundBehavior);
 

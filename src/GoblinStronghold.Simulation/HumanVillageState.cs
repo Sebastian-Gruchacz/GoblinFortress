@@ -1185,6 +1185,7 @@ internal sealed class HumanVillageState
             item.WorkProgress)
         {
             Sex = item.Sex,
+            PolityId = CorePolityIds.HumanVillage,
             CarriedGrime = item.CarriedGrime,
         };
 

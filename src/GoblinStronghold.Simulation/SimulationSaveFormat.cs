@@ -115,6 +115,10 @@ internal static class SimulationSaveReader
     {
         save.PlayerPolityId = CorePolityIds.PlayerTribe.Value;
         save.HumanVillage.PolityId = CorePolityIds.HumanVillage.Value;
+        foreach (var actor in save.Actors)
+        {
+            actor.PolityId = CorePolityIds.PlayerTribe.Value;
+        }
         foreach (var faction in save.UndergroundFactions)
         {
             faction.PolityId = CorePolityIds.CaveDwarfClan(faction.Id).Value;

@@ -135,17 +135,21 @@ adapters until profile IDs and versions are persisted.
   embedded core pack.
 - [ ] Move goblin and human vital, need, age, name, skill, equipment, and
   behavior profiles out of `SimulationDefinitions` and `HumanVillageState`.
-  Schema-7 civilization data now owns goblin and human maximum health, the
+  Schema-8 civilization data now owns goblin and human maximum health, the
   goblin aging curve, goblin hunger, thirst, and fatigue, plus the human
   population's daily needs and fatigue profile. It also owns baseline melee
-  damage and variance for both civilizations; equipment retains its separate
-  bonuses and ranged attacks. Day, night, and structure-assisted perception
+  damage and variance for both civilizations. The goblin actor-generation
+  profile owns deterministic skill and trait pools, roll keys, starting
+  equipment, and work-preference ranges. Equipment bonuses, crafted loadout
+  progression, and human role loadouts remain separate. Day, night, and
+  structure-assisted perception
   ranges are civilization data too, including human intruder detection. Spatial
   behavior now controls movement timing, the human village activity radius, and
   the goblin autonomous-explorer limit. Runtime and UI consume civilization
   values directly. Matching
-  `SimulationDefinitions` values remain compatibility adapters while skills,
-  equipment tables, and broader behavior await later vertical slices.
+  `SimulationDefinitions` values and the current skill, trait, and equipment
+  enums remain compatibility adapters while stable moddable catalogs for those
+  concepts and broader behavior await later vertical slices.
 - [x] Introduce deterministic `INameGenerator` strategies; retain numbered
   names only as a save-compatible placeholder. The core registry now resolves
   stable generator IDs from civilization definitions. Goblin syllable sampling

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "civilizations": [
     {
       "id": "core:goblin-tribe",
@@ -53,6 +53,21 @@
         "initialMinimumAgeYears": 1,
         "initialMaximumAgeYearsExclusive": 5
       },
+      "actorGeneration": {
+        "randomDomain": "GoblinIdentity",
+        "skillPool": ["Foraging", "Hauling", "Survival", "Scouting", "Building"],
+        "skillSampleKeys": [3, 4],
+        "traitPool": ["Stubborn", "Curious", "Hardy", "Gluttonous", "Nimble", "Fastidious"],
+        "traitSampleKeys": [5, 6],
+        "guaranteedEquipment": "RagClothes, PrimitiveWaterskin",
+        "optionalEquipment": "BoneKnife",
+        "optionalEquipmentSampleKey": 7,
+        "optionalEquipmentRollMaximumExclusive": 2,
+        "optionalEquipmentSuccessValue": 1,
+        "workPreferenceMinimum": -2,
+        "workPreferenceMaximum": 2,
+        "workPreferenceSampleKeys": [8, 9, 10]
+      },
       "undergroundGeneration": null,
       "undergroundBehavior": null
     },
@@ -98,6 +113,7 @@
         "thirstDamageDivisor": 3
       },
       "aging": null,
+      "actorGeneration": null,
       "undergroundGeneration": null,
       "undergroundBehavior": null
     },
@@ -117,6 +133,7 @@
       "needs": null,
       "populationNeeds": null,
       "aging": null,
+      "actorGeneration": null,
       "undergroundGeneration": {
         "legacyKind": "DarkDwarves",
         "firstLevel": -6,

@@ -25,7 +25,11 @@ public sealed class SaveCompatibilityTests
         Assert.Equal(RiverGenerationMode.SingleChannel, restored.Map.RiverMode);
         var snapshot = restored.CreateSnapshot();
         Assert.Equal(CorePolityIds.PlayerTribe, snapshot.PlayerPolityId);
+        Assert.All(snapshot.Actors, actor =>
+            Assert.Equal(CorePolityIds.PlayerTribe, actor.PolityId));
         Assert.Equal(CorePolityIds.HumanVillage, snapshot.HumanVillage.PolityId);
+        Assert.All(snapshot.HumanVillage.Villagers, villager =>
+            Assert.Equal(CorePolityIds.HumanVillage, villager.PolityId));
         Assert.Equal(
             snapshot.UndergroundFactions.Count,
             snapshot.UndergroundFactions.Select(faction => faction.PolityId).Distinct().Count());
@@ -86,6 +90,10 @@ public sealed class SaveCompatibilityTests
         var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
         save["formatVersion"] = SimulationSaveFormat.PolityIdMigrationVersion;
         save.Remove("playerPolityId");
+        foreach (var actor in save["actors"]!.AsArray())
+        {
+            actor!.AsObject().Remove("polityId");
+        }
         save["humanVillage"]!.AsObject().Remove("polityId");
         foreach (var faction in save["undergroundFactions"]!.AsArray())
         {
@@ -98,6 +106,8 @@ public sealed class SaveCompatibilityTests
         var snapshot = restored.CreateSnapshot();
 
         Assert.Equal(CorePolityIds.PlayerTribe, snapshot.PlayerPolityId);
+        Assert.All(snapshot.Actors, actor =>
+            Assert.Equal(CorePolityIds.PlayerTribe, actor.PolityId));
         Assert.Equal(CorePolityIds.HumanVillage, snapshot.HumanVillage.PolityId);
         Assert.All(snapshot.UndergroundFactions, faction => Assert.Equal(
             CorePolityIds.CaveDwarfClan(faction.Id),

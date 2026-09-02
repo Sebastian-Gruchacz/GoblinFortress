@@ -49,6 +49,7 @@ public sealed partial class SimulationEngine
     private readonly SortedDictionary<ulong, AnimalState> _animals = [];
     private readonly CivilizationDefinition _goblinCivilization;
     private readonly CivilizationDefinition _humanCivilization;
+    private readonly CivilizationActorGenerator _goblinActorGenerator;
     private readonly UndergroundFactionDirector _undergroundFactions;
     private readonly NavigationKnowledgeState _tribeNavigationKnowledge = new();
     private readonly SortedDictionary<CommandKey, SimulationCommand> _pendingCommands = [];
@@ -91,6 +92,10 @@ public sealed partial class SimulationEngine
             CivilizationLegacyRole.PlayerGoblins);
         _humanCivilization = CivilizationCatalog.Current.Get(
             CivilizationLegacyRole.HumanVillage);
+        _goblinActorGenerator = new CivilizationActorGenerator(
+            worldSeed,
+            _goblinCivilization.ActorGeneration ?? throw new InvalidDataException(
+                $"Civilization '{_goblinCivilization.Id}' has no actor-generation profile."));
         _undergroundFactions = UndergroundFactionDirector.Create(worldSeed, map.MinimumWorldLevel);
         _humanVillage = HumanVillageState.CreateInitial(
             World,
@@ -570,6 +575,7 @@ public sealed partial class SimulationEngine
                         : null))
             {
                 Sex = actor.Sex,
+                PolityId = CorePolityIds.PlayerTribe,
                 Loadout = CreateEquipmentLoadout(actor),
                 CarriedCorpseId = actor.CarriedCorpseId,
                 TacticalOrder = new ActorTacticalOrderSnapshot(
@@ -1906,7 +1912,7 @@ public sealed partial class SimulationEngine
         {
             var id = new EntityId(actorModel.Id);
             var position = new GridPosition(actorModel.X, actorModel.Y, actorModel.Z);
-            var generatedPreferences = CreateGoblinWorkPreferences(id);
+            var generatedPreferences = _goblinActorGenerator.CreateWorkPreferences(id);
             var workPreferences = new GoblinWorkPreferences(
                 actorModel.ForagingPreference ?? generatedPreferences.Foraging,
                 actorModel.HaulingPreference ?? generatedPreferences.Hauling,
@@ -1942,6 +1948,8 @@ public sealed partial class SimulationEngine
             if (id == EntityId.None ||
                 string.IsNullOrWhiteSpace(actorModel.Name) ||
                 !Enum.IsDefined(actorModel.Sex) ||
+                !PolityId.TryParse(actorModel.PolityId, out var actorPolityId) ||
+                actorPolityId != CorePolityIds.PlayerTribe ||
                 !HasOnlyKnownFlags(actorModel.KnownSkills, GoblinSkill.Building) ||
                 !HasOnlyKnownFlags(actorModel.KnownTraits, GoblinTrait.Fastidious) ||
                 !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.WoodenBucket) ||
@@ -6333,10 +6341,10 @@ public sealed partial class SimulationEngine
         {
             Name = CreateGoblinName(id, sex),
             Sex = sex,
-            KnownSkills = CreateGoblinSkills(id),
-            KnownTraits = CreateGoblinTraits(id),
-            Equipment = CreateGoblinEquipment(id),
-            WorkPreferences = CreateGoblinWorkPreferences(id),
+            KnownSkills = _goblinActorGenerator.CreateSkills(id),
+            KnownTraits = _goblinActorGenerator.CreateTraits(id),
+            Equipment = _goblinActorGenerator.CreateEquipment(id),
+            WorkPreferences = _goblinActorGenerator.CreateWorkPreferences(id),
             Health = health ?? GoblinVitals.MaximumHealth,
             PersonalWater = Definitions.PersonalWaterCapacity,
             AgeOffsetTicks = CreateInitialAgeOffsetTicks(id),
@@ -6477,77 +6485,6 @@ public sealed partial class SimulationEngine
                 .ToHashSet(StringComparer.Ordinal),
             sex));
     }
-
-    private GoblinSkill CreateGoblinSkills(EntityId id)
-    {
-        var primary = DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.GoblinIdentity,
-            id,
-            SimulationTick.Zero,
-            sampleKey: 3,
-            minimumInclusive: 0,
-            maximumExclusive: 5);
-        var secondary = DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.GoblinIdentity,
-            id,
-            SimulationTick.Zero,
-            sampleKey: 4,
-            minimumInclusive: 0,
-            maximumExclusive: 5);
-        return (GoblinSkill)(1 << primary) | (GoblinSkill)(1 << secondary);
-    }
-
-    private GoblinTrait CreateGoblinTraits(EntityId id)
-    {
-        var first = DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.GoblinIdentity,
-            id,
-            SimulationTick.Zero,
-            sampleKey: 5,
-            minimumInclusive: 0,
-            maximumExclusive: 6);
-        var second = DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.GoblinIdentity,
-            id,
-            SimulationTick.Zero,
-            sampleKey: 6,
-            minimumInclusive: 0,
-            maximumExclusive: 6);
-        return (GoblinTrait)(1 << first) | (GoblinTrait)(1 << second);
-    }
-
-    private PersonalEquipment CreateGoblinEquipment(EntityId id)
-    {
-        var equipment = PersonalEquipment.RagClothes | PersonalEquipment.PrimitiveWaterskin;
-        var hasKnife = DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.GoblinIdentity,
-            id,
-            SimulationTick.Zero,
-            sampleKey: 7,
-            minimumInclusive: 0,
-            maximumExclusive: 2) == 1;
-        return hasKnife ? equipment | PersonalEquipment.BoneKnife : equipment;
-    }
-
-    private GoblinWorkPreferences CreateGoblinWorkPreferences(EntityId id) => new(
-        CreateWorkPreference(id, sampleKey: 8),
-        CreateWorkPreference(id, sampleKey: 9),
-        CreateWorkPreference(id, sampleKey: 10));
-
-    private int CreateWorkPreference(EntityId id, ulong sampleKey) =>
-        DeterministicRandom.NextInt(
-            WorldSeed,
-            RandomDomain.GoblinIdentity,
-            id,
-            SimulationTick.Zero,
-            sampleKey,
-            GoblinWorkPreferences.Minimum,
-            GoblinWorkPreferences.Maximum + 1);
 
     private void EnsureTribeHasStarterAxe()
     {
@@ -7399,6 +7336,7 @@ public sealed partial class SimulationEngine
         Id = actor.Id.Value,
         Name = actor.Name,
         Sex = actor.Sex,
+        PolityId = CorePolityIds.PlayerTribe.Value,
         KnownSkills = actor.KnownSkills,
         KnownTraits = actor.KnownTraits,
         Equipment = actor.Equipment,

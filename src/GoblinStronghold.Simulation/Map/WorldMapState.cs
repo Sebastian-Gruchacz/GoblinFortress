@@ -1176,8 +1176,29 @@ public sealed class WorldMapState
     }
 
     public bool CanBuildWoodenBarrier(GridPosition anchor) =>
-        (anchor.Z == 0 ? IsSurfaceTraversable(anchor) : IsTerrainTraversable(anchor)) &&
-        !_occupancy.Keys.Any(key => key.Position == anchor);
+        HasStableFlatConstructionGround(anchor) &&
+        !_occupancy.Keys.Any(key =>
+            key.Position == anchor &&
+            key.Channel != SpatialOccupancyChannel.FloorCover);
+
+    private bool HasStableFlatConstructionGround(GridPosition position)
+    {
+        if (!IsTerrainTraversable(position) || IsTerrainRampIntact(position) ||
+            TryGetOccupancyClaim(
+                position,
+                SpatialOccupancyChannel.Surface,
+                out var surfaceClaim) &&
+            surfaceClaim.PartKind == WorldObjectPartKind.ConstructedRamp)
+        {
+            return false;
+        }
+
+        return HasConstructedFloorSurface(position) ||
+            _excavatedCaveCells.Contains(position) ||
+            Baseline.TryGetInitialGeometry(position, out var geometry) &&
+            geometry.Support == CellSupportKind.NaturalFlat &&
+            geometry.FluidDepthLevels == 0;
+    }
 
     public bool CanBuildWoodenWalls(IReadOnlyList<GridPosition> positions)
     {

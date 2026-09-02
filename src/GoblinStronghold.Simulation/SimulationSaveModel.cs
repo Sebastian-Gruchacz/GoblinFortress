@@ -443,6 +443,8 @@ internal sealed class ActorSaveModel
 
     public ActorSex Sex { get; set; }
 
+    public string PolityId { get; set; } = string.Empty;
+
     public GoblinSkill KnownSkills { get; set; }
 
     public GoblinTrait KnownTraits { get; set; }

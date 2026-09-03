@@ -11,7 +11,7 @@ public sealed class GameSessionPreferencesTests
     [Fact]
     public void ConstructionMaterialChoicesRoundTripInsideGameSave()
     {
-        var preferences = new GameSessionPreferences("Lo 20260901-2245");
+        var preferences = new GameSessionPreferences("Lo 20260901-2245", visibleLevel: -2);
         preferences.SetConstructionMaterial("Wall", ResourceVariant.Granite);
         preferences.SetConstructionMaterial("Door", ResourceVariant.OakWood);
 
@@ -23,6 +23,7 @@ public sealed class GameSessionPreferencesTests
         Assert.True(restored.TryGetConstructionMaterial("Door", out var door));
         Assert.Equal(ResourceVariant.OakWood, door);
         Assert.Equal("Lo 20260901-2245", restored.ProfileName);
+        Assert.Equal(-2, restored.VisibleLevel);
         using var document = JsonDocument.Parse(json);
         Assert.Equal(17, document.RootElement.GetProperty("currentTick").GetInt32());
     }
@@ -34,6 +35,16 @@ public sealed class GameSessionPreferencesTests
 
         Assert.False(preferences.TryGetConstructionMaterial("Wall", out _));
         Assert.Empty(preferences.ProfileName);
+        Assert.Equal(0, preferences.VisibleLevel);
+    }
+
+    [Fact]
+    public void InvalidSavedVisibleLevelUsesSurfaceDefault()
+    {
+        var preferences = GameSessionPreferences.FromSave(
+            "{\"clientPreferences\":{\"visibleLevel\":\"underground\"}}");
+
+        Assert.Equal(0, preferences.VisibleLevel);
     }
 
     [Fact]

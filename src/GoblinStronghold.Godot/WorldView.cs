@@ -13,6 +13,13 @@ namespace GoblinStronghold.GodotClient;
 
 public partial class WorldView : Node2D
 {
+    private enum WorldRenderPass : byte
+    {
+        Combined,
+        Static,
+        Dynamic,
+    }
+
     private static readonly Vector2I[] CardinalOffsets =
     [
         Vector2I.Up,
@@ -34,7 +41,6 @@ public partial class WorldView : Node2D
 
     private const float TileSize = 20f;
     private const double WaterAnimationCycleSeconds = 4.0;
-    private const double WaterAnimationRedrawSeconds = 1d / 20d;
     private const double WorkAnimationCycleSeconds = 0.68;
     private const double WorkAnimationRedrawSeconds = 1d / 20d;
     private const double LightingAnimationCycleSeconds = 6.0;
@@ -42,10 +48,15 @@ public partial class WorldView : Node2D
     private const double CombatEffectDurationSeconds = 0.42;
     private const int MaximumCombatEffects = 32;
     private const int CombatAudioPlayerCount = 4;
+    private const double StaticSnapshotRefreshSeconds = 1d;
     private readonly Dictionary<EntityId, Vector2> _visualActorPositions = [];
     private readonly Dictionary<EntityId, Vector2> _targetActorPositions = [];
+    private readonly Dictionary<EntityId, ActorSnapshot> _actorsById = [];
     private readonly Dictionary<ulong, Vector2> _visualAnimalPositions = [];
     private readonly Dictionary<ulong, Vector2> _targetAnimalPositions = [];
+    private readonly Dictionary<ulong, AnimalSnapshot> _animalsById = [];
+    private readonly HashSet<EntityId> _dirtyActorPositions = [];
+    private readonly HashSet<ulong> _dirtyAnimalPositions = [];
     private SimulationEngine _engine = null!;
     private SimulationSnapshot _snapshot = null!;
     private HashSet<EntityId> _selectedActorIds = [];
@@ -78,11 +89,20 @@ public partial class WorldView : Node2D
     private Texture2D _mineralDepositAtlas = null!;
     private int _visibleLevel;
     private double _waterAnimationElapsed;
-    private double _waterAnimationRedrawElapsed;
     private double _workAnimationElapsed;
     private double _workAnimationRedrawElapsed;
     private double _lightingAnimationElapsed;
     private double _lightingAnimationRedrawElapsed;
+    private double _lowerLevelRefreshElapsed;
+    private double _presentationElapsedSeconds;
+    private double _lowerLevelRefreshSeconds =
+        RenderingPerformanceOptions.DefaultLowerLayerRefreshSeconds;
+    private double _staticSnapshotRefreshElapsed;
+    private bool _staticSnapshotRefreshPending;
+    private int _staticRetainedChunkSize = RenderingPerformanceOptions.DefaultLowerLayerChunkSize;
+    private (int MinimumX, int MinimumY, int MaximumX, int MaximumY) _staticRetainedBounds;
+    private bool _hasStaticRetainedBounds;
+    private bool _hasSnapshot;
     private ulong _snapshotTopologyVersion;
     private readonly Dictionary<int, (ulong TopologyVersion, HashSet<GridPosition> Solids)>
         _cachedCaveSolids = [];
@@ -90,6 +110,7 @@ public partial class WorldView : Node2D
     private readonly ActiveLevelLightIndex _activeLevelLights = new();
     private readonly ActiveLevelLightMap _activeLevelLightMap = new();
     private readonly LowerLevelPresentationState _lowerLevelPresentation = new();
+    private readonly TimedPresentationOperationCounter _worldDraws = new();
     private readonly MaterialPaletteTextureCache _materialPaletteTextures = new();
     private readonly AnimalPaletteTextureCache _animalPaletteTextures = new();
     private Dictionary<ContentId,
@@ -99,6 +120,8 @@ public partial class WorldView : Node2D
     private AudioStreamWav _stoneHitSound = null!;
     private AudioStreamWav _meleeHitSound = null!;
     private int _nextCombatAudioPlayer;
+    private WorldRenderPass _renderPass = WorldRenderPass.Combined;
+    private WorldView? _staticLayer;
 
     public int VisibleLevel => _visibleLevel;
 
@@ -110,7 +133,8 @@ public partial class WorldView : Node2D
     {
         var emitterQueries = _activeLevelLights.GetQueryMetrics();
         var activeLight = _activeLevelLightMap.GetMetrics();
-        var lower = _lowerLevelPresentation.GetPerformanceMetrics();
+        var lower = (_staticLayer?._lowerLevelPresentation ?? _lowerLevelPresentation)
+            .GetPerformanceMetrics();
         return new WorldPresentationPerformanceMetrics(
             emitterQueries.Timings,
             emitterQueries.Results,
@@ -122,7 +146,22 @@ public partial class WorldView : Node2D
             lower.GeometryTextures,
             lower.StaticLightTextures,
             lower.VisibleDirtyChunks,
-            lower.Workload);
+            lower.Workload,
+            _worldDraws.Snapshot,
+            _staticLayer?._worldDraws.Snapshot ?? default);
+    }
+
+    internal PresentationWarmupStatus GetPresentationWarmupStatus()
+    {
+        var staticLayer = _staticLayer ?? this;
+        var lower = staticLayer._lowerLevelPresentation.GetPerformanceMetrics();
+        var chunkCount = Math.Max(0, lower.Workload.VisibleChunks);
+        var readyChunks = Math.Clamp(chunkCount - lower.VisibleDirtyChunks, 0, chunkCount);
+        var staticDrawReady = staticLayer._worldDraws.Snapshot.Calls > 0;
+        var completed = readyChunks + (staticDrawReady ? 1 : 0);
+        return new PresentationWarmupStatus(
+            (double)completed / (chunkCount + 1),
+            lower.VisibleDirtyChunks == 0 && staticDrawReady);
     }
 
     public override void _Ready()
@@ -161,15 +200,31 @@ public partial class WorldView : Node2D
         _mineralDepositAtlas = UndergroundSprites.LoadMineralAtlas();
         _stoneHitSound = CreateCombatSound(720f, 0.075f, 0.22f);
         _meleeHitSound = CreateCombatSound(145f, 0.11f, 0.38f);
-        for (var index = 0; index < _combatAudioPlayers.Length; index++)
+        if (_renderPass != WorldRenderPass.Static)
         {
-            var player = new AudioStreamPlayer
+            for (var index = 0; index < _combatAudioPlayers.Length; index++)
             {
-                Name = $"CombatAudio{index + 1}",
-                VolumeDb = -13f,
+                var player = new AudioStreamPlayer
+                {
+                    Name = $"CombatAudio{index + 1}",
+                    VolumeDb = -13f,
+                };
+                AddChild(player);
+                _combatAudioPlayers[index] = player;
+            }
+        }
+
+        if (_renderPass == WorldRenderPass.Combined)
+        {
+            _renderPass = WorldRenderPass.Dynamic;
+            _staticLayer = new WorldView
+            {
+                Name = "StaticWorldLayer",
+                ZIndex = -1,
+                ZAsRelative = false,
+                _renderPass = WorldRenderPass.Static,
             };
-            AddChild(player);
-            _combatAudioPlayers[index] = player;
+            AddChild(_staticLayer);
         }
     }
 
@@ -181,12 +236,16 @@ public partial class WorldView : Node2D
         _lowerLevelPresentation.Dispose();
     }
 
-    public void SetWorld(SimulationEngine engine)
+    public void SetWorld(SimulationEngine engine, int visibleLevel = 0)
     {
         _visualActorPositions.Clear();
         _targetActorPositions.Clear();
+        _actorsById.Clear();
         _visualAnimalPositions.Clear();
         _targetAnimalPositions.Clear();
+        _animalsById.Clear();
+        _dirtyActorPositions.Clear();
+        _dirtyAnimalPositions.Clear();
         _combatEffects.Clear();
         _snapshotTopologyVersion = 0;
         _cachedCaveSolids.Clear();
@@ -194,19 +253,77 @@ public partial class WorldView : Node2D
         _activeLevelLights.Reset();
         _activeLevelLightMap.Reset();
         _lowerLevelPresentation.Reset();
+        _worldDraws.Reset();
+        _lowerLevelRefreshElapsed = 0d;
+        _presentationElapsedSeconds = 0d;
+        _staticSnapshotRefreshElapsed = 0d;
+        _staticSnapshotRefreshPending = false;
+        _hasStaticRetainedBounds = false;
+        _hasSnapshot = false;
         _engine = engine;
+        _visibleLevel = visibleLevel;
+        _staticLayer?.SetWorld(engine, visibleLevel);
         Refresh(engine.CreatePresentationSnapshot());
+        if (_renderPass != WorldRenderPass.Dynamic)
+        {
+            SynchronizeLowerLevelPresentation();
+        }
     }
 
     public void Refresh(SimulationSnapshot snapshot)
     {
+        var redrawStaticImmediately = !_hasSnapshot ||
+            snapshot.WorldVersion != _snapshot.WorldVersion ||
+            _snapshotTopologyVersion != _engine.World.TopologyVersion;
+        var staticPresentationChanged = _renderPass == WorldRenderPass.Static &&
+            (!_hasSnapshot || ActiveStaticPresentationChangePolicy.HasChanged(
+                _snapshot,
+                snapshot,
+                _visibleLevel));
         _snapshot = snapshot;
+        _hasSnapshot = true;
         _snapshotTopologyVersion = _engine.World.TopologyVersion;
+        if (_renderPass == WorldRenderPass.Static)
+        {
+            if (redrawStaticImmediately)
+            {
+                _staticSnapshotRefreshPending = false;
+                _staticSnapshotRefreshElapsed = 0d;
+                QueueRedraw();
+            }
+            else
+            {
+                _staticSnapshotRefreshPending |= staticPresentationChanged;
+            }
+            return;
+        }
+
         _activeLevelLights.Synchronize(_engine, _snapshot, _visibleLevel);
-        SynchronizeLowerLevelPresentation();
         SynchronizeActorPositions();
         SynchronizeAnimalPositions();
         QueueRedraw();
+        _staticLayer?.Refresh(snapshot);
+    }
+
+    internal void ConfigurePerformance(RenderingPerformanceOptions options)
+    {
+        if (_staticLayer is not null)
+        {
+            _staticLayer.ConfigurePerformance(options);
+            return;
+        }
+
+        var normalized = options.Clamp();
+        _lowerLevelRefreshSeconds = normalized.LowerLayerRefreshSeconds;
+        _staticRetainedChunkSize = normalized.LowerLayerChunkSize;
+        _hasStaticRetainedBounds = false;
+        _lowerLevelPresentation.ConfigureChunkSize(normalized.LowerLayerChunkSize);
+        _lowerLevelRefreshElapsed = _lowerLevelRefreshSeconds;
+        if (_engine is not null && _snapshot is not null)
+        {
+            SynchronizeLowerLevelPresentation();
+            QueueRedraw();
+        }
     }
 
     public void SetSimulationSpeed(int speed, double secondsPerTick)
@@ -220,10 +337,17 @@ public partial class WorldView : Node2D
     public void SetVisibleLevel(int level)
     {
         _visibleLevel = level;
+        _staticLayer?.SetVisibleLevel(level);
         if (_engine is not null && _snapshot is not null)
         {
-            _activeLevelLights.Synchronize(_engine, _snapshot, _visibleLevel);
-            SynchronizeLowerLevelPresentation();
+            if (_renderPass != WorldRenderPass.Static)
+            {
+                _activeLevelLights.Synchronize(_engine, _snapshot, _visibleLevel);
+            }
+            if (_renderPass != WorldRenderPass.Dynamic)
+            {
+                SynchronizeLowerLevelPresentation();
+            }
         }
         QueueRedraw();
     }
@@ -312,12 +436,12 @@ public partial class WorldView : Node2D
             return;
         }
 
-        if (SynchronizeLowerLevelPresentation())
+        if (_renderPass == WorldRenderPass.Static)
         {
-            QueueRedraw();
+            ProcessStaticLayer(delta);
+            return;
         }
 
-        _waterAnimationElapsed = (_waterAnimationElapsed + delta) % WaterAnimationCycleSeconds;
         _lightingAnimationElapsed =
             (_lightingAnimationElapsed + delta) % LightingAnimationCycleSeconds;
         var combatEffectsChanged = false;
@@ -330,16 +454,6 @@ public partial class WorldView : Node2D
                 _combatEffects.RemoveAt(index);
             }
         }
-        _waterAnimationRedrawElapsed += delta;
-        if (_waterAnimationRedrawElapsed >= WaterAnimationRedrawSeconds)
-        {
-            _waterAnimationRedrawElapsed %= WaterAnimationRedrawSeconds;
-            if (HasVisibleAnimatedWater())
-            {
-                QueueRedraw();
-            }
-        }
-
         _lightingAnimationRedrawElapsed += delta;
         if (_lightingAnimationRedrawElapsed >= LightingAnimationRedrawSeconds)
         {
@@ -376,10 +490,26 @@ public partial class WorldView : Node2D
             _secondsPerTick / _simulationSpeed;
         var maximumDistance = (float)(TileSize * delta / movementDuration);
         var changed = false;
+        var visibleBounds = GetVisibleCellBounds(padding: 0);
         foreach (var id in _visualActorPositions.Keys.ToArray())
         {
             var current = _visualActorPositions[id];
             var target = _targetActorPositions[id];
+            if (!_actorsById.TryGetValue(id, out var actor) ||
+                !ShouldAnimateUnit(actor.Position, visibleBounds))
+            {
+                if (!target.IsEqualApprox(current))
+                {
+                    _dirtyActorPositions.Add(id);
+                }
+                continue;
+            }
+            if (_dirtyActorPositions.Remove(id))
+            {
+                _visualActorPositions[id] = target;
+                changed = true;
+                continue;
+            }
             var next = current.MoveToward(target, maximumDistance);
             if (!next.IsEqualApprox(current))
             {
@@ -395,6 +525,21 @@ public partial class WorldView : Node2D
         {
             var current = _visualAnimalPositions[id];
             var target = _targetAnimalPositions[id];
+            if (!_animalsById.TryGetValue(id, out var animal) ||
+                !ShouldAnimateUnit(animal.Position, visibleBounds))
+            {
+                if (!target.IsEqualApprox(current))
+                {
+                    _dirtyAnimalPositions.Add(id);
+                }
+                continue;
+            }
+            if (_dirtyAnimalPositions.Remove(id))
+            {
+                _visualAnimalPositions[id] = target;
+                changed = true;
+                continue;
+            }
             var next = current.MoveToward(target, maximumAnimalDistance);
             if (!next.IsEqualApprox(current))
             {
@@ -409,6 +554,56 @@ public partial class WorldView : Node2D
         }
     }
 
+    private void ProcessStaticLayer(double delta)
+    {
+        var viewportBounds = GetViewportCellBounds(padding: 2);
+        if (!_hasStaticRetainedBounds ||
+            !RetainedPresentationBoundsPolicy.Contains(
+                ToPresentationBounds(_staticRetainedBounds),
+                ToPresentationBounds(viewportBounds)))
+        {
+            _staticRetainedBounds = CreateStaticRetainedBounds(viewportBounds);
+            _hasStaticRetainedBounds = true;
+            QueueRedraw();
+        }
+
+        _presentationElapsedSeconds += delta;
+        _lowerLevelRefreshElapsed += delta;
+        _waterAnimationElapsed = (_waterAnimationElapsed + delta) % WaterAnimationCycleSeconds;
+        var lowerPresentationSynchronized = false;
+        if (_lowerLevelRefreshElapsed >= _lowerLevelRefreshSeconds &&
+            SynchronizeLowerLevelPresentation())
+        {
+            lowerPresentationSynchronized = true;
+            QueueRedraw();
+        }
+        if (_lowerLevelRefreshElapsed >= _lowerLevelRefreshSeconds)
+        {
+            _lowerLevelRefreshElapsed %= _lowerLevelRefreshSeconds;
+        }
+        if (!lowerPresentationSynchronized &&
+            _lowerLevelPresentation.RebuildReadyTextures(
+                _engine,
+                _snapshot,
+                _visibleLevel,
+                _presentationElapsedSeconds,
+                _lowerLevelRefreshSeconds))
+        {
+            QueueRedraw();
+        }
+
+        if (!_staticSnapshotRefreshPending)
+        {
+            return;
+        }
+
+        _staticSnapshotRefreshElapsed += delta;
+        if (_staticSnapshotRefreshElapsed >= StaticSnapshotRefreshSeconds)
+        {
+            QueueRedraw();
+        }
+    }
+
     public override void _Draw()
     {
         if (_engine is null)
@@ -416,6 +611,54 @@ public partial class WorldView : Node2D
             return;
         }
 
+        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        if (_renderPass == WorldRenderPass.Static)
+        {
+            if (!_hasStaticRetainedBounds)
+            {
+                _staticRetainedBounds = CreateStaticRetainedBounds(
+                    GetViewportCellBounds(padding: 2));
+                _hasStaticRetainedBounds = true;
+            }
+            DrawStaticWorld();
+            _staticSnapshotRefreshPending = false;
+            _staticSnapshotRefreshElapsed = 0d;
+            _worldDraws.Record(startedAt);
+            return;
+        }
+
+        if (_renderPass == WorldRenderPass.Combined)
+        {
+            DrawStaticWorld();
+        }
+        if (_visibleLevel >= 0)
+        {
+            DrawHumanCohorts();
+        }
+        if (ShouldDrawDenseOverlays())
+        {
+            DrawJobTargets();
+        }
+        DrawAnimals();
+        DrawActors();
+        DrawCombatEffects();
+        DrawLighting();
+        DrawFog();
+        if (ShouldDrawDenseOverlays())
+        {
+            DrawWorkDesignations();
+        }
+        DrawWorkAreaPreview();
+        DrawWorkPreview();
+        DrawOrderedDestination();
+        DrawConstructionPreview();
+        DrawRaidTargetPreview();
+        _worldDraws.Record(startedAt);
+    }
+
+    private void DrawStaticWorld()
+    {
         DrawTerrain();
         DrawPlants();
         DrawCaveFlora();
@@ -427,29 +670,13 @@ public partial class WorldView : Node2D
         DrawStructures();
         DrawSurfaceGrime();
         DrawBloodStains();
-        if (_visibleLevel >= 0)
-        {
-            DrawHumanCohorts();
-        }
         DrawStorageAreas();
         DrawStorageZones();
         DrawConstructionSites();
         DrawCraftingOrders();
         DrawItems();
         DrawCorpses();
-        DrawJobTargets();
         DrawGoblinBuds();
-        DrawAnimals();
-        DrawActors();
-        DrawCombatEffects();
-        DrawLighting();
-        DrawFog();
-        DrawWorkDesignations();
-        DrawWorkAreaPreview();
-        DrawWorkPreview();
-        DrawOrderedDestination();
-        DrawConstructionPreview();
-        DrawRaidTargetPreview();
     }
 
     private void DrawRaidTargetPreview()
@@ -473,8 +700,6 @@ public partial class WorldView : Node2D
     private void DrawTerrain()
     {
         DrawLowerLevelTextures();
-        DrawLowerLevelDetails();
-        DrawLowerLevelActors();
         if (_visibleLevel < 0)
         {
             DrawCaveTerrain();
@@ -534,7 +759,8 @@ public partial class WorldView : Node2D
                     continue;
                 }
 
-                if (!_lowerLevelPresentation.HasCachedGeometryAt(
+                if (_visibleLevel <= 0 &&
+                    !_lowerLevelPresentation.HasCachedGeometryAt(
                         new GridPosition(x, y, cell.SurfaceLevel)))
                 {
                     DrawLowerTerrainSurface(x, y, cell, livingTrees);
@@ -549,7 +775,7 @@ public partial class WorldView : Node2D
         {
             var depth = Math.Max(1, _visibleLevel - chunk.Key.Level);
             var brightness = LowerLevelVisualDegradationPolicy.ResolveBrightness(depth);
-            var chunkWorldSize = LowerLevelExposureIndex.DefaultChunkSize * TileSize;
+            var chunkWorldSize = chunk.ChunkSize * TileSize;
             DrawTextureRect(
                 chunk.Lighting,
                 new Rect2(
@@ -566,100 +792,10 @@ public partial class WorldView : Node2D
                     chunk.Key.Y * chunkWorldSize,
                     chunkWorldSize,
                     chunkWorldSize),
-                tile: false);
+                tile: false,
+                modulate: new Color(brightness, brightness, brightness, 1f));
         }
     }
-
-    private void DrawLowerLevelActors()
-    {
-        foreach (var group in _lowerLevelPresentation.VisibleActors
-                     .GroupBy(actor => actor.Position))
-        {
-            DrawLowerLevelActorGroup(group.ToArray(), CellCenter(group.Key), compact: false);
-        }
-    }
-
-    private void DrawLowerLevelDetails()
-    {
-        var visibleLevels = _lowerLevelPresentation.VisibleRegions
-            .Select(region => region.Level)
-            .Distinct()
-            .ToArray();
-        if (visibleLevels.Length == 0)
-        {
-            return;
-        }
-
-        foreach (var level in visibleLevels)
-        {
-            foreach (var worldObject in _snapshot.WorldObjects.Where(worldObject =>
-                         IsDetailedLowerLevelStructure(worldObject.Kind) &&
-                         worldObject.GetAbsoluteParts().Any(item =>
-                             item.Position.Z == level &&
-                             _lowerLevelPresentation.IsDynamicPresentationActive(
-                                 item.Position))))
-            {
-                switch (worldObject.Kind)
-                {
-                    case WorldObjectKind.GoblinRuin:
-                        GoblinRuinPainter.Paint(this, worldObject, level);
-                        break;
-                    case WorldObjectKind.GoblinCompost:
-                        GoblinRuinPainter.PaintCompost(this, worldObject, level);
-                        break;
-                    case WorldObjectKind.WoodenWatchtower:
-                        WoodenWatchtowerPainter.Paint(this, worldObject, level);
-                        break;
-                    case WorldObjectKind.WoodenLadder:
-                        WoodenLadderPainter.Paint(this, worldObject, level);
-                        break;
-                    case WorldObjectKind.ReedSleepingMat:
-                        ReedSleepingMatPainter.Paint(this, worldObject, level);
-                        break;
-                    case WorldObjectKind.StandingTorch:
-                        StandingTorchPainter.Paint(this, worldObject, level);
-                        break;
-                    case WorldObjectKind.CookingFire:
-                        CookingFirePainter.Paint(this, worldObject, level);
-                        break;
-                    case WorldObjectKind.WoodenRamp:
-                    case WorldObjectKind.StoneRamp:
-                        DrawConstructedRamp(worldObject);
-                        break;
-                    case WorldObjectKind.PrimitiveWorkshop:
-                    case WorldObjectKind.Bloomery:
-                    case WorldObjectKind.SmeltingFurnace:
-                    case WorldObjectKind.CrucibleFurnace:
-                    case WorldObjectKind.FittedWorkshop:
-                        DrawWorkshop(worldObject);
-                        break;
-                }
-            }
-        }
-
-        foreach (var stack in _snapshot.ItemStacks.Where(stack =>
-                     stack.Location.Kind == ItemLocationKind.Ground &&
-                     _lowerLevelPresentation.IsDynamicPresentationActive(
-                         stack.Location.Position)))
-        {
-            DrawItemStack(stack);
-        }
-        foreach (var corpse in _snapshot.Corpses.Where(corpse =>
-                     _lowerLevelPresentation.IsDynamicPresentationActive(corpse.Position)))
-        {
-            DrawCorpse(corpse);
-        }
-    }
-
-    private static bool IsDetailedLowerLevelStructure(WorldObjectKind kind) => kind is
-        WorldObjectKind.GoblinRuin or WorldObjectKind.GoblinCompost or
-        WorldObjectKind.WoodenWatchtower or WorldObjectKind.WoodenLadder or
-        WorldObjectKind.ReedSleepingMat or
-        WorldObjectKind.StandingTorch or WorldObjectKind.CookingFire or
-        WorldObjectKind.WoodenRamp or WorldObjectKind.StoneRamp or
-        WorldObjectKind.PrimitiveWorkshop or WorldObjectKind.Bloomery or
-        WorldObjectKind.SmeltingFurnace or WorldObjectKind.CrucibleFurnace or
-        WorldObjectKind.FittedWorkshop;
 
     private void DrawLowerLevelActorGroup(
         IReadOnlyList<LowerLevelActorMarker> actors,
@@ -780,9 +916,9 @@ public partial class WorldView : Node2D
 
     private void DrawBloodStains()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var stain in _snapshot.BloodStains.Where(stain =>
-                     stain.Position.Z == _visibleLevel &&
-                     _snapshot.GetVisibility(stain.Position, _engine.Map.Width).IsDiscovered()))
+                     stain.Position.Z == _visibleLevel && Contains(bounds, stain.Position)))
         {
             var variant = unchecked(
                 (stain.Position.X * 73_856_093) ^
@@ -812,9 +948,9 @@ public partial class WorldView : Node2D
 
     private void DrawSurfaceGrime()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var stain in _snapshot.SurfaceGrime.Where(stain =>
-                     stain.Position.Z == _visibleLevel &&
-                     _snapshot.GetVisibility(stain.Position, _engine.Map.Width).IsDiscovered()))
+                     stain.Position.Z == _visibleLevel && Contains(bounds, stain.Position)))
         {
             var variant = unchecked(
                 (stain.Position.X * 83_492_791) ^
@@ -1030,7 +1166,7 @@ public partial class WorldView : Node2D
         }
 
         var depth = Math.Max(1, _visibleLevel - opening.Level);
-        var brightness = Math.Max(0.32f, 0.68f - ((depth - 1) * 0.1f));
+        var brightness = LowerLevelVisualDegradationPolicy.ResolveBrightness(depth);
         var destination = CellRect(upperPosition.X, upperPosition.Y).Grow(-3f);
         DrawRect(destination.Grow(1.5f), new Color("080a0b"));
         DrawTextureRectRegion(
@@ -1041,7 +1177,8 @@ public partial class WorldView : Node2D
         DrawTextureRectRegion(
             opening.SkyLighting,
             destination,
-            opening.SourceRegion);
+            opening.SourceRegion,
+            new Color(brightness, brightness, brightness, 1f));
         DrawLowerLevelActorGroup(
             _lowerLevelPresentation.GetOpeningActors(upperPosition),
             destination.GetCenter(),
@@ -1521,6 +1658,7 @@ public partial class WorldView : Node2D
 
     private void DrawPlants()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var item in _snapshot.PlantPatches
                      .Where(plant => plant.Biomass > 0 || plant.Kind == PlantKind.BerryBush)
                      .Select(plant => (
@@ -1528,7 +1666,8 @@ public partial class WorldView : Node2D
                          Position: PlantPresentationPositionPolicy.Resolve(
                              _engine.Map,
                              plant)))
-                     .Where(item => item.Position.Z == _visibleLevel))
+                     .Where(item => item.Position.Z == _visibleLevel &&
+                         Contains(bounds, item.Position)))
         {
             var plant = item.Plant;
             var center = CellCenter(item.Position);
@@ -1640,24 +1779,34 @@ public partial class WorldView : Node2D
 
     private void DrawStructures()
     {
+        var bounds = GetVisibleCellBounds(padding: 2);
         var structureCache = GetStructureRenderCache();
-        foreach (var floor in structureCache.Floors.Values)
+        foreach (var floor in structureCache.Floors.Values.Where(floor =>
+                     Contains(bounds, floor.Anchor)))
         {
             DrawMaterialFloor(floor);
         }
         foreach (var ramp in _snapshot.WorldObjects.Where(worldObject =>
                      worldObject.Kind is WorldObjectKind.WoodenRamp or
                          WorldObjectKind.StoneRamp &&
-                     worldObject.Anchor.Z == _visibleLevel))
+                     worldObject.Anchor.Z == _visibleLevel &&
+                     Contains(bounds, worldObject.Anchor)))
         {
             DrawConstructedRamp(ramp);
         }
-        DrawWalkways(structureCache.WalkwayCells, Colors.White);
-        DrawWalkways(structureCache.BasaltWalkwayCells, new Color("8f8982"));
-        DrawPrimitiveBarriers(structureCache);
+        DrawWalkways(structureCache.WalkwayCells, Colors.White, bounds);
+        DrawWalkways(structureCache.BasaltWalkwayCells, new Color("8f8982"), bounds);
+        DrawPrimitiveBarriers(structureCache, bounds);
 
         foreach (var worldObject in _snapshot.WorldObjects)
         {
+            if (!worldObject.GetAbsoluteParts().Any(item =>
+                    item.Position.Z == _visibleLevel &&
+                    Contains(bounds, item.Position)))
+            {
+                continue;
+            }
+
             if (worldObject.Kind is WorldObjectKind.WoodenWalkway or
                 WorldObjectKind.BasaltWalkway or
                 WorldObjectKind.WoodenFloor or WorldObjectKind.StoneFloor or
@@ -1763,7 +1912,8 @@ public partial class WorldView : Node2D
                 ? new Color("745b3b")
                 : new Color("c08b55"));
             foreach (var (position, part) in worldObject.GetAbsoluteParts().Where(item =>
-                         item.Position.Z == _visibleLevel))
+                         item.Position.Z == _visibleLevel &&
+                         Contains(bounds, item.Position)))
             {
                 var color = part.Kind switch
                 {
@@ -1886,9 +2036,11 @@ public partial class WorldView : Node2D
 
     private void DrawWalkways(
         IReadOnlyDictionary<GridPosition, WorldObjectSnapshot> walkwayCells,
-        Color modulate)
+        Color modulate,
+        (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds)
     {
-        foreach (var (position, walkway) in walkwayCells)
+        foreach (var (position, walkway) in walkwayCells.Where(item =>
+                     Contains(bounds, item.Key)))
         {
             var mask = 0;
             if (walkwayCells.ContainsKey(position with { Y = position.Y - 1 })) mask |= 1;
@@ -1961,14 +2113,17 @@ public partial class WorldView : Node2D
         }, 1.35f);
     }
 
-    private void DrawPrimitiveBarriers(StructureRenderCache cache)
+    private void DrawPrimitiveBarriers(
+        StructureRenderCache cache,
+        (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds)
     {
         if (cache.ConnectedCells.Count == 0 && cache.DoorLeaves.Count == 0 &&
             cache.WallTorches.Length == 0)
         {
             return;
         }
-        foreach (var (position, wall) in cache.WoodenWalls)
+        foreach (var (position, wall) in cache.WoodenWalls.Where(item =>
+                     Contains(bounds, item.Key)))
         {
             var mask = GetCardinalConnectionMask(position, cache.ConnectedCells);
             var destination = CellRect(position.X, position.Y).Grow(-0.5f);
@@ -1998,7 +2153,8 @@ public partial class WorldView : Node2D
                 palette: palette);
         }
 
-        foreach (var (position, wall) in cache.StoneWalls)
+        foreach (var (position, wall) in cache.StoneWalls.Where(item =>
+                     Contains(bounds, item.Key)))
         {
             var mask = GetCardinalConnectionMask(position, cache.ConnectedCells);
             var destination = CellRect(position.X, position.Y).Grow(-0.5f);
@@ -2033,7 +2189,8 @@ public partial class WorldView : Node2D
                 palette: palette);
         }
 
-        foreach (var (position, frame) in cache.DoorFrames)
+        foreach (var (position, frame) in cache.DoorFrames.Where(item =>
+                     Contains(bounds, item.Key)))
         {
             DrawDoorFrame(
                 position,
@@ -2049,7 +2206,8 @@ public partial class WorldView : Node2D
             }
         }
 
-        foreach (var torch in cache.WallTorches)
+        foreach (var torch in cache.WallTorches.Where(torch =>
+                     Contains(bounds, torch.Anchor)))
         {
             DrawWallTorch(torch.Anchor, torch.Orientation, PaletteFor(torch));
         }
@@ -2674,8 +2832,9 @@ public partial class WorldView : Node2D
             return;
         }
 
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var field in _snapshot.HumanVillage.Fields.Where(field =>
-                     _snapshot.GetVisibility(field.Position, _engine.Map.Width) == CellVisibility.Visible))
+                     Contains(bounds, field.Position)))
         {
             var color = field.Phase switch
             {
@@ -2715,8 +2874,10 @@ public partial class WorldView : Node2D
 
     private void DrawWorkDesignations()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var designation in _snapshot.WorkDesignations.Where(designation =>
-                     designation.Target.Z == _visibleLevel))
+                     designation.Target.Z == _visibleLevel &&
+                     Contains(bounds, designation.Target)))
         {
             var color = designation.Kind switch
             {
@@ -2792,10 +2953,12 @@ public partial class WorldView : Node2D
 
     private void DrawActors()
     {
-        var offsets = CreateActorOffsets();
-        foreach (var group in _snapshot.Actors
-                     .Where(actor => actor.Position.Z == _visibleLevel)
-                     .GroupBy(actor => actor.Position))
+        var bounds = GetVisibleCellBounds(padding: 1);
+        var visibleActors = _snapshot.Actors
+            .Where(actor => ShouldAnimateUnit(actor.Position, bounds))
+            .ToArray();
+        var offsets = CreateActorOffsets(visibleActors);
+        foreach (var group in visibleActors.GroupBy(actor => actor.Position))
         {
             var actors = group.OrderBy(actor => actor.Id).ToArray();
             for (var index = 0; index < actors.Length; index++)
@@ -2838,10 +3001,14 @@ public partial class WorldView : Node2D
         DrawSetTransform(Vector2.Zero);
     }
 
-    private bool HasVisibleWorkAnimation() => _snapshot.Actors.Any(actor =>
-        actor.Position.Z == _visibleLevel &&
-        actor.Job.Phase == ActorJobPhase.Working &&
-        TryGetWorkTool(actor.Job.Kind, out _));
+    private bool HasVisibleWorkAnimation()
+    {
+        var bounds = GetVisibleCellBounds(padding: 1);
+        return _snapshot.Actors.Any(actor =>
+            ShouldAnimateUnit(actor.Position, bounds) &&
+            actor.Job.Phase == ActorJobPhase.Working &&
+            TryGetWorkTool(actor.Job.Kind, out _));
+    }
 
     private void DrawWorkingTool(ActorSnapshot actor, Vector2 actorCenter)
     {
@@ -3121,10 +3288,10 @@ public partial class WorldView : Node2D
 
     private void DrawCorpses()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var corpse in _snapshot.Corpses.Where(corpse =>
                      corpse.Position.Z == _visibleLevel &&
-                     _snapshot.GetVisibility(corpse.Position, _engine.Map.Width) !=
-                         CellVisibility.Unknown))
+                     Contains(bounds, corpse.Position)))
         {
             DrawCorpse(corpse);
         }
@@ -3146,9 +3313,10 @@ public partial class WorldView : Node2D
 
     private void DrawGoblinBuds()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var bud in _snapshot.GoblinBuds.Where(bud =>
                      bud.Position.Z == _visibleLevel &&
-                     _snapshot.GetVisibility(bud.Position, _engine.Map.Width) != CellVisibility.Unknown))
+                     Contains(bounds, bud.Position)))
         {
             var center = CellCenter(bud.Position);
             var progress = 1f - (float)bud.RemainingCareTicks / bud.TotalCareTicks;
@@ -3171,10 +3339,9 @@ public partial class WorldView : Node2D
 
     private void DrawAnimals()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var animal in _snapshot.Animals.Where(animal =>
-                     animal.Position.Z == _visibleLevel &&
-                     _snapshot.GetVisibility(animal.Position, _engine.Map.Width) ==
-                     CellVisibility.Visible))
+                     ShouldAnimateUnit(animal.Position, bounds)))
         {
             var center = GetVisualAnimalPosition(animal);
             var species = AnimalSpeciesCatalog.Current.Get(animal.Kind);
@@ -3257,8 +3424,10 @@ public partial class WorldView : Node2D
             return;
         }
 
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var villager in _snapshot.HumanVillage.Villagers.Where(villager =>
                      villager.Health > 0 &&
+                     Contains(bounds, villager.Position) &&
                      _snapshot.GetVisibility(villager.Position, _engine.Map.Width) ==
                          CellVisibility.Visible))
         {
@@ -3369,16 +3538,17 @@ public partial class WorldView : Node2D
 
     private void DrawStorageAreas()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var area in _snapshot.StorageAreas.Where(area =>
-                     area.Footprint.Any(cell => cell.Z == _visibleLevel)))
+                     area.Footprint.Any(cell => cell.Z == _visibleLevel &&
+                         Contains(bounds, cell))))
         {
             var color = area.LogisticsNetworkId == EntityId.None
                 ? new Color(0.35f, 0.55f, 0.3f, 0.16f)
                 : new Color(0.28f, 0.48f, 0.68f, 0.2f);
             foreach (var cell in area.Footprint.Where(cell =>
                          cell.Z == _visibleLevel &&
-                         _snapshot.GetVisibility(cell, _engine.Map.Width) !=
-                             CellVisibility.Unknown))
+                         Contains(bounds, cell)))
             {
                 var rect = CellRect(cell.X, cell.Y).Grow(-1f);
                 DrawRect(rect, color);
@@ -3392,8 +3562,13 @@ public partial class WorldView : Node2D
 
     private void DrawStorageZones()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var zone in _snapshot.StorageZones.Where(zone => zone.Position.Z == _visibleLevel))
         {
+            if (!Contains(bounds, zone.Position))
+            {
+                continue;
+            }
             var rect = CellRect(zone.Position.X, zone.Position.Y).Grow(-2f);
             var zoneColor = zone.AcceptedResource switch
             {
@@ -3402,8 +3577,7 @@ public partial class WorldView : Node2D
                 _ => new Color(0.2f, 0.32f, 0.23f, 0.62f),
             };
             DrawRect(rect, zoneColor);
-            if (zone.StoredQuantity > 0 &&
-                _snapshot.GetVisibility(zone.Position, _engine.Map.Width) == CellVisibility.Visible)
+            if (zone.StoredQuantity > 0)
             {
                 var fillHeight = rect.Size.Y * zone.StoredQuantity / zone.Capacity;
                 DrawRect(
@@ -3458,12 +3632,11 @@ public partial class WorldView : Node2D
 
     private void DrawItems()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var stack in _snapshot.ItemStacks.Where(stack =>
                      stack.Location.Kind == ItemLocationKind.Ground &&
                      stack.Location.Position.Z == _visibleLevel &&
-                     _snapshot.GetVisibility(
-                         stack.Location.Position,
-                         _engine.Map.Width).IsDiscovered()))
+                     Contains(bounds, stack.Location.Position)))
         {
             DrawItemStack(stack);
         }
@@ -3556,8 +3729,10 @@ public partial class WorldView : Node2D
 
     private void DrawJobTargets()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var actor in _snapshot.Actors.Where(actor =>
                      actor.Position.Z == _visibleLevel &&
+                     Contains(bounds, actor.Position) &&
                      actor.Job.Target.Z == _visibleLevel &&
                      actor.Job.Kind != ActorJobKind.None))
         {
@@ -3587,8 +3762,10 @@ public partial class WorldView : Node2D
 
     private void DrawConstructionSites()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var site in _snapshot.ConstructionSites.Where(site =>
-                     site.Anchor.Z == _visibleLevel))
+                     site.Anchor.Z == _visibleLevel &&
+                     site.Footprint.Any(position => Contains(bounds, position))))
         {
             var materialRequired = site.Materials.Sum(material => material.RequiredQuantity);
             var materialDelivered = site.Materials.Sum(material => material.DeliveredQuantity);
@@ -3604,7 +3781,7 @@ public partial class WorldView : Node2D
 
             foreach (var position in site.Footprint.Where(position =>
                          position.Z == _visibleLevel &&
-                         _snapshot.GetVisibility(position, _engine.Map.Width).IsDiscovered()))
+                         Contains(bounds, position)))
             {
                 var rect = CellRect(position.X, position.Y).Grow(-2f);
                 DrawRect(rect, color with { A = 0.18f });
@@ -3623,8 +3800,10 @@ public partial class WorldView : Node2D
 
     private void DrawCraftingOrders()
     {
+        var bounds = GetVisibleCellBounds(padding: 1);
         foreach (var order in _snapshot.CraftingOrders.Where(order =>
-                     order.Workshop.Z == _visibleLevel))
+                     order.Workshop.Z == _visibleLevel &&
+                     Contains(bounds, order.Workshop)))
         {
             var required = order.Materials.Sum(material => material.RequiredQuantity);
             var delivered = order.Materials.Sum(material => material.DeliveredQuantity);
@@ -3817,10 +3996,14 @@ public partial class WorldView : Node2D
         {
             _visualActorPositions.Remove(id);
             _targetActorPositions.Remove(id);
+            _actorsById.Remove(id);
+            _dirtyActorPositions.Remove(id);
         }
 
+        _actorsById.Clear();
         foreach (var actor in _snapshot.Actors)
         {
+            _actorsById.Add(actor.Id, actor);
             var target = CellCenter(actor.Position);
             _targetActorPositions[actor.Id] = target;
             _visualActorPositions.TryAdd(actor.Id, target);
@@ -3834,20 +4017,25 @@ public partial class WorldView : Node2D
         {
             _visualAnimalPositions.Remove(id);
             _targetAnimalPositions.Remove(id);
+            _animalsById.Remove(id);
+            _dirtyAnimalPositions.Remove(id);
         }
 
+        _animalsById.Clear();
         foreach (var animal in _snapshot.Animals)
         {
+            _animalsById.Add(animal.Id, animal);
             var target = CellCenter(animal.Position);
             _targetAnimalPositions[animal.Id] = target;
             _visualAnimalPositions.TryAdd(animal.Id, target);
         }
     }
 
-    private Dictionary<EntityId, Vector2> CreateActorOffsets()
+    private static Dictionary<EntityId, Vector2> CreateActorOffsets(
+        IEnumerable<ActorSnapshot> visibleActors)
     {
         var result = new Dictionary<EntityId, Vector2>();
-        foreach (var group in _snapshot.Actors.GroupBy(actor => actor.Position))
+        foreach (var group in visibleActors.GroupBy(actor => actor.Position))
         {
             var actors = group.OrderBy(actor => actor.Id).ToArray();
             for (var index = 0; index < actors.Length; index++)
@@ -3868,8 +4056,37 @@ public partial class WorldView : Node2D
     private Vector2 GetVisualAnimalPosition(AnimalSnapshot animal) =>
         _visualAnimalPositions.GetValueOrDefault(animal.Id, CellCenter(animal.Position));
 
+    private bool ShouldAnimateUnit(
+        GridPosition position,
+        (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds) =>
+        position.Z == _visibleLevel &&
+        Contains(bounds, position) &&
+        _snapshot.GetVisibility(position, _engine.Map.Width) == CellVisibility.Visible;
+
+    private static bool Contains(
+        (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds,
+        GridPosition position) =>
+        position.X >= bounds.MinimumX && position.X < bounds.MaximumX &&
+        position.Y >= bounds.MinimumY && position.Y < bounds.MaximumY;
+
+    private bool ShouldDrawDenseOverlays() =>
+        GetGlobalTransformWithCanvas().X.Length() * TileSize >= 6f;
+
     private (int MinimumX, int MinimumY, int MaximumX, int MaximumY) GetVisibleCellBounds(
         int padding = 2)
+    {
+        if (_renderPass == WorldRenderPass.Static)
+        {
+            return _hasStaticRetainedBounds
+                ? _staticRetainedBounds
+                : CreateStaticRetainedBounds(GetViewportCellBounds(padding: 2));
+        }
+
+        return GetViewportCellBounds(padding);
+    }
+
+    private (int MinimumX, int MinimumY, int MaximumX, int MaximumY)
+        GetViewportCellBounds(int padding)
     {
         var viewportSize = GetViewport().GetVisibleRect().Size;
         var viewportToLocal = GetGlobalTransformWithCanvas().AffineInverse();
@@ -3894,6 +4111,25 @@ public partial class WorldView : Node2D
         return (minimumX, minimumY, maximumX, maximumY);
     }
 
+    private (int MinimumX, int MinimumY, int MaximumX, int MaximumY)
+        CreateStaticRetainedBounds(
+            (int MinimumX, int MinimumY, int MaximumX, int MaximumY) viewportBounds)
+    {
+        var expanded = RetainedPresentationBoundsPolicy.ExpandToChunks(
+            ToPresentationBounds(viewportBounds),
+            _staticRetainedChunkSize,
+            _engine.Map.Width,
+            _engine.Map.Height);
+        return (expanded.MinimumX, expanded.MinimumY, expanded.MaximumX, expanded.MaximumY);
+    }
+
+    private static PresentationCellBounds ToPresentationBounds(
+        (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds) => new(
+        bounds.MinimumX,
+        bounds.MinimumY,
+        bounds.MaximumX,
+        bounds.MaximumY);
+
     private bool SynchronizeLowerLevelPresentation()
     {
         var bounds = GetVisibleCellBounds();
@@ -3905,36 +4141,9 @@ public partial class WorldView : Node2D
                 bounds.MinimumX,
                 bounds.MinimumY,
                 bounds.MaximumX,
-                bounds.MaximumY));
-    }
-
-    private bool HasVisibleAnimatedWater()
-    {
-        var bounds = GetVisibleCellBounds(padding: 0);
-        for (var y = bounds.MinimumY; y < bounds.MaximumY; y++)
-        {
-            for (var x = bounds.MinimumX; x < bounds.MaximumX; x++)
-            {
-                var position = new GridPosition(x, y, _visibleLevel);
-                if (_visibleLevel < 0)
-                {
-                    if (_engine.World.TryGetFluid(position, out var fluid, out _) &&
-                        fluid != CellFluidKind.None)
-                    {
-                        return true;
-                    }
-                    continue;
-                }
-
-                var cell = _engine.Map.GetColumnCell(position);
-                if (cell.SurfaceLevel == _visibleLevel &&
-                    cell.Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater)
-                {
-                    return true;
-                }
-            }
-        }
-        return false;
+                bounds.MaximumY),
+            _presentationElapsedSeconds,
+            _lowerLevelRefreshSeconds);
     }
 
     private IReadOnlySet<GridPosition> GetCachedCaveSolids()

@@ -19,7 +19,13 @@ public readonly record struct WorldPresentationPerformanceMetrics(
     long GeometryTextureRebuilds,
     long StaticLightTextureRebuilds,
     int VisibleDirtyChunks,
-    PresentationSliceWorkload SliceWorkload);
+    PresentationSliceWorkload SliceWorkload,
+    TimedPresentationOperationMetrics DynamicWorldDraws,
+    TimedPresentationOperationMetrics StaticWorldDraws);
+
+internal readonly record struct PresentationWarmupStatus(
+    double Progress,
+    bool IsReady);
 
 internal sealed class TimedPresentationOperationCounter
 {

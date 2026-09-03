@@ -95,7 +95,7 @@ public sealed partial class SimulationEngine
         DebugSettings = debugSettings;
         World = WorldMapState.CreateInitial(map);
         Navigation = new NavigationPathService(World);
-        Visibility = WorldVisibilityState.Create(map);
+        Visibility = WorldVisibilityState.Create(map, World.MaximumOccupiedLevel);
         _goblinCivilization = CivilizationCatalog.Current.Get(
             CivilizationLegacyRole.PlayerGoblins);
         _humanCivilization = CivilizationCatalog.Current.Get(
@@ -451,7 +451,8 @@ public sealed partial class SimulationEngine
         engine.Visibility = WorldVisibilityState.Restore(
             map,
             save.Visibility,
-            savedNegativeLevelCount);
+            savedNegativeLevelCount,
+            engine.World.MaximumOccupiedLevel);
         engine._humanVillage = HumanVillageState.Restore(
             engine.World,
             save.HumanVillage,
@@ -3086,6 +3087,11 @@ public sealed partial class SimulationEngine
                 World.IsOpenUnsupportedVolume,
                 Map.IsWorldPosition),
             World.IsSolidHillRock);
+        Visibility.DiscoverOpenVerticalColumns(
+            Map.MinimumWorldLevel,
+            World.MaximumOccupiedLevel,
+            World.TopologyVersion,
+            World.HasOpenVerticalSightLine);
         RemoveMiningDesignationsBlockedByRevealedFluid();
         foreach (var actor in _actors.Values.Where(actor =>
                      actor.JobKind == ActorJobKind.Explore &&

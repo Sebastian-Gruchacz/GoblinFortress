@@ -47,6 +47,8 @@ public readonly record struct WorldChangeEvent(
 
 public sealed class WorldMapState
 {
+    public const int MaximumSupportedLevel = 16;
+
     private static readonly SpatialOccupancyChannel[] OccupancyChannels =
         Enum.GetValues<SpatialOccupancyChannel>();
     private readonly SortedDictionary<int, PlantPatchState> _plantPatches;
@@ -539,6 +541,28 @@ public sealed class WorldMapState
         !geometry.IsSupported &&
         !HasConstructedSurface(position) &&
         !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _);
+
+    public bool HasOpenVerticalSightLine(GridPosition upper, GridPosition lower)
+    {
+        if (upper.X != lower.X || upper.Y != lower.Y || upper.Z != lower.Z + 1 ||
+            !Baseline.IsColumnWithin(upper) || lower.Z < Baseline.MinimumWorldLevel ||
+            upper.Z > MaximumOccupiedLevel)
+        {
+            return false;
+        }
+
+        if (HasVerticalPassageBetween(upper, lower))
+        {
+            return true;
+        }
+
+        var naturalBlocker = Baseline.TryGetInitialGeometry(upper, out var geometry) &&
+            (geometry.IsSolid || geometry.IsSupported);
+        return !naturalBlocker &&
+            !HasConstructedSurface(upper) &&
+            !TryGetOccupancyClaim(upper, SpatialOccupancyChannel.Solid, out _) &&
+            !TryGetOccupancyClaim(upper, SpatialOccupancyChannel.Overhead, out _);
+    }
 
     public bool IsOpenToSky(GridPosition position)
     {
@@ -3224,7 +3248,8 @@ public sealed class WorldMapState
             foreach (var (position, part) in worldObject.GetAbsoluteParts())
             {
                 if (!baseline.IsColumnWithin(position) ||
-                    position.Z < baseline.MinimumWorldLevel || position.Z > 16 ||
+                    position.Z < baseline.MinimumWorldLevel ||
+                    position.Z > MaximumSupportedLevel ||
                     !Enum.IsDefined(part.Channel) ||
                     !Enum.IsDefined(part.Kind))
                 {

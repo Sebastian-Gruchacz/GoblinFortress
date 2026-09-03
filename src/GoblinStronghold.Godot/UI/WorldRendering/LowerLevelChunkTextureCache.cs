@@ -13,6 +13,7 @@ internal sealed record LowerLevelChunkTexture(
     Texture2D Lighting,
     Texture2D SkyLighting,
     Texture2D ExposureMask,
+    int ChunkSize,
     int PixelsPerCell);
 
 internal sealed record LowerLevelOpeningTexture(
@@ -21,6 +22,10 @@ internal sealed record LowerLevelOpeningTexture(
     Texture2D SkyLighting,
     Rect2 SourceRegion,
     int Level);
+
+internal readonly record struct LowerLevelChunkRebuildResult(
+    int RebuiltChunks,
+    double NextEligibleSeconds);
 
 internal sealed class LowerLevelChunkTextureCache : IDisposable
 {
@@ -38,6 +43,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
     private Image? _treePartAtlas;
     private Image? _treeCrownAtlas;
     private Image? _lavaTile;
+    private int _chunkSize = LowerLevelExposureIndex.DefaultChunkSize;
     private long _chunksRebuilt;
     private long _geometryTexturesRebuilt;
     private long _staticLightTexturesRebuilt;
@@ -94,12 +100,33 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         _staticLightTexturesRebuilt = 0;
     }
 
-    public int RebuildVisibleDirty(
+    public void ConfigureChunkSize(int chunkSize)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(chunkSize, 1);
+        if (_chunkSize == chunkSize)
+        {
+            return;
+        }
+
+        ResetWorld();
+        _chunkSize = chunkSize;
+    }
+
+    public LowerLevelChunkRebuildResult RebuildVisibleDirty(
         SimulationEngine engine,
         SimulationSnapshot snapshot,
         LowerLevelExposureIndex exposure,
-        LowerLevelPresentationCacheState cacheState)
+        LowerLevelPresentationCacheState cacheState,
+        int activeLevel,
+        double currentSeconds,
+        double baseIntervalSeconds)
     {
+        if (exposure.ChunkSize != _chunkSize)
+        {
+            throw new ArgumentException(
+                "The exposure index and texture cache must use the same chunk size.",
+                nameof(exposure));
+        }
         if (_terrainAtlas is null || _caveAtlas is null ||
             _environmentAtlas is null || _itemIconAtlas is null ||
             _treePartAtlas is null ||
@@ -109,12 +136,27 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
                 "Lower-level texture atlases must be initialized before rebuilding chunks.");
         }
 
-        var candidates = cacheState.GetVisibleRebuildCandidates()
+        var dirtyCandidates = cacheState.GetVisibleRebuildCandidates();
+        var candidates = dirtyCandidates
+            .Where(candidate =>
+                !_chunks.TryGetValue(candidate.Key, out var cached) ||
+                LowerLevelRefreshCadencePolicy.IsRebuildDue(
+                    cached.LastRebuildSeconds,
+                    currentSeconds,
+                    baseIntervalSeconds,
+                    activeLevel,
+                    candidate.Key.Level))
             .Take(MaximumRebuildsPerFrame)
             .ToArray();
         if (candidates.Length == 0)
         {
-            return 0;
+            return new LowerLevelChunkRebuildResult(
+                0,
+                GetNextEligibleSeconds(
+                    dirtyCandidates,
+                    activeLevel,
+                    currentSeconds,
+                    baseIntervalSeconds));
         }
 
         var startedAt = Stopwatch.GetTimestamp();
@@ -127,7 +169,8 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
                 snapshot,
                 candidate.Key,
                 cells,
-                exposure);
+                exposure,
+                currentSeconds);
             if (_chunks.Remove(candidate.Key, out var previous))
             {
                 previous.Dispose();
@@ -140,7 +183,13 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         _staticLightTexturesRebuilt = checked(
             _staticLightTexturesRebuilt + candidates.Length);
         _rebuildBatches.Record(startedAt);
-        return candidates.Length;
+        return new LowerLevelChunkRebuildResult(
+            candidates.Length,
+            GetNextEligibleSeconds(
+                cacheState.GetVisibleRebuildCandidates(),
+                activeLevel,
+                currentSeconds,
+                baseIntervalSeconds));
     }
 
     public IReadOnlyList<LowerLevelChunkTexture> GetVisibleTextures(
@@ -155,7 +204,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
 
     public bool HasGeometryAt(GridPosition position)
     {
-        var key = GetChunkKey(position);
+        var key = GetChunkKey(position, _chunkSize);
         return _chunks.TryGetValue(key, out var chunk) &&
             chunk.GeometryCells.Contains(position);
     }
@@ -164,7 +213,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         GridPosition position,
         out LowerLevelOpeningTexture texture)
     {
-        var key = GetChunkKey(position);
+        var key = GetChunkKey(position, _chunkSize);
         if (!_chunks.TryGetValue(key, out var chunk) ||
             !chunk.GeometryCells.Contains(position))
         {
@@ -172,8 +221,8 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             return false;
         }
 
-        var localX = position.X - (key.X * LowerLevelExposureIndex.DefaultChunkSize);
-        var localY = position.Y - (key.Y * LowerLevelExposureIndex.DefaultChunkSize);
+        var localX = position.X - (key.X * _chunkSize);
+        var localY = position.Y - (key.Y * _chunkSize);
         texture = new LowerLevelOpeningTexture(
             chunk.Snapshot.Geometry,
             chunk.Snapshot.Lighting,
@@ -210,7 +259,8 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         SimulationSnapshot snapshot,
         PresentationChunkKey key,
         IReadOnlyCollection<GridPosition> exposedCells,
-        LowerLevelExposureIndex exposure)
+        LowerLevelExposureIndex exposure,
+        double currentSeconds)
     {
         var chunkSize = exposure.ChunkSize;
         var geometry = Image.CreateEmpty(
@@ -332,6 +382,8 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             lightingTexture,
             skyLightingTexture,
             maskTexture,
+            chunkSize,
+            currentSeconds,
             geometryCells);
     }
 
@@ -385,15 +437,42 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         }
     }
 
-    private static PresentationChunkKey GetChunkKey(GridPosition position) => new(
+    private static PresentationChunkKey GetChunkKey(
+        GridPosition position,
+        int chunkSize) => new(
         position.Z,
-        FloorDivide(position.X, LowerLevelExposureIndex.DefaultChunkSize),
-        FloorDivide(position.Y, LowerLevelExposureIndex.DefaultChunkSize));
+        FloorDivide(position.X, chunkSize),
+        FloorDivide(position.Y, chunkSize));
 
     private static int FloorDivide(int value, int divisor)
     {
         var quotient = value / divisor;
         return value < 0 && value % divisor != 0 ? quotient - 1 : quotient;
+    }
+
+    private double GetNextEligibleSeconds(
+        IReadOnlyList<PresentationChunkCacheSnapshot> candidates,
+        int activeLevel,
+        double currentSeconds,
+        double baseIntervalSeconds)
+    {
+        var next = double.PositiveInfinity;
+        foreach (var candidate in candidates)
+        {
+            if (!_chunks.TryGetValue(candidate.Key, out var cached))
+            {
+                return currentSeconds;
+            }
+
+            next = Math.Min(
+                next,
+                cached.LastRebuildSeconds +
+                LowerLevelRefreshCadencePolicy.GetMinimumIntervalSeconds(
+                    baseIntervalSeconds,
+                    activeLevel,
+                    candidate.Key.Level));
+        }
+        return next;
     }
 
     private static IReadOnlyDictionary<GridPosition, List<LowerLevelStaticStructurePart>>
@@ -639,6 +718,8 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         ImageTexture lighting,
         ImageTexture skyLighting,
         ImageTexture exposureMask,
+        int chunkSize,
+        double lastRebuildSeconds,
         HashSet<GridPosition> geometryCells) : IDisposable
     {
         public LowerLevelChunkTexture Snapshot { get; } = new(
@@ -647,9 +728,12 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             lighting,
             skyLighting,
             exposureMask,
+            chunkSize,
             PixelsPerCell);
 
         public IReadOnlySet<GridPosition> GeometryCells { get; } = geometryCells;
+
+        public double LastRebuildSeconds { get; } = lastRebuildSeconds;
 
         public void Dispose()
         {

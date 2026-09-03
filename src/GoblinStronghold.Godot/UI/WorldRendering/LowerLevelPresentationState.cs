@@ -8,7 +8,7 @@ namespace GoblinStronghold.GodotClient.UI.WorldRendering;
 
 internal sealed class LowerLevelPresentationState : IDisposable
 {
-    private readonly LowerLevelPresentationCacheState _cache = new();
+    private LowerLevelPresentationCacheState _cache = new();
     private readonly LowerLevelChunkTextureCache _textures = new();
     private readonly LowerLevelPresentationChangeTracker _changeTracker = new();
     private readonly LowerLevelActorOverlayState _actors = new();
@@ -18,6 +18,8 @@ internal sealed class LowerLevelPresentationState : IDisposable
     private SimulationSnapshot? _observationSnapshot;
     private LowerLevelExposureIndex? _exposure;
     private PresentationSliceWorkload _workload;
+    private int _chunkSize = LowerLevelExposureIndex.DefaultChunkSize;
+    private double _nextTextureRebuildSeconds;
     private IReadOnlyDictionary<GridPosition, GridPosition> _openingDestinations =
         new Dictionary<GridPosition, GridPosition>();
 
@@ -81,6 +83,30 @@ internal sealed class LowerLevelPresentationState : IDisposable
         _observationSnapshot = null;
         _exposure = null;
         _workload = default;
+        _nextTextureRebuildSeconds = 0d;
+        _openingDestinations = new Dictionary<GridPosition, GridPosition>();
+    }
+
+    public void ConfigureChunkSize(int chunkSize)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(chunkSize, 1);
+        if (_chunkSize == chunkSize)
+        {
+            return;
+        }
+
+        _chunkSize = chunkSize;
+        _cache = new LowerLevelPresentationCacheState(chunkSize);
+        _textures.ConfigureChunkSize(chunkSize);
+        _changeTracker.Reset();
+        _actors.Reset();
+        _verticalLights.Reset();
+        _synchronizationKey = null;
+        _observationKey = null;
+        _observationSnapshot = null;
+        _exposure = null;
+        _workload = default;
+        _nextTextureRebuildSeconds = 0d;
         _openingDestinations = new Dictionary<GridPosition, GridPosition>();
     }
 
@@ -88,9 +114,14 @@ internal sealed class LowerLevelPresentationState : IDisposable
         SimulationEngine engine,
         SimulationSnapshot snapshot,
         int activeLevel,
-        PresentationCellBounds visibleBounds)
+        PresentationCellBounds visibleBounds,
+        double currentSeconds,
+        double baseIntervalSeconds)
     {
         SynchronizeInvalidations(engine, snapshot);
+        _nextTextureRebuildSeconds = Math.Min(
+            _nextTextureRebuildSeconds,
+            currentSeconds);
         var key = new SynchronizationKey(
             engine.World.TopologyVersion,
             activeLevel,
@@ -108,23 +139,31 @@ internal sealed class LowerLevelPresentationState : IDisposable
                 _exposure,
                 visibleBounds,
                 force: false);
-            var chunksRebuilt =
-                _textures.RebuildVisibleDirty(engine, snapshot, _exposure, _cache) > 0;
+            var chunksRebuilt = RebuildTextures(
+                engine,
+                snapshot,
+                activeLevel,
+                currentSeconds,
+                baseIntervalSeconds);
             return actorsChanged || chunksRebuilt;
         }
 
         var plan = PresentationSlicePlanner.Create(
-            new PresentationSliceRequest(activeLevel, visibleBounds),
+            new PresentationSliceRequest(activeLevel, visibleBounds, _chunkSize),
             (x, y) => engine.Map.GetColumnCell(new GridPosition(x, y)).SurfaceLevel,
             engine.World.CreateVerticalPassageSnapshot(),
-            position => engine.Visibility.TryGet(position, out var visibility) &&
-                visibility.IsDiscovered(),
+            position => IsPresentationDiscovered(engine, position),
             engine.World.HasConstructedFloorSurface);
         _openingDestinations = plan.OpeningDestinations;
         _exposure = plan.Exposure;
         _workload = plan.Workload;
         _cache.SynchronizeExposure(_exposure);
-        _textures.RebuildVisibleDirty(engine, snapshot, _exposure, _cache);
+        RebuildTextures(
+            engine,
+            snapshot,
+            activeLevel,
+            currentSeconds,
+            baseIntervalSeconds);
         _actors.Synchronize(snapshot, _exposure, visibleBounds, force: true);
         _verticalLights.Synchronize(
             engine,
@@ -136,6 +175,21 @@ internal sealed class LowerLevelPresentationState : IDisposable
         _synchronizationKey = key;
         return true;
     }
+
+    public bool RebuildReadyTextures(
+        SimulationEngine engine,
+        SimulationSnapshot snapshot,
+        int activeLevel,
+        double currentSeconds,
+        double baseIntervalSeconds) =>
+        _exposure is not null &&
+        currentSeconds >= _nextTextureRebuildSeconds &&
+        RebuildTextures(
+            engine,
+            snapshot,
+            activeLevel,
+            currentSeconds,
+            baseIntervalSeconds);
 
     public bool IsDynamicPresentationActive(GridPosition position) =>
         _exposure?.IsContinuouslyExposed(position) == true;
@@ -172,6 +226,30 @@ internal sealed class LowerLevelPresentationState : IDisposable
     }
 
     public void Dispose() => _textures.Dispose();
+
+    private bool RebuildTextures(
+        SimulationEngine engine,
+        SimulationSnapshot snapshot,
+        int activeLevel,
+        double currentSeconds,
+        double baseIntervalSeconds)
+    {
+        if (_exposure is null)
+        {
+            return false;
+        }
+
+        var result = _textures.RebuildVisibleDirty(
+            engine,
+            snapshot,
+            _exposure,
+            _cache,
+            activeLevel,
+            currentSeconds,
+            baseIntervalSeconds);
+        _nextTextureRebuildSeconds = result.NextEligibleSeconds;
+        return result.RebuiltChunks > 0;
+    }
 
     private void SynchronizeInvalidations(
         SimulationEngine engine,
@@ -263,13 +341,34 @@ internal sealed class LowerLevelPresentationState : IDisposable
             for (var x = visibleBounds.MinimumX; x < visibleBounds.MaximumX; x++)
             {
                 var position = new GridPosition(x, y, activeLevel);
-                var discovered = engine.Visibility.TryGet(position, out var visibility) &&
-                    visibility.IsDiscovered();
+                var discovered = IsPresentationDiscovered(engine, position);
                 signature = (signature ^ (discovered ? 1UL : 0UL)) * prime;
             }
         }
 
         return signature;
+    }
+
+    private static bool IsPresentationDiscovered(
+        SimulationEngine engine,
+        GridPosition position)
+    {
+        if (engine.Visibility.TryGet(position, out var visibility) &&
+            visibility.IsDiscovered())
+        {
+            return true;
+        }
+        if (position.Z <= 0)
+        {
+            return false;
+        }
+
+        var surfaceLevel = engine.Map.GetColumnCell(position).SurfaceLevel;
+        return surfaceLevel != position.Z &&
+            engine.Visibility.TryGet(
+                new GridPosition(position.X, position.Y, surfaceLevel),
+                out var surfaceVisibility) &&
+            surfaceVisibility.IsDiscovered();
     }
 
     private readonly record struct SynchronizationKey(

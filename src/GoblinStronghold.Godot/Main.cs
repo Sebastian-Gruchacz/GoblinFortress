@@ -204,6 +204,9 @@ public partial class Main : Node
     private Window _optionsWindow = null!;
     private VBoxContainer _shortcutRows = null!;
     private ShortcutSettings _shortcutSettings = null!;
+    private RenderingPerformanceSettings _renderingPerformanceSettings = null!;
+    private LoadingProgressOverlay _loadingProgress = null!;
+    private bool _loadingOperationActive;
     private Theme _gameUiTheme = null!;
     private readonly Dictionary<GameShortcutId, Action> _shortcutActions = [];
     private readonly Dictionary<GameShortcutId, Button> _shortcutBindingButtons = [];
@@ -381,10 +384,25 @@ public partial class Main : Node
             SimulationSaveFormat.CurrentVersion);
         _shortcutSettings = new ShortcutSettings(
             ProjectSettings.GlobalizePath("user://settings/shortcuts.json"));
+        _renderingPerformanceSettings = new RenderingPerformanceSettings(
+            ProjectSettings.GlobalizePath("user://settings/rendering-performance.json"));
         ApplyCameraShortcutBindings();
         _gameUiTheme = GameUiTheme.Create();
 
+        _loadingProgress = new LoadingProgressOverlay
+        {
+            Theme = _gameUiTheme,
+        };
+        var loadingLayer = new CanvasLayer
+        {
+            Name = "LoadingLayer",
+            Layer = 100,
+        };
+        AddChild(loadingLayer);
+        loadingLayer.AddChild(_loadingProgress);
+
         _worldView = GetNode<WorldView>("WorldView");
+        _worldView.ConfigurePerformance(_renderingPerformanceSettings.Options);
         _worldView3D = GetNode<WorldView3D>("WorldView3D");
         _minimap = GetNode<MinimapView>("Interface/RightHud/MinimapFrame/Minimap");
         _camera = GetNode<Camera2D>("Camera2D");
@@ -899,7 +917,9 @@ public partial class Main : Node
             ActiveLightMapDuration: presentation.ActiveLightMapBuilds.LastDuration,
             LowerChunkRebuildDuration: presentation.LowerChunkRebuildBatches.LastDuration,
             VisibleDirtyChunks: presentation.VisibleDirtyChunks,
-            SliceWorkload: presentation.SliceWorkload));
+            SliceWorkload: presentation.SliceWorkload,
+            DynamicWorldDrawDuration: presentation.DynamicWorldDraws.LastDuration,
+            StaticWorldDrawDuration: presentation.StaticWorldDraws.LastDuration));
     }
 
     public override void _UnhandledInput(InputEvent inputEvent)
@@ -1163,19 +1183,30 @@ public partial class Main : Node
 
     private void ShowNewGameSetup() => _newGameSetupWindow.ShowSetup();
 
-    private void StartNewGame(NewGameSetup setup)
+    private async void StartNewGame(NewGameSetup setup)
     {
+        if (!BeginLoading("new-game-title"))
+        {
+            return;
+        }
+
         try
         {
             var protectedPreviousSession = _hasActiveSession;
             if (protectedPreviousSession)
             {
+                await SetLoadingStage("protecting-session", 0.08d);
                 SaveAutosave();
             }
 
+            await SetLoadingStage("building-world", 0.16d);
+            var engine = CreateNewEngine(setup.Map);
+            _loadingProgress.Update(Ui("loading", "restoring-profile"), 0.66d);
             _sessionPreferences = new GameSessionPreferences(setup.ProfileName);
             _windowLayoutController.ActivateProfile(_sessionPreferences.ProfileName);
-            ReplaceEngine(CreateNewEngine(setup.Map));
+            await SetLoadingStage("initializing-views", 0.72d);
+            ReplaceEngine(engine);
+            await WarmPresentationCaches(0.86d, 0.98d);
             _hasActiveSession = true;
             _newGameSetupWindow.Hide();
             CloseMainMenu();
@@ -1185,10 +1216,15 @@ public partial class Main : Node
                 setup.ProfileName,
                 setup.Map.Seed.Value,
                 setup.Map.Width);
+            await SetLoadingStage("finishing", 1d);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             _inspector.Text = UiFormat("new-game", "failed", exception.Message);
+        }
+        finally
+        {
+            EndLoading();
         }
     }
 
@@ -1218,48 +1254,111 @@ public partial class Main : Node
         }
     }
 
-    private void LoadGame()
+    private async void LoadGame()
     {
-        string? preferredFailure = null;
-        foreach (var candidate in _saveStore.LoadLatestProgressFirst())
+        if (!BeginLoading("load-game-title"))
         {
-            if (TryLoadGameCandidate(candidate.Path, candidate.Json, out var failure))
-            {
-                return;
-            }
-            preferredFailure ??= $"{Path.GetFileName(candidate.Path)}: {failure}";
-            // Try rotating autosave recovery points if the preferred save cannot load.
-        }
-
-        _inspector.Text = preferredFailure is null
-            ? Ui("save-load", "no-save-to-load")
-            : UiFormat("save-load", "no-compatible-save", preferredFailure);
-        ShowLoadFailure(_inspector.Text);
-    }
-
-    private void LoadSpecificGame(string path)
-    {
-        var candidate = _saveStore.LoadLatestProgressFirst()
-            .FirstOrDefault(item => StringComparer.OrdinalIgnoreCase.Equals(item.Path, path));
-        if (candidate.Path is null)
-        {
-            _recoverySummary.Text = Ui("save-load", "save-point-missing");
-            ShowLoadFailure(_recoverySummary.Text);
             return;
         }
 
-        if (!TryLoadGameCandidate(candidate.Path, candidate.Json, out var failure))
+        try
         {
-            _recoverySummary.Text = UiFormat(
-                "save-load", "specific-load-failed", Path.GetFileName(path), failure);
-            ShowLoadFailure(_recoverySummary.Text);
+            await SetLoadingStage("finding-save", 0.04d);
+            var candidates = _saveStore.LoadLatestProgressFirst().ToArray();
+            string? preferredFailure = null;
+            for (var index = 0; index < candidates.Length; index++)
+            {
+                var candidate = candidates[index];
+                var start = 0.08d + (0.82d * index / Math.Max(1, candidates.Length));
+                var end = 0.08d + (0.82d * (index + 1) / Math.Max(1, candidates.Length));
+                var result = await TryLoadGameCandidate(candidate.Path, candidate.Json, start, end);
+                if (result.Success)
+                {
+                    await SetLoadingStage("finishing", 1d);
+                    return;
+                }
+                preferredFailure ??= $"{Path.GetFileName(candidate.Path)}: {result.Failure}";
+                // Try rotating autosave recovery points if the preferred save cannot load.
+            }
+
+            _inspector.Text = preferredFailure is null
+                ? Ui("save-load", "no-save-to-load")
+                : UiFormat("save-load", "no-compatible-save", preferredFailure);
+            ShowLoadFailure(_inspector.Text);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _inspector.Text = UiFormat("save-load", "no-compatible-save", exception.Message);
+            ShowLoadFailure(_inspector.Text);
+        }
+        finally
+        {
+            EndLoading();
         }
     }
 
-    private bool TryLoadGameCandidate(string path, string json, out string failure)
+    private async void LoadSpecificGame(string path)
+    {
+        if (!BeginLoading("load-game-title"))
+        {
+            return;
+        }
+
+        try
+        {
+            await SetLoadingStage("finding-save", 0.04d);
+            var candidate = _saveStore.LoadLatestProgressFirst()
+                .FirstOrDefault(item => StringComparer.OrdinalIgnoreCase.Equals(item.Path, path));
+            if (candidate.Path is null)
+            {
+                _recoverySummary.Text = Ui("save-load", "save-point-missing");
+                ShowLoadFailure(_recoverySummary.Text);
+                return;
+            }
+
+            var result = await TryLoadGameCandidate(
+                candidate.Path,
+                candidate.Json,
+                0.08d,
+                0.98d);
+            if (!result.Success)
+            {
+                _recoverySummary.Text = UiFormat(
+                    "save-load",
+                    "specific-load-failed",
+                    Path.GetFileName(path),
+                    result.Failure);
+                ShowLoadFailure(_recoverySummary.Text);
+                return;
+            }
+
+            await SetLoadingStage("finishing", 1d);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _recoverySummary.Text = UiFormat(
+                "save-load",
+                "specific-load-failed",
+                Path.GetFileName(path),
+                exception.Message);
+            ShowLoadFailure(_recoverySummary.Text);
+        }
+        finally
+        {
+            EndLoading();
+        }
+    }
+
+    private async Task<(bool Success, string Failure)> TryLoadGameCandidate(
+        string path,
+        string json,
+        double progressStart,
+        double progressEnd)
     {
         try
         {
+            var progressRange = progressEnd - progressStart;
+            await SetLoadingStage("building-world", progressStart + (progressRange * 0.08d));
             var loaded = SimulationEngine.Load(
                 json,
                 SimulationDefinitions.Foundation,
@@ -1268,8 +1367,14 @@ public partial class Main : Node
             var protectedCurrentSession = _hasActiveSession;
             if (protectedCurrentSession)
             {
+                await SetLoadingStage(
+                    "protecting-session",
+                    progressStart + (progressRange * 0.58d));
                 _saveStore.SaveBeforeLoad(CreateSaveJson(), excludedPath: path);
             }
+            _loadingProgress.Update(
+                Ui("loading", "restoring-profile"),
+                progressStart + (progressRange * 0.68d));
             _sessionPreferences = loadedPreferences;
             if (!string.IsNullOrEmpty(_sessionPreferences.ProfileName))
             {
@@ -1279,7 +1384,13 @@ public partial class Main : Node
             {
                 _windowLayoutController.DeactivateProfile();
             }
-            ReplaceEngine(loaded);
+            await SetLoadingStage(
+                "initializing-views",
+                progressStart + (progressRange * 0.74d));
+            ReplaceEngine(loaded, loadedPreferences.VisibleLevel);
+            await WarmPresentationCaches(
+                progressStart + (progressRange * 0.84d),
+                progressStart + (progressRange * 0.98d));
             _hasActiveSession = true;
             _recoveryWindow.Hide();
             CloseMainMenu();
@@ -1288,14 +1399,60 @@ public partial class Main : Node
                 (protectedCurrentSession
                     ? Ui("save-load", "previous-session-preserved")
                     : string.Empty);
-            failure = string.Empty;
-            return true;
+            return (true, string.Empty);
         }
         catch (Exception exception) when (exception is InvalidDataException or
             System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
         {
-            failure = exception.Message;
+            return (false, exception.Message);
+        }
+    }
+
+    private bool BeginLoading(string titleKey)
+    {
+        if (_loadingOperationActive)
+        {
             return false;
+        }
+
+        _loadingOperationActive = true;
+        _loadingProgress.Begin(
+            Ui("loading", titleKey),
+            Ui("loading", "starting"));
+        return true;
+    }
+
+    private void EndLoading()
+    {
+        _loadingProgress.Hide();
+        _loadingOperationActive = false;
+    }
+
+    private async Task SetLoadingStage(string stageKey, double progress)
+    {
+        _loadingProgress.Update(Ui("loading", stageKey), progress);
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+    }
+
+    private async Task WarmPresentationCaches(double progressStart, double progressEnd)
+    {
+        if (!_renderingPerformanceSettings.Options.WarmPresentationCachesBeforeShowingWorld)
+        {
+            return;
+        }
+
+        const int maximumWarmupFrames = 240;
+        for (var frame = 0; frame < maximumWarmupFrames; frame++)
+        {
+            var status = _worldView.GetPresentationWarmupStatus();
+            _loadingProgress.Update(
+                Ui("loading", "warming-caches"),
+                Mathf.Lerp(progressStart, progressEnd, status.Progress));
+            if (status.IsReady)
+            {
+                return;
+            }
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         }
     }
 
@@ -1495,9 +1652,22 @@ public partial class Main : Node
         margin.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         _optionsWindow.AddChild(margin);
 
-        var content = new VBoxContainer();
+        var tabs = new TabContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        margin.AddChild(tabs);
+
+        var content = new VBoxContainer
+        {
+            Name = "GeneralOptions",
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
         content.AddThemeConstantOverride("separation", 10);
-        margin.AddChild(content);
+        tabs.AddChild(content);
+        tabs.SetTabTitle(0, Ui("options", "general"));
         content.AddChild(new Label
         {
             Text = Ui("options", "language"),
@@ -1527,6 +1697,25 @@ public partial class Main : Node
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
         content.AddChild(new HSeparator());
+
+        var performance = RenderingPerformanceOptionsPanel.Create(
+            _renderingPerformanceSettings.Options,
+            Ui("options", "performance-help"),
+            value => UiFormat("options", "lower-refresh-value", value),
+            value => UiFormat("options", "chunk-size-value", value),
+            Ui("options", "warm-caches"),
+            Ui("options", "warm-caches-help"),
+            options =>
+            {
+                _renderingPerformanceSettings.Set(options);
+                _worldView.ConfigurePerformance(_renderingPerformanceSettings.Options);
+            });
+        performance.Name = "PerformanceOptions";
+        performance.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        performance.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+        tabs.AddChild(performance);
+        tabs.SetTabTitle(1, Ui("options", "performance"));
+
         content.AddChild(new Label
         {
             Text = Ui("options", "shortcuts"),
@@ -1924,12 +2113,16 @@ public partial class Main : Node
         _autosaveElapsedRealSeconds = 0;
     }
 
-    private string CreateSaveJson() => _sessionPreferences.AddToSave(_engine.Save());
+    private string CreateSaveJson()
+    {
+        _sessionPreferences.VisibleLevel = _visibleLevel;
+        return _sessionPreferences.AddToSave(_engine.Save());
+    }
 
     private void ScheduleNextAutosave() => _nextAutosaveTick =
         SimulationCalendar.NextDayStart(_engine.CurrentTick, _engine.Definitions.Clock);
 
-    private void ReplaceEngine(SimulationEngine engine)
+    private void ReplaceEngine(SimulationEngine engine, int preferredVisibleLevel = 0)
     {
         CancelActiveTool();
         SelectActor(EntityId.None);
@@ -1957,13 +2150,14 @@ public partial class Main : Node
         _accumulator = 0;
         _presentationRefreshElapsed = 0;
         _autosaveElapsedRealSeconds = 0;
-        _visibleLevel = 0;
-        _worldView.SetWorld(engine);
-        _worldView.SetVisibleLevel(0);
+        _visibleLevel = Math.Clamp(
+            preferredVisibleLevel,
+            engine.Map.MinimumWorldLevel,
+            engine.World.MaximumOccupiedLevel);
+        _worldView.SetWorld(engine, _visibleLevel);
         _worldView.SetSimulationSpeed(_speed, SecondsPerTick);
         _worldView3D.SetWorld(engine);
-        _minimap.SetWorld(engine);
-        _minimap.SetVisibleLevel(0);
+        _minimap.SetWorld(engine, _visibleLevel);
         _worldView.Visible = !_use3DView;
         _camera.Enabled = !_use3DView;
         _worldView3D.SetActive(_use3DView);

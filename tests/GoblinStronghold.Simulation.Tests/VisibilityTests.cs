@@ -108,7 +108,7 @@ public sealed class VisibilityTests
             initialFoodStock: 8);
         var snapshot = engine.CreateSnapshot();
         var expectedLayers = 1 + map.MaterializedNegativeLevelCount +
-            map.MaterializedPositiveLevelCount;
+            Math.Max(map.MaterializedPositiveLevelCount, engine.World.MaximumOccupiedLevel);
         var hillColumn = Enumerable.Range(0, map.Height)
             .SelectMany(y => Enumerable.Range(0, map.Width)
                 .Select(x => new GridPosition(x, y)))
@@ -248,6 +248,115 @@ public sealed class VisibilityTests
     }
 
     [Fact]
+    public void DiscoveredSurfacePropagatesUpAnOpenColumnUntilTheFirstBlocker()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x4F50454E434F4CUL),
+            width: 32,
+            height: 32);
+        var visibility = WorldVisibilityState.Create(map);
+        var source = new GridPosition(8, 8, map.MaximumWorldLevel - 3);
+        Assert.True(source.Z >= map.MinimumWorldLevel);
+        visibility.Reveal([source], radius: 1);
+
+        visibility.DiscoverOpenVerticalColumns(
+            minimumLevel: map.MinimumWorldLevel,
+            maximumLevel: map.MaximumWorldLevel,
+            topologyVersion: 1,
+            (upper, _) => upper.Z < map.MaximumWorldLevel);
+
+        Assert.Equal(CellVisibility.Visible, visibility.Get(source));
+        Assert.Equal(CellVisibility.Explored, visibility.Get(source with { Z = source.Z + 1 }));
+        Assert.Equal(CellVisibility.Explored, visibility.Get(source with { Z = source.Z + 2 }));
+        Assert.Equal(CellVisibility.Explored, visibility.Get(source with { Z = source.Z + 3 }));
+    }
+
+    [Fact]
+    public void OpenColumnDiscoveryIsReevaluatedAfterTopologyChanges()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x544F504F4C4F4759UL),
+            width: 32,
+            height: 32);
+        var visibility = WorldVisibilityState.Create(map);
+        var source = new GridPosition(8, 8, map.MinimumWorldLevel);
+        visibility.Reveal([source], radius: 1);
+        visibility.DiscoverOpenVerticalColumns(
+            minimumLevel: map.MinimumWorldLevel,
+            maximumLevel: source.Z + 2,
+            topologyVersion: 1,
+            (_, _) => false);
+
+        Assert.Equal(CellVisibility.Explored, visibility.Get(source with { Z = source.Z + 1 }));
+        Assert.Equal(CellVisibility.Unknown, visibility.Get(source with { Z = source.Z + 2 }));
+
+        visibility.DiscoverOpenVerticalColumns(
+            minimumLevel: map.MinimumWorldLevel,
+            maximumLevel: source.Z + 2,
+            topologyVersion: 2,
+            (upper, _) => upper.Z == source.Z + 1);
+
+        Assert.Equal(CellVisibility.Explored, visibility.Get(source with { Z = source.Z + 2 }));
+    }
+
+    [Fact]
+    public void ShallowWaterAtOneEightyNineRevealsItsOpenPositiveColumn()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(4_876_562_197_428_743_871UL),
+            width: 128,
+            height: 128);
+        var world = WorldMapState.CreateInitial(map);
+        var visibility = WorldVisibilityState.Create(map);
+        var surface = new GridPosition(1, 89, 0);
+        Assert.True(map.IsTerrainSurfacePosition(surface));
+        Assert.Equal(TerrainKind.ShallowWater, map.GetColumnCell(surface).Terrain);
+        visibility.Reveal([(surface, 1)], world.IsSolidHillRock);
+
+        visibility.DiscoverOpenVerticalColumns(
+            map.MinimumWorldLevel,
+            map.MaximumWorldLevel,
+            world.TopologyVersion,
+            world.HasOpenVerticalSightLine);
+
+        Assert.Equal(CellVisibility.Visible, visibility.Get(surface));
+        Assert.Equal(CellVisibility.Explored, visibility.Get(surface with { Z = 1 }));
+        Assert.Equal(CellVisibility.Explored, visibility.Get(surface with { Z = 2 }));
+        Assert.Equal(CellVisibility.Unknown, visibility.Get(surface with { Z = -1 }));
+    }
+
+    [Fact]
+    public void OpenColumnCanReachAConstructedLevelAboveNaturalTerrain()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x48494748434F4CUL),
+            width: 32,
+            height: 32);
+        const int constructedLevel = 5;
+        var visibility = WorldVisibilityState.Create(map, constructedLevel);
+        var source = new GridPosition(8, 8, map.MaximumWorldLevel);
+        visibility.Reveal([source], radius: 1);
+
+        visibility.DiscoverOpenVerticalColumns(
+            map.MinimumWorldLevel,
+            constructedLevel,
+            topologyVersion: 1,
+            (upper, _) => upper.Z < constructedLevel);
+
+        Assert.Equal(
+            CellVisibility.Explored,
+            visibility.Get(source with { Z = constructedLevel }));
+        var restored = WorldVisibilityState.Restore(
+            map,
+            visibility.CreateSnapshot(),
+            map.MaterializedNegativeLevelCount,
+            map.MaximumWorldLevel);
+        Assert.Equal(
+            CellVisibility.Explored,
+            restored.Get(source with { Z = constructedLevel }));
+    }
+
+    [Fact]
     public void GoblinBesideAnOpenEdgeUsesItsVisionRadiusOnTheImmediateLowerLayer()
     {
         var observer = new GridPosition(5, 5, 1);
@@ -374,7 +483,8 @@ public sealed class VisibilityTests
                 engine = restored;
                 restoredActiveExplore = true;
             }
-            if (CountDiscoveredAtLevel(engine, origin.Z) > initiallyDiscovered)
+            if (receivedExploreJob && restoredActiveExplore &&
+                CountDiscoveredAtLevel(engine, origin.Z) > initiallyDiscovered)
             {
                 break;
             }

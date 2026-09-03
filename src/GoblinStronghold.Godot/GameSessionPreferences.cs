@@ -11,14 +11,17 @@ internal sealed class GameSessionPreferences
     private readonly Dictionary<string, ResourceVariant> _constructionMaterials =
         new(StringComparer.OrdinalIgnoreCase);
 
-    internal GameSessionPreferences(string? profileName = null)
+    internal GameSessionPreferences(string? profileName = null, int visibleLevel = 0)
     {
         ProfileName = GameProfileName.TryNormalize(profileName, out var normalized)
             ? normalized
             : string.Empty;
+        VisibleLevel = visibleLevel;
     }
 
     internal string ProfileName { get; }
+
+    internal int VisibleLevel { get; set; }
 
     internal bool TryGetConstructionMaterial(string group, out ResourceVariant variant) =>
         _constructionMaterials.TryGetValue(group, out variant);
@@ -41,6 +44,7 @@ internal sealed class GameSessionPreferences
         root[SavePropertyName] = new JsonObject
         {
             ["profileName"] = ProfileName,
+            ["visibleLevel"] = VisibleLevel,
             ["constructionMaterials"] = new JsonObject(
                 _constructionMaterials
                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
@@ -65,7 +69,12 @@ internal sealed class GameSessionPreferences
             profileNameValue.ValueKind == JsonValueKind.String
                 ? profileNameValue.GetString()
                 : null;
-        var preferences = new GameSessionPreferences(profileName);
+        var visibleLevel = client.TryGetProperty("visibleLevel", out var visibleLevelValue) &&
+            visibleLevelValue.ValueKind == JsonValueKind.Number &&
+            visibleLevelValue.TryGetInt32(out var storedVisibleLevel)
+                ? storedVisibleLevel
+                : 0;
+        var preferences = new GameSessionPreferences(profileName, visibleLevel);
         if (!client.TryGetProperty("constructionMaterials", out var materials) ||
             materials.ValueKind != JsonValueKind.Object)
         {

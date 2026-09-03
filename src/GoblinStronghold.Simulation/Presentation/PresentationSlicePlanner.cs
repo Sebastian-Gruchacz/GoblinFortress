@@ -4,7 +4,8 @@ namespace GoblinStronghold.Simulation.Presentation;
 
 public readonly record struct PresentationSliceRequest(
     int ActiveLevel,
-    PresentationCellBounds VisibleBounds);
+    PresentationCellBounds VisibleBounds,
+    int ChunkSize = LowerLevelExposureIndex.DefaultChunkSize);
 
 public readonly record struct PresentationSliceWorkload(
     int DirectlyExposedColumns,
@@ -57,6 +58,7 @@ public static class PresentationSlicePlanner
         ArgumentNullException.ThrowIfNull(verticalPassages);
         ArgumentNullException.ThrowIfNull(isActiveLevelDiscovered);
         ArgumentNullException.ThrowIfNull(isVerticalViewBlocked);
+        ArgumentOutOfRangeException.ThrowIfLessThan(request.ChunkSize, 1);
         if (request.VisibleBounds.MaximumX < request.VisibleBounds.MinimumX ||
             request.VisibleBounds.MaximumY < request.VisibleBounds.MinimumY)
         {
@@ -103,7 +105,8 @@ public static class PresentationSlicePlanner
         var exposure = LowerLevelExposureIndex.Build(
             request.ActiveLevel,
             directlyExposed,
-            passages);
+            passages,
+            request.ChunkSize);
         var workload = new PresentationSliceWorkload(
             directlyExposed.Count,
             exposure.Regions.Sum(region => region.Cells.Count),
@@ -138,15 +141,27 @@ public static class PresentationSlicePlanner
             for (var x = request.VisibleBounds.MinimumX; x < request.VisibleBounds.MaximumX; x++)
             {
                 var surface = surfaceLevelAt(x, y);
-                if (surface < request.ActiveLevel &&
-                    isActiveLevelDiscovered(new GridPosition(x, y, request.ActiveLevel)) &&
-                    !Enumerable.Range(
-                            surface + 1,
-                            request.ActiveLevel - surface)
-                        .Any(level => isVerticalViewBlocked(
-                            new GridPosition(x, y, level))))
+                if (surface >= request.ActiveLevel ||
+                    !isActiveLevelDiscovered(new GridPosition(x, y, request.ActiveLevel)))
                 {
-                    result.Add(new GridPosition(x, y, surface));
+                    continue;
+                }
+
+                var exposedLevel = surface;
+                for (var level = request.ActiveLevel; level > surface; level--)
+                {
+                    if (!isVerticalViewBlocked(new GridPosition(x, y, level)))
+                    {
+                        continue;
+                    }
+
+                    exposedLevel = level;
+                    break;
+                }
+
+                if (exposedLevel < request.ActiveLevel)
+                {
+                    result.Add(new GridPosition(x, y, exposedLevel));
                 }
             }
         }

@@ -701,10 +701,17 @@ public sealed class SimulationSnapshot
             throw new ArgumentOutOfRangeException(nameof(position));
         }
 
+        var layerCount = Visibility.Count / VisibilityLayerCellCount;
+        var positiveLevelCount = layerCount - VisibilityNegativeLevelCount - 1;
+        if (position.Z < -VisibilityNegativeLevelCount ||
+            position.Z > positiveLevelCount)
+        {
+            return CellVisibility.Unknown;
+        }
+
         var layerIndex = position.Z <= 0
             ? -(long)position.Z
             : (long)VisibilityNegativeLevelCount + position.Z;
-        var layerCount = Visibility.Count / VisibilityLayerCellCount;
         if (layerIndex < 0 || layerIndex >= layerCount)
         {
             return CellVisibility.Unknown;

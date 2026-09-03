@@ -17,7 +17,9 @@ public readonly record struct RuntimeFramePerformanceSample(
     TimeSpan ActiveLightMapDuration,
     TimeSpan LowerChunkRebuildDuration,
     int VisibleDirtyChunks,
-    PresentationSliceWorkload SliceWorkload)
+    PresentationSliceWorkload SliceWorkload,
+    TimeSpan DynamicWorldDrawDuration,
+    TimeSpan StaticWorldDrawDuration)
 {
     public TimeSpan EffectiveDuration => FrameInterval > MainProcessDuration
         ? FrameInterval

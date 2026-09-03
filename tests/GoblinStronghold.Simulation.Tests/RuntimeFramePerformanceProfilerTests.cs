@@ -60,5 +60,7 @@ public sealed class RuntimeFramePerformanceProfilerTests
         ActiveLightMapDuration: TimeSpan.Zero,
         LowerChunkRebuildDuration: TimeSpan.Zero,
         VisibleDirtyChunks: 0,
-        SliceWorkload: default);
+        SliceWorkload: default,
+        DynamicWorldDrawDuration: TimeSpan.Zero,
+        StaticWorldDrawDuration: TimeSpan.Zero);
 }

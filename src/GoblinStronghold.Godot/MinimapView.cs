@@ -1,6 +1,7 @@
 using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.GodotClient.UI.WorldRendering;
 
 namespace GoblinStronghold.GodotClient;
 
@@ -11,23 +12,28 @@ public partial class MinimapView : Control
     private Vector2 _cameraCenterNormalized = new(0.5f, 0.5f);
     private Vector2 _cameraSizeNormalized = Vector2.One;
     private int _visibleLevel;
+    private readonly MinimapStaticTextureCache _staticLayers = new();
 
     public event Action<GridPosition>? NavigationRequested;
 
     public override void _Ready()
     {
         MouseFilter = MouseFilterEnum.Stop;
+        TextureFilter = TextureFilterEnum.Nearest;
     }
 
-    public void SetWorld(SimulationEngine engine)
+    public void SetWorld(SimulationEngine engine, int visibleLevel = 0)
     {
+        _staticLayers.Reset();
         _engine = engine;
+        _visibleLevel = visibleLevel;
         Refresh(engine.CreatePresentationSnapshot());
     }
 
     public void Refresh(SimulationSnapshot snapshot)
     {
         _snapshot = snapshot;
+        _staticLayers.SynchronizeLevel(_engine, snapshot, _visibleLevel);
         QueueRedraw();
     }
 
@@ -39,8 +45,14 @@ public partial class MinimapView : Control
         }
 
         _visibleLevel = level;
+        if (_engine is not null && _snapshot is not null)
+        {
+            _staticLayers.SynchronizeLevel(_engine, _snapshot, _visibleLevel);
+        }
         QueueRedraw();
     }
+
+    public override void _ExitTree() => _staticLayers.Dispose();
 
     public void SetCameraView(Vector2 centerNormalized, Vector2 sizeNormalized)
     {
@@ -82,42 +94,16 @@ public partial class MinimapView : Control
         }
 
         DrawRect(new Rect2(Vector2.Zero, Size), new Color("101719"));
+        if (_staticLayers.GetTexture(_visibleLevel) is { } staticLayer)
+        {
+            DrawTextureRect(
+                staticLayer,
+                new Rect2(Vector2.Zero, Size),
+                tile: false);
+        }
         var tileSize = new Vector2(
             Size.X / _engine.Map.Width,
             Size.Y / _engine.Map.Height);
-        var constructedSurfaces = _snapshot.WorldObjects
-            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
-            .Where(item => item.Part.Kind is WorldObjectPartKind.Walkway or
-                WorldObjectPartKind.Floor or WorldObjectPartKind.ConstructedRamp)
-            .Select(item => item.Position)
-            .Where(position => position.Z == _visibleLevel)
-            .ToHashSet();
-        for (var y = 0; y < _engine.Map.Height; y++)
-        {
-            for (var x = 0; x < _engine.Map.Width; x++)
-            {
-                var position = new GridPosition(x, y, _visibleLevel);
-                var visibility = _snapshot.GetVisibility(position, _engine.Map.Width);
-                if (visibility == CellVisibility.Unknown)
-                {
-                    continue;
-                }
-
-                var color = ResolveLevelColor(position, constructedSurfaces);
-                if (color is null)
-                {
-                    continue;
-                }
-                if (visibility == CellVisibility.Explored)
-                {
-                    color = color.Value.Darkened(0.48f);
-                }
-
-                DrawRect(
-                    new Rect2(new Vector2(x, y) * tileSize, tileSize + Vector2.One),
-                    color.Value);
-            }
-        }
 
         foreach (var actor in _snapshot.Actors.Where(actor =>
                      actor.Position.Z == _visibleLevel))
@@ -140,69 +126,6 @@ public partial class MinimapView : Control
         DrawRect(cameraRect, new Color(1f, 1f, 1f, 0.82f), filled: false, width: 1.5f);
         DrawRect(new Rect2(Vector2.Zero, Size), new Color("91a29b"), filled: false, width: 1f);
     }
-
-    private Color? ResolveLevelColor(
-        GridPosition position,
-        IReadOnlySet<GridPosition> constructedSurfaces)
-    {
-        if (_engine.Map.IsTerrainSurfacePosition(position))
-        {
-            var cell = _engine.Map.GetColumnCell(position);
-            if (cell.SurfaceRoute != SurfaceRouteKind.None)
-            {
-                return cell.SurfaceRoute == SurfaceRouteKind.Ford
-                    ? new Color("b28a50")
-                    : new Color("85633e");
-            }
-            return cell.Terrain switch
-            {
-                TerrainKind.SolidGround => new Color("668b4d"),
-                TerrainKind.Mud => new Color("4f5838"),
-                TerrainKind.ShallowWater => new Color("4b8890"),
-                TerrainKind.DeepWater => new Color("28536d"),
-                _ => Colors.Magenta,
-            };
-        }
-
-        if (_engine.Map.IsCavePosition(position))
-        {
-            var cell = _engine.Map.GetCaveCell(position);
-            if (cell.Fluid == CellFluidKind.Lava)
-            {
-                return new Color("b94a22");
-            }
-            if (cell.Fluid == CellFluidKind.Water)
-            {
-                return new Color("28536d");
-            }
-
-            var open = cell.IsOpen || _engine.World.ExcavatedCaveCells.Contains(position);
-            return RockColor(cell.Rock, open);
-        }
-
-        if (_engine.Map.IsHillMassPosition(position))
-        {
-            var cell = _engine.Map.GetHillMassCell(position);
-            return RockColor(cell.Rock, !_engine.World.IsSolidHillRock(position));
-        }
-
-        return constructedSurfaces.Contains(position)
-            ? new Color("8a7655")
-            : null;
-    }
-
-    private static Color RockColor(RockKind rock, bool floor) => (rock, floor) switch
-    {
-        (RockKind.Sandstone, true) => new Color("77634a"),
-        (RockKind.Sandstone, false) => new Color("463725"),
-        (RockKind.Granite, true) => new Color("656b74"),
-        (RockKind.Granite, false) => new Color("343942"),
-        (RockKind.Basalt, true) => new Color("44464d"),
-        (RockKind.Basalt, false) => new Color("202228"),
-        (RockKind.Obsidian, true) => new Color("514064"),
-        (RockKind.Obsidian, false) => new Color("271d31"),
-        _ => Colors.Magenta,
-    };
 
     private void RequestNavigation(Vector2 localPosition)
     {

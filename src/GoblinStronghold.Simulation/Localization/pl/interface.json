@@ -649,6 +649,13 @@
       "title": "Opcje",
       "language": "Język",
       "language-restart": "Wybór języka jest zapisywany od razu i zacznie obowiązywać po ponownym uruchomieniu gry.",
+      "general": "Ogólne",
+      "performance": "Wydajność",
+      "performance-help": "Przebudowywane są tylko brudne fragmenty terenu niższych poziomów. Minimalny odstęp jest mnożony przez głębokość; większe fragmenty zajmują więcej pamięci cache i przebudowują większy obszar po lokalnej zmianie.",
+      "lower-refresh-value": "Minimalny odstęp odświeżania niższych poziomów: {0:0.00} s",
+      "chunk-size-value": "Rozmiar fragmentu cache: {0} × {0} pól",
+      "warm-caches": "Przygotuj cache renderingu przed pokazaniem gry",
+      "warm-caches-help": "Podczas ładowania zaczekaj na przygotowanie początkowego widoku świata, widocznych fragmentów niższych poziomów i minimapy. Wyłącz, aby wejść szybciej i dogrzewać cache w tle.",
       "shortcuts": "Skróty klawiaturowe",
       "shortcuts-help": "Kliknij skrót i naciśnij nowy klawisz. Pozycje wcięte działają po wcześniejszym otwarciu nadrzędnego menu.",
       "about": "O grze",
@@ -656,6 +663,18 @@
       "music-notice": "Muzyka „The Hollow Council” jest tymczasowym utworem wygenerowanym przez AI, używanym wyłącznie w tym wewnętrznym demie. Nie posiada zgody na wykorzystanie komercyjne i musi zostać zastąpiona przed publiczną lub komercyjną dystrybucją.",
       "press-key": "Naciśnij klawisz…",
       "shortcut-conflict": "Zajęty: {0}"
+    },
+    "loading": {
+      "new-game-title": "Przygotowywanie nowej gry",
+      "load-game-title": "Wczytywanie gry",
+      "starting": "Przygotowywanie operacji…",
+      "finding-save": "Odczytywanie dostępnych punktów zapisu…",
+      "building-world": "Odtwarzanie świata i symulacji…",
+      "protecting-session": "Zabezpieczanie bieżącej sesji…",
+      "restoring-profile": "Przywracanie profilu gracza…",
+      "initializing-views": "Przygotowywanie widoku świata i minimapy…",
+      "warming-caches": "Budowanie cache renderingu…",
+      "finishing": "Kończenie działań po wczytaniu…"
     },
     "mods": {
       "title": "Mody",

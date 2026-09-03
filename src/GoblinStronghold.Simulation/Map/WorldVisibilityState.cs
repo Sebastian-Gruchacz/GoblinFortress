@@ -19,16 +19,32 @@ public sealed class WorldVisibilityState
 {
     private CellVisibility[] _cells;
     private readonly List<int> _visibleIndices;
+    private readonly HashSet<int> _discoveredIndices;
+    private readonly HashSet<GridPosition> _verticalDiscoverySeeds;
+    private readonly Queue<GridPosition> _pendingVerticalDiscoverySeeds;
     private int _materializedNegativeLevelCount;
+    private int _materializedPositiveLevelCount;
+    private ulong? _verticalDiscoveryTopologyVersion;
 
-    private WorldVisibilityState(GeneratedMap map, CellVisibility[] cells)
+    private WorldVisibilityState(
+        GeneratedMap map,
+        CellVisibility[] cells,
+        int materializedPositiveLevelCount)
     {
         Map = map;
         _cells = cells;
         _materializedNegativeLevelCount = map.MaterializedNegativeLevelCount;
+        _materializedPositiveLevelCount = materializedPositiveLevelCount;
         _visibleIndices = Enumerable.Range(0, cells.Length)
             .Where(index => cells[index] == CellVisibility.Visible)
             .ToList();
+        _discoveredIndices = Enumerable.Range(0, cells.Length)
+            .Where(index => cells[index] != CellVisibility.Unknown)
+            .ToHashSet();
+        _verticalDiscoverySeeds = _visibleIndices
+            .Select(GetPosition)
+            .ToHashSet();
+        _pendingVerticalDiscoverySeeds = new Queue<GridPosition>(_verticalDiscoverySeeds);
     }
 
     public GeneratedMap Map { get; }
@@ -38,36 +54,55 @@ public sealed class WorldVisibilityState
         get
         {
             EnsureLayerCapacity();
-            return _cells.Count(state => state != CellVisibility.Unknown);
+            return _discoveredIndices.Count;
         }
     }
 
-    internal static WorldVisibilityState Create(GeneratedMap map)
+    internal static WorldVisibilityState Create(GeneratedMap map, int? maximumLevel = null)
     {
         ArgumentNullException.ThrowIfNull(map);
+        var positiveLevelCount = Math.Max(
+            map.MaterializedPositiveLevelCount,
+            Math.Max(0, maximumLevel ?? map.MaximumWorldLevel));
         return new WorldVisibilityState(
             map,
             new CellVisibility[checked(map.CellCount *
-                (map.MaterializedNegativeLevelCount + map.MaterializedPositiveLevelCount + 1))]);
+                (map.MaterializedNegativeLevelCount + positiveLevelCount + 1))],
+            positiveLevelCount);
     }
 
     internal static WorldVisibilityState Restore(
         GeneratedMap map,
         IEnumerable<CellVisibility> visibility,
-        int? savedNegativeLevelCount = null)
+        int? savedNegativeLevelCount = null,
+        int? maximumLevel = null)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(visibility);
         var cells = visibility.ToArray();
+        var targetPositiveLevelCount = Math.Max(
+            map.MaterializedPositiveLevelCount,
+            Math.Max(0, maximumLevel ?? map.MaximumWorldLevel));
+        if (cells.Length % map.CellCount == 0)
+        {
+            var storedPositiveLevelCount =
+                (cells.Length / map.CellCount) - map.MaterializedNegativeLevelCount - 1;
+            if (storedPositiveLevelCount is >= 0 and <= WorldMapState.MaximumSupportedLevel)
+            {
+                targetPositiveLevelCount = Math.Max(
+                    targetPositiveLevelCount,
+                    storedPositiveLevelCount);
+            }
+        }
         var legacyLength = checked(map.CellCount * (map.CaveLevelCount + 1));
         var previousExpectedLength = checked(map.CellCount *
             (map.CaveLevelCount + map.MaterializedPositiveLevelCount + 1));
         var expectedLength = checked(map.CellCount *
-            (map.MaterializedNegativeLevelCount + map.MaterializedPositiveLevelCount + 1));
+            (map.MaterializedNegativeLevelCount + targetPositiveLevelCount + 1));
         var savedExpectedLength = savedNegativeLevelCount is null
             ? expectedLength
             : checked(map.CellCount *
-                (savedNegativeLevelCount.Value + map.MaterializedPositiveLevelCount + 1));
+                (savedNegativeLevelCount.Value + targetPositiveLevelCount + 1));
         if (cells.Any(state => !Enum.IsDefined(state)) ||
             cells.Length != map.CellCount && cells.Length != legacyLength &&
             cells.Length != previousExpectedLength &&
@@ -84,10 +119,10 @@ public sealed class WorldVisibilityState
                 savedNegativeLevelCount ??
                     Math.Min(map.CaveLevelCount, (cells.Length / map.CellCount) - 1),
                 map.MaterializedNegativeLevelCount,
-                map.MaterializedPositiveLevelCount);
+                targetPositiveLevelCount);
         }
 
-        return new WorldVisibilityState(map, cells);
+        return new WorldVisibilityState(map, cells, targetPositiveLevelCount);
     }
 
     public CellVisibility Get(GridPosition position)
@@ -161,6 +196,7 @@ public sealed class WorldVisibilityState
                         var index = GetIndex(position);
                         if (_cells[index] != CellVisibility.Visible)
                         {
+                            TrackDiscovery(index, isVerticalSeed: true);
                             _cells[index] = CellVisibility.Visible;
                             _visibleIndices.Add(index);
                         }
@@ -201,24 +237,83 @@ public sealed class WorldVisibilityState
                     }
 
                     var index = GetIndex(position);
-                    if (_cells[index] == CellVisibility.Unknown)
-                    {
-                        _cells[index] = CellVisibility.Explored;
-                    }
+                    TrackDiscovery(index, isVerticalSeed: true);
                 }
             }
         }
     }
 
-    private bool IsVisibilityPosition(GridPosition position) =>
-        Map.IsWithin(position) || Map.IsCavePosition(position) ||
-        Map.IsHillMassPosition(position) ||
-        Map.IsTerrainSurfacePosition(position);
+    internal void DiscoverOpenVerticalColumns(
+        int minimumLevel,
+        int maximumLevel,
+        ulong topologyVersion,
+        Func<GridPosition, GridPosition, bool> canSeeVertically)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(minimumLevel, maximumLevel);
+        ArgumentNullException.ThrowIfNull(canSeeVertically);
+        EnsureLayerCapacity(maximumLevel);
+        if (_verticalDiscoveryTopologyVersion != topologyVersion)
+        {
+            _pendingVerticalDiscoverySeeds.Clear();
+            _verticalDiscoverySeeds.Clear();
+            foreach (var index in _visibleIndices)
+            {
+                var seed = GetPosition(index);
+                _verticalDiscoverySeeds.Add(seed);
+                _pendingVerticalDiscoverySeeds.Enqueue(seed);
+            }
+            _verticalDiscoveryTopologyVersion = topologyVersion;
+        }
 
-    private void EnsureLayerCapacity()
+        var processed = new HashSet<GridPosition>();
+        while (_pendingVerticalDiscoverySeeds.TryDequeue(out var source))
+        {
+            if (!processed.Add(source))
+            {
+                continue;
+            }
+
+            var lower = source;
+            while (lower.Z > minimumLevel)
+            {
+                var next = lower with { Z = lower.Z - 1 };
+                if (!canSeeVertically(lower, next))
+                {
+                    break;
+                }
+
+                DiscoverExact(next);
+                lower = next;
+            }
+
+            var upper = source;
+            while (upper.Z < maximumLevel)
+            {
+                var next = upper with { Z = upper.Z + 1 };
+                DiscoverExact(next);
+                if (!canSeeVertically(next, upper))
+                {
+                    break;
+                }
+
+                upper = next;
+            }
+        }
+    }
+
+    private bool IsVisibilityPosition(GridPosition position) =>
+        Map.IsColumnWithin(position) &&
+        position.Z >= -_materializedNegativeLevelCount &&
+        position.Z <= _materializedPositiveLevelCount;
+
+    private void EnsureLayerCapacity(int? maximumLevel = null)
     {
         var targetNegativeLevelCount = Map.MaterializedNegativeLevelCount;
-        if (_materializedNegativeLevelCount == targetNegativeLevelCount)
+        var targetPositiveLevelCount = Math.Max(
+            _materializedPositiveLevelCount,
+            Math.Max(Map.MaterializedPositiveLevelCount, Math.Max(0, maximumLevel ?? 0)));
+        if (_materializedNegativeLevelCount == targetNegativeLevelCount &&
+            _materializedPositiveLevelCount == targetPositiveLevelCount)
         {
             return;
         }
@@ -228,16 +323,67 @@ public sealed class WorldVisibilityState
             Map.CellCount,
             _materializedNegativeLevelCount,
             targetNegativeLevelCount,
-            Map.MaterializedPositiveLevelCount);
+            targetPositiveLevelCount);
         _materializedNegativeLevelCount = targetNegativeLevelCount;
+        _materializedPositiveLevelCount = targetPositiveLevelCount;
         _visibleIndices.Clear();
         _visibleIndices.AddRange(Enumerable.Range(0, _cells.Length)
             .Where(index => _cells[index] == CellVisibility.Visible));
+        _discoveredIndices.Clear();
+        foreach (var index in Enumerable.Range(0, _cells.Length)
+                     .Where(index => _cells[index] != CellVisibility.Unknown))
+        {
+            _discoveredIndices.Add(index);
+        }
+        _verticalDiscoverySeeds.Clear();
+        _pendingVerticalDiscoverySeeds.Clear();
+        foreach (var index in _visibleIndices)
+        {
+            var seed = GetPosition(index);
+            _verticalDiscoverySeeds.Add(seed);
+            _pendingVerticalDiscoverySeeds.Enqueue(seed);
+        }
+        _verticalDiscoveryTopologyVersion = null;
     }
 
     private int GetIndex(GridPosition position) => checked(
         ((position.Z <= 0 ? -position.Z : Map.MaterializedNegativeLevelCount + position.Z) * Map.CellCount) +
         (position.Y * Map.Width) + position.X);
+
+    private GridPosition GetPosition(int index)
+    {
+        var layer = index / Map.CellCount;
+        var cell = index % Map.CellCount;
+        var level = layer <= Map.MaterializedNegativeLevelCount
+            ? -layer
+            : layer - Map.MaterializedNegativeLevelCount;
+        return new GridPosition(cell % Map.Width, cell / Map.Width, level);
+    }
+
+    private void DiscoverExact(GridPosition position)
+    {
+        if (!IsVisibilityPosition(position))
+        {
+            return;
+        }
+
+        TrackDiscovery(GetIndex(position), isVerticalSeed: false);
+    }
+
+    private void TrackDiscovery(int index, bool isVerticalSeed)
+    {
+        if (_cells[index] == CellVisibility.Unknown)
+        {
+            _cells[index] = CellVisibility.Explored;
+            _discoveredIndices.Add(index);
+        }
+
+        var position = GetPosition(index);
+        if (isVerticalSeed && _verticalDiscoverySeeds.Add(position))
+        {
+            _pendingVerticalDiscoverySeeds.Enqueue(position);
+        }
+    }
 
     private static CellVisibility[] ExpandLayers(
         CellVisibility[] source,

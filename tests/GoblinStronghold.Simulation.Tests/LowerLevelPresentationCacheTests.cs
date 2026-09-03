@@ -1,11 +1,75 @@
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Presentation;
+using GoblinStronghold.Simulation.Resources;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class LowerLevelPresentationCacheTests
 {
+    [Fact]
+    public void RetainedViewportBoundsUseAChunkMarginAndClampToTheMap()
+    {
+        var expanded = RetainedPresentationBoundsPolicy.ExpandToChunks(
+            new PresentationCellBounds(17, 18, 31, 35),
+            chunkSize: 16,
+            mapWidth: 40,
+            mapHeight: 40);
+
+        Assert.Equal(new PresentationCellBounds(0, 0, 40, 40), expanded);
+        Assert.True(RetainedPresentationBoundsPolicy.Contains(
+            expanded,
+            new PresentationCellBounds(8, 8, 32, 32)));
+        Assert.False(RetainedPresentationBoundsPolicy.Contains(
+            expanded,
+            new PresentationCellBounds(8, 8, 41, 32)));
+    }
+
+    [Fact]
+    public void ActiveStaticPresentationIgnoresActorOnlyTickChanges()
+    {
+        var seed = new WorldSeed(0x535441544943UL);
+        var map = SwampMapGenerator.Generate(seed, width: 24, height: 24);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+        var previous = engine.CreatePresentationSnapshot();
+
+        engine.AdvanceTicks(1);
+        var current = engine.CreatePresentationSnapshot();
+
+        Assert.False(ActiveStaticPresentationChangePolicy.HasChanged(previous, current, 0));
+    }
+
+    [Fact]
+    public void ActiveStaticPresentationDetectsStorageChangesOnTheVisibleLevel()
+    {
+        var seed = new WorldSeed(0x53544F52414745UL);
+        var map = SwampMapGenerator.Generate(seed, width: 24, height: 24);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+        var previous = engine.CreatePresentationSnapshot();
+        var storagePosition = map.GetCardinalNeighbors(map.GoblinSpawn)
+            .First(engine.World.IsTerrainTraversable);
+
+        engine.ApplyCommandImmediately(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick,
+            sequence: 1,
+            storagePosition,
+            ResourceKind.Wood,
+            capacity: 10));
+        var current = engine.CreatePresentationSnapshot();
+
+        Assert.True(ActiveStaticPresentationChangePolicy.HasChanged(previous, current, 0));
+    }
+
     [Fact]
     public void LowerLevelVisualDegradationIsGradualAndBounded()
     {
@@ -43,6 +107,50 @@ public sealed class LowerLevelPresentationCacheTests
         Assert.Equal(visible.Lower, plan.OpeningDestinations[visible.Upper]);
         Assert.True(plan.Exposure.IsContinuouslyExposed(visible.Lower));
         Assert.False(plan.Exposure.IsContinuouslyExposed(distant.Lower));
+    }
+
+    [Fact]
+    public void SlicePlannerUsesTheRequestedChunkSize()
+    {
+        var bounds = new PresentationCellBounds(0, 0, 20, 20);
+
+        var plan = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(1, bounds, ChunkSize: 8),
+            (_, _) => 0,
+            []);
+
+        Assert.Equal(8, plan.Exposure.ChunkSize);
+        Assert.Equal(9, plan.Workload.VisibleChunks);
+    }
+
+    [Theory]
+    [InlineData(1, 0, 1.0)]
+    [InlineData(2, 0, 2.0)]
+    [InlineData(3, 0, 3.0)]
+    [InlineData(2, -1, 3.0)]
+    public void LowerRefreshCadenceGrowsLinearlyWithDepth(
+        int activeLevel,
+        int cachedLevel,
+        double expectedSeconds)
+    {
+        Assert.Equal(
+            expectedSeconds,
+            LowerLevelRefreshCadencePolicy.GetMinimumIntervalSeconds(
+                baseIntervalSeconds: 1d,
+                activeLevel,
+                cachedLevel));
+        Assert.False(LowerLevelRefreshCadencePolicy.IsRebuildDue(
+            lastRebuildSeconds: 4d,
+            currentSeconds: 4d + expectedSeconds - 0.01d,
+            baseIntervalSeconds: 1d,
+            activeLevel,
+            cachedLevel));
+        Assert.True(LowerLevelRefreshCadencePolicy.IsRebuildDue(
+            lastRebuildSeconds: 4d,
+            currentSeconds: 4d + expectedSeconds,
+            baseIntervalSeconds: 1d,
+            activeLevel,
+            cachedLevel));
     }
 
     [Fact]
@@ -108,6 +216,28 @@ public sealed class LowerLevelPresentationCacheTests
 
         Assert.Contains(lowerSurface, plan.DirectlyExposedCells);
         Assert.True(plan.Exposure.IsContinuouslyExposed(lowerSurface));
+    }
+
+    [Fact]
+    public void PositiveSliceShowsTheHighestBlockingFloorFromTheSharedCache()
+    {
+        var bounds = new PresentationCellBounds(0, 0, 8, 8);
+        var naturalSurface = new GridPosition(3, 3, 0);
+        var upperFloor = naturalSurface with { Z = 1 };
+
+        var plan = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(2, bounds),
+            (x, y) => x == naturalSurface.X && y == naturalSurface.Y ? 0 : 2,
+            [],
+            _ => true,
+            position => position == upperFloor);
+
+        Assert.Equal([upperFloor], plan.DirectlyExposedCells);
+        Assert.True(plan.Exposure.IsContinuouslyExposed(upperFloor));
+        Assert.False(plan.Exposure.IsContinuouslyExposed(naturalSurface));
+        Assert.Contains(
+            new PresentationChunkKey(upperFloor.Z, 0, 0),
+            plan.Exposure.VisibleChunks);
     }
 
     [Fact]

@@ -409,11 +409,15 @@ caches.
   textures with a separate one-pixel-per-cell exposure mask. Rebuild only
   visible dirty chunks, retain hidden textures, and composite cached geometry
   from the deepest visible level upward before drawing the active level.
-- [x] Increase lower-slice geometry to sixteen pixels per cell and bake plants,
+- [x] Increase lower-slice geometry to twenty pixels per cell and bake plants,
   effective-height structures, tree trunks, and segmented atlas crowns into the
-  same cached image before applying one distance-based degradation pass. Plant
-  harvest and regrowth invalidate only affected retained chunks; vegetation no
-  longer uses a separate lower-level overlay.
+  same cached image before applying one distance-based brightness degradation
+  pass. Apply the same depth curve to the sky-exposed copy and to regions drawn
+  through openings so neither path can restore full brightness. Plant harvest
+  and regrowth invalidate only affected retained chunks; vegetation no longer
+  uses a separate lower-level overlay. Keep spatial resolution fixed until
+  playtesting justifies depth-dependent downsampling; deeper chunks already lose
+  temporal fidelity through their linearly increasing refresh interval.
 - [x] Extend cached geometry with simplified static structures and apply the
   exposure mask while composing openings in the active plane. Lower slices use
   deliberately reduced structure silhouettes instead of live structure draw
@@ -436,9 +440,34 @@ caches.
   Current underground water and lava belong to immutable generated map
   geometry, so there is no runtime fluid mutation source to register yet.
 - [x] Add a low-cadence, position-quantized overlay for lower-level moving
-  actors. Sample once per ten simulation ticks, render compact silhouettes
-  without interpolation, and force a refresh only when exposure or the camera
-  slice changes.
+  actors. Render compact silhouettes without interpolation and only inside the
+  exact currently exposed opening above them. Lower geometry, visibility
+  signatures, and actor samples now synchronize on a persisted 0.25-2 second
+  presentation cadence instead of every frame. Texture rebuilds occur only for
+  dirty chunks and no more often than that base interval, multiplied linearly by
+  depth below the active slice; positive and negative slices use the same path.
+- [x] Make the lower-slice chunk size (8, 16, 24, or 32 cells) and refresh
+  cadence player-configurable in the localized Performance section. Changing
+  chunk size safely resets presentation-only indices and textures while keeping
+  simulation and save contracts unchanged.
+- [x] Gate active actor and animal interpolation to the current camera rectangle
+  and currently visible cells. Off-screen, unexplored, and merely remembered
+  movement stays position-dirty without scheduling animation redraws, then snaps
+  to the current target when it becomes observable again.
+- [x] Remove the duplicate live lower-detail and lower-actor passes from
+  `WorldView`; static detail stays in cached chunk textures and lower actors are
+  drawn only through openings. Hide job targets and work-designation overlays
+  when a cell falls below six screen pixels.
+- [x] Bound active-slice collection passes to the camera rectangle before
+  issuing draw commands. Structures and their parts, floors, walkways, walls,
+  doors, torches, plants, contamination, fields, storage, loose items, corpses,
+  buds, jobs, construction, crafting, animals, and villagers no longer draw the
+  rest of the level merely because another visible animation requested redraw.
+- [x] Cache every visited minimap level as a static one-pixel-per-cell texture
+  keyed by world and discovery state. Terrain and non-nature structures rebuild
+  synchronously during snapshot refresh or a level switch, while actor markers
+  and the camera rectangle remain lightweight overlays. Current actor vision no
+  longer brightens the cached minimap surface.
 - [ ] Attach mobile light snapshots to that overlay once carried lanterns,
   torches, or luminous actor traits have real content definitions. Until then,
   do not invent implicit light sources for ordinary actors.
@@ -449,7 +478,9 @@ caches.
 - [x] Add allocation-free-on-write counters and timings for presentation
   snapshot construction, emitter queries, active light-map builds, evaluated
   cells/emitters, dirty lower chunks, and geometry/static-light texture rebuilds.
-  Metrics remain pull-based and do not log every frame.
+  Full `WorldView._Draw` duration is included so retained-layer work can be
+  distinguished from snapshot refresh cost. Metrics remain pull-based and do
+  not log every frame.
 - [x] Establish deterministic structural baselines for a single shaft and a
   broad Swiss-cheese exposure map. The workload summary reports direct columns,
   continuously exposed cells, regions, chunks, and light passages alongside
@@ -461,6 +492,43 @@ caches.
   the bounded sample history.
 - [ ] Capture live wall-clock samples from a representative long-running save
   for both workloads before increasing cache fidelity or rebuild budgets.
+- [x] Split the active slice into independent retained static and dynamic
+  `CanvasItem` passes. Terrain, structures, contamination, storage, items, and
+  other slow state retain their Godot draw-command buffer while actors,
+  villagers, animals, effects, previews, fog, and active light redraw without
+  re-entering static C# drawing. Static snapshot changes are coalesced to at
+  most once per second unless world or topology versions require an immediate
+  refresh; lower-slice rebuilds still invalidate the retained pass directly.
+- [x] Stop scheduling the retained static pass for actor-only snapshots. A
+  focused presentation-change policy compares only slow visual state on the
+  active level, while opaque dynamic fog masks cached static content in unknown
+  cells and reveals it without rebuilding the static pass as exploration moves.
+- [x] Pad the retained active static command buffer to chunk-aligned camera
+  bounds. Camera movement reuses the buffered margin and queues a rebuild only
+  after the viewport leaves it; the existing performance chunk-size setting
+  controls this spatial hysteresis as well as lower-slice texture chunks.
+- [x] Route positive active levels through the same lower-slice texture cache as
+  surface and underground views. Empty positive cells inherit discovery from
+  their known terrain column, and the highest constructed floor is included in
+  the cached slice while blocking geometry beneath it. Positive slices no
+  longer fall back to a separate terrain-only draw while a chunk is pending.
+- [x] Keep rendering caches derived and outside the save contract. A persisted
+  performance option chooses background warmup or waits behind a localized,
+  weighted loading overlay until the initial retained world pass and visible
+  lower-level chunks are ready; minimap construction remains part of view
+  initialization. The client save envelope retains the last viewed level and
+  restores it before that initial cache pass, while exposure/opening indices
+  remain cheap topology-derived presentation state rather than duplicated save
+  data.
+- [x] Propagate current discovery through continuous open vertical sight lines
+  in both directions. Newly observed cells seed the column pass, current visible
+  seeds are reconsidered after topology changes, open air continues through
+  every materialized level, and the first blocking floor or ceiling becomes
+  explored without revealing geometry behind it.
+- [ ] Partition the retained active static pass into independently invalidated
+  spatial chunks. The current retained command buffer avoids repeated C# work
+  between invalidations but a real static change still rebuilds the visible
+  camera rectangle as one unit.
 
 ### Stage F: profiles, saves and mod content
 

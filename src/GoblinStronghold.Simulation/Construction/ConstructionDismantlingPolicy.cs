@@ -37,6 +37,13 @@ public static class ConstructionDismantlingPolicy
             WorldObjectKind.StoneFloor => ConstructionKind.StoneFloor,
             WorldObjectKind.WoodenRamp => ConstructionKind.WoodenRamp,
             WorldObjectKind.StoneRamp => ConstructionKind.StoneRamp,
+            WorldObjectKind.GoblinCompost => ConstructionKind.GoblinCompost,
+            WorldObjectKind.WoodenWatchtower => ConstructionKind.WoodenWatchtower,
+            WorldObjectKind.ReedSleepingMat => ConstructionKind.ReedSleepingMat,
+            WorldObjectKind.StandingTorch => ConstructionKind.StandingTorch,
+            WorldObjectKind.CookingFire => ConstructionKind.CookingFire,
+            WorldObjectKind.FittedWorkshop => ConstructionKind.FittedWorkshop,
+            WorldObjectKind.WoodenLadder => ConstructionKind.WoodenLadder,
             _ => default,
         };
         return construction != default;

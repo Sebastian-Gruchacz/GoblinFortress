@@ -12,6 +12,8 @@ public enum WorkshopKind : byte
     Bloomery = 2,
     SmeltingFurnace = 3,
     CrucibleFurnace = 4,
+    CookingFire = 5,
+    FittedWorkshop = 6,
 }
 
 public sealed record WorkshopConstructionRequirement(

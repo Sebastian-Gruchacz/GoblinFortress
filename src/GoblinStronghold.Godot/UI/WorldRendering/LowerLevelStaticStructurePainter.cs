@@ -129,16 +129,47 @@ internal static class LowerLevelStaticStructurePainter
                     new Vector2I(2, Math.Max(3, size / 3))),
                     new Color("f28a24"));
                 break;
+            case WorldObjectPartKind.StandingTorch:
+                target.FillRect(cell.Grow(-4), new Color("76502f"));
+                target.FillRect(cell.Grow(-6), new Color("f28a24"));
+                break;
             case WorldObjectPartKind.PrimitiveWorkshop:
             case WorldObjectPartKind.Bloomery:
             case WorldObjectPartKind.SmeltingFurnace:
             case WorldObjectPartKind.CrucibleFurnace:
+            case WorldObjectPartKind.FittedWorkshop:
                 target.FillRect(cell.Grow(-2), palette.Edge);
                 target.FillRect(cell.Grow(-3), palette.Midtone);
                 break;
+            case WorldObjectPartKind.CookingFire:
+                target.FillRect(cell.Grow(-5), new Color("4a3523"));
+                target.FillRect(cell.Grow(-7), new Color("d45a20"));
+                break;
+            case WorldObjectPartKind.WatchtowerPlatform:
+                target.FillRect(cell.Grow(-1), palette.Edge);
+                target.FillRect(cell.Grow(-3), palette.Midtone);
+                DrawLine(target, origin, horizontal: true, palette.Highlight);
+                break;
+            case WorldObjectPartKind.WatchtowerSupport:
+                target.FillRect(cell.Grow(-6), palette.Shadow);
+                break;
+            case WorldObjectPartKind.Ladder:
+                target.FillRect(cell.Grow(-6), palette.Shadow);
+                DrawLine(target, origin, horizontal: false, palette.Highlight);
+                break;
+            case WorldObjectPartKind.SleepingMat:
+                target.FillRect(cell.Grow(-3), new Color("8f7b43"));
+                DrawLine(target, origin, horizontal: true, new Color("c0a95f"));
+                break;
             case WorldObjectPartKind.ConstructedRamp:
-                target.FillRect(cell.Grow(-1), palette.Midtone);
-                DrawRampSteps(target, origin, worldObject.Orientation, palette.Edge);
+                PaintConstructedRamp(
+                    target,
+                    origin,
+                    worldObject.Orientation,
+                    palette);
+                break;
+            case WorldObjectPartKind.CompostHeap:
+                PaintCompostHeap(target, origin);
                 break;
             case WorldObjectPartKind.WellRim:
             case WorldObjectPartKind.WellShaft:
@@ -272,16 +303,86 @@ internal static class LowerLevelStaticStructurePainter
         Image target,
         Vector2I origin,
         CardinalOrientation orientation,
-        Color color)
+        Color highlight,
+        Color shadow)
     {
         var size = LowerLevelChunkTextureCache.PixelsPerCell;
         var horizontal = orientation is CardinalOrientation.North or CardinalOrientation.South;
-        for (var offset = 2; offset < size - 1; offset += 4)
+        ReadOnlySpan<int> offsets = [5, 10, 15];
+        foreach (var offset in offsets)
         {
-            var rectangle = horizontal
-                ? new Rect2I(origin + new Vector2I(1, offset), new Vector2I(size - 2, 1))
-                : new Rect2I(origin + new Vector2I(offset, 1), new Vector2I(1, size - 2));
-            target.FillRect(rectangle, color);
+            var highlightLine = horizontal
+                ? new Rect2I(origin + new Vector2I(3, offset), new Vector2I(size - 6, 1))
+                : new Rect2I(origin + new Vector2I(offset, 3), new Vector2I(1, size - 6));
+            target.FillRect(highlightLine, highlight);
+            target.FillRect(
+                new Rect2I(highlightLine.Position + RampShadowOffset(orientation),
+                    highlightLine.Size),
+                shadow);
+        }
+    }
+
+    private static void PaintConstructedRamp(
+        Image target,
+        Vector2I origin,
+        CardinalOrientation orientation,
+        MaterialPaletteColors palette)
+    {
+        var size = LowerLevelChunkTextureCache.PixelsPerCell;
+        var cell = new Rect2I(origin, new Vector2I(size, size));
+        target.FillRect(cell.Grow(-1), palette.Edge);
+        target.FillRect(cell.Grow(-3), palette.Midtone);
+        var shade = orientation switch
+        {
+            CardinalOrientation.North => new Rect2I(origin + new Vector2I(3, 13),
+                new Vector2I(size - 6, 4)),
+            CardinalOrientation.East => new Rect2I(origin + new Vector2I(3, 3),
+                new Vector2I(4, size - 6)),
+            CardinalOrientation.South => new Rect2I(origin + new Vector2I(3, 3),
+                new Vector2I(size - 6, 4)),
+            CardinalOrientation.West => new Rect2I(origin + new Vector2I(13, 3),
+                new Vector2I(4, size - 6)),
+            _ => cell.Grow(-3),
+        };
+        target.FillRect(shade, palette.Midtone.Lerp(palette.Shadow, 0.42f));
+        DrawRampSteps(target, origin, orientation, palette.Highlight, palette.Shadow);
+    }
+
+    private static Vector2I RampShadowOffset(CardinalOrientation orientation) => orientation switch
+    {
+        CardinalOrientation.North => new Vector2I(0, 1),
+        CardinalOrientation.East => new Vector2I(-1, 0),
+        CardinalOrientation.South => new Vector2I(0, -1),
+        CardinalOrientation.West => new Vector2I(1, 0),
+        _ => Vector2I.Zero,
+    };
+
+    private static void PaintCompostHeap(Image target, Vector2I origin)
+    {
+        FillDisc(target, origin + new Vector2I(10, 11), 8, new Color("33291d"));
+        FillDisc(target, origin + new Vector2I(8, 11), 6, new Color("594a2b"));
+        FillDisc(target, origin + new Vector2I(13, 12), 4, new Color("6c6332"));
+        target.FillRect(new Rect2I(origin + new Vector2I(5, 7), new Vector2I(11, 2)),
+            new Color("c8b98a"));
+        FillDisc(target, origin + new Vector2I(13, 5), 2, new Color("789246"));
+    }
+
+    private static void FillDisc(
+        Image target,
+        Vector2I center,
+        int radius,
+        Color color)
+    {
+        var squaredRadius = radius * radius;
+        for (var y = -radius; y <= radius; y++)
+        {
+            for (var x = -radius; x <= radius; x++)
+            {
+                if ((x * x) + (y * y) <= squaredRadius)
+                {
+                    target.SetPixel(center.X + x, center.Y + y, color);
+                }
+            }
         }
     }
 

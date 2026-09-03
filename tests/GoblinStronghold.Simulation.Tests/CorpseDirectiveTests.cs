@@ -194,6 +194,44 @@ public sealed class CorpseDirectiveTests
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
 
+    [Fact]
+    public void GoblinCorpseCanBeCarriedToStarterCompostAndBecomeABud()
+    {
+        var engine = CreateEngine();
+        var compost = Assert.Single(engine.CreateSnapshot().WorldObjects,
+            item => item.Kind == WorldObjectKind.GoblinCompost);
+        var corpseId = AddGoblinCorpse(ref engine, engine.Map.GoblinSpawn);
+
+        engine.QueueCommand(SimulationCommand.ConfigureCorpseDirectives(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            corpseId,
+            CorpseDirective.RecoverAndBudAtCamp));
+        engine.AdvanceTicks(1);
+        for (var tick = 0; tick < 2_000 && !engine.CreateSnapshot().Actors.Any(actor =>
+                 actor.Job.Kind == ActorJobKind.RecoverRaidCorpse); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        Assert.Contains(engine.CreateSnapshot().Actors,
+            actor => actor.Job.Kind == ActorJobKind.RecoverRaidCorpse);
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+        engine = restored;
+
+        for (var tick = 0; tick < 4_000 && engine.CreateSnapshot().GoblinBuds.Count == 0; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        var bud = Assert.Single(snapshot.GoblinBuds);
+        Assert.Equal(compost.Anchor, bud.Position);
+        Assert.Equal(corpseId, bud.OriginCorpseId);
+        Assert.DoesNotContain(snapshot.Corpses, item => item.Id == corpseId);
+    }
+
     private static SimulationEngine CreateEngine() => SimulationEngine.Create(
         new WorldSeed(0x434F52505345UL),
         SimulationDefinitions.Foundation,

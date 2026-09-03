@@ -5,9 +5,11 @@
   "subsections": {
     "names": {
       "primitive-workshop": "primitive workshop",
+      "fitted-workshop": "fitted workshop",
       "bloomery": "bloomery",
       "smelting-furnace": "smelting furnace",
-      "crucible-furnace": "crucible furnace"
+      "crucible-furnace": "crucible furnace",
+      "cooking-fire": "cooking fire"
     }
   }
 }

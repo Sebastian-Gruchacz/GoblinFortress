@@ -119,10 +119,7 @@ internal static class LowerLevelStaticLightPainter
                         var instanceId = checked((ulong)(y * engine.Map.Width + x) + 1UL);
                         emitters.Add(CreateEmitter(position, lava, instanceId));
                     }
-                    else if (CaveFloraGenerator.TryGet(
-                                 engine.Map,
-                                 position,
-                                 out var flora) &&
+                    else if (engine.World.TryGetCaveFlora(position, out var flora) &&
                              flora.Kind == CaveFloraKind.GlowcapCluster)
                     {
                         var instanceId = checked(

@@ -338,7 +338,7 @@ public sealed class BloodCleaningTests
         var origin = initial.Actors[0].Position;
         var floor = initial.WorldObjects
             .Where(worldObject =>
-                worldObject.Kind == WorldObjectKind.GoblinHut &&
+                worldObject.Kind is (WorldObjectKind.GoblinHut or WorldObjectKind.GoblinRuin) &&
                 worldObject.Owner == WorldObjectOwner.GoblinTribe)
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
@@ -387,7 +387,7 @@ public sealed class BloodCleaningTests
         var origin = initial.Actors[0].Position;
         var floor = initial.WorldObjects
             .Where(worldObject =>
-                worldObject.Kind == WorldObjectKind.GoblinHut &&
+                worldObject.Kind is (WorldObjectKind.GoblinHut or WorldObjectKind.GoblinRuin) &&
                 worldObject.Owner == WorldObjectOwner.GoblinTribe)
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
@@ -439,7 +439,7 @@ public sealed class BloodCleaningTests
         engine.AdvanceTicks(1);
         var floors = engine.CreateSnapshot().WorldObjects
             .Where(worldObject =>
-                worldObject.Kind == WorldObjectKind.GoblinHut &&
+                worldObject.Kind is (WorldObjectKind.GoblinHut or WorldObjectKind.GoblinRuin) &&
                 worldObject.Owner == WorldObjectOwner.GoblinTribe)
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
@@ -497,7 +497,8 @@ public sealed class BloodCleaningTests
         var initial = engine.CreateSnapshot();
         var origin = initial.Actors[0].Position;
         var floor = initial.WorldObjects
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut)
+            .Where(worldObject => worldObject.Kind is
+                WorldObjectKind.GoblinHut or WorldObjectKind.GoblinRuin)
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
             .Select(part => part.Position)

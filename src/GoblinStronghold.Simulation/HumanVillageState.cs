@@ -766,7 +766,6 @@ internal sealed class HumanVillageState
         var occupied = _villagers.Values.Where(item => item.Health > 0)
             .Select(item => item.Position).ToHashSet();
         var livingVillagers = _villagers.Values.Where(item => item.Health > 0).ToArray();
-        var pathBudget = Math.Max(1, maximumPathExpansions / Math.Max(1, livingVillagers.Length));
         foreach (var villager in livingVillagers)
         {
             occupied.Remove(villager.Position);
@@ -792,7 +791,9 @@ internal sealed class HumanVillageState
                 occupied.Add(villager.Position);
                 continue;
             }
-            var request = navigation.RequestPath(
+            // Human routes are not serialized. Resolve each infrequent cohort step atomically so
+            // save/load cannot discard an in-progress search and change later authoritative state.
+            var route = navigation.FindPath(
                 villager.Position,
                 target,
                 new NavigationPathContext(
@@ -803,11 +804,7 @@ internal sealed class HumanVillageState
                     ConstraintKey: 2),
                 (from, to) => from.Z == 0 && to.Z == 0 &&
                     world.Baseline.CanTraverseSurfaceEdge(from, to),
-                pathBudget,
                 canOpenDoors: false);
-            var route = request.Status == NavigationPathRequestStatus.Complete
-                ? request.Path
-                : null;
             if (route is { Count: > 0 } && Distance(route[0], Anchor) <= villagerRadius &&
                 !occupied.Contains(route[0]))
             {

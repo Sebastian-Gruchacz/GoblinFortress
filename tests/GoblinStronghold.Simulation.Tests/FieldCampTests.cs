@@ -550,6 +550,7 @@ public sealed class FieldCampTests
         actorModel["personalFood"] = 1;
         actorModel["personalFoodKind"] = (int)FoodKind.DriedRations;
         actorModel.Remove("personalFoodKinds");
+        actorModel.Remove("personalFoodFreshUntilTicks");
         var stackModel = save["itemStacks"]!.AsArray()
             .Single(item => item!["id"]!.GetValue<ulong>() == foodStack.Id.Value)!.AsObject();
         stackModel["foodKind"] = (int)FoodKind.EdibleRoots;

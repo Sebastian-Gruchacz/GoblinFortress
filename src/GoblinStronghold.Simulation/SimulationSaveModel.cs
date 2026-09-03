@@ -30,6 +30,8 @@ internal sealed class SimulationSaveModel
 
     public long CurrentTick { get; set; }
 
+    public int CompostNutrients { get; set; }
+
     public ulong NextEntityId { get; set; }
 
     public ulong NextEventSequence { get; set; }
@@ -83,6 +85,8 @@ internal sealed class SimulationSaveModel
     public List<GridPositionSaveModel> ExcavatedTerrainRamps { get; set; } = [];
 
     public List<VerticalPassageSaveModel> ExcavatedVerticalPassages { get; set; } = [];
+
+    public List<GridPositionSaveModel> HarvestedCaveFlora { get; set; } = [];
 
     public HumanVillageSaveModel HumanVillage { get; set; } = new();
 
@@ -490,6 +494,8 @@ internal sealed class ActorSaveModel
 
     public List<Resources.FoodKind>? PersonalFoodKinds { get; set; }
 
+    public List<long>? PersonalFoodFreshUntilTicks { get; set; }
+
     public int PersonalWater { get; set; }
 
     public int PersonalStoneAmmo { get; set; }
@@ -643,6 +649,8 @@ internal sealed class ItemStackSaveModel
     public ulong OwnerId { get; set; }
 
     public Resources.StoragePriority? HaulPriority { get; set; }
+
+    public long? FreshUntilTick { get; set; }
 }
 
 internal sealed class StorageZoneSaveModel
@@ -799,15 +807,21 @@ internal sealed class CraftingOrderSaveModel
     public int RemainingWorkTicks { get; set; }
 
     public bool IsRepeating { get; set; }
+
+    public bool IsAutomatic { get; set; }
 }
 
 internal sealed class CraftingDeliveredMaterialSaveModel
 {
     public Resources.ResourceKind Resource { get; set; }
 
+    public Resources.FoodKind FoodKind { get; set; }
+
     public Resources.ResourceVariant Variant { get; set; }
 
     public int Quantity { get; set; }
+
+    public long? FreshUntilTick { get; set; }
 }
 
 internal sealed class CommandSaveModel

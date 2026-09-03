@@ -22,7 +22,15 @@
       "SmeltIronBar": "wytop sztabki żelaza",
       "SmeltCopperBar": "wytop sztabki miedzi",
       "SmeltSilverBar": "wytop sztabki srebra",
-      "SmeltGoldBar": "wytop sztabki złota"
+      "SmeltGoldBar": "wytop sztabki złota",
+      "CookRawMeat": "ugotuj mięso",
+      "FishRootSoup": "zupa rybna z korzonkami",
+      "FishMushroomSoup": "zupa rybna z grzybami",
+      "MeatRootSoup": "zupa mięsna z korzonkami",
+      "MeatMushroomSoup": "zupa mięsna z grzybami",
+      "PreserveFishAndMeat": "przygotuj suszone racje",
+      "BrewRootAndBerryMedicine": "uwarz lek z korzonków i jagód",
+      "BrewLichenAndMushroomMana": "uwarz manę z porostów i grzybów"
     }
   }
 }

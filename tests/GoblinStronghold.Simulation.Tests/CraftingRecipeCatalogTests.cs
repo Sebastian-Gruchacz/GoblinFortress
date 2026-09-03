@@ -30,7 +30,7 @@ public sealed class CraftingRecipeCatalogTests
         var barrel = CraftingRecipeCatalog.Get("wooden-barrel");
 
         Assert.Equal(CraftingRecipeKind.WoodenBarrel, barrel.Kind);
-        Assert.Equal(WorkshopKind.PrimitiveWorkshop, barrel.Workshop);
+        Assert.Equal(WorkshopKind.FittedWorkshop, barrel.Workshop);
         Assert.Equal(
             [
                 new CraftingMaterialRequirement(
@@ -49,6 +49,20 @@ public sealed class CraftingRecipeCatalogTests
                 ResourceVariant.EquipmentWoodenBarrel,
                 1),
             barrel.Output);
+    }
+
+    [Theory]
+    [InlineData(CraftingRecipeKind.ReinforcedPickaxe)]
+    [InlineData(CraftingRecipeKind.WoodenBarrel)]
+    [InlineData(CraftingRecipeKind.WoodenChest)]
+    [InlineData(CraftingRecipeKind.WoodenBulkBin)]
+    public void AdvancedToolsAndContainersRequireTheFittedWorkshop(
+        CraftingRecipeKind recipeKind)
+    {
+        var recipe = CraftingRecipeCatalog.Get(recipeKind);
+
+        Assert.Equal(WorkshopKind.FittedWorkshop, recipe.Workshop);
+        Assert.Equal(2, recipe.Level);
     }
 
     [Fact]
@@ -101,6 +115,90 @@ public sealed class CraftingRecipeCatalogTests
                 ResourceVariant.EquipmentPrimitivePickaxe,
                 1),
             pickaxe.Output);
+    }
+
+    [Fact]
+    public void CookingFireConsumesRawMeatAndWoodAndProducesCookedMeat()
+    {
+        var recipe = CraftingRecipeCatalog.Get(CraftingRecipeKind.CookRawMeat);
+
+        Assert.Equal(WorkshopKind.CookingFire, recipe.Workshop);
+        Assert.Contains(recipe.Materials, material => material ==
+            new CraftingMaterialRequirement(
+                ResourceKind.Food,
+                ResourceVariant.None,
+                2,
+                FoodKind.RawMeat));
+        Assert.Contains(recipe.Materials, material => material ==
+            new CraftingMaterialRequirement(ResourceKind.Wood, ResourceVariant.None, 1));
+        Assert.Equal(
+            new CraftingOutputDefinition(
+                ResourceKind.Food,
+                ResourceVariant.None,
+                2,
+                FoodKind.CookedMeat),
+            recipe.Output);
+        Assert.Null(CraftingRecipeCatalog.FindMaterial(
+            recipe.Kind,
+            ResourceKind.Food,
+            FoodKind.Berries,
+            ResourceVariant.None));
+    }
+
+    [Theory]
+    [InlineData(CraftingRecipeKind.FishRootSoup, FoodKind.Fish, FoodKind.EdibleRoots,
+        FoodKind.CampSoup, 2)]
+    [InlineData(CraftingRecipeKind.FishMushroomSoup, FoodKind.Fish, FoodKind.Mushrooms,
+        FoodKind.CampSoup, 2)]
+    [InlineData(CraftingRecipeKind.MeatRootSoup, FoodKind.RawMeat, FoodKind.EdibleRoots,
+        FoodKind.CampSoup, 2)]
+    [InlineData(CraftingRecipeKind.MeatMushroomSoup, FoodKind.RawMeat, FoodKind.Mushrooms,
+        FoodKind.CampSoup, 2)]
+    [InlineData(CraftingRecipeKind.PreserveFishAndMeat, FoodKind.Fish, FoodKind.RawMeat,
+        FoodKind.DriedRations, 2)]
+    [InlineData(CraftingRecipeKind.BrewRootAndBerryMedicine, FoodKind.EdibleRoots,
+        FoodKind.Berries, FoodKind.Medicine, 1)]
+    public void PrimitiveCookingRecipesRetainExactIngredientIdentity(
+        CraftingRecipeKind recipeKind,
+        FoodKind firstIngredient,
+        FoodKind secondIngredient,
+        FoodKind outputKind,
+        int outputQuantity)
+    {
+        var recipe = CraftingRecipeCatalog.Get(recipeKind);
+
+        Assert.Equal(WorkshopKind.CookingFire, recipe.Workshop);
+        Assert.Contains(recipe.Materials, material =>
+            material.Resource == ResourceKind.Food && material.FoodKind == firstIngredient);
+        Assert.Contains(recipe.Materials, material =>
+            material.Resource == ResourceKind.Food && material.FoodKind == secondIngredient);
+        Assert.Contains(recipe.Materials, material =>
+            material.Resource == ResourceKind.Wood && material.Quantity == 1);
+        Assert.Equal(ResourceKind.Food, recipe.Output.Resource);
+        Assert.Equal(outputKind, recipe.Output.FoodKind);
+        Assert.Equal(outputQuantity, recipe.Output.Quantity);
+    }
+
+    [Fact]
+    public void ManaRecipeConsumesLichenAndMushroomsWithoutFuel()
+    {
+        var recipe = CraftingRecipeCatalog.Get(
+            CraftingRecipeKind.BrewLichenAndMushroomMana);
+
+        Assert.Equal(WorkshopKind.CookingFire, recipe.Workshop);
+        Assert.Contains(recipe.Materials, material =>
+            material.Resource == ResourceKind.Materials &&
+            material.Variant == ResourceVariant.Lichen &&
+            material.Quantity == 1);
+        Assert.Contains(recipe.Materials, material =>
+            material.Resource == ResourceKind.Food &&
+            material.FoodKind == FoodKind.Mushrooms &&
+            material.Quantity == 1);
+        Assert.DoesNotContain(recipe.Materials, material =>
+            material.Resource == ResourceKind.Wood);
+        Assert.Equal(ResourceKind.Materials, recipe.Output.Resource);
+        Assert.Equal(ResourceVariant.Mana, recipe.Output.Variant);
+        Assert.Equal(1, recipe.Output.Quantity);
     }
 
     [Theory]

@@ -82,6 +82,7 @@ public readonly record struct TribeNeedsSnapshot(
     int HealthyWorkers,
     int WorkDemand,
     int HumanHostility,
+    int CompostNutrients,
     GoblinReproductionReadinessSnapshot Reproduction);
 
 public enum AnimalKind : byte

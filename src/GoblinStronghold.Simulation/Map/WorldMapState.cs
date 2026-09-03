@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Workshops;
 
@@ -27,6 +28,8 @@ public enum WorldChangeKind : byte
     RockExcavated = 9,
     RampExcavated = 10,
     StructureDismantled = 11,
+    SeasonalFoodChanged = 12,
+    CaveFloraHarvested = 13,
 }
 
 public readonly record struct PlantPatchSnapshot(
@@ -52,6 +55,7 @@ public sealed class WorldMapState
     private readonly HashSet<GridPosition> _excavatedCaveCells;
     private readonly HashSet<GridPosition> _excavatedTerrainRamps;
     private readonly HashSet<VerticalPassage> _excavatedVerticalPassages;
+    private readonly HashSet<GridPosition> _harvestedCaveFlora;
     private readonly Dictionary<GridPosition, GridPosition> _verticalPassageDestinations;
 
     private WorldMapState(
@@ -62,7 +66,8 @@ public sealed class WorldMapState
         Dictionary<SpatialOccupancyKey, SpatialOccupancyClaim> occupancy,
         IEnumerable<GridPosition>? excavatedCaveCells = null,
         IEnumerable<GridPosition>? excavatedTerrainRamps = null,
-        IEnumerable<VerticalPassage>? excavatedVerticalPassages = null)
+        IEnumerable<VerticalPassage>? excavatedVerticalPassages = null,
+        IEnumerable<GridPosition>? harvestedCaveFlora = null)
     {
         Baseline = baseline;
         Version = version;
@@ -72,6 +77,7 @@ public sealed class WorldMapState
         _excavatedCaveCells = excavatedCaveCells?.ToHashSet() ?? [];
         _excavatedTerrainRamps = excavatedTerrainRamps?.ToHashSet() ?? [];
         _excavatedVerticalPassages = excavatedVerticalPassages?.ToHashSet() ?? [];
+        _harvestedCaveFlora = harvestedCaveFlora?.ToHashSet() ?? [];
         _verticalPassageDestinations = BuildVerticalPassageIndex(
             Baseline.VerticalPassages.Concat(_excavatedVerticalPassages));
     }
@@ -104,6 +110,19 @@ public sealed class WorldMapState
 
     public IReadOnlyCollection<VerticalPassage> ExcavatedVerticalPassages =>
         _excavatedVerticalPassages;
+
+    public IReadOnlyCollection<GridPosition> HarvestedCaveFlora => _harvestedCaveFlora;
+
+    public bool TryGetCaveFlora(GridPosition position, out CaveFloraPatch flora)
+    {
+        if (_harvestedCaveFlora.Contains(position))
+        {
+            flora = default;
+            return false;
+        }
+
+        return CaveFloraGenerator.TryGet(Baseline, position, out flora);
+    }
 
     public IReadOnlyList<VerticalPassage> CreateVerticalPassageSnapshot() =>
         Baseline.VerticalPassages
@@ -175,7 +194,8 @@ public sealed class WorldMapState
         IEnumerable<WorldObjectSnapshot> worldObjects,
         IEnumerable<GridPosition>? excavatedCaveCells = null,
         IEnumerable<GridPosition>? excavatedTerrainRamps = null,
-        IEnumerable<VerticalPassage>? excavatedVerticalPassages = null)
+        IEnumerable<VerticalPassage>? excavatedVerticalPassages = null,
+        IEnumerable<GridPosition>? harvestedCaveFlora = null)
     {
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(plantPatches);
@@ -185,8 +205,10 @@ public sealed class WorldMapState
         var excavated = excavatedCaveCells?.ToArray() ?? [];
         var excavatedRamps = excavatedTerrainRamps?.ToArray() ?? [];
         var passages = excavatedVerticalPassages?.ToArray() ?? [];
+        var harvestedFlora = harvestedCaveFlora?.ToArray() ?? [];
         var lowestSavedLevel = excavated
             .Concat(passages.SelectMany(passage => new[] { passage.Upper, passage.Lower }))
+            .Concat(harvestedFlora)
             .Concat(restoredWorldObjects.SelectMany(worldObject =>
                 worldObject.GetAbsoluteParts().Select(part => part.Position)))
             .Select(position => position.Z)
@@ -259,6 +281,14 @@ public sealed class WorldMapState
         {
             throw new InvalidDataException("The save contains duplicate excavated ramps.");
         }
+
+        if (harvestedFlora.Distinct().Count() != harvestedFlora.Length ||
+            harvestedFlora.Any(position =>
+                !CaveFloraGenerator.TryGet(baseline, position, out var flora) ||
+                flora.Kind != CaveFloraKind.LichenPatch))
+        {
+            throw new InvalidDataException("The save contains invalid harvested cave flora.");
+        }
         if (allPassages.SelectMany(passage => new[] { passage.Upper, passage.Lower })
             .GroupBy(position => position)
             .Any(group => group.Count() > 1))
@@ -275,7 +305,8 @@ public sealed class WorldMapState
             occupancy,
             excavated,
             excavatedRamps,
-            passages);
+            passages,
+            harvestedFlora);
     }
 
     public PlantPatchSnapshot? GetPlantPatch(GridPosition position)
@@ -411,13 +442,16 @@ public sealed class WorldMapState
             worldObject.Anchor == position &&
             worldObject.Kind is WorldObjectKind.PrimitiveWorkshop or
                 WorldObjectKind.Bloomery or WorldObjectKind.SmeltingFurnace or
-                WorldObjectKind.CrucibleFurnace);
+                WorldObjectKind.CrucibleFurnace or WorldObjectKind.CookingFire or
+                WorldObjectKind.FittedWorkshop);
         kind = workshop?.Kind switch
         {
             WorldObjectKind.PrimitiveWorkshop => WorkshopKind.PrimitiveWorkshop,
             WorldObjectKind.Bloomery => WorkshopKind.Bloomery,
             WorldObjectKind.SmeltingFurnace => WorkshopKind.SmeltingFurnace,
             WorldObjectKind.CrucibleFurnace => WorkshopKind.CrucibleFurnace,
+            WorldObjectKind.CookingFire => WorkshopKind.CookingFire,
+            WorldObjectKind.FittedWorkshop => WorkshopKind.FittedWorkshop,
             _ => default,
         };
         return workshop is not null;
@@ -461,7 +495,8 @@ public sealed class WorldMapState
         var hasConstructedSurface = _occupancy.TryGetValue(
             new SpatialOccupancyKey(position, SpatialOccupancyChannel.Surface),
             out var surfaceClaim) &&
-            surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor ||
+            surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor or
+                WorldObjectPartKind.WatchtowerPlatform ||
             _occupancy.TryGetValue(
                 new SpatialOccupancyKey(position, SpatialOccupancyChannel.FloorCover),
                 out var floorClaim) && floorClaim.PartKind == WorldObjectPartKind.Floor;
@@ -475,11 +510,15 @@ public sealed class WorldMapState
                    out var claim) ||
                claim.PartKind == WorldObjectPartKind.Door;
         var fixtureIsReachable = !_occupancy.TryGetValue(
-            new SpatialOccupancyKey(position, SpatialOccupancyChannel.Fixture),
-            out var fixtureClaim) ||
+                   new SpatialOccupancyKey(position, SpatialOccupancyChannel.Fixture),
+                   out var fixtureClaim) ||
             fixtureClaim.PartKind is WorldObjectPartKind.OpenDoorLeaf or
                 WorldObjectPartKind.ClosedDoorLeaf or
-                WorldObjectPartKind.AutomaticallyOpenedDoorLeaf;
+                WorldObjectPartKind.AutomaticallyOpenedDoorLeaf or
+                WorldObjectPartKind.CompostHeap or
+                WorldObjectPartKind.SleepingMat or
+                WorldObjectPartKind.StandingTorch or
+                WorldObjectPartKind.Ladder;
         return solidIsTraversable && fixtureIsReachable;
     }
 
@@ -514,6 +553,7 @@ public sealed class WorldMapState
             var above = position with { Z = z };
             if (HasConstructedSurface(above) ||
                 TryGetOccupancyClaim(above, SpatialOccupancyChannel.Solid, out _) ||
+                TryGetOccupancyClaim(above, SpatialOccupancyChannel.Overhead, out _) ||
                 IsSolidRock(above))
             {
                 return false;
@@ -613,7 +653,7 @@ public sealed class WorldMapState
                 SpatialOccupancyChannel.Surface,
                 out var surfaceClaim) &&
             surfaceClaim.PartKind is WorldObjectPartKind.Walkway or WorldObjectPartKind.Floor or
-                WorldObjectPartKind.ConstructedRamp ||
+                WorldObjectPartKind.ConstructedRamp or WorldObjectPartKind.WatchtowerPlatform ||
         TryGetOccupancyClaim(
                 position,
                 SpatialOccupancyChannel.FloorCover,
@@ -633,7 +673,11 @@ public sealed class WorldMapState
                 out var fixtureClaim) ||
             fixtureClaim.PartKind is WorldObjectPartKind.OpenDoorLeaf or
                 WorldObjectPartKind.ClosedDoorLeaf or
-                WorldObjectPartKind.AutomaticallyOpenedDoorLeaf;
+                WorldObjectPartKind.AutomaticallyOpenedDoorLeaf or
+                WorldObjectPartKind.CompostHeap or
+                WorldObjectPartKind.SleepingMat or
+                WorldObjectPartKind.StandingTorch or
+                WorldObjectPartKind.Ladder;
         return solidIsReachable && fixtureIsReachable;
     }
 
@@ -751,6 +795,12 @@ public sealed class WorldMapState
             {
                 yield return rampLower;
             }
+        }
+
+        if (TryGetConstructedLadderDestination(position, out var ladderDestination) &&
+            canTraverse(ladderDestination))
+        {
+            yield return ladderDestination;
         }
     }
 
@@ -1192,6 +1242,91 @@ public sealed class WorldMapState
             _ => throw new InvalidOperationException("The constructed ramp has no orientation."),
         };
 
+    public bool CanBuildWoodenLadder(GridPosition lower, GridPosition upper)
+    {
+        if (!Baseline.IsWorldPosition(lower) || !Baseline.IsWorldPosition(upper) ||
+            upper.Z != lower.Z + 1 ||
+            Math.Abs(upper.X - lower.X) + Math.Abs(upper.Y - lower.Y) != 1 ||
+            !IsTerrainTraversable(lower) || !IsTerrainTraversable(upper) ||
+            TryGetOccupancyClaim(lower, SpatialOccupancyChannel.Fixture, out _) ||
+            TryGetOccupancyClaim(upper, SpatialOccupancyChannel.Fixture, out _) ||
+            HasVerticalConnectionAt(lower) || HasVerticalConnectionAt(upper))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    internal WorldChangeEvent BuildWoodenLadder(
+        GridPosition lower,
+        GridPosition upper,
+        SimulationTick tick,
+        ResourceVariant materialVariant)
+    {
+        if (!CanBuildWoodenLadder(lower, upper))
+        {
+            throw new InvalidOperationException("The wooden-ladder placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var upperOffset = new GridPosition(
+            upper.X - lower.X,
+            upper.Y - lower.Y,
+            1);
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.WoodenLadder,
+            WorldObjectOwner.GoblinTribe,
+            lower,
+            DirectionFrom(lower, upper),
+            [
+                new(default, SpatialOccupancyChannel.Fixture, WorldObjectPartKind.Ladder),
+                new(upperOffset, SpatialOccupancyChannel.Fixture, WorldObjectPartKind.Ladder),
+            ],
+            materialVariant);
+        _worldObjects.Add(id, worldObject);
+        foreach (var (position, part) in worldObject.GetAbsoluteParts())
+        {
+            _occupancy.Add(
+                new SpatialOccupancyKey(position, part.Channel),
+                new SpatialOccupancyClaim(id, part.Kind));
+        }
+
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, lower, 2);
+    }
+
+    private bool HasVerticalConnectionAt(GridPosition position) =>
+        _verticalPassageDestinations.ContainsKey(position) ||
+        _worldObjects.Values.Any(worldObject =>
+            worldObject.Kind is WorldObjectKind.WoodenRamp or WorldObjectKind.StoneRamp &&
+                (worldObject.Anchor == position || GetConstructedRampUpper(worldObject) == position) ||
+            worldObject.Kind == WorldObjectKind.WoodenLadder &&
+                (worldObject.Anchor == position || GetConstructedLadderUpper(worldObject) == position));
+
+    private bool TryGetConstructedLadderDestination(
+        GridPosition position,
+        out GridPosition destination)
+    {
+        var ladder = _worldObjects.Values.FirstOrDefault(worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenLadder &&
+            (worldObject.Anchor == position || GetConstructedLadderUpper(worldObject) == position));
+        if (ladder is null)
+        {
+            destination = default;
+            return false;
+        }
+
+        var upper = GetConstructedLadderUpper(ladder);
+        destination = position == ladder.Anchor ? upper : ladder.Anchor;
+        return true;
+    }
+
+    private static GridPosition GetConstructedLadderUpper(WorldObjectSnapshot ladder) =>
+        GetConstructedRampUpper(ladder);
+
     private static CardinalOrientation DirectionFrom(
         GridPosition lower,
         GridPosition upper) => (upper.X - lower.X, upper.Y - lower.Y) switch
@@ -1566,6 +1701,40 @@ public sealed class WorldMapState
         return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 1);
     }
 
+    public bool CanBuildStandingTorch(GridPosition anchor) =>
+        IsTerrainTraversable(anchor) &&
+        !_occupancy.ContainsKey(new(anchor, SpatialOccupancyChannel.Solid)) &&
+        !_occupancy.ContainsKey(new(anchor, SpatialOccupancyChannel.Fixture));
+
+    internal WorldChangeEvent BuildStandingTorch(
+        GridPosition anchor,
+        SimulationTick tick,
+        ResourceVariant materialVariant = ResourceVariant.None)
+    {
+        if (!CanBuildStandingTorch(anchor))
+        {
+            throw new InvalidOperationException("The standing-torch placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.StandingTorch,
+            WorldObjectOwner.GoblinTribe,
+            anchor,
+            CardinalOrientation.North,
+            [new(default, SpatialOccupancyChannel.Fixture,
+                WorldObjectPartKind.StandingTorch)],
+            materialVariant);
+        _worldObjects.Add(id, worldObject);
+        _occupancy.Add(
+            new SpatialOccupancyKey(anchor, SpatialOccupancyChannel.Fixture),
+            new SpatialOccupancyClaim(id, WorldObjectPartKind.StandingTorch));
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 1);
+    }
+
     private CardinalOrientation ResolveWallMountSide(
         GridPosition anchor,
         CardinalOrientation preferredSide)
@@ -1802,6 +1971,64 @@ public sealed class WorldMapState
                 SpatialOccupancyChannel.Overhead))));
     }
 
+    public bool CanBuildWoodenWatchtower(GridPosition anchor)
+    {
+        var footprint = GetSquareFootprint(anchor, 2);
+        return footprint.All(position =>
+            IsTerrainTraversable(position) &&
+            !_occupancy.Keys.Any(key => key.Position == position) &&
+            IsOpenUnsupportedVolume(position with { Z = position.Z + 1 }) &&
+            !_occupancy.Keys.Any(key => key.Position == position with { Z = position.Z + 1 }));
+    }
+
+    internal WorldChangeEvent BuildWoodenWatchtower(
+        GridPosition anchor,
+        SimulationTick tick,
+        ResourceVariant materialVariant = ResourceVariant.None)
+    {
+        if (!CanBuildWoodenWatchtower(anchor))
+        {
+            throw new InvalidOperationException("The wooden watchtower placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var parts = new List<WorldObjectPartSnapshot>();
+        foreach (var position in GetSquareFootprint(anchor, 2))
+        {
+            var relative = new GridPosition(position.X - anchor.X, position.Y - anchor.Y);
+            parts.Add(new(
+                relative,
+                SpatialOccupancyChannel.Solid,
+                WorldObjectPartKind.WatchtowerSupport));
+            parts.Add(new(
+                relative with { Z = 1 },
+                SpatialOccupancyChannel.Surface,
+                WorldObjectPartKind.WatchtowerPlatform));
+        }
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.WoodenWatchtower,
+            WorldObjectOwner.GoblinTribe,
+            anchor,
+            CardinalOrientation.North,
+            parts,
+            materialVariant);
+        _worldObjects.Add(id, worldObject);
+        foreach (var (position, part) in worldObject.GetAbsoluteParts())
+        {
+            _occupancy.Add(
+                new SpatialOccupancyKey(position, part.Channel),
+                new SpatialOccupancyClaim(id, part.Kind));
+            if (position.Z == 0)
+            {
+                _plantPatches.Remove(GetIndex(Baseline, position));
+            }
+        }
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, parts.Count);
+    }
+
     internal WorldChangeEvent BuildGoblinHut(
         GridPosition anchor,
         SimulationTick tick,
@@ -1852,6 +2079,71 @@ public sealed class WorldMapState
     public bool CanBuildPrimitiveWorkshop(GridPosition anchor) =>
         CanBuildWorkshop(anchor);
 
+    public bool CanBuildGoblinCompost(GridPosition anchor) =>
+        IsTerrainTraversable(anchor) &&
+        !_occupancy.Keys.Any(key =>
+            key.Position == anchor &&
+            key.Channel != SpatialOccupancyChannel.FloorCover);
+
+    internal WorldChangeEvent BuildGoblinCompost(
+        GridPosition anchor,
+        SimulationTick tick)
+    {
+        if (!CanBuildGoblinCompost(anchor))
+        {
+            throw new InvalidOperationException("The goblin compost placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.GoblinCompost,
+            WorldObjectOwner.GoblinTribe,
+            anchor,
+            CardinalOrientation.North,
+            [new(default, SpatialOccupancyChannel.Fixture,
+                WorldObjectPartKind.CompostHeap)]);
+        _worldObjects.Add(id, worldObject);
+        _occupancy.Add(
+            new SpatialOccupancyKey(anchor, SpatialOccupancyChannel.Fixture),
+            new SpatialOccupancyClaim(id, WorldObjectPartKind.CompostHeap));
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 1);
+    }
+
+    public bool CanBuildReedSleepingMat(GridPosition anchor) =>
+        IsTerrainTraversable(anchor) &&
+        !_occupancy.ContainsKey(new(anchor, SpatialOccupancyChannel.Solid)) &&
+        !_occupancy.ContainsKey(new(anchor, SpatialOccupancyChannel.Fixture));
+
+    internal WorldChangeEvent BuildReedSleepingMat(
+        GridPosition anchor,
+        SimulationTick tick)
+    {
+        if (!CanBuildReedSleepingMat(anchor))
+        {
+            throw new InvalidOperationException("The reed sleeping mat placement is invalid.");
+        }
+
+        var id = new WorldObjectId(_worldObjects.Count == 0
+            ? 1UL
+            : checked(_worldObjects.Keys.Max(item => item.Value) + 1));
+        var worldObject = new WorldObjectSnapshot(
+            id,
+            WorldObjectKind.ReedSleepingMat,
+            WorldObjectOwner.GoblinTribe,
+            anchor,
+            CardinalOrientation.North,
+            [new(default, SpatialOccupancyChannel.Fixture,
+                WorldObjectPartKind.SleepingMat)]);
+        _worldObjects.Add(id, worldObject);
+        _occupancy.Add(
+            new SpatialOccupancyKey(anchor, SpatialOccupancyChannel.Fixture),
+            new SpatialOccupancyClaim(id, WorldObjectPartKind.SleepingMat));
+        return CreateChange(tick, WorldChangeKind.StructureBuilt, anchor, 1);
+    }
+
     public bool CanBuildWorkshop(GridPosition anchor) =>
         IsTerrainTraversable(anchor) &&
         !_occupancy.Keys.Any(key =>
@@ -1892,6 +2184,12 @@ public sealed class WorldMapState
             WorkshopKind.CrucibleFurnace => (
                 WorldObjectKind.CrucibleFurnace,
                 WorldObjectPartKind.CrucibleFurnace),
+            WorkshopKind.CookingFire => (
+                WorldObjectKind.CookingFire,
+                WorldObjectPartKind.CookingFire),
+            WorkshopKind.FittedWorkshop => (
+                WorldObjectKind.FittedWorkshop,
+                WorldObjectPartKind.FittedWorkshop),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
         var id = new WorldObjectId(_worldObjects.Count == 0
@@ -2189,6 +2487,23 @@ public sealed class WorldMapState
         harvested = Math.Min(requestedAmount, patch.Biomass);
         patch.Biomass -= harvested;
         change = CreateChange(tick, WorldChangeKind.VegetationHarvested, position, -harvested);
+        return true;
+    }
+
+    internal bool TryHarvestLichen(
+        GridPosition position,
+        SimulationTick tick,
+        out WorldChangeEvent change)
+    {
+        if (!TryGetCaveFlora(position, out var flora) ||
+            flora.Kind != CaveFloraKind.LichenPatch)
+        {
+            change = default;
+            return false;
+        }
+
+        _harvestedCaveFlora.Add(position);
+        change = CreateChange(tick, WorldChangeKind.CaveFloraHarvested, position, -1);
         return true;
     }
 
@@ -2600,8 +2915,7 @@ public sealed class WorldMapState
         {
             var canGrow = patch.Kind switch
             {
-                PlantKind.BerryBush => season == SeasonKind.Summer,
-                PlantKind.MushroomCluster => season is SeasonKind.Spring or SeasonKind.Autumn,
+                PlantKind.BerryBush or PlantKind.MushroomCluster => false,
                 PlantKind.EdibleRoots => season is not SeasonKind.Winter,
                 PlantKind.FishShoal => true,
                 PlantKind.ReedBed => season is not SeasonKind.Winter,
@@ -2636,6 +2950,36 @@ public sealed class WorldMapState
                 grown));
         }
 
+        return changes;
+    }
+
+    internal IReadOnlyList<WorldChangeEvent> RefreshSeasonalWildFood(
+        SimulationTick tick,
+        SeasonKind season)
+    {
+        if (season is not (SeasonKind.Summer or SeasonKind.Winter))
+        {
+            return [];
+        }
+
+        var changes = new List<WorldChangeEvent>();
+        foreach (var patch in _plantPatches.Values.Where(patch =>
+                     patch.Kind is PlantKind.BerryBush or PlantKind.MushroomCluster))
+        {
+            var target = season == SeasonKind.Summer ? patch.Capacity : 0;
+            var amount = target - patch.Biomass;
+            if (amount == 0)
+            {
+                continue;
+            }
+
+            patch.Biomass = target;
+            changes.Add(CreateChange(
+                tick,
+                WorldChangeKind.SeasonalFoodChanged,
+                patch.Position,
+                amount));
+        }
         return changes;
     }
 
@@ -2861,10 +3205,15 @@ public sealed class WorldMapState
                     WorldObjectKind.StoneDoorFrame or
                     WorldObjectKind.WoodenDoorLeaf or
                     WorldObjectKind.WallTorch or
+                    WorldObjectKind.StandingTorch or
+                    WorldObjectKind.ReedSleepingMat or
                     WorldObjectKind.PrimitiveWorkshop or
                     WorldObjectKind.Bloomery or
                     WorldObjectKind.SmeltingFurnace or
                     WorldObjectKind.CrucibleFurnace or
+                    WorldObjectKind.CookingFire or
+                    WorldObjectKind.FittedWorkshop or
+                    WorldObjectKind.WoodenLadder or
                     WorldObjectKind.GoblinFieldCamp)) ||
                 worldObject.Parts.Count == 0 ||
                 !restored.TryAdd(worldObject.Id, worldObject))

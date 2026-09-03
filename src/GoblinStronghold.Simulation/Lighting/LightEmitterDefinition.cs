@@ -52,6 +52,7 @@ public static class LightEmitterCatalog
         ContentId.Parse("core:smelting-furnace-fire");
     public static readonly ContentId CrucibleFurnaceId =
         ContentId.Parse("core:crucible-furnace-fire");
+    public static readonly ContentId CookingFireId = ContentId.Parse("core:cooking-fire");
 
     private static readonly IReadOnlyDictionary<ContentId, LightEmitterDefinition> Definitions =
         CreateDefinitions();
@@ -60,9 +61,11 @@ public static class LightEmitterCatalog
         new Dictionary<WorldObjectKind, ContentId>
         {
             [WorldObjectKind.WallTorch] = WallTorchId,
+            [WorldObjectKind.StandingTorch] = WallTorchId,
             [WorldObjectKind.Bloomery] = BloomeryId,
             [WorldObjectKind.SmeltingFurnace] = SmeltingFurnaceId,
             [WorldObjectKind.CrucibleFurnace] = CrucibleFurnaceId,
+            [WorldObjectKind.CookingFire] = CookingFireId,
         };
 
     public static IReadOnlyCollection<LightEmitterDefinition> All =>
@@ -147,6 +150,16 @@ public static class LightEmitterCatalog
                 0.94f,
                 new LightColor(1f, 0.22f, 0.08f),
                 0.06f,
+                new LightEmitterActivation(
+                    LightEmitterActivityRequirement.WhileWorking,
+                    LightEmitterFuelRequirement.WorkOrderInput),
+                LightEmitterAttachment.World),
+            new LightEmitterDefinition(
+                CookingFireId,
+                3.6f,
+                0.82f,
+                new LightColor(1f, 0.46f, 0.1f),
+                0.12f,
                 new LightEmitterActivation(
                     LightEmitterActivityRequirement.WhileWorking,
                     LightEmitterFuelRequirement.WorkOrderInput),

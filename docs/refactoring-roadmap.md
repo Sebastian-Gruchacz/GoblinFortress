@@ -215,6 +215,31 @@ and rendering stay outside simulation code.
   expose the ordered route centerlines and named endpoints as immutable derived
   data, so future party directors can consume road approaches without parsing
   rendered surface features or adding route state to saves.
+- Generator v16 composes its goblin opening through the focused
+  `Map/Generation/GoblinStarterRuinPlanner`. The planner owns deterministic
+  placement and authoritative ruin, workshop, compost, sleeping-mat and torch objects while
+  v15 retains its original hut composition. Permanent-shelter classification,
+  floor selection and capacity now share `Shelter/GoblinShelterPolicy`; compost
+  reproduction sites are selected by `Reproduction/GoblinReproductionSitePolicy`
+  instead of adding another structure branch to the reproduction engine. Its
+  rebuild path is an ordinary catalog-defined two-reed construction, including
+  generic hauling, save/load and dismantling contracts. Primitive rest-place
+  selection lives in `Shelter/GoblinSleepingPlacePolicy`: it partitions free
+  mats into covered and exposed candidates from authoritative sky exposure,
+  while engine orchestration owns pathfinding and deterministic per-job
+  reservation. Placement is independent from structure classification, so a
+  primitive exposed mat remains usable when no roof exists.
+- Primitive food production now keeps feasibility selection in
+  `Crafting/AutomaticCookingPolicy`, portability in `Resources/FoodUsePolicy`
+  and shelf-life values in `Resources/FoodPreservationPolicy`. Engine
+  orchestration assigns saved expiry ticks, applies daily spoilage to world,
+  personal and workshop-buffer food, and transfers spoiled units into one
+  tribe-wide compost nutrient pool. Manual and repeating crafting orders remain
+  the authoritative override over automatic cooking. Cave lichen now has a
+  dedicated designation and persistent depleted-patch state in `WorldMapState`;
+  lichen and mana reuse concrete `Materials` variants, while the data-driven
+  cooking catalog owns their first recipe. Mana consumers and flora regrowth
+  remain deferred.
 - Surface contamination now has a focused `Contamination/SurfaceGrimeState`
   owner with deterministic pickup, deposition, cleaning, snapshot, and restore
   contracts. The goblin, human-villager, and animal movement boundaries all
@@ -255,9 +280,9 @@ and rendering stay outside simulation code.
   grouped rows in one second-level grid, while Basic constructions, Other
   constructions, and Digging and carving are flat toolbar-level grids.
   Construction content declares `basic/*`, `terrain/*`, or `advanced/*` paths.
-  Future routes and terrain shaping,
-  plus the drying rack and cooking fire, have localized disabled slots without
-  speculative gameplay definitions. Material-bearing families remember their
+  Future routes, terrain shaping, and the drying rack have localized disabled
+  slots without speculative gameplay definitions. The cooking-fire slot is now
+  enabled through the shared construction and crafting catalogs. Material-bearing families remember their
   per-save variant through a Godot-owned `clientPreferences` envelope, defaulting
   to the largest compatible stored supply; simulation save contracts remain
   unchanged. Terrain target qualification and UI command creation remain behind
@@ -278,15 +303,18 @@ command and job flow, placement validation, rendering, persistence, and tests:
   navigation, resource-consumption, and geology rules.
 - [ ] Level terrain: use the first selected cell as the target elevation and
   validate excavation, fill, ramps, fluids, and unreachable fragments safely.
-- [ ] Drying rack: add its construction blueprint, storage/input contract, work
-  orders, and data-driven recipes for preserving fish and meat.
-- [ ] Cooking fire: add its construction blueprint, fuel and ingredient flow,
-  work orders, and data-driven recipes for simple meals.
+- [ ] Drying rack: add its construction blueprint, storage/input contract and
+  work orders; define how its fuel-free preservation differs from the cooking
+  fire's existing fish-and-meat ration recipe.
+- [x] Cooking fire: its construction blueprint, seven food recipes, automatic
+  feasible-recipe selection, exact food inputs, long-lived outputs and
+  working-only light are data-driven through the shared construction, crafting
+  and emitter catalogs.
 
-The drying rack and cooking fire should use the future `Crafting/` recipe
-catalog rather than introduce structure-specific recipe switches. Exact costs,
-ingredients, outputs, durations, and skill requirements remain intentionally
-undefined until the food-processing design is agreed.
+The drying rack should use the existing `Crafting/` recipe catalog rather than
+introduce structure-specific recipe switches. Its exact construction cost,
+efficiency advantage, durations and skill requirements remain intentionally
+undefined until it has a distinct role from primitive fire drying.
 
 ### Stage E: rendering
 
@@ -299,6 +327,21 @@ undefined until the food-processing design is agreed.
   The grime layer reuses a recolored atlas mask and is ordered below blood; move
   both into a dedicated contamination renderer when render-layer extraction
   begins.
+- The generated starter ruin uses the focused procedural
+  `UI/WorldRendering/GoblinRuinPainter`, so masonry, repairs, fires
+  and compost retain the established strict top-down perspective at 20 pixels
+  per cell. `WorldView` retains only structure dispatch and active-torch
+  composition until the general structure-renderer registry is extracted;
+  decoration remains non-authoritative. Authoritative sleeping mats use the
+  focused `ReedSleepingMatPainter` instead of being baked into ruin decoration.
+  The freestanding fire basket likewise uses `StandingTorchPainter` and maps to
+  the existing wall-torch light definition without inheriting its directional
+  wall-facing occlusion.
+- Passive settlement observation now routes through
+  `Visibility/GoblinStructureObserverPolicy`. Existing shelters retain their
+  civilization-defined radius, while the first wooden watchtower contributes a
+  focused radius-7 observer without adding a structure-kind branch to
+  `SimulationEngine.UpdateVisibility`.
 
 #### Active slice lighting and lower-level presentation cache
 

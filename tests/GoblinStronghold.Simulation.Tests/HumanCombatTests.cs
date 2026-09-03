@@ -114,6 +114,11 @@ public sealed class HumanCombatTests
             actor["personalFood"] = 1;
             actor["personalFoodKind"] = (int)FoodKind.DriedRations;
             actor["personalFoodKinds"] = new JsonArray((int)FoodKind.DriedRations);
+            actor["personalFoodFreshUntilTicks"] = new JsonArray(
+                FoodPreservationPolicy.GetFreshUntilTick(
+                    FoodKind.DriedRations,
+                    engine.CurrentTick,
+                    engine.Definitions.Clock));
             actor["thirst"] = 0;
             actor["personalWater"] = SimulationDefinitions.Foundation.PersonalWaterCapacity;
             actor["personalStoneAmmo"] = 0;

@@ -85,8 +85,8 @@
     {
       "id": "reinforced-pickaxe",
       "kind": "ReinforcedPickaxe",
-      "workshop": "PrimitiveWorkshop",
-      "level": 1,
+      "workshop": "FittedWorkshop",
+      "level": 2,
       "baseWorkTicks": 180,
       "materials": [{ "resource": "Wood", "quantity": 2 }, { "resource": "Stone", "quantity": 3 }, { "resource": "Bone", "quantity": 1 }],
       "output": { "resource": "Equipment", "variant": "EquipmentReinforcedPickaxe", "quantity": 1 }
@@ -103,8 +103,8 @@
     {
       "id": "wooden-barrel",
       "kind": "WoodenBarrel",
-      "workshop": "PrimitiveWorkshop",
-      "level": 1,
+      "workshop": "FittedWorkshop",
+      "level": 2,
       "baseWorkTicks": 140,
       "materials": [{ "resource": "Wood", "quantity": 3 }, { "resource": "Reeds", "quantity": 2 }],
       "output": { "resource": "Equipment", "variant": "EquipmentWoodenBarrel", "quantity": 1 }
@@ -121,8 +121,8 @@
     {
       "id": "wooden-chest",
       "kind": "WoodenChest",
-      "workshop": "PrimitiveWorkshop",
-      "level": 1,
+      "workshop": "FittedWorkshop",
+      "level": 2,
       "baseWorkTicks": 120,
       "materials": [{ "resource": "Wood", "quantity": 4 }, { "resource": "Reeds", "quantity": 1 }],
       "output": { "resource": "Equipment", "variant": "EquipmentWoodenChest", "quantity": 1 }
@@ -130,8 +130,8 @@
     {
       "id": "wooden-bulk-bin",
       "kind": "WoodenBulkBin",
-      "workshop": "PrimitiveWorkshop",
-      "level": 1,
+      "workshop": "FittedWorkshop",
+      "level": 2,
       "baseWorkTicks": 100,
       "materials": [{ "resource": "Wood", "quantity": 3 }, { "resource": "Reeds", "quantity": 2 }],
       "output": { "resource": "Equipment", "variant": "EquipmentWoodenBulkBin", "quantity": 1 }
@@ -171,6 +171,108 @@
       "baseWorkTicks": 320,
       "materials": [{ "resource": "Ore", "variant": "GoldOre", "quantity": 2 }, { "resource": "Coal", "quantity": 1 }],
       "output": { "resource": "Materials", "variant": "GoldBar", "quantity": 1 }
+    },
+    {
+      "id": "cook-raw-meat",
+      "kind": "CookRawMeat",
+      "workshop": "CookingFire",
+      "level": 1,
+      "baseWorkTicks": 80,
+      "materials": [
+        { "resource": "Food", "foodKind": "RawMeat", "quantity": 2 },
+        { "resource": "Wood", "quantity": 1 }
+      ],
+      "output": { "resource": "Food", "foodKind": "CookedMeat", "quantity": 2 }
+    },
+    {
+      "id": "fish-root-soup",
+      "kind": "FishRootSoup",
+      "workshop": "CookingFire",
+      "level": 1,
+      "baseWorkTicks": 90,
+      "materials": [
+        { "resource": "Food", "foodKind": "Fish", "quantity": 1 },
+        { "resource": "Food", "foodKind": "EdibleRoots", "quantity": 1 },
+        { "resource": "Wood", "quantity": 1 }
+      ],
+      "output": { "resource": "Food", "foodKind": "CampSoup", "quantity": 2 }
+    },
+    {
+      "id": "fish-mushroom-soup",
+      "kind": "FishMushroomSoup",
+      "workshop": "CookingFire",
+      "level": 1,
+      "baseWorkTicks": 90,
+      "materials": [
+        { "resource": "Food", "foodKind": "Fish", "quantity": 1 },
+        { "resource": "Food", "foodKind": "Mushrooms", "quantity": 1 },
+        { "resource": "Wood", "quantity": 1 }
+      ],
+      "output": { "resource": "Food", "foodKind": "CampSoup", "quantity": 2 }
+    },
+    {
+      "id": "meat-root-soup",
+      "kind": "MeatRootSoup",
+      "workshop": "CookingFire",
+      "level": 1,
+      "baseWorkTicks": 90,
+      "materials": [
+        { "resource": "Food", "foodKind": "RawMeat", "quantity": 1 },
+        { "resource": "Food", "foodKind": "EdibleRoots", "quantity": 1 },
+        { "resource": "Wood", "quantity": 1 }
+      ],
+      "output": { "resource": "Food", "foodKind": "CampSoup", "quantity": 2 }
+    },
+    {
+      "id": "meat-mushroom-soup",
+      "kind": "MeatMushroomSoup",
+      "workshop": "CookingFire",
+      "level": 1,
+      "baseWorkTicks": 90,
+      "materials": [
+        { "resource": "Food", "foodKind": "RawMeat", "quantity": 1 },
+        { "resource": "Food", "foodKind": "Mushrooms", "quantity": 1 },
+        { "resource": "Wood", "quantity": 1 }
+      ],
+      "output": { "resource": "Food", "foodKind": "CampSoup", "quantity": 2 }
+    },
+    {
+      "id": "preserve-fish-and-meat",
+      "kind": "PreserveFishAndMeat",
+      "workshop": "CookingFire",
+      "level": 1,
+      "baseWorkTicks": 120,
+      "materials": [
+        { "resource": "Food", "foodKind": "Fish", "quantity": 1 },
+        { "resource": "Food", "foodKind": "RawMeat", "quantity": 1 },
+        { "resource": "Wood", "quantity": 1 }
+      ],
+      "output": { "resource": "Food", "foodKind": "DriedRations", "quantity": 2 }
+    },
+    {
+      "id": "brew-root-and-berry-medicine",
+      "kind": "BrewRootAndBerryMedicine",
+      "workshop": "CookingFire",
+      "level": 1,
+      "baseWorkTicks": 100,
+      "materials": [
+        { "resource": "Food", "foodKind": "EdibleRoots", "quantity": 1 },
+        { "resource": "Food", "foodKind": "Berries", "quantity": 1 },
+        { "resource": "Wood", "quantity": 1 }
+      ],
+      "output": { "resource": "Food", "foodKind": "Medicine", "quantity": 1 }
+    },
+    {
+      "id": "brew-lichen-and-mushroom-mana",
+      "kind": "BrewLichenAndMushroomMana",
+      "workshop": "CookingFire",
+      "level": 1,
+      "baseWorkTicks": 100,
+      "materials": [
+        { "resource": "Materials", "variant": "Lichen", "quantity": 1 },
+        { "resource": "Food", "foodKind": "Mushrooms", "quantity": 1 }
+      ],
+      "output": { "resource": "Materials", "variant": "Mana", "quantity": 1 }
     }
   ]
 }

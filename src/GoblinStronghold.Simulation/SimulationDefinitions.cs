@@ -30,7 +30,10 @@ public sealed record FoodNutritionSettings(
     int Mushrooms,
     int EdibleRoots,
     int Fish,
-    int RawMeat)
+    int RawMeat,
+    int CookedMeat,
+    int CampSoup,
+    int Medicine)
 {
     public int GetSatiety(Resources.FoodKind kind) => kind switch
     {
@@ -40,6 +43,9 @@ public sealed record FoodNutritionSettings(
         Resources.FoodKind.EdibleRoots => EdibleRoots,
         Resources.FoodKind.Fish => Fish,
         Resources.FoodKind.RawMeat => RawMeat,
+        Resources.FoodKind.CookedMeat => CookedMeat,
+        Resources.FoodKind.CampSoup => CampSoup,
+        Resources.FoodKind.Medicine => Medicine,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown food kind."),
     };
 }
@@ -52,6 +58,7 @@ public sealed record HealthRecoverySettings(
     public int GetFoodHealing(Resources.FoodKind kind) => kind switch
     {
         Resources.FoodKind.EdibleRoots => MedicinalRootsHealing,
+        Resources.FoodKind.Medicine => checked(MedicinalRootsHealing * 2),
         _ => 0,
     };
 }
@@ -595,7 +602,10 @@ public sealed class SimulationDefinitions
             Mushrooms: mushroomsNutrition,
             EdibleRoots: edibleRootsNutrition,
             Fish: fishNutrition,
-            RawMeat: fishNutrition);
+            RawMeat: fishNutrition,
+            CookedMeat: FoodNutrition + 700,
+            CampSoup: FoodNutrition + 1_200,
+            Medicine: Math.Max(1, FoodNutrition / 4));
         HealthRecovery = new(
             NaturalIntervalTicks: naturalHealthRecoveryIntervalTicks,
             SleepingBonusIntervalTicks: sleepingHealthRecoveryBonusIntervalTicks,

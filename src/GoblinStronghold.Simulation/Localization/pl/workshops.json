@@ -5,9 +5,11 @@
   "subsections": {
     "names": {
       "primitive-workshop": "prymitywny warsztat",
+      "fitted-workshop": "wyposażony warsztat",
       "bloomery": "dymarka",
       "smelting-furnace": "piec hutniczy",
-      "crucible-furnace": "piec tyglowy"
+      "crucible-furnace": "piec tyglowy",
+      "cooking-fire": "palenisko"
     }
   }
 }

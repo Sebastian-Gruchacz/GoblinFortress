@@ -1,3 +1,4 @@
+using GoblinStronghold.Simulation.Crafting;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 
@@ -5,13 +6,87 @@ namespace GoblinStronghold.Simulation;
 
 public sealed partial class SimulationEngine
 {
+    private void UpdateAutomaticCooking()
+    {
+        var available = _itemStacks.Values
+            .Where(stack => stack.Location.Kind == ItemLocationKind.StorageZone)
+            .GroupBy(stack => (stack.Resource, stack.FoodKind, stack.Variant))
+            .ToDictionary(group => group.Key, group => group.Sum(stack => stack.Quantity));
+        foreach (var order in _craftingOrders.Values
+                     .OrderBy(order => order.IsAutomatic)
+                     .ThenBy(order => order.Id))
+        {
+            var definition = CraftingRecipeCatalog.Get(order.Recipe);
+            var missingDefinition = definition with
+            {
+                Materials = definition.Materials
+                    .Select(requirement => requirement with
+                    {
+                        Quantity = order.GetMissing(requirement),
+                    })
+                    .Where(requirement => requirement.Quantity > 0)
+                    .ToArray(),
+            };
+            AutomaticCookingPolicy.TryReserve(missingDefinition, available);
+        }
+
+        foreach (var fire in World.EnumerateWorldObjects()
+                     .Where(item => item.Kind == WorldObjectKind.CookingFire)
+                     .OrderBy(item => item.Id))
+        {
+            if (_craftingOrders.Values.Any(order => order.Workshop == fire.Anchor))
+            {
+                continue;
+            }
+
+            var feasible = AutomaticCookingPolicy.FindFeasibleRecipes(available);
+            if (feasible.Count == 0)
+            {
+                continue;
+            }
+
+            var selectedIndex = DeterministicRandom.NextInt(
+                WorldSeed,
+                RandomDomain.Crafting,
+                new EntityId(fire.Id.Value),
+                CurrentTick,
+                sampleKey: 0x434F4F4B494E47UL,
+                minimumInclusive: 0,
+                maximumExclusive: feasible.Count);
+            var selected = feasible[selectedIndex];
+            if (TryCreateCraftingOrder(
+                    fire.Anchor,
+                    selected.Kind,
+                    isRepeating: false,
+                    isAutomatic: true))
+            {
+                AutomaticCookingPolicy.TryReserve(selected, available);
+            }
+        }
+    }
+
+    private void CancelAutomaticCraftingOrdersAt(GridPosition workshop)
+    {
+        foreach (var order in _craftingOrders.Values
+                     .Where(order => order.Workshop == workshop && order.IsAutomatic)
+                     .ToArray())
+        {
+            CancelCraftingOrder(order);
+        }
+    }
+
     private Dictionary<(
         EntityId OrderId,
         ResourceKind Resource,
+        FoodKind FoodKind,
         ResourceVariant Variant), int>
         CreateCraftingReservations()
     {
-        var reservations = new Dictionary<(EntityId, ResourceKind, ResourceVariant), int>();
+        var reservations = new Dictionary<(
+            EntityId,
+            ResourceKind,
+            FoodKind,
+            ResourceVariant), int>();
         foreach (var actor in _actors.Values.Where(actor =>
                      actor.JobKind == ActorJobKind.SupplyCrafting))
         {
@@ -29,12 +104,17 @@ public sealed partial class SimulationEngine
                 CraftingRecipeCatalog.FindMaterial(
                     order.Recipe,
                     stack.Resource,
+                    stack.FoodKind,
                     stack.Variant) is not { } requirement)
             {
                 continue;
             }
 
-            var key = (actor.DestinationZoneId, requirement.Resource, requirement.Variant);
+            var key = (
+                actor.DestinationZoneId,
+                requirement.Resource,
+                requirement.FoodKind,
+                requirement.Variant);
             reservations[key] = checked(
                 reservations.GetValueOrDefault(key) + actor.ReservedQuantity);
         }
@@ -44,25 +124,36 @@ public sealed partial class SimulationEngine
     private bool TryPlanCraftingSupply(
         ActorState actor,
         Dictionary<EntityId, int> sourceReservations,
-        Dictionary<(EntityId OrderId, ResourceKind Resource, ResourceVariant Variant), int>
+        Dictionary<(
+            EntityId OrderId,
+            ResourceKind Resource,
+            FoodKind FoodKind,
+            ResourceVariant Variant), int>
             craftingReservations)
     {
         var candidates = (
                 from order in _craftingOrders.Values
                 from material in CraftingRecipeCatalog.Get(order.Recipe).Materials
-                let key = (order.Id, material.Resource, material.Variant)
+                let key = (
+                    order.Id,
+                    material.Resource,
+                    material.FoodKind,
+                    material.Variant)
                 let missing = order.GetMissing(material) -
                     craftingReservations.GetValueOrDefault(key)
                 where missing > 0
                 from source in _itemStacks.Values
-                where material.Matches(source.Resource, source.Variant) &&
+                where material.Matches(
+                        source.Resource,
+                        source.FoodKind,
+                        source.Variant) &&
                     source.Location.Kind == ItemLocationKind.StorageZone
                 let available = source.Quantity - sourceReservations.GetValueOrDefault(source.Id)
                 where available > 0
                 let estimatedDistance =
                     ManhattanDistance(actor.Position, source.Location.Position) +
                     ManhattanDistance(source.Location.Position, order.Workshop)
-                orderby estimatedDistance, order.Id, source.Id
+                orderby order.IsAutomatic, estimatedDistance, order.Id, source.Id
                 select new
                 {
                     Order = order,
@@ -99,6 +190,7 @@ public sealed partial class SimulationEngine
             var reservationKey = (
                 candidate.Order.Id,
                 candidate.Requirement.Resource,
+                candidate.Requirement.FoodKind,
                 candidate.Requirement.Variant);
             craftingReservations[reservationKey] = checked(
                 craftingReservations.GetValueOrDefault(reservationKey) +
@@ -111,7 +203,11 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanCarriedCraftingDelivery(
         ActorState actor,
-        Dictionary<(EntityId OrderId, ResourceKind Resource, ResourceVariant Variant), int>
+        Dictionary<(
+            EntityId OrderId,
+            ResourceKind Resource,
+            FoodKind FoodKind,
+            ResourceVariant Variant), int>
             craftingReservations)
     {
         if (!_itemStacks.TryGetValue(actor.CarriedStackId, out var carried))
@@ -126,6 +222,7 @@ public sealed partial class SimulationEngine
                 Requirement = CraftingRecipeCatalog.FindMaterial(
                     order.Recipe,
                     carried.Resource,
+                    carried.FoodKind,
                     carried.Variant),
             })
             .Where(candidate => candidate.Requirement is not null &&
@@ -133,9 +230,11 @@ public sealed partial class SimulationEngine
                     craftingReservations.GetValueOrDefault((
                         candidate.Order.Id,
                         candidate.Requirement.Resource,
+                        candidate.Requirement.FoodKind,
                         candidate.Requirement.Variant)) >= carried.Quantity)
             .Select(candidate => candidate.Order)
-            .OrderBy(order => ManhattanDistance(actor.Position, order.Workshop))
+            .OrderBy(order => order.IsAutomatic)
+            .ThenBy(order => ManhattanDistance(actor.Position, order.Workshop))
             .ThenBy(order => order.Id)
             .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
         foreach (var order in candidates)
@@ -161,8 +260,13 @@ public sealed partial class SimulationEngine
             var requirement = CraftingRecipeCatalog.FindMaterial(
                 order.Recipe,
                 carried.Resource,
+                carried.FoodKind,
                 carried.Variant)!;
-            var key = (order.Id, requirement.Resource, requirement.Variant);
+            var key = (
+                order.Id,
+                requirement.Resource,
+                requirement.FoodKind,
+                requirement.Variant);
             craftingReservations[key] = checked(
                 craftingReservations.GetValueOrDefault(key) + carried.Quantity);
             return true;
@@ -214,7 +318,10 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        if (order.GetMissing(material.Resource, material.Variant) < actor.ReservedQuantity)
+        if (order.GetMissing(
+                material.Resource,
+                material.FoodKind,
+                material.Variant) < actor.ReservedQuantity)
         {
             if (actor.JobStage == ActorJobStage.Delivering)
             {
@@ -279,7 +386,8 @@ public sealed partial class SimulationEngine
                 actor.ReservedQuantity,
                 ItemLocation.CarriedBy(actor.Id),
                 source.FoodKind,
-                source.Variant);
+                source.Variant,
+                source.FreshUntilTick);
         }
 
         MoveItemStack(carried, ItemLocation.CarriedBy(actor.Id));
@@ -296,10 +404,11 @@ public sealed partial class SimulationEngine
         var carried = _itemStacks[actor.CarriedStackId];
         var delivered = carried.Quantity;
         var resource = carried.Resource;
+        var foodKind = carried.FoodKind;
         var variant = carried.Variant;
         RemoveItemStack(carried.Id);
         actor.CarriedStackId = EntityId.None;
-        order.Deliver(resource, variant, delivered);
+        order.Deliver(resource, foodKind, variant, delivered, carried.FreshUntilTick);
         GainHaulingExperience(actor, Math.Max(1, delivered * 2));
         Publish(SimulationEventKind.CraftingMaterialDelivered, actor.Id, order.Id, delivered);
         actor.ClearJob();
@@ -313,7 +422,8 @@ public sealed partial class SimulationEngine
             .ToHashSet();
         var candidates = _craftingOrders.Values
             .Where(order => order.HasAllMaterials && !reservedOrders.Contains(order.Id))
-            .OrderBy(order => ManhattanDistance(actor.Position, order.Workshop))
+            .OrderBy(order => order.IsAutomatic)
+            .ThenBy(order => ManhattanDistance(actor.Position, order.Workshop))
             .ThenBy(order => order.Id)
             .Take(MaximumConstructionRouteCandidatesPerPlanningTick);
         foreach (var order in candidates)
@@ -372,6 +482,7 @@ public sealed partial class SimulationEngine
             output.Resource,
             output.Quantity,
             ItemLocation.OnGround(actor.Position),
+            output.FoodKind,
             variant: output.Variant);
         if (order.IsRepeating)
         {
@@ -411,7 +522,10 @@ public sealed partial class SimulationEngine
             ? actor.SourceStackId
             : actor.CarriedStackId;
         if (!_itemStacks.TryGetValue(stackId, out var stack) ||
-            order.GetMissing(stack.Resource, stack.Variant) < actor.ReservedQuantity)
+            order.GetMissing(
+                stack.Resource,
+                stack.FoodKind,
+                stack.Variant) < actor.ReservedQuantity)
         {
             throw new InvalidDataException("The save contains invalid crafting material demand.");
         }

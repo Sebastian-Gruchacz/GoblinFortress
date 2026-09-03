@@ -39,6 +39,14 @@ public enum WorldObjectKind : byte
     StoneFloor = 23,
     WoodenRamp = 24,
     StoneRamp = 25,
+    GoblinRuin = 26,
+    GoblinCompost = 27,
+    WoodenWatchtower = 28,
+    ReedSleepingMat = 29,
+    StandingTorch = 30,
+    CookingFire = 31,
+    FittedWorkshop = 32,
+    WoodenLadder = 33,
 }
 
 public enum WorldObjectOwner : byte
@@ -89,6 +97,14 @@ public enum WorldObjectPartKind : byte
     SmeltingFurnace = 19,
     CrucibleFurnace = 20,
     ConstructedRamp = 21,
+    CompostHeap = 22,
+    WatchtowerPlatform = 23,
+    SleepingMat = 24,
+    StandingTorch = 25,
+    CookingFire = 26,
+    FittedWorkshop = 27,
+    Ladder = 28,
+    WatchtowerSupport = 29,
 }
 
 public readonly record struct WorldObjectPartSnapshot(

@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Civilizations;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Visibility;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -22,6 +23,42 @@ public sealed class VisibilityTests
     public void CurrentBuildVisibilityAidIsDisabledForRelease()
     {
         Assert.False(SimulationDebugSettings.ForCurrentBuild.RevealFogFromNonPlayerUnits);
+    }
+
+    [Fact]
+    public void WoodenWatchtowerProvidesTheFocusedTribalObservationRadius()
+    {
+        var shelter = new WorldObjectSnapshot(
+            new WorldObjectId(1),
+            WorldObjectKind.GoblinHut,
+            WorldObjectOwner.GoblinTribe,
+            new GridPosition(4, 5),
+            CardinalOrientation.North,
+            []);
+        var watchtower = new WorldObjectSnapshot(
+            new WorldObjectId(2),
+            WorldObjectKind.WoodenWatchtower,
+            WorldObjectOwner.GoblinTribe,
+            new GridPosition(8, 9),
+            CardinalOrientation.North,
+            []);
+        var foreignWatchtower = new WorldObjectSnapshot(
+            new WorldObjectId(3),
+            WorldObjectKind.WoodenWatchtower,
+            WorldObjectOwner.HumanVillage,
+            new GridPosition(12, 13),
+            CardinalOrientation.North,
+            []);
+
+        var observers = GoblinStructureObserverPolicy.SelectObservers(
+            [shelter, watchtower, foreignWatchtower],
+            shelterVisionRadius: 3);
+
+        Assert.Equal(2, observers.Count);
+        Assert.Contains((shelter.Anchor, 3), observers);
+        Assert.Contains(
+            (watchtower.Anchor, GoblinStructureObserverPolicy.WoodenWatchtowerVisionRadius),
+            observers);
     }
 
     [Fact]
@@ -247,7 +284,7 @@ public sealed class VisibilityTests
             initialFoodStock: 0);
         var hut = engine.CreateSnapshot().WorldObjects.First(worldObject =>
             worldObject.Owner == WorldObjectOwner.GoblinTribe &&
-            worldObject.Kind == WorldObjectKind.GoblinHut);
+            worldObject.Kind is WorldObjectKind.GoblinHut or WorldObjectKind.GoblinRuin);
 
         var snapshot = engine.CreateSnapshot();
 

@@ -14,7 +14,9 @@ public static class SimulationSaveFormat
     public const int PolityIdMigrationVersion = 74;
     public const int RoadModeMigrationVersion = 75;
     public const int WorkTypePrioritiesMigrationVersion = 76;
-    public const int CurrentVersion = 77;
+    public const int FoodPreservationMigrationVersion = 77;
+    public const int CaveFloraHarvestMigrationVersion = 78;
+    public const int CurrentVersion = 79;
 
     public static bool IsLoadableVersion(int version) =>
         version is SurfaceGrimeMigrationVersion or
@@ -24,6 +26,8 @@ public static class SimulationSaveFormat
             PolityIdMigrationVersion or
             RoadModeMigrationVersion or
             WorkTypePrioritiesMigrationVersion or
+            FoodPreservationMigrationVersion or
+            CaveFloraHarvestMigrationVersion or
             CurrentVersion;
 }
 
@@ -47,6 +51,8 @@ internal static class SimulationSaveReader
                 $"{SimulationSaveFormat.PolityIdMigrationVersion} and " +
                 $"{SimulationSaveFormat.RoadModeMigrationVersion} and " +
                 $"{SimulationSaveFormat.WorkTypePrioritiesMigrationVersion} and " +
+                $"{SimulationSaveFormat.FoodPreservationMigrationVersion} and " +
+                $"{SimulationSaveFormat.CaveFloraHarvestMigrationVersion} and " +
                 $"{SimulationSaveFormat.CurrentVersion}.");
         }
 
@@ -77,6 +83,14 @@ internal static class SimulationSaveReader
         if (save.FormatVersion == SimulationSaveFormat.WorkTypePrioritiesMigrationVersion)
         {
             MigrateWorkTypePriorities(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.FoodPreservationMigrationVersion)
+        {
+            MigrateFoodPreservation(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.CaveFloraHarvestMigrationVersion)
+        {
+            MigrateCaveFloraHarvest(save);
         }
 
         return save;
@@ -150,6 +164,18 @@ internal static class SimulationSaveReader
     {
         save.WorkTypePriorities.Clear();
         save.DiscardMisplacedLegacySurfaceGrime = true;
+        save.FormatVersion = SimulationSaveFormat.FoodPreservationMigrationVersion;
+    }
+
+    private static void MigrateFoodPreservation(SimulationSaveModel save)
+    {
+        save.CompostNutrients = 0;
+        save.FormatVersion = SimulationSaveFormat.CaveFloraHarvestMigrationVersion;
+    }
+
+    private static void MigrateCaveFloraHarvest(SimulationSaveModel save)
+    {
+        save.HarvestedCaveFlora.Clear();
         save.FormatVersion = SimulationSaveFormat.CurrentVersion;
     }
 }

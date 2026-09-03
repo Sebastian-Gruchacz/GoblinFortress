@@ -24,7 +24,7 @@ internal sealed record LowerLevelOpeningTexture(
 
 internal sealed class LowerLevelChunkTextureCache : IDisposable
 {
-    public const int PixelsPerCell = 16;
+    public const int PixelsPerCell = 20;
     public const int MaximumRebuildsPerFrame = 2;
 
     private readonly Dictionary<PresentationChunkKey, CachedChunk> _chunks = [];
@@ -260,7 +260,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
                     new Rect2I(0, 0, PixelsPerCell, PixelsPerCell),
                     origin);
             }
-            if (CaveFloraGenerator.TryGet(engine.Map, position, out var caveFlora))
+            if (engine.World.TryGetCaveFlora(position, out var caveFlora))
             {
                 LowerLevelStaticCaveFloraPainter.PaintCell(
                     geometry,

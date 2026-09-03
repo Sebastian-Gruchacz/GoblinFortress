@@ -15,6 +15,7 @@
     <Compile Include="..\GoblinStronghold.Simulation.Tests\MoveCommandTests.cs" Link="MoveCommandTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\RaidAutoAssignmentPolicyTests.cs" Link="RaidAutoAssignmentPolicyTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\RaidPreparationPolicyTests.cs" Link="RaidPreparationPolicyTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\RuinedStartSmokeTests.cs" Link="RuinedStartSmokeTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\SaveCompatibilityTests.cs" Link="SaveCompatibilityTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\SimulationCalendarTests.cs" Link="SimulationCalendarTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\SimulationEngineTests.cs" Link="SimulationEngineTests.cs" />

@@ -16,10 +16,39 @@ public sealed class GeneratedStructureTests
             snapshot.WorldObjects.Count(item => item.Kind == WorldObjectKind.HumanCottage));
         Assert.Single(snapshot.WorldObjects, item => item.Kind == WorldObjectKind.HumanBarn);
         Assert.Single(snapshot.WorldObjects, item => item.Kind == WorldObjectKind.HumanWell);
-        Assert.InRange(
-            snapshot.WorldObjects.Count(item => item.Kind == WorldObjectKind.GoblinHut),
-            2,
-            3);
+        Assert.Single(snapshot.WorldObjects, item => item.Kind == WorldObjectKind.GoblinRuin);
+        Assert.Single(snapshot.WorldObjects, item => item.Kind == WorldObjectKind.GoblinCompost);
+        Assert.Single(snapshot.WorldObjects, item =>
+            item.Kind == WorldObjectKind.PrimitiveWorkshop &&
+            item.Owner == WorldObjectOwner.GoblinTribe);
+        Assert.Equal(2, snapshot.WorldObjects.Count(item =>
+            item.Kind == WorldObjectKind.WallTorch &&
+            item.Owner == WorldObjectOwner.GoblinTribe));
+        Assert.Equal(4, snapshot.WorldObjects.Count(item =>
+            item.Kind == WorldObjectKind.ReedSleepingMat &&
+            item.Owner == WorldObjectOwner.GoblinTribe));
+        Assert.Single(snapshot.WorldObjects, item =>
+            item.Kind == WorldObjectKind.StandingTorch &&
+            item.Owner == WorldObjectOwner.GoblinTribe);
+        Assert.Single(snapshot.WorldObjects, item =>
+            item.Kind == WorldObjectKind.CookingFire &&
+            item.Owner == WorldObjectOwner.GoblinTribe);
+        Assert.DoesNotContain(snapshot.WorldObjects, item =>
+            item.Kind == WorldObjectKind.GoblinHut);
+    }
+
+    [Fact]
+    public void StarterRuinSleepingBaysBlockSkyExposure()
+    {
+        var engine = CreateEngine(new WorldSeed(123));
+        var sleepingMats = engine.World.CreateWorldObjectSnapshot()
+            .Where(item => item.Kind == WorldObjectKind.ReedSleepingMat)
+            .Select(item => item.Anchor)
+            .ToArray();
+
+        Assert.Equal(4, sleepingMats.Length);
+        Assert.All(sleepingMats, position =>
+            Assert.False(engine.World.IsOpenToSky(position)));
     }
 
     [Fact]
@@ -57,7 +86,7 @@ public sealed class GeneratedStructureTests
         var snapshot = CreateEngine(new WorldSeed(456)).CreateSnapshot();
 
         foreach (var building in snapshot.WorldObjects.Where(item => item.Kind is
-                     WorldObjectKind.GoblinHut or WorldObjectKind.HumanCottage or
+                     WorldObjectKind.GoblinRuin or WorldObjectKind.HumanCottage or
                      WorldObjectKind.HumanBarn))
         {
             var absoluteParts = building.GetAbsoluteParts().ToArray();
@@ -136,9 +165,29 @@ public sealed class GeneratedStructureTests
             Assert.InRange(
                 engine.World.CreateWorldObjectSnapshot().Count(item =>
                     item.Owner is WorldObjectOwner.GoblinTribe or WorldObjectOwner.HumanVillage),
-                6,
-                7);
+                9,
+                15);
         }
+    }
+
+    [Fact]
+    public void LegacyGeneratorKeepsTheFormerGoblinHuts()
+    {
+        var seed = new WorldSeed(0x4C4547414359UL);
+        var map = SwampMapGenerator.Generate(seed, width: 32, height: 32, generatorVersion: 15);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 0,
+            initialFoodStock: 0);
+
+        Assert.InRange(engine.World.CountWorldObjects(
+            WorldObjectKind.GoblinHut,
+            WorldObjectOwner.GoblinTribe), 2, 3);
+        Assert.Equal(0, engine.World.CountWorldObjects(
+            WorldObjectKind.GoblinRuin,
+            WorldObjectOwner.GoblinTribe));
     }
 
     private static SimulationEngine CreateEngine(WorldSeed seed) => SimulationEngine.Create(

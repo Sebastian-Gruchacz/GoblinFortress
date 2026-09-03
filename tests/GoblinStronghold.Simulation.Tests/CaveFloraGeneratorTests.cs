@@ -55,6 +55,45 @@ public sealed class CaveFloraGeneratorTests
         Assert.False(CaveFloraGenerator.TryGet(map, position, out _));
     }
 
+    [Fact]
+    public void HarvestedLichenRemainsDepletedAfterWorldRestore()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x4C494348454EUL),
+            64,
+            64);
+        map.MaterializeCaveLevel(-3);
+        var position = Enumerable.Range(1, 3)
+            .SelectMany(depth => Enumerable.Range(0, map.Height)
+                .SelectMany(y => Enumerable.Range(0, map.Width)
+                    .Select(x => new GridPosition(x, y, -depth))))
+            .First(cell => CaveFloraGenerator.TryGet(map, cell, out var flora) &&
+                flora.Kind == CaveFloraKind.LichenPatch);
+        var world = WorldMapState.CreateInitial(map);
+
+        Assert.True(world.TryGetCaveFlora(position, out _));
+        Assert.True(world.TryHarvestLichen(position, new SimulationTick(12), out var change));
+        Assert.Equal(WorldChangeKind.CaveFloraHarvested, change.Kind);
+        Assert.False(world.TryGetCaveFlora(position, out _));
+
+        var restoredMap = SwampMapGenerator.Generate(
+            new WorldSeed(0x4C494348454EUL),
+            64,
+            64);
+        var restored = WorldMapState.Restore(
+            restoredMap,
+            world.Version,
+            world.CreatePlantSnapshot(),
+            world.CreateWorldObjectSnapshot(),
+            world.ExcavatedCaveCells,
+            world.ExcavatedTerrainRamps,
+            world.ExcavatedVerticalPassages,
+            world.HarvestedCaveFlora);
+
+        Assert.False(restored.TryGetCaveFlora(position, out _));
+        Assert.Contains(position, restored.HarvestedCaveFlora);
+    }
+
     private static CaveFloraPatch[] Collect(GeneratedMap map) =>
         (from depth in Enumerable.Range(1, 3)
          from y in Enumerable.Range(0, map.Height)

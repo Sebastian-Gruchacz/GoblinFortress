@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Shelter;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -24,7 +25,8 @@ public sealed class SurvivalNeedTests
         Assert.NotEqual(EntityId.None, resting.Id);
         Assert.Contains(
             engine.World.GetWorldObjectsAt(resting.Job.Target),
-            worldObject => worldObject.Kind == WorldObjectKind.GoblinHut);
+            worldObject => worldObject.Kind is
+                WorldObjectKind.GoblinHut or WorldObjectKind.GoblinRuin);
         var fatigueBeforeRest = resting.Fatigue;
 
         engine.AdvanceTicks(5);
@@ -57,7 +59,68 @@ public sealed class SurvivalNeedTests
         Assert.Equal(engine.DrainWorldChanges(), restored.DrainWorldChanges());
     }
 
-    private static SimulationEngine CreateEngine()
+    [Fact]
+    public void TiredGoblinsReserveDifferentSleepingMats()
+    {
+        var engine = CreateEngine(initialGoblinCount: 2);
+        var sleepingMats = engine.World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Kind == WorldObjectKind.ReedSleepingMat)
+            .Select(worldObject => worldObject.Anchor)
+            .ToHashSet();
+
+        for (var tick = 0; tick < 2_000; tick++)
+        {
+            engine.AdvanceTicks(1);
+            if (engine.CreateSnapshot().Actors.All(actor =>
+                    actor.Job.Kind == ActorJobKind.Rest))
+            {
+                break;
+            }
+        }
+
+        var targets = engine.CreateSnapshot().Actors
+            .Select(actor => actor.Job.Target)
+            .ToArray();
+        Assert.Equal(2, targets.Length);
+        Assert.All(targets, target => Assert.Contains(target, sleepingMats));
+        Assert.Equal(2, targets.Distinct().Count());
+    }
+
+    [Fact]
+    public void SleepingPlacePolicyPrefersCoveredMatsButKeepsExposedMatsUsable()
+    {
+        var covered = new GridPosition(1, 1);
+        var exposed = new GridPosition(2, 1);
+        var fallback = new GridPosition(3, 1);
+        var worldObjects = new[]
+        {
+            CreateSleepingMat(id: 1, covered),
+            CreateSleepingMat(id: 2, exposed),
+        };
+
+        var options = GoblinSleepingPlacePolicy.CreateOptions(
+            worldObjects,
+            new HashSet<GridPosition>(),
+            new HashSet<GridPosition> { covered, exposed, fallback },
+            _ => true,
+            position => position == exposed);
+
+        Assert.Equal(new[] { covered }, options.CoveredSleepingMats);
+        Assert.Equal(new[] { exposed }, options.ExposedSleepingMats);
+        Assert.Equal(new[] { fallback }, options.ShelterFloorFallback);
+    }
+
+    private static WorldObjectSnapshot CreateSleepingMat(ulong id, GridPosition position) =>
+        new(
+            new WorldObjectId(id),
+            WorldObjectKind.ReedSleepingMat,
+            WorldObjectOwner.GoblinTribe,
+            position,
+            CardinalOrientation.North,
+            [new(default, SpatialOccupancyChannel.Fixture,
+                WorldObjectPartKind.SleepingMat)]);
+
+    private static SimulationEngine CreateEngine(int initialGoblinCount = 1)
     {
         var seed = new WorldSeed(0x52455354UL);
         var map = SwampMapGenerator.Generate(seed, width: 32, height: 32);
@@ -65,11 +128,14 @@ public sealed class SurvivalNeedTests
             seed,
             SimulationDefinitions.Foundation,
             map,
-            initialGoblinCount: 1,
+            initialGoblinCount,
             initialFoodStock: 0);
         var save = System.Text.Json.Nodes.JsonNode.Parse(engine.Save())?.AsObject()
             ?? throw new InvalidOperationException("The simulation produced invalid JSON.");
-        save["actors"]![0]!["fatigue"] = SimulationDefinitions.Foundation.RestThreshold;
+        foreach (var actor in save["actors"]!.AsArray())
+        {
+            actor!["fatigue"] = SimulationDefinitions.Foundation.RestThreshold;
+        }
         return SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
     }
 }

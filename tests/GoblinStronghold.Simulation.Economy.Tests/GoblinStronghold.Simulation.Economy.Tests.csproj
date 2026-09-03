@@ -6,6 +6,7 @@
     <Compile Include="..\GoblinStronghold.Simulation.Tests\CorpseDirectiveTests.cs" Link="CorpseDirectiveTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\CraftingTests.cs" Link="CraftingTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\FieldCampTests.cs" Link="FieldCampTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\FoodPreservationTests.cs" Link="FoodPreservationTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\LogisticsManagementTests.cs" Link="LogisticsManagementTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\LogisticsNetworkTests.cs" Link="LogisticsNetworkTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\PhysicalStockTests.cs" Link="PhysicalStockTests.cs" />

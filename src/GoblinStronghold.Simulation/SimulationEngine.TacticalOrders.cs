@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Shelter;
 
 namespace GoblinStronghold.Simulation;
 
@@ -170,10 +171,7 @@ public sealed partial class SimulationEngine
     {
         actor.ClearTacticalOrder();
         var destinations = World.CreateWorldObjectSnapshot()
-            .Where(worldObject =>
-                worldObject.Owner == WorldObjectOwner.GoblinTribe &&
-                worldObject.Kind is WorldObjectKind.GoblinHut or
-                    WorldObjectKind.GoblinFieldCamp)
+            .Where(GoblinShelterPolicy.IsShelter)
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(part => part.Part.Kind == WorldObjectPartKind.Floor &&
                 World.IsTerrainTraversable(part.Position))

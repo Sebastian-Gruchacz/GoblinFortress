@@ -23,6 +23,7 @@ public sealed class StarvationTests
         Assert.Empty(snapshot.Actors);
         var corpse = Assert.Single(snapshot.Corpses);
         Assert.Equal(CorpseKind.Goblin, corpse.Kind);
+        Assert.Equal(CorpseDirective.RecoverAndBudAtCamp, corpse.Directives);
         Assert.Contains(corpse.Contents, item =>
             item.Variant == ResourceVariant.EquipmentWoodenAxe);
         Assert.Contains(corpse.Contents, item =>

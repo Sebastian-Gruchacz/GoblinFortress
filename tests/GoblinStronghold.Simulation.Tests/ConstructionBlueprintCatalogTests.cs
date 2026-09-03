@@ -65,6 +65,21 @@ public sealed class ConstructionBlueprintCatalogTests
     }
 
     [Fact]
+    public void WoodenWatchtowerBlueprintOwnsTwoByTwoWoodenFootprint()
+    {
+        var definition = ConstructionBlueprintDefinitions.Get(
+            ConstructionKind.WoodenWatchtower);
+        var anchor = new GridPosition(8, 9, 0);
+        var footprint = definition.GetFootprint(anchor, anchor);
+
+        Assert.Equal(4, footprint.Count);
+        Assert.Contains(anchor with { X = 9, Y = 10 }, footprint);
+        Assert.Equal(ResourceKind.Wood, definition.RequiredResource);
+        Assert.Equal(8, definition.GetRequiredQuantity(footprint.Count));
+        Assert.True(definition.RetainsMaterialIdentity);
+    }
+
+    [Fact]
     public void WorkshopBlueprintUsesWorkshopConstructionQuantity()
     {
         var definition = ConstructionBlueprintDefinitions.Get(ConstructionKind.Bloomery);
@@ -74,6 +89,95 @@ public sealed class ConstructionBlueprintCatalogTests
         Assert.Equal(
             workshop.ConstructionRequirements.Sum(item => item.Quantity),
             definition.GetRequiredQuantity(1));
+    }
+
+    [Fact]
+    public void CookingFireBlueprintUsesPrimitiveWoodRequirement()
+    {
+        var definition = ConstructionBlueprintDefinitions.Get(ConstructionKind.CookingFire);
+        var workshop = WorkshopCatalog.Get(WorkshopKind.CookingFire);
+
+        Assert.Equal(WorkshopKind.CookingFire, definition.Workshop);
+        Assert.Equal(ResourceKind.Wood, definition.RequiredResource);
+        Assert.True(definition.RetainsMaterialIdentity);
+        Assert.Equal(
+            workshop.ConstructionRequirements.Sum(item => item.Quantity),
+            definition.GetRequiredQuantity(1));
+    }
+
+    [Fact]
+    public void FittedWorkshopIsAnAttainableSecondTierWoodenWorkshop()
+    {
+        var definition = ConstructionBlueprintDefinitions.Get(
+            ConstructionKind.FittedWorkshop);
+        var workshop = WorkshopCatalog.Get(WorkshopKind.FittedWorkshop);
+
+        Assert.Equal(WorkshopKind.FittedWorkshop, definition.Workshop);
+        Assert.Equal(ResourceKind.Wood, definition.RequiredResource);
+        Assert.True(definition.RetainsMaterialIdentity);
+        Assert.Equal(8, definition.GetRequiredQuantity(1));
+        Assert.Equal(1, definition.Capabilities.MinimumBuildingLevel);
+        Assert.Equal(PersonalEquipment.WoodenAxe,
+            definition.Capabilities.RequiredEquipment);
+        Assert.Equal(2, workshop.Level);
+    }
+
+    [Fact]
+    public void FittedWorkshopCommandUsesItsCatalogCostAndConstructionKind()
+    {
+        var command = SimulationCommand.BuildWorkshop(
+            new SimulationTick(3),
+            sequence: 7,
+            new GridPosition(5, 6, -1),
+            WorkshopKind.FittedWorkshop);
+
+        Assert.Equal(ConstructionKind.FittedWorkshop, command.Construction);
+        Assert.Equal(ResourceKind.Wood, command.Resource);
+        Assert.Equal(8, command.Amount);
+    }
+
+    [Fact]
+    public void WoodenLadderBlueprintAndCommandDescribeOneLevelConnection()
+    {
+        var definition = ConstructionBlueprintDefinitions.Get(ConstructionKind.WoodenLadder);
+        var lower = new GridPosition(5, 6, 0);
+        var upper = new GridPosition(6, 6, 1);
+        var command = SimulationCommand.BuildWoodenLadder(
+            new SimulationTick(3),
+            sequence: 7,
+            lower,
+            upper,
+            ResourceVariant.OakWood);
+
+        Assert.Equal(WorldToolPlacementMode.DirectionalConnection, definition.PlacementMode);
+        Assert.Equal(ResourceKind.Wood, definition.RequiredResource);
+        Assert.Equal(2, definition.GetRequiredQuantity(1));
+        Assert.True(definition.RetainsMaterialIdentity);
+        Assert.Equal(ConstructionKind.WoodenLadder, command.Construction);
+        Assert.Equal(lower, command.Position);
+        Assert.Equal(upper, command.EndPosition);
+        Assert.Equal(ResourceVariant.OakWood, command.MaterialVariant);
+    }
+
+    [Fact]
+    public void DirectionalLadderGestureResolvesExactlyOneValidOrientation()
+    {
+        var dragStart = new GridPosition(5, 6, 0);
+        var dragEnd = dragStart with { X = 6 };
+        var expectedUpper = dragEnd with { Z = 1 };
+
+        Assert.True(DirectionalLadderPlacementPolicy.TryResolve(
+            dragStart,
+            dragEnd,
+            (lower, upper) => lower == dragStart && upper == expectedUpper,
+            out var placement));
+        Assert.Equal(dragStart, placement.Lower);
+        Assert.Equal(expectedUpper, placement.Upper);
+        Assert.False(DirectionalLadderPlacementPolicy.TryResolve(
+            dragStart,
+            dragEnd,
+            (_, _) => true,
+            out _));
     }
 
     [Fact]
@@ -168,14 +272,21 @@ public sealed class ConstructionBlueprintCatalogTests
             "structures");
 
         Assert.Equal(
-            [ConstructionKind.GoblinFieldCamp, ConstructionKind.GoblinHut],
+            [ConstructionKind.GoblinFieldCamp, ConstructionKind.GoblinHut,
+                ConstructionKind.GoblinCompost, ConstructionKind.WoodenWatchtower,
+                ConstructionKind.ReedSleepingMat],
             structures.Select(definition => definition.Kind));
         Assert.Equal(
             [ConstructionKind.WoodenWalkway, ConstructionKind.BasaltWalkway],
             ConstructionBlueprintDefinitions.GetMenuBlueprints("terrain", "routes")
                 .Select(definition => definition.Kind));
         Assert.Equal(
-            [ConstructionKind.Bloomery, ConstructionKind.SmeltingFurnace,
+            [ConstructionKind.WallTorch, ConstructionKind.StandingTorch],
+            ConstructionBlueprintDefinitions.GetMenuBlueprints("basic", "lighting")
+                .Select(definition => definition.Kind));
+        Assert.Equal(
+            [ConstructionKind.FittedWorkshop, ConstructionKind.Bloomery,
+                ConstructionKind.SmeltingFurnace,
                 ConstructionKind.CrucibleFurnace],
             ConstructionBlueprintDefinitions.GetMenuBlueprints("advanced", "production")
                 .Select(definition => definition.Kind));

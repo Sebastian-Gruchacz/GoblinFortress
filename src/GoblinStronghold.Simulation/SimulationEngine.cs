@@ -9,9 +9,12 @@ using GoblinStronghold.Simulation.Civilizations.Polities;
 using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Shelter;
 using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Workshops;
+using GoblinStronghold.Simulation.Visibility;
 using GoblinStronghold.Simulation.WorkPriorities;
 
 namespace GoblinStronghold.Simulation;
@@ -67,6 +70,7 @@ public sealed partial class SimulationEngine
     private ulong _nextAnimalId = 1;
     private ulong _nextEntityId = 1;
     private ulong _nextEventSequence = 1;
+    private int _compostNutrients;
     private long _ticksExecuted;
     private long _commandsExecuted;
     private long _eventsPublished;
@@ -383,6 +387,7 @@ public sealed partial class SimulationEngine
             _raidDirectives = save.RaidDirectives == RaidDirective.None
                 ? DefaultRaidDirectives
                 : save.RaidDirectives,
+            _compostNutrients = save.CompostNutrients,
         };
         foreach (var actorId in save.RaidPartyIds)
         {
@@ -420,7 +425,9 @@ public sealed partial class SimulationEngine
             save.ExcavatedVerticalPassages.Select(model => new VerticalPassage(
                 new GridPosition(model.UpperX, model.UpperY, model.UpperZ),
                 new GridPosition(model.LowerX, model.LowerY, model.LowerZ),
-                model.Kind)));
+                model.Kind)),
+            save.HarvestedCaveFlora.Select(model =>
+                new GridPosition(model.X, model.Y, model.Z)));
         engine.Navigation = new NavigationPathService(engine.World);
         engine.LoadBloodStains(save.BloodStains);
         var surfaceGrime = save.SurfaceGrime.Select(model =>
@@ -612,6 +619,7 @@ public sealed partial class SimulationEngine
                 stack.Id, stack.Resource, stack.FoodKind, stack.Variant, stack.Quantity, stack.Location)
             {
                 HaulPriority = stack.HaulPriority,
+                FreshUntilTick = stack.FreshUntilTick,
             })
             .ToArray();
         var goblinBuds = _goblinBuds.Values
@@ -1145,6 +1153,7 @@ public sealed partial class SimulationEngine
             MapHeight = Map.Height,
             MapFingerprint = Map.ComputeFingerprint(),
             CurrentTick = CurrentTick.Value,
+            CompostNutrients = _compostNutrients,
             NextEntityId = _nextEntityId,
             NextEventSequence = _nextEventSequence,
             WorldVersion = World.Version,
@@ -1293,6 +1302,16 @@ public sealed partial class SimulationEngine
                     LowerZ = passage.Lower.Z,
                     Kind = passage.Kind,
                 }).ToList(),
+            HarvestedCaveFlora = World.HarvestedCaveFlora
+                .OrderBy(position => position.Z)
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X)
+                .Select(position => new GridPositionSaveModel
+                {
+                    X = position.X,
+                    Y = position.Y,
+                    Z = position.Z,
+                }).ToList(),
             HumanVillage = _humanVillage.CreateSaveModel(),
             Visibility = Visibility.CreateSnapshot().ToList(),
             Actors = _actors.Values.Select(ToSaveModel).ToList(),
@@ -1351,11 +1370,14 @@ public sealed partial class SimulationEngine
                         new CraftingDeliveredMaterialSaveModel
                         {
                             Resource = material.Resource,
+                            FoodKind = material.FoodKind,
                             Variant = material.Variant,
                             Quantity = material.Quantity,
+                            FreshUntilTick = material.FreshUntilTick,
                         }).ToList(),
                     RemainingWorkTicks = order.RemainingWorkTicks,
                     IsRepeating = order.IsRepeating,
+                    IsAutomatic = order.IsAutomatic,
                 }).ToList(),
             WorkDesignations = _workDesignations.Values.Select(designation =>
                 new WorkDesignationSaveModel
@@ -1589,6 +1611,17 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)passage.Kind);
         }
 
+        var harvestedCaveFlora = World.HarvestedCaveFlora
+            .OrderBy(position => position.Z)
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .ToArray();
+        Append(canonical, harvestedCaveFlora.Length);
+        foreach (var position in harvestedCaveFlora)
+        {
+            Append(canonical, position);
+        }
+
         var humanVillage = _humanVillage.CreateSnapshot();
         Append(canonical, humanVillage.PolityId.Value);
         Append(canonical, humanVillage.Anchor);
@@ -1668,6 +1701,7 @@ public sealed partial class SimulationEngine
         }
 
         Append(canonical, CurrentTick.Value);
+        Append(canonical, _compostNutrients);
         Append(canonical, _nextEntityId);
         Append(canonical, _nextEventSequence);
         Append(canonical, _actors.Count);
@@ -1696,6 +1730,10 @@ public sealed partial class SimulationEngine
             foreach (var foodKind in actor.PersonalFoodKinds)
             {
                 Append(canonical, (int)foodKind);
+            }
+            foreach (var freshUntilTick in actor.PersonalFoodFreshUntilTicks)
+            {
+                Append(canonical, freshUntilTick);
             }
             Append(canonical, actor.PersonalWater);
             Append(canonical, actor.PersonalStoneAmmo);
@@ -1753,6 +1791,7 @@ public sealed partial class SimulationEngine
             Append(canonical, stack.Location.Position);
             Append(canonical, stack.Location.OwnerId.Value);
             Append(canonical, (int)stack.HaulPriority);
+            Append(canonical, stack.FreshUntilTick ?? -1);
         }
 
         Append(canonical, _resourcePriorities.Count);
@@ -1870,11 +1909,14 @@ public sealed partial class SimulationEngine
             foreach (var material in order.DeliveredMaterials)
             {
                 Append(canonical, (int)material.Resource);
+                Append(canonical, (int)material.FoodKind);
                 Append(canonical, (int)material.Variant);
                 Append(canonical, material.Quantity);
+                Append(canonical, material.FreshUntilTick ?? -1);
             }
             Append(canonical, order.RemainingWorkTicks);
             Append(canonical, order.IsRepeating ? 1 : 0);
+            Append(canonical, order.IsAutomatic ? 1 : 0);
         }
 
         Append(canonical, _pendingCommands.Count);
@@ -1905,6 +1947,11 @@ public sealed partial class SimulationEngine
         if (save.FormatVersion != SaveFormatVersion)
         {
             throw new InvalidDataException($"Unsupported save format version {save.FormatVersion}.");
+        }
+
+        if (save.CompostNutrients < 0)
+        {
+            throw new InvalidDataException("The save contains an invalid compost nutrient count.");
         }
 
         if (!StringComparer.Ordinal.Equals(save.DefinitionsId, definitions.Id))
@@ -1977,6 +2024,12 @@ public sealed partial class SimulationEngine
             var personalFoodKinds = actorModel.PersonalFoodKinds is null
                 ? Enumerable.Repeat(actorModel.PersonalFoodKind, actorModel.PersonalFood).ToArray()
                 : actorModel.PersonalFoodKinds.ToArray();
+            var personalFoodFreshUntilTicks = actorModel.PersonalFoodFreshUntilTicks is null
+                ? personalFoodKinds.Select(kind => FoodPreservationPolicy.GetFreshUntilTick(
+                    kind,
+                    CurrentTick,
+                    Definitions.Clock)).ToArray()
+                : actorModel.PersonalFoodFreshUntilTicks.ToArray();
             var tacticalCenter = new GridPosition(
                 actorModel.TacticalCenterX,
                 actorModel.TacticalCenterY,
@@ -2020,7 +2073,9 @@ public sealed partial class SimulationEngine
                 actorModel.Thirst < 0 || actorModel.Thirst > GoblinNeeds.MaximumThirst ||
                 actorModel.PersonalFood < 0 || actorModel.PersonalFood > Definitions.PersonalFoodCapacity ||
                 personalFoodKinds.Length != actorModel.PersonalFood ||
+                personalFoodFreshUntilTicks.Length != actorModel.PersonalFood ||
                 personalFoodKinds.Any(kind => !Enum.IsDefined(kind) || kind == FoodKind.None) ||
+                personalFoodFreshUntilTicks.Any(tick => tick <= 0) ||
                 (personalFoodKinds.Length == 0
                     ? actorModel.PersonalFoodKind != FoodKind.None
                     : actorModel.PersonalFoodKind != personalFoodKinds[0]) ||
@@ -2111,6 +2166,7 @@ public sealed partial class SimulationEngine
                 DispatcherSuspendedUntilTick = actorModel.DispatcherSuspendedUntilTick,
             };
             actor.PersonalFoodKinds.AddRange(personalFoodKinds);
+            actor.PersonalFoodFreshUntilTicks.AddRange(personalFoodFreshUntilTicks);
 
             actor.RemainingRoute.AddRange(actorModel.RemainingRoute.Select(routePosition =>
                 new GridPosition(routePosition.X, routePosition.Y, routePosition.Z)));
@@ -2386,6 +2442,7 @@ public sealed partial class SimulationEngine
                 !Enum.IsDefined(priority) ||
                 !IsAddressableMapPosition(target) ||
                 (model.Kind is WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds or
+                    WorkDesignationKind.GatherLichen or
                     WorkDesignationKind.UprootBerryBush or WorkDesignationKind.FellTree or
                     WorkDesignationKind.QuarryBoulder or WorkDesignationKind.MineRock or
                     WorkDesignationKind.Scout or WorkDesignationKind.CarveRampDown or
@@ -2525,8 +2582,15 @@ public sealed partial class SimulationEngine
             var deliveredMaterials = model.DeliveredMaterials.Select(material =>
                 new CraftingDeliveredMaterialState(
                     material.Resource,
+                    material.FoodKind,
                     material.Variant,
-                    material.Quantity)).ToArray();
+                    material.Quantity,
+                    material.Resource == ResourceKind.Food
+                        ? material.FreshUntilTick ?? FoodPreservationPolicy.GetFreshUntilTick(
+                            material.FoodKind,
+                            CurrentTick,
+                            Definitions.Clock)
+                        : null)).ToArray();
             if (id == EntityId.None ||
                 !Enum.IsDefined(model.Recipe) ||
                 !World.HasWorkshop(
@@ -2543,7 +2607,8 @@ public sealed partial class SimulationEngine
                         workshop,
                         deliveredMaterials,
                         model.RemainingWorkTicks,
-                        model.IsRepeating)))
+                        model.IsRepeating,
+                        model.IsAutomatic)))
             {
                 throw new InvalidDataException("The save contains an invalid crafting order.");
             }
@@ -2556,6 +2621,7 @@ public sealed partial class SimulationEngine
     {
         if (deliveredMaterials.Any(material =>
                 !Enum.IsDefined(material.Resource) ||
+                !Enum.IsDefined(material.FoodKind) ||
                 !Enum.IsDefined(material.Variant) ||
                 !IsValidResourceVariant(
                     material.Resource,
@@ -2565,8 +2631,12 @@ public sealed partial class SimulationEngine
                 CraftingRecipeCatalog.FindMaterial(
                     recipe,
                     material.Resource,
+                    material.FoodKind,
                     material.Variant) is null) ||
-            deliveredMaterials.Select(material => (material.Resource, material.Variant))
+            deliveredMaterials.Select(material => (
+                    material.Resource,
+                    material.FoodKind,
+                    material.Variant))
                 .Distinct().Count() != deliveredMaterials.Count)
         {
             return false;
@@ -2575,6 +2645,7 @@ public sealed partial class SimulationEngine
         return CraftingRecipeCatalog.Get(recipe).Materials.All(requirement =>
             deliveredMaterials.Where(material => requirement.Matches(
                     material.Resource,
+                    material.FoodKind,
                     material.Variant))
                 .Sum(material => material.Quantity) <= requirement.Quantity);
     }
@@ -2603,19 +2674,33 @@ public sealed partial class SimulationEngine
                 !IsStorableResource(stackModel.Resource) ||
                 !IsValidFoodKind(stackModel.Resource, stackModel.FoodKind) ||
                 !IsValidResourceVariant(stackModel.Resource, stackModel.Variant, allowLegacyDefault: true) ||
+                (stackModel.Resource == ResourceKind.Food &&
+                 !FoodUsePolicy.CanBePacked(stackModel.FoodKind) &&
+                 stackModel.LocationKind != ItemLocationKind.Ground) ||
                 (stackModel.HaulPriority is { } haulPriority && !Enum.IsDefined(haulPriority)) ||
                 stackModel.Quantity <= 0)
             {
                 throw new InvalidDataException("The save contains an invalid item stack.");
             }
 
+            long? freshUntilTick = stackModel.Resource == ResourceKind.Food
+                ? stackModel.FreshUntilTick ?? FoodPreservationPolicy.GetFreshUntilTick(
+                    stackModel.FoodKind,
+                    CurrentTick,
+                    Definitions.Clock)
+                : null;
+            if (freshUntilTick <= 0)
+            {
+                throw new InvalidDataException("The save contains an invalid food shelf life.");
+            }
             var stack = new ItemStackState(
                 id,
                 stackModel.Resource,
                 stackModel.FoodKind,
                 NormalizeResourceVariant(stackModel.Resource, stackModel.Variant),
                 stackModel.Quantity,
-                location)
+                location,
+                freshUntilTick)
             {
                 HaulPriority = stackModel.HaulPriority ?? StoragePriority.Normal,
             };
@@ -2644,6 +2729,9 @@ public sealed partial class SimulationEngine
                     { Kind: not PlantKind.ReedBed },
                 WorkDesignationKind.GatherReeds => World.GetPlantPatch(designation.Target) is
                     { Kind: PlantKind.ReedBed },
+                WorkDesignationKind.GatherLichen =>
+                    World.TryGetCaveFlora(designation.Target, out var flora) &&
+                    flora.Kind == CaveFloraKind.LichenPatch,
                 WorkDesignationKind.UprootBerryBush =>
                     World.GetPlantPatch(designation.Target) is { Kind: PlantKind.BerryBush },
                 WorkDesignationKind.GatherBrushwood =>
@@ -2914,6 +3002,16 @@ public sealed partial class SimulationEngine
     private void UpdateWorld()
     {
         UpdateBloodStains();
+        var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
+        if (calendar.IsDayStart)
+        {
+            UpdateFoodSpoilage();
+        }
+        if (calendar.IsDayStart && calendar.DayOfSeason == 1)
+        {
+            _undeliveredWorldChanges.AddRange(
+                World.RefreshSeasonalWildFood(CurrentTick, calendar.Season));
+        }
         if (_undergroundFactions.HasFactions)
         {
             var deepestGoblinLevel = _actors.Values
@@ -2927,7 +3025,6 @@ public sealed partial class SimulationEngine
         }
         if (CurrentTick.Value % Definitions.PlantGrowthIntervalTicks == 0)
         {
-            var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
             _undeliveredWorldChanges.AddRange(
                 World.GrowPlants(
                     CurrentTick,
@@ -2962,16 +3059,9 @@ public sealed partial class SimulationEngine
             .ToArray();
         var observers = goblinObservers.ToList();
         var verticalPassages = World.CreateVerticalPassageSnapshot();
-        if (GoblinPerception.StructureVisionRadius > 0)
-        {
-            observers.AddRange(World.EnumerateWorldObjects()
-                .Where(worldObject =>
-                    worldObject.Owner == WorldObjectOwner.GoblinTribe &&
-                    worldObject.Kind is WorldObjectKind.GoblinHut or
-                        WorldObjectKind.GoblinFieldCamp)
-                .Select(worldObject =>
-                    (worldObject.Anchor, GoblinPerception.StructureVisionRadius)));
-        }
+        observers.AddRange(GoblinStructureObserverPolicy.SelectObservers(
+            World.EnumerateWorldObjects(),
+            GoblinPerception.StructureVisionRadius));
         if (DebugSettings.RevealFogFromNonPlayerUnits)
         {
             var humanRadius = calendar.IsNight
@@ -3043,6 +3133,8 @@ public sealed partial class SimulationEngine
             _pendingCommands.Remove(first.Key);
             ExecuteValidatedCommand(first.Value);
         }
+
+        UpdateAutomaticCooking();
     }
 
     private void ExecuteValidatedCommand(SimulationCommand command)
@@ -3323,7 +3415,9 @@ public sealed partial class SimulationEngine
                     material.Resource,
                     material.Quantity,
                     workshop,
-                    material.Variant);
+                    material.Variant,
+                    material.FoodKind,
+                    material.FreshUntilTick);
             }
             _craftingOrders.Remove(order.Id);
         }
@@ -3333,24 +3427,44 @@ public sealed partial class SimulationEngine
         ResourceKind resource,
         int quantity,
         GridPosition position,
-        ResourceVariant variant)
+        ResourceVariant variant,
+        FoodKind foodKind = FoodKind.None,
+        long? freshUntilTick = null)
     {
-        var existing = FindMergeableGroundStack(resource, position, variant: variant);
+        var existing = FindMergeableGroundStack(
+            resource,
+            position,
+            foodKind,
+            variant);
         if (existing is not null)
         {
             existing.Quantity = checked(existing.Quantity + quantity);
+            if (existing.FreshUntilTick is { } existingFreshUntil &&
+                freshUntilTick is { } incomingFreshUntil)
+            {
+                existing.FreshUntilTick = Math.Min(existingFreshUntil, incomingFreshUntil);
+            }
             return;
         }
-        AllocateItemStack(resource, quantity, ItemLocation.OnGround(position), variant: variant);
+        AllocateItemStack(
+            resource,
+            quantity,
+            ItemLocation.OnGround(position),
+            foodKind,
+            variant,
+            freshUntilTick);
     }
 
     private bool TryExecuteQueueCraftingOrder(SimulationCommand command)
     {
         var recipe = (CraftingRecipeKind)command.Amount;
-        return Enum.IsDefined(recipe) && TryCreateCraftingOrder(
-            command.Position,
-            recipe,
-            isRepeating: false);
+        if (!Enum.IsDefined(recipe))
+        {
+            return false;
+        }
+
+        CancelAutomaticCraftingOrdersAt(command.Position);
+        return TryCreateCraftingOrder(command.Position, recipe, isRepeating: false);
     }
 
     private bool TryExecuteConfigureRepeatingCraftingOrder(SimulationCommand command)
@@ -3360,6 +3474,11 @@ public sealed partial class SimulationEngine
         if (!Enum.IsDefined(recipe))
         {
             return false;
+        }
+
+        if (enabled)
+        {
+            CancelAutomaticCraftingOrdersAt(command.Position);
         }
 
         var existing = _craftingOrders.Values.FirstOrDefault(order =>
@@ -3383,7 +3502,8 @@ public sealed partial class SimulationEngine
     private bool TryCreateCraftingOrder(
         GridPosition position,
         CraftingRecipeKind recipe,
-        bool isRepeating)
+        bool isRepeating,
+        bool isAutomatic = false)
     {
         var recipeDefinition = CraftingRecipeCatalog.Get(recipe);
         var workshop = WorkshopCatalog.Get(recipeDefinition.Workshop);
@@ -3400,7 +3520,8 @@ public sealed partial class SimulationEngine
             position,
             deliveredMaterials: [],
             CraftingRecipeCatalog.GetWorkTicks(recipe),
-            isRepeating);
+            isRepeating,
+            isAutomatic);
         _craftingOrders.Add(id, order);
         Publish(SimulationEventKind.CraftingOrdered, EntityId.None, id, (int)recipe);
         return true;
@@ -3424,7 +3545,9 @@ public sealed partial class SimulationEngine
                 material.Resource,
                 material.Quantity,
                 order.Workshop,
-                material.Variant);
+                material.Variant,
+                material.FoodKind,
+                material.FreshUntilTick);
         }
         _craftingOrders.Remove(order.Id);
     }
@@ -3799,6 +3922,11 @@ public sealed partial class SimulationEngine
                     IsInside(plant.Position, minimum, maximum) &&
                     Visibility.Get(plant.Position) != CellVisibility.Unknown)
                 .Select(plant => (plant.Position, EntityId.None)),
+            WorkDesignationKind.GatherLichen => EnumerateAreaCells(minimum, maximum)
+                .Where(position => Visibility.Get(position) != CellVisibility.Unknown &&
+                    World.TryGetCaveFlora(position, out var flora) &&
+                    flora.Kind == CaveFloraKind.LichenPatch)
+                .Select(position => (position, EntityId.None)),
             WorkDesignationKind.GatherBrushwood => _itemStacks.Values
                 .Where(stack => stack.Resource == ResourceKind.Wood &&
                     stack.Location.Kind == ItemLocationKind.Ground &&
@@ -3865,6 +3993,7 @@ public sealed partial class SimulationEngine
             (int)WorkDesignationKind.CarveRampDown => WorkDesignationKind.CarveRampDown,
             (int)WorkDesignationKind.CarveRampUp => WorkDesignationKind.CarveRampUp,
             (int)WorkDesignationKind.CleanBlood => WorkDesignationKind.CleanBlood,
+            (int)WorkDesignationKind.GatherLichen => WorkDesignationKind.GatherLichen,
             _ => command.Resource switch
         {
             ResourceKind.Food => WorkDesignationKind.GatherFood,
@@ -4054,7 +4183,8 @@ public sealed partial class SimulationEngine
         ActorState actor,
         WorkDesignationSnapshot designation) => designation.Kind switch
     {
-        WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds =>
+        WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds or
+            WorkDesignationKind.GatherLichen =>
             actor.SuspendedJobKind == ActorJobKind.Forage &&
             actor.SuspendedJobTarget == designation.Target,
         WorkDesignationKind.UprootBerryBush =>
@@ -4086,7 +4216,8 @@ public sealed partial class SimulationEngine
         ActorState actor,
         WorkDesignationSnapshot designation) => designation.Kind switch
     {
-        WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds =>
+        WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds or
+            WorkDesignationKind.GatherLichen =>
             actor.JobKind == ActorJobKind.Forage && actor.JobTarget == designation.Target,
         WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone =>
             actor.JobKind == ActorJobKind.Haul &&
@@ -4800,6 +4931,13 @@ public sealed partial class SimulationEngine
             .SelectMany(y => Enumerable.Range(0, 3)
                 .Select(x => new GridPosition(anchor.X + x, anchor.Y + y, anchor.Z)))
             .ToArray(),
+        ConstructionKind.WoodenWatchtower =>
+        [
+            anchor,
+            anchor with { X = anchor.X + 1 },
+            anchor with { Y = anchor.Y + 1 },
+            anchor with { X = anchor.X + 1, Y = anchor.Y + 1 },
+        ],
         _ => [anchor],
     };
 
@@ -4830,18 +4968,24 @@ public sealed partial class SimulationEngine
             ConstructionKind.BasaltWalkway => World.CanBuildBasaltWalkway(footprint),
             ConstructionKind.GoblinFieldCamp => World.CanBuildGoblinFieldCamp(anchor),
             ConstructionKind.GoblinHut => World.CanBuildGoblinHut(anchor),
+            ConstructionKind.GoblinCompost => World.CanBuildGoblinCompost(anchor),
+            ConstructionKind.WoodenWatchtower => World.CanBuildWoodenWatchtower(anchor),
+            ConstructionKind.ReedSleepingMat => World.CanBuildReedSleepingMat(anchor),
             ConstructionKind.WoodenWall => World.CanBuildWoodenWalls(footprint),
             ConstructionKind.StoneWall => World.CanBuildStoneWalls(footprint),
             ConstructionKind.WoodenFloor or ConstructionKind.StoneFloor =>
                 World.CanBuildFloors(footprint),
             ConstructionKind.WoodenRamp or ConstructionKind.StoneRamp =>
                 World.CanBuildRamp(anchor, end),
+            ConstructionKind.WoodenLadder => World.CanBuildWoodenLadder(anchor, end),
             ConstructionKind.WoodenDoorFrame => World.CanBuildWoodenDoorFrame(anchor),
             ConstructionKind.StoneDoorFrame => World.CanBuildStoneDoorFrame(anchor),
             ConstructionKind.WoodenDoor => World.CanBuildWoodenDoor(anchor),
             ConstructionKind.WallTorch => World.CanBuildWallTorch(anchor),
+            ConstructionKind.StandingTorch => World.CanBuildStandingTorch(anchor),
             ConstructionKind.PrimitiveWorkshop or ConstructionKind.Bloomery or
-                ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace =>
+                ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace or
+                ConstructionKind.CookingFire or ConstructionKind.FittedWorkshop =>
                 World.CanBuildWorkshop(anchor),
             _ => false,
         };
@@ -4873,7 +5017,8 @@ public sealed partial class SimulationEngine
         if (site.Kind is ConstructionKind.WoodenWall or ConstructionKind.StoneWall or
                 ConstructionKind.PrimitiveWorkshop or ConstructionKind.Bloomery or
                 ConstructionKind.SmeltingFurnace or ConstructionKind.CrucibleFurnace or
-                ConstructionKind.GoblinHut &&
+                ConstructionKind.CookingFire or ConstructionKind.FittedWorkshop or
+                ConstructionKind.GoblinHut or ConstructionKind.WoodenWatchtower &&
             _actors.Values.Any(actor => site.GetFootprint().Contains(actor.Position)))
         {
             return false;
@@ -4980,6 +5125,28 @@ public sealed partial class SimulationEngine
                 completedTarget = EntityId.None;
                 experience = 35;
                 break;
+            case ConstructionKind.GoblinCompost:
+                _undeliveredWorldChanges.Add(World.BuildGoblinCompost(
+                    site.Anchor,
+                    CurrentTick));
+                completedTarget = EntityId.None;
+                experience = 8;
+                break;
+            case ConstructionKind.WoodenWatchtower:
+                _undeliveredWorldChanges.Add(World.BuildWoodenWatchtower(
+                    site.Anchor,
+                    CurrentTick,
+                    site.DeliveredVariant));
+                completedTarget = EntityId.None;
+                experience = 30;
+                break;
+            case ConstructionKind.ReedSleepingMat:
+                _undeliveredWorldChanges.Add(World.BuildReedSleepingMat(
+                    site.Anchor,
+                    CurrentTick));
+                completedTarget = EntityId.None;
+                experience = 6;
+                break;
             case ConstructionKind.WoodenWall:
                 var wallCells = site.GetFootprint();
                 _undeliveredWorldChanges.Add(World.BuildWoodenWalls(
@@ -5019,6 +5186,15 @@ public sealed partial class SimulationEngine
                 completedTarget = EntityId.None;
                 experience = site.Kind == ConstructionKind.StoneRamp ? 14 : 10;
                 break;
+            case ConstructionKind.WoodenLadder:
+                _undeliveredWorldChanges.Add(World.BuildWoodenLadder(
+                    site.Anchor,
+                    site.End,
+                    CurrentTick,
+                    site.DeliveredVariant));
+                completedTarget = EntityId.None;
+                experience = 10;
+                break;
             case ConstructionKind.WoodenDoorFrame:
                 _undeliveredWorldChanges.Add(World.BuildWoodenDoorFrame(
                     site.Anchor,
@@ -5051,10 +5227,20 @@ public sealed partial class SimulationEngine
                 completedTarget = EntityId.None;
                 experience = 5;
                 break;
+            case ConstructionKind.StandingTorch:
+                _undeliveredWorldChanges.Add(World.BuildStandingTorch(
+                    site.Anchor,
+                    CurrentTick,
+                    site.DeliveredVariant));
+                completedTarget = EntityId.None;
+                experience = 5;
+                break;
             case ConstructionKind.PrimitiveWorkshop:
             case ConstructionKind.Bloomery:
             case ConstructionKind.SmeltingFurnace:
             case ConstructionKind.CrucibleFurnace:
+            case ConstructionKind.CookingFire:
+            case ConstructionKind.FittedWorkshop:
                 _ = ConstructionBlueprintCatalog.TryGetWorkshopKind(
                     site.Kind,
                     out var workshopKind);
@@ -5137,20 +5323,7 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var shelters = World.CreateWorldObjectSnapshot()
-            .Where(worldObject => worldObject.Owner == WorldObjectOwner.GoblinTribe)
-            .ToArray();
-        var destinations = shelters
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut)
-            .SelectMany(GetShelterFloorCells)
-            .Concat(shelters
-                .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
-                    CanReserveFieldCampBed(actor, worldObject))
-                .SelectMany(GetShelterFloorCells))
-            .Where(World.IsTerrainTraversable)
-            .Distinct()
-            .ToHashSet();
-        var route = FindActorPathToNearest(actor, destinations);
+        var route = FindRestRoute(actor);
         if (route is null)
         {
             return false;
@@ -5437,6 +5610,8 @@ public sealed partial class SimulationEngine
             actor.CarriedStackId != EntityId.None ||
             !_itemStacks.TryGetValue(command.Target, out var source) ||
             source.Location.Kind == ItemLocationKind.ActorInventory ||
+            (source.Resource == ResourceKind.Food &&
+             !FoodUsePolicy.CanBePacked(source.FoodKind)) ||
             command.Amount <= 0 ||
             command.Amount > source.Quantity ||
             command.Amount > Definitions.ActorCarryCapacity)
@@ -5464,7 +5639,8 @@ public sealed partial class SimulationEngine
                 command.Amount,
                 ItemLocation.CarriedBy(actor.Id),
                 source.FoodKind,
-                source.Variant);
+                source.Variant,
+                source.FreshUntilTick);
         }
 
         MoveActor(actor, sourcePosition);
@@ -5555,6 +5731,7 @@ public sealed partial class SimulationEngine
                 {
                     var foodKind = actor.PersonalFoodKinds[0];
                     actor.PersonalFoodKinds.RemoveAt(0);
+                    actor.PersonalFoodFreshUntilTicks.RemoveAt(0);
                     ApplyFoodEffects(actor, foodKind);
                     Publish(SimulationEventKind.ActorAte, actor.Id, EntityId.None, 1);
                 }
@@ -5864,19 +6041,8 @@ public sealed partial class SimulationEngine
                 break;
             case SimulationCommandKind.Build:
                 if (!Enum.IsDefined(command.Construction) ||
-                    command.Resource != (command.Construction switch
-                    {
-                        ConstructionKind.BasaltWalkway or ConstructionKind.StoneWall or
-                            ConstructionKind.StoneFloor or ConstructionKind.StoneRamp or
-                            ConstructionKind.StoneDoorFrame or ConstructionKind.Bloomery or
-                            ConstructionKind.SmeltingFurnace or
-                            ConstructionKind.CrucibleFurnace =>
-                            ResourceKind.Stone,
-                        ConstructionKind.WaterBarrel or ConstructionKind.WoodenBox or
-                            ConstructionKind.WoodenChest or ConstructionKind.WoodenBulkBin =>
-                            ResourceKind.Equipment,
-                        _ => ResourceKind.Wood,
-                    }) ||
+                    command.Resource != ConstructionBlueprintDefinitions
+                        .Get(command.Construction).RequiredResource ||
                     !IsPotentialConstructionPosition(command.Position) ||
                     !IsPotentialConstructionPosition(command.EndPosition))
                 {
@@ -5945,6 +6111,36 @@ public sealed partial class SimulationEngine
                     throw new ArgumentException("Goblin-hut construction is invalid.", nameof(command));
                 }
 
+                if (command.Construction == ConstructionKind.GoblinCompost &&
+                    (command.Position != command.EndPosition || command.Amount != 2))
+                {
+                    throw new ArgumentException(
+                        "Goblin-compost construction is invalid.",
+                        nameof(command));
+                }
+
+                if (command.Construction == ConstructionKind.WoodenWatchtower &&
+                    (command.Amount != 8 ||
+                     command.EndPosition.Z != command.Position.Z ||
+                     command.EndPosition != command.Position with
+                     {
+                         X = command.Position.X + 1,
+                         Y = command.Position.Y + 1,
+                     }))
+                {
+                    throw new ArgumentException(
+                        "Wooden-watchtower construction is invalid.",
+                        nameof(command));
+                }
+
+                if (command.Construction == ConstructionKind.ReedSleepingMat &&
+                    (command.Position != command.EndPosition || command.Amount != 2))
+                {
+                    throw new ArgumentException(
+                        "Reed-sleeping-mat construction is invalid.",
+                        nameof(command));
+                }
+
                 if (command.Construction == ConstructionKind.WoodenWall &&
                     (command.Position.Z != command.EndPosition.Z ||
                      command.Amount != 2))
@@ -5980,6 +6176,16 @@ public sealed partial class SimulationEngine
                     throw new ArgumentException("Ramp construction is invalid.", nameof(command));
                 }
 
+                if (command.Construction == ConstructionKind.WoodenLadder &&
+                    (command.Amount != 2 ||
+                     command.EndPosition.Z != command.Position.Z + 1 ||
+                     Math.Abs(command.EndPosition.X - command.Position.X) +
+                         Math.Abs(command.EndPosition.Y - command.Position.Y) != 1))
+                {
+                    throw new ArgumentException(
+                        "Wooden-ladder construction is invalid.", nameof(command));
+                }
+
                 if (command.Construction == ConstructionKind.WoodenDoorFrame &&
                     (command.Position != command.EndPosition ||
                      command.Amount != 1))
@@ -6006,6 +6212,15 @@ public sealed partial class SimulationEngine
                      command.Amount != 1))
                 {
                     throw new ArgumentException("Wall-torch construction is invalid.", nameof(command));
+                }
+
+                if (command.Construction == ConstructionKind.StandingTorch &&
+                    (command.Position != command.EndPosition ||
+                     command.Amount != 1))
+                {
+                    throw new ArgumentException(
+                        "Standing-torch construction is invalid.",
+                        nameof(command));
                 }
 
                 if (ConstructionBlueprintCatalog.TryGetWorkshopKind(
@@ -6035,6 +6250,7 @@ public sealed partial class SimulationEngine
                     (int)WorkDesignationKind.CarveRampDown => WorkDesignationKind.CarveRampDown,
                     (int)WorkDesignationKind.CarveRampUp => WorkDesignationKind.CarveRampUp,
                     (int)WorkDesignationKind.CleanBlood => WorkDesignationKind.CleanBlood,
+                    (int)WorkDesignationKind.GatherLichen => WorkDesignationKind.GatherLichen,
                     _ => command.Resource switch
                     {
                         ResourceKind.Food => WorkDesignationKind.GatherFood,
@@ -6553,7 +6769,8 @@ public sealed partial class SimulationEngine
         int quantity,
         ItemLocation location,
         FoodKind foodKind = FoodKind.None,
-        ResourceVariant variant = ResourceVariant.None)
+        ResourceVariant variant = ResourceVariant.None,
+        long? freshUntilTick = null)
     {
         if (resource == ResourceKind.Food && foodKind == FoodKind.None)
         {
@@ -6561,8 +6778,21 @@ public sealed partial class SimulationEngine
         }
 
         variant = NormalizeResourceVariant(resource, variant);
+        freshUntilTick = resource == ResourceKind.Food
+            ? freshUntilTick ?? FoodPreservationPolicy.GetFreshUntilTick(
+                foodKind,
+                CurrentTick,
+                Definitions.Clock)
+            : null;
         var id = AllocateEntityId();
-        var stack = new ItemStackState(id, resource, foodKind, variant, quantity, location);
+        var stack = new ItemStackState(
+            id,
+            resource,
+            foodKind,
+            variant,
+            quantity,
+            location,
+            freshUntilTick);
         _itemStacks.Add(id, stack);
         IndexItemStack(stack);
         return stack;
@@ -7017,6 +7247,11 @@ public sealed partial class SimulationEngine
         }
 
         existing.Quantity = checked(existing.Quantity + stack.Quantity);
+        if (existing.FreshUntilTick is { } existingFreshUntil &&
+            stack.FreshUntilTick is { } incomingFreshUntil)
+        {
+            existing.FreshUntilTick = Math.Min(existingFreshUntil, incomingFreshUntil);
+        }
         RemoveItemStack(stack.Id);
         return existing;
     }
@@ -7321,6 +7556,12 @@ public sealed partial class SimulationEngine
 
     private static bool ZoneAccepts(StorageZoneState zone, ItemStackState stack)
     {
+        if (stack.Resource == ResourceKind.Food &&
+            !FoodUsePolicy.CanBeStored(stack.FoodKind))
+        {
+            return false;
+        }
+
         if (!ZoneCategoryAccepts(zone, stack.Resource) ||
             zone.AcceptedResource != ResourceKind.Stone)
         {
@@ -7559,6 +7800,7 @@ public sealed partial class SimulationEngine
         PersonalFood = actor.PersonalFood,
         PersonalFoodKind = actor.PersonalFoodKind,
         PersonalFoodKinds = actor.PersonalFoodKinds.ToList(),
+        PersonalFoodFreshUntilTicks = actor.PersonalFoodFreshUntilTicks.ToList(),
         PersonalWater = actor.PersonalWater,
         PersonalStoneAmmo = actor.PersonalStoneAmmo,
         BloodFootprintSteps = actor.BloodFootprintSteps,
@@ -7653,6 +7895,7 @@ public sealed partial class SimulationEngine
         Z = stack.Location.Position.Z,
         OwnerId = stack.Location.OwnerId.Value,
         HaulPriority = stack.HaulPriority,
+        FreshUntilTick = stack.FreshUntilTick,
     };
 
     private static StorageZoneSaveModel ToSaveModel(StorageZoneState zone) => new()
@@ -7818,6 +8061,8 @@ public sealed partial class SimulationEngine
 
         public List<FoodKind> PersonalFoodKinds { get; } = [];
 
+        public List<long> PersonalFoodFreshUntilTicks { get; } = [];
+
         public int PersonalFood => PersonalFoodKinds.Count;
 
         public FoodKind PersonalFoodKind => PersonalFoodKinds.Count == 0
@@ -7955,7 +8200,8 @@ public sealed partial class SimulationEngine
         FoodKind foodKind,
         ResourceVariant variant,
         int quantity,
-        ItemLocation location)
+        ItemLocation location,
+        long? freshUntilTick)
     {
         public EntityId Id { get; } = id;
 
@@ -7968,6 +8214,8 @@ public sealed partial class SimulationEngine
         public int Quantity { get; set; } = quantity;
 
         public ItemLocation Location { get; set; } = location;
+
+        public long? FreshUntilTick { get; set; } = freshUntilTick;
 
         public StoragePriority HaulPriority { get; set; } = StoragePriority.Normal;
     }

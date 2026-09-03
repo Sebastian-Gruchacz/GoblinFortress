@@ -155,6 +155,19 @@
       "workTicks": 20
     },
     {
+      "id": "standing-torch",
+      "kind": "StandingTorch",
+      "planningMode": "SimplePlacement",
+      "placementMode": "Point",
+      "menuPath": ["basic", "lighting"],
+      "footprint": "Single",
+      "requiredResource": "Wood",
+      "quantityMode": "Fixed",
+      "materialQuantity": 1,
+      "retainsMaterialIdentity": true,
+      "workTicks": 20
+    },
+    {
       "id": "primitive-workshop",
       "kind": "PrimitiveWorkshop",
       "planningMode": "BuildingBlueprint",
@@ -167,6 +180,25 @@
       "retainsMaterialIdentity": true,
       "workTicks": 90,
       "workshop": "PrimitiveWorkshop"
+    },
+    {
+      "id": "fitted-workshop",
+      "kind": "FittedWorkshop",
+      "planningMode": "BuildingBlueprint",
+      "placementMode": "Point",
+      "menuPath": ["advanced", "production"],
+      "footprint": "Single",
+      "requiredResource": "Wood",
+      "quantityMode": "WorkshopRequirements",
+      "materialQuantity": 1,
+      "retainsMaterialIdentity": true,
+      "workTicks": 140,
+      "capabilities": {
+        "requiredSkills": "Building",
+        "minimumBuildingLevel": 1,
+        "requiredEquipment": "WoodenAxe"
+      },
+      "workshop": "FittedWorkshop"
     },
     {
       "id": "goblin-hut",
@@ -182,6 +214,45 @@
       "materialQuantity": 8,
       "retainsMaterialIdentity": true,
       "workTicks": 180
+    },
+    {
+      "id": "goblin-compost",
+      "kind": "GoblinCompost",
+      "planningMode": "SimplePlacement",
+      "placementMode": "Point",
+      "menuPath": ["basic", "structures"],
+      "footprint": "Single",
+      "requiredResource": "Reeds",
+      "quantityMode": "Fixed",
+      "materialQuantity": 2,
+      "workTicks": 30
+    },
+    {
+      "id": "wooden-watchtower",
+      "kind": "WoodenWatchtower",
+      "planningMode": "BuildingBlueprint",
+      "placementMode": "FixedFootprint",
+      "menuPath": ["basic", "structures"],
+      "footprint": "FixedRectangle",
+      "footprintWidth": 2,
+      "footprintHeight": 2,
+      "requiredResource": "Wood",
+      "quantityMode": "Fixed",
+      "materialQuantity": 8,
+      "retainsMaterialIdentity": true,
+      "workTicks": 140
+    },
+    {
+      "id": "reed-sleeping-mat",
+      "kind": "ReedSleepingMat",
+      "planningMode": "SimplePlacement",
+      "placementMode": "Point",
+      "menuPath": ["basic", "structures"],
+      "footprint": "Single",
+      "requiredResource": "Reeds",
+      "quantityMode": "Fixed",
+      "materialQuantity": 2,
+      "workTicks": 25
     },
     {
       "id": "equipment-storage",
@@ -397,6 +468,33 @@
         "requiredSkills": "Building",
         "requiredEquipment": "PrimitivePickaxe"
       }
+    },
+    {
+      "id": "wooden-ladder",
+      "kind": "WoodenLadder",
+      "planningMode": "SimplePlacement",
+      "placementMode": "DirectionalConnection",
+      "menuPath": ["basic", "structural"],
+      "footprint": "Single",
+      "requiredResource": "Wood",
+      "quantityMode": "Fixed",
+      "materialQuantity": 2,
+      "retainsMaterialIdentity": true,
+      "workTicks": 40
+    },
+    {
+      "id": "cooking-fire",
+      "kind": "CookingFire",
+      "planningMode": "BuildingBlueprint",
+      "placementMode": "Point",
+      "menuPath": ["basic", "workshops"],
+      "footprint": "Single",
+      "requiredResource": "Wood",
+      "quantityMode": "WorkshopRequirements",
+      "materialQuantity": 1,
+      "retainsMaterialIdentity": true,
+      "workTicks": 45,
+      "workshop": "CookingFire"
     }
   ]
 }

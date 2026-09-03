@@ -218,6 +218,7 @@ public partial class Main : Node
     private Control _cameraModePanel = null!;
     private Button _cameraAngleButton = null!;
     private bool _use3DView;
+    private static readonly bool Enable3DPrototype = false;
 
     private double SecondsPerTick =>
         _engine.Definitions.Clock.RealSecondsPerTickAtNormalSpeed;
@@ -253,6 +254,13 @@ public partial class Main : Node
         SmeltingFurnace,
         CrucibleFurnace,
         GoblinHut,
+        GoblinCompost,
+        WoodenWatchtower,
+        ReedSleepingMat,
+        StandingTorch,
+        CookingFire,
+        FittedWorkshop,
+        WoodenLadder,
     }
 
     private enum ConstructionMaterialGroup
@@ -271,6 +279,7 @@ public partial class Main : Node
         None,
         GatherFood,
         GatherReeds,
+        GatherLichen,
         GatherBrushwood,
         GatherStone,
         UprootBerryBushes,
@@ -411,6 +420,8 @@ public partial class Main : Node
         _titleMusic = GetNode<AudioStreamPlayer>("TitleMusic");
         _titleMusic.Finished += ReplayTitleMusic;
         _viewModeButton = GetNode<Button>("Interface/RightHud/SessionPanel/Controls/ViewMode");
+        _viewModeButton.Visible = Enable3DPrototype;
+        _viewModeButton.Disabled = !Enable3DPrototype;
         _cameraModePanel = GetNode<Control>("Interface/RightHud/CameraPanel");
         _cameraAngleButton = GetNode<Button>("Interface/RightHud/CameraPanel/Controls/Angle");
         _iconAtlas = UiIcons.LoadAtlas();
@@ -588,7 +599,10 @@ public partial class Main : Node
             ApplyConstructionSettings;
         GetNode<Button>("Interface/RightHud/SessionPanel/Controls/Menu").Pressed += ShowMainMenu;
         GetNode<Button>("Interface/RightHud/SessionPanel/Controls/SaveGame").Pressed += SaveGame;
-        _viewModeButton.Pressed += ToggleWorldView;
+        if (Enable3DPrototype)
+        {
+            _viewModeButton.Pressed += ToggleWorldView;
+        }
         GetNode<Button>("Interface/RightHud/CameraPanel/Controls/RotateLeft").Pressed +=
             () => Rotate3DCamera(-1);
         _cameraAngleButton.Pressed += Toggle3DCameraAngle;
@@ -949,7 +963,8 @@ public partial class Main : Node
                 LoadGame();
                 GetViewport().SetInputAsHandled();
                 break;
-            case InputEventKey key when key.Pressed && !key.Echo && key.Keycode == Key.F3:
+            case InputEventKey key when Enable3DPrototype && key.Pressed && !key.Echo &&
+                key.Keycode == Key.F3:
                 ToggleWorldView();
                 GetViewport().SetInputAsHandled();
                 break;
@@ -1132,8 +1147,8 @@ public partial class Main : Node
             request.Seed,
             SimulationDefinitions.Foundation,
             map,
-            initialGoblinCount: 8,
-            initialFoodStock: 16,
+            initialGoblinCount: 12,
+            initialFoodStock: 32,
             scatterInitialBrushwood: true,
             debugSettings: SimulationDebugSettings.ForCurrentBuild);
         _commandSequence = 1;
@@ -2118,15 +2133,24 @@ public partial class Main : Node
         AddBasic(CreateGoblinHutIcon(), "goblin-hut",
             () => SelectBuildMode((long)BuildMode.GoblinHut),
             GameShortcutId.BuildGoblinHut);
+        AddBasic(CreateGoblinCompostIcon(), "goblin-compost",
+            () => SelectBuildMode((long)BuildMode.GoblinCompost));
+        AddBasic(CreateWoodenWatchtowerIcon(), "wooden-watchtower",
+            () => SelectBuildMode((long)BuildMode.WoodenWatchtower));
+        AddBasic(CreateWoodenLadderIcon(), "wooden-ladder",
+            () => SelectBuildMode((long)BuildMode.WoodenLadder));
+        AddBasic(CreateReedSleepingMatIcon(), "reed-sleeping-mat",
+            () => SelectBuildMode((long)BuildMode.ReedSleepingMat));
         AddBasic(CreatePrimitiveWorkshopIcon(), "primitive-workshop",
             () => SelectBuildMode((long)BuildMode.PrimitiveWorkshop),
             GameShortcutId.BuildPrimitiveWorkshop);
         _constructionPlanningMenu.AddDisabledRootTool(
             PlanningToolIcons.CreateDryingRackIcon(),
             Ui("action-tiles", "drying-rack-coming-soon"));
-        _constructionPlanningMenu.AddDisabledRootTool(
+        AddBasic(
             PlanningToolIcons.CreateCookingFireIcon(),
-            Ui("action-tiles", "cooking-fire-coming-soon"));
+            "cooking-fire",
+            () => SelectBuildMode((long)BuildMode.CookingFire));
 
         AddBasic(
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.StoneWall),
@@ -2153,7 +2177,13 @@ public partial class Main : Node
             ConstructionIcons.CreateTexture(_constructionIconAtlas, ConstructionIcon.WallTorch),
             "wall-torch",
             () => SelectBuildMode((long)BuildMode.WallTorch));
+        AddBasic(
+            CreateWallTorchIcon(),
+            "standing-torch",
+            () => SelectBuildMode((long)BuildMode.StandingTorch));
 
+        AddAdvanced(CreateFittedWorkshopIcon(), "fitted-workshop",
+            () => SelectBuildMode((long)BuildMode.FittedWorkshop));
         AddAdvanced(CreateFurnaceIcon(WorkshopKind.Bloomery), "bloomery",
             () => SelectBuildMode((long)BuildMode.Bloomery));
         AddAdvanced(CreateFurnaceIcon(WorkshopKind.SmeltingFurnace), "smelting-furnace",
@@ -2232,6 +2262,8 @@ public partial class Main : Node
             () => SelectWorkMode((long)WorkMode.GatherFood), GameShortcutId.GatherFood);
         Add(CreateGatherIcon(ItemIcon.Reeds), "gather-reeds",
             () => SelectWorkMode((long)WorkMode.GatherReeds), GameShortcutId.GatherReeds);
+        Add(CreateGatherIcon(ItemIcon.Reeds), "gather-lichen",
+            () => SelectWorkMode((long)WorkMode.GatherLichen));
         Add(CreateGatherIcon(UiIcons.CreateTexture(_iconAtlas, UiIcon.GatherBrushwood)),
             "gather-brushwood", () => SelectWorkMode((long)WorkMode.GatherBrushwood),
             GameShortcutId.GatherBrushwood);
@@ -2888,6 +2920,64 @@ public partial class Main : Node
         return CreateSvgIcon(svg, "goblin hut");
     }
 
+    private static Texture2D CreateGoblinCompostIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <ellipse cx="32" cy="48" rx="25" ry="9" fill="#2d251b" stroke="#17130f" stroke-width="3"/>
+              <path d="M11 47 Q16 24 32 25 Q50 24 55 47 Z" fill="#5d4d2c" stroke="#302719" stroke-width="3"/>
+              <path d="M17 39 Q24 31 31 38 T47 36" fill="none" stroke="#788b43" stroke-width="4" stroke-linecap="round"/>
+              <path d="M20 30 L45 46" stroke="#d2c59a" stroke-width="4" stroke-linecap="round"/>
+              <circle cx="20" cy="30" r="4" fill="#e1d5aa" stroke="#756c50" stroke-width="2"/>
+              <circle cx="45" cy="46" r="4" fill="#e1d5aa" stroke="#756c50" stroke-width="2"/>
+              <path d="M10 51 Q32 58 54 51" fill="none" stroke="#a08a4e" stroke-width="4" stroke-dasharray="5 3"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "goblin compost");
+    }
+
+    private static Texture2D CreateWoodenWatchtowerIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <rect x="8" y="8" width="48" height="48" rx="3" fill="#79502f" stroke="#2b1b12" stroke-width="4"/>
+              <path d="M20 10 V54 M32 10 V54 M44 10 V54" stroke="#b27b46" stroke-width="3"/>
+              <path d="M12 14 L50 52 M52 14 L14 52" stroke="#4a321f" stroke-width="4" stroke-linecap="round"/>
+              <circle cx="13" cy="13" r="4" fill="#d09a52" stroke="#2b1b12" stroke-width="2"/>
+              <circle cx="51" cy="13" r="4" fill="#d09a52" stroke="#2b1b12" stroke-width="2"/>
+              <circle cx="13" cy="51" r="4" fill="#d09a52" stroke="#2b1b12" stroke-width="2"/>
+              <circle cx="51" cy="51" r="4" fill="#d09a52" stroke="#2b1b12" stroke-width="2"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "wooden watchtower");
+    }
+
+    private static Texture2D CreateWoodenLadderIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <path d="M18 58 L26 6 M39 58 L47 6" stroke="#5a3b26" stroke-width="7" stroke-linecap="round"/>
+              <path d="M22 16 H44 M20 27 H42 M19 38 H41 M17 49 H39" stroke="#b27b46" stroke-width="5" stroke-linecap="round"/>
+              <path d="M21 12 H45 M18 34 H41" stroke="#d09a52" stroke-width="2" stroke-linecap="round"/>
+              <path d="M14 58 H43" stroke="#2b1b12" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "wooden ladder");
+    }
+
+    private static Texture2D CreateReedSleepingMatIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <rect x="8" y="13" width="48" height="38" rx="5" fill="#8f7b43" stroke="#302719" stroke-width="4"/>
+              <path d="M12 20 H52 M12 27 H52 M12 34 H52 M12 41 H52" stroke="#c0a95f" stroke-width="3"/>
+              <path d="M17 10 V54 M47 10 V54" stroke="#76502f" stroke-width="4" stroke-linecap="round"/>
+              <path d="M8 16 L3 11 M56 16 L61 11 M8 48 L3 53 M56 48 L61 53" stroke="#d2bd70" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "reed sleeping mat");
+    }
+
     private static Texture2D CreateCleanBloodIcon()
     {
         const string svg = """
@@ -2963,6 +3053,22 @@ public partial class Main : Node
             </svg>
             """;
         return CreateSvgIcon(svg, "primitive workshop");
+    }
+
+    private static Texture2D CreateFittedWorkshopIcon()
+    {
+        const string svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <rect x="6" y="24" width="52" height="19" rx="3" fill="#76502f" stroke="#2b1b12" stroke-width="4"/>
+              <path d="M13 42 L11 59 M51 42 L53 59" stroke="#432b1d" stroke-width="6" stroke-linecap="round"/>
+              <path d="M10 29 H54" stroke="#b27b46" stroke-width="3"/>
+              <path d="M17 20 H34 V31 H17 Z" fill="#5f6768" stroke="#252a2b" stroke-width="3"/>
+              <path d="M22 11 V20 M29 8 V20" stroke="#9ca4a1" stroke-width="4" stroke-linecap="round"/>
+              <path d="M42 9 L54 18 L49 24 L37 15 Z" fill="#d7d0b2" stroke="#5f6768" stroke-width="3"/>
+              <circle cx="46" cy="37" r="4" fill="#8e9594" stroke="#252a2b" stroke-width="2"/>
+            </svg>
+            """;
+        return CreateSvgIcon(svg, "fitted workshop");
     }
 
     private static Texture2D CreateFurnaceIcon(WorkshopKind kind)
@@ -3119,6 +3225,10 @@ public partial class Main : Node
             BuildMode.FieldCamp => Ui("build-prompts", "field-camp"),
             BuildMode.GoblinHut => UiFormat(
                 "build-prompts", "goblin-hut", SimulationDefinitions.GoblinHutCapacity),
+            BuildMode.GoblinCompost => Ui("build-prompts", "goblin-compost"),
+            BuildMode.WoodenWatchtower => Ui("build-prompts", "wooden-watchtower"),
+            BuildMode.WoodenLadder => Ui("build-prompts", "wooden-ladder"),
+            BuildMode.ReedSleepingMat => Ui("build-prompts", "reed-sleeping-mat"),
             BuildMode.WoodenWall => UiFormat(
                 "build-prompts", "wooden-wall", DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.StoneWall => UiFormat(
@@ -3141,10 +3251,13 @@ public partial class Main : Node
                 "build-prompts", "wooden-door",
                 DescribeResourceVariant(_selectedConstructionMaterial)),
             BuildMode.WallTorch => Ui("build-prompts", "wall-torch"),
+            BuildMode.StandingTorch => Ui("build-prompts", "standing-torch"),
             BuildMode.PrimitiveWorkshop => Ui("build-prompts", "primitive-workshop"),
+            BuildMode.FittedWorkshop => Ui("build-prompts", "fitted-workshop"),
             BuildMode.Bloomery => Ui("build-prompts", "bloomery"),
             BuildMode.SmeltingFurnace => Ui("build-prompts", "smelting-furnace"),
             BuildMode.CrucibleFurnace => Ui("build-prompts", "crucible-furnace"),
+            BuildMode.CookingFire => Ui("build-prompts", "cooking-fire"),
             _ => _inspector.Text,
         };
     }
@@ -3168,6 +3281,7 @@ public partial class Main : Node
         {
             WorkMode.GatherFood => Ui("work-prompts", "gather-food"),
             WorkMode.GatherReeds => Ui("work-prompts", "gather-reeds"),
+            WorkMode.GatherLichen => Ui("work-prompts", "gather-lichen"),
             WorkMode.GatherBrushwood => Ui("work-prompts", "gather-brushwood"),
             WorkMode.GatherStone => Ui("work-prompts", "gather-stone"),
             WorkMode.UprootBerryBushes => Ui("work-prompts", "uproot-bushes"),
@@ -3206,7 +3320,8 @@ public partial class Main : Node
             return;
         }
 
-        if (_buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp)
+        if (_buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp or
+            BuildMode.WoodenLadder)
         {
             _linearBuildStart = cell;
             _isDraggingLinearBuild = true;
@@ -3215,12 +3330,33 @@ public partial class Main : Node
         }
 
         if (_buildMode is BuildMode.WoodenDoorFrame or BuildMode.StoneDoorFrame or
-            BuildMode.WoodenDoor or BuildMode.WallTorch or BuildMode.PrimitiveWorkshop or
+            BuildMode.WoodenDoor or BuildMode.WallTorch or BuildMode.GoblinCompost or
+            BuildMode.ReedSleepingMat or BuildMode.StandingTorch or
+            BuildMode.PrimitiveWorkshop or BuildMode.CookingFire or
+            BuildMode.FittedWorkshop or
             BuildMode.Bloomery or BuildMode.SmeltingFurnace or BuildMode.CrucibleFurnace)
         {
             if (!_engine.Visibility.Get(cell).IsDiscovered())
             {
                 _inspector.Text = Ui("construction-feedback", "discovered-cell-required");
+                return;
+            }
+
+            if (_buildMode == BuildMode.ReedSleepingMat &&
+                !_engine.World.CanBuildReedSleepingMat(cell))
+            {
+                _inspector.Text = Ui(
+                    "construction-feedback",
+                    "reed-sleeping-mat-invalid");
+                return;
+            }
+
+            if (_buildMode == BuildMode.StandingTorch &&
+                !_engine.World.CanBuildStandingTorch(cell))
+            {
+                _inspector.Text = Ui(
+                    "construction-feedback",
+                    "standing-torch-invalid");
                 return;
             }
 
@@ -3234,8 +3370,17 @@ public partial class Main : Node
                     _selectedConstructionMaterial),
                 BuildMode.WallTorch => SimulationCommand.BuildWallTorch(
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
+                BuildMode.StandingTorch => SimulationCommand.BuildStandingTorch(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                BuildMode.GoblinCompost => SimulationCommand.BuildGoblinCompost(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
+                BuildMode.ReedSleepingMat => SimulationCommand.BuildReedSleepingMat(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell),
                 BuildMode.PrimitiveWorkshop => SimulationCommand.BuildPrimitiveWorkshop(
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
+                BuildMode.FittedWorkshop => SimulationCommand.BuildWorkshop(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell,
+                    WorkshopKind.FittedWorkshop),
                 BuildMode.Bloomery => SimulationCommand.BuildWorkshop(
                     _engine.CurrentTick.Next(), _commandSequence++, cell, WorkshopKind.Bloomery),
                 BuildMode.SmeltingFurnace => SimulationCommand.BuildWorkshop(
@@ -3244,6 +3389,9 @@ public partial class Main : Node
                 BuildMode.CrucibleFurnace => SimulationCommand.BuildWorkshop(
                     _engine.CurrentTick.Next(), _commandSequence++, cell,
                     WorkshopKind.CrucibleFurnace),
+                BuildMode.CookingFire => SimulationCommand.BuildWorkshop(
+                    _engine.CurrentTick.Next(), _commandSequence++, cell,
+                    WorkshopKind.CookingFire),
                 _ => SimulationCommand.BuildWoodenDoor(
                     _engine.CurrentTick.Next(), _commandSequence++, cell,
                     _selectedConstructionMaterial),
@@ -3257,13 +3405,23 @@ public partial class Main : Node
                     Ui("construction-feedback", "stone-door-frame-ordered"),
                 BuildMode.WallTorch =>
                     Ui("construction-feedback", "wall-torch-ordered"),
+                BuildMode.StandingTorch =>
+                    Ui("construction-feedback", "standing-torch-ordered"),
+                BuildMode.GoblinCompost =>
+                    Ui("construction-feedback", "goblin-compost-ordered"),
+                BuildMode.ReedSleepingMat =>
+                    Ui("construction-feedback", "reed-sleeping-mat-ordered"),
                 BuildMode.PrimitiveWorkshop =>
                     Ui("construction-feedback", "primitive-workshop-ordered"),
+                BuildMode.FittedWorkshop =>
+                    Ui("construction-feedback", "fitted-workshop-ordered"),
                 BuildMode.Bloomery => Ui("construction-feedback", "bloomery-ordered"),
                 BuildMode.SmeltingFurnace =>
                     Ui("construction-feedback", "smelting-furnace-ordered"),
                 BuildMode.CrucibleFurnace =>
                     Ui("construction-feedback", "crucible-furnace-ordered"),
+                BuildMode.CookingFire =>
+                    Ui("construction-feedback", "cooking-fire-ordered"),
                 _ => Ui("construction-feedback", "wooden-door-ordered"),
             };
             UpdateBuildPreview(screenPosition);
@@ -3283,6 +3441,23 @@ public partial class Main : Node
             _engine.QueueCommand(SimulationCommand.BuildGoblinFieldCamp(
                 _engine.CurrentTick.Next(), _commandSequence++, cell));
             _inspector.Text = Ui("construction-feedback", "field-camp-ordered");
+            UpdateBuildPreview(screenPosition);
+            return;
+        }
+
+        if (_buildMode == BuildMode.WoodenWatchtower)
+        {
+            var cells = GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 });
+            if (cells.Any(item =>
+                    !IsBuildableLayerCell(item) ||
+                    !_engine.Visibility.Get(item).IsDiscovered()))
+            {
+                _inspector.Text = Ui("construction-feedback", "wooden-watchtower-invalid");
+                return;
+            }
+            _engine.QueueCommand(SimulationCommand.BuildWoodenWatchtower(
+                _engine.CurrentTick.Next(), _commandSequence++, cell));
+            _inspector.Text = Ui("construction-feedback", "wooden-watchtower-ordered");
             UpdateBuildPreview(screenPosition);
             return;
         }
@@ -3310,6 +3485,11 @@ public partial class Main : Node
         if (_buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp)
         {
             FinishDirectionalRampConstruction(end, screenPosition);
+            return;
+        }
+        if (_buildMode == BuildMode.WoodenLadder)
+        {
+            FinishDirectionalLadderConstruction(end, screenPosition);
             return;
         }
         if (!IsBuildableLayerCell(end) || end.Z != _linearBuildStart.Z)
@@ -3465,6 +3645,31 @@ public partial class Main : Node
         UpdateBuildPreview(screenPosition);
     }
 
+    private void FinishDirectionalLadderConstruction(
+        GridPosition dragEnd,
+        Vector2 screenPosition)
+    {
+        if (!TryResolveDiscoveredLadderDrag(_linearBuildStart, dragEnd, out var placement))
+        {
+            _inspector.Text = Ui("construction-feedback", "ladder-direction-invalid");
+            UpdateBuildPreview(screenPosition);
+            return;
+        }
+
+        _engine.QueueCommand(SimulationCommand.BuildWoodenLadder(
+            _engine.CurrentTick.Next(),
+            _commandSequence++,
+            placement.Lower,
+            placement.Upper));
+        _inspector.Text = UiFormat(
+            "construction-feedback",
+            "wooden-ladder-ordered",
+            placement.Lower,
+            placement.Upper,
+            DescribeRampDirection(placement.Lower, placement.Upper));
+        UpdateBuildPreview(screenPosition);
+    }
+
     private void UpdateBuildPreview(Vector2 screenPosition)
     {
         var cell = ScreenToVisibleCell(screenPosition);
@@ -3486,10 +3691,13 @@ public partial class Main : Node
                 GetAreaCells(_linearBuildStart, cell),
             BuildMode.WoodenFloor or BuildMode.StoneFloor when _isDraggingLinearBuild =>
                 GetAreaCells(_linearBuildStart, cell),
-            BuildMode.WoodenRamp or BuildMode.StoneRamp when _isDraggingLinearBuild =>
+            BuildMode.WoodenRamp or BuildMode.StoneRamp or BuildMode.WoodenLadder
+                when _isDraggingLinearBuild =>
                 [_linearBuildStart, cell],
             BuildMode.FieldCamp => GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
             BuildMode.GoblinHut => GetAreaCells(cell, cell with { X = cell.X + 2, Y = cell.Y + 2 }),
+            BuildMode.WoodenWatchtower =>
+                GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
             _ => new[] { cell },
         };
         if (_buildMode is BuildMode.WoodenFloor or BuildMode.StoneFloor)
@@ -3520,6 +3728,10 @@ public partial class Main : Node
                     TryResolveDiscoveredRampDrag(_linearBuildStart, cell, out _)
                         ? Ui("construction-feedback", "ramp-preview-valid")
                         : Ui("construction-feedback", "ramp-direction-invalid"),
+                BuildMode.WoodenLadder =>
+                    TryResolveDiscoveredLadderDrag(_linearBuildStart, cell, out _)
+                        ? Ui("construction-feedback", "ladder-preview-valid")
+                        : Ui("construction-feedback", "ladder-direction-invalid"),
                 BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
                     UiFormat("construction-feedback", "storage-resize-preview",
                         _resizingStorageAreaId, cells.Count),
@@ -3552,6 +3764,15 @@ public partial class Main : Node
             : _buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp
                 ? cells.Count == 2 &&
                     TryResolveDiscoveredRampDrag(cells[0], cells[1], out _)
+            : _buildMode == BuildMode.WoodenLadder
+                ? cells.Count == 2 &&
+                    TryResolveDiscoveredLadderDrag(cells[0], cells[1], out _)
+            : _buildMode == BuildMode.ReedSleepingMat
+                ? cells.Count == 1 && IsDiscoveredConstructionCell(cells[0]) &&
+                    _engine.World.CanBuildReedSleepingMat(cells[0])
+            : _buildMode == BuildMode.StandingTorch
+                ? cells.Count == 1 && IsDiscoveredConstructionCell(cells[0]) &&
+                    _engine.World.CanBuildStandingTorch(cells[0])
             : _buildMode is BuildMode.Walkway or BuildMode.BasaltWalkway or
                 BuildMode.WoodenWall or BuildMode.StoneWall or
                 BuildMode.WoodenFloor or BuildMode.StoneFloor
@@ -3609,6 +3830,26 @@ public partial class Main : Node
                 dragStart,
                 dragEnd,
                 _engine.World.CanBuildRamp,
+                out placement))
+        {
+            return false;
+        }
+
+        return IsBuildableLayerCell(placement.Lower) &&
+            IsBuildableLayerCell(placement.Upper) &&
+            IsDiscoveredConstructionCell(placement.Lower) &&
+            IsDiscoveredConstructionCell(placement.Upper);
+    }
+
+    private bool TryResolveDiscoveredLadderDrag(
+        GridPosition dragStart,
+        GridPosition dragEnd,
+        out DirectionalLadderPlacement placement)
+    {
+        if (!DirectionalLadderPlacementPolicy.TryResolve(
+                dragStart,
+                dragEnd,
+                _engine.World.CanBuildWoodenLadder,
                 out placement))
         {
             return false;
@@ -3861,6 +4102,11 @@ public partial class Main : Node
                 _workAreaStart,
                 end,
                 ResourceKind.Reeds),
+            WorkMode.GatherLichen => SimulationCommand.DesignateLichenGathering(
+                executeAt,
+                _commandSequence++,
+                _workAreaStart,
+                end),
             WorkMode.GatherBrushwood => SimulationCommand.DesignateWork(
                 executeAt,
                 _commandSequence++,
@@ -4108,6 +4354,7 @@ public partial class Main : Node
     {
         WorkMode.GatherFood => WorkDesignationKind.GatherFood,
         WorkMode.GatherReeds => WorkDesignationKind.GatherReeds,
+        WorkMode.GatherLichen => WorkDesignationKind.GatherLichen,
         WorkMode.GatherBrushwood => WorkDesignationKind.GatherBrushwood,
         WorkMode.GatherStone => WorkDesignationKind.GatherStone,
         WorkMode.UprootBerryBushes => WorkDesignationKind.UprootBerryBush,
@@ -4126,6 +4373,7 @@ public partial class Main : Node
     {
         WorkDesignationKind.GatherFood => WorkMode.GatherFood,
         WorkDesignationKind.GatherReeds => WorkMode.GatherReeds,
+        WorkDesignationKind.GatherLichen => WorkMode.GatherLichen,
         WorkDesignationKind.GatherBrushwood => WorkMode.GatherBrushwood,
         WorkDesignationKind.GatherStone => WorkMode.GatherStone,
         WorkDesignationKind.UprootBerryBush => WorkMode.UprootBerryBushes,
@@ -4549,10 +4797,7 @@ public partial class Main : Node
                     : excavated
                         ? Ui("cave-kinds", "excavated-corridor")
                         : DescribeCaveKind(caveCell.Kind);
-                var caveFlora = CaveFloraGenerator.TryGet(
-                    _engine.Map,
-                    levelPosition,
-                    out var flora)
+                var caveFlora = _engine.World.TryGetCaveFlora(levelPosition, out var flora)
                     ? Ui("cave-flora", flora.Kind.ToString())
                     : null;
                 _inspector.Text = $"{levelPosition} • {DescribeCaveRock(caveCell.Rock)} • " +
@@ -4785,14 +5030,19 @@ public partial class Main : Node
         WorldObjectKind.Boulder => Ui("world-objects", "Boulder"),
         WorldObjectKind.PrimitiveWorkshop =>
             Ui("world-objects", "PrimitiveWorkshop") + DescribeWorkshopMaterial(worldObject),
+        WorldObjectKind.FittedWorkshop =>
+            Ui("world-objects", "FittedWorkshop") + DescribeWorkshopMaterial(worldObject),
         WorldObjectKind.Bloomery =>
             Ui("world-objects", "Bloomery") + DescribeWorkshopMaterial(worldObject),
         WorldObjectKind.SmeltingFurnace =>
             Ui("world-objects", "SmeltingFurnace") + DescribeWorkshopMaterial(worldObject),
         WorldObjectKind.CrucibleFurnace =>
             Ui("world-objects", "CrucibleFurnace") + DescribeWorkshopMaterial(worldObject),
+        WorldObjectKind.CookingFire =>
+            Ui("world-objects", "CookingFire") + DescribeWorkshopMaterial(worldObject),
         WorldObjectKind.WoodenRamp => Ui("world-objects", "WoodenRamp"),
         WorldObjectKind.StoneRamp => Ui("world-objects", "StoneRamp"),
+        WorldObjectKind.WoodenLadder => Ui("world-objects", "WoodenLadder"),
         _ => Ui("world-objects", worldObject.Kind.ToString()),
     };
 
@@ -4852,8 +5102,12 @@ public partial class Main : Node
                     FoodKind.None,
                     material.Variant))} " +
             $"{material.DeliveredQuantity}/{material.RequiredQuantity}"));
-        return $"{(order.IsRepeating ? "∞ " : string.Empty)}" +
-            $"{DescribeCraftingRecipe(order.Recipe)} • {materials} • praca " +
+        var automatic = order.IsAutomatic
+            ? $"[{TranslationCatalog.Get(_currentLocale, "interface", "crafting", "automatic")}] "
+            : string.Empty;
+        return $"{automatic}{(order.IsRepeating ? "∞ " : string.Empty)}" +
+            $"{DescribeCraftingRecipe(order.Recipe)} • {materials} • " +
+            $"{TranslationCatalog.Get(_currentLocale, "interface", "crafting", "work")} " +
             $"{order.TotalWorkTicks - order.RemainingWorkTicks}/" +
             order.TotalWorkTicks;
     }
@@ -4882,7 +5136,7 @@ public partial class Main : Node
         ResourceVariant variant) => resource switch
     {
         ResourceKind.Food => DescribeFood(foodKind),
-        ResourceKind.Equipment => DescribeResourceVariant(variant),
+        _ when variant != ResourceVariant.None => DescribeResourceVariant(variant),
         _ => DescribeResource(resource),
     };
 
@@ -4934,6 +5188,12 @@ public partial class Main : Node
 
     private static string DescribeResourceVariant(ResourceVariant variant)
     {
+        if (variant is ResourceVariant.Lichen or ResourceVariant.Mana)
+        {
+            return TranslationCatalog.Get(
+                _currentLocale, "interface", "resource-variants", variant.ToString());
+        }
+
         if (MaterialCatalog.TryGet(variant, out var material))
         {
             return TranslationCatalog.Get(_currentLocale, "materials", "names", material.Id);
@@ -6409,6 +6669,11 @@ public partial class Main : Node
 
     private void ToggleWorldView()
     {
+        if (!Enable3DPrototype)
+        {
+            return;
+        }
+
         CancelActiveTool();
         SelectActor(EntityId.None);
         _use3DView = !_use3DView;
@@ -6759,6 +7024,69 @@ public partial class Main : Node
             (CreateResourceThumbnail(ResourceKind.Ore, ResourceVariant.GoldOre),
                 "Ruda złota", 2),
             (CreateResourceThumbnail(ResourceKind.Coal), "Węgiel", 1));
+        AddRepeatableWorkshopRecipeButton(
+            recipes,
+            CraftingRecipeKind.CookRawMeat,
+            CreateFoodThumbnail(FoodKind.CookedMeat),
+            DescribeCraftingRecipe(CraftingRecipeKind.CookRawMeat),
+            (CreateFoodThumbnail(FoodKind.RawMeat), DescribeFood(FoodKind.RawMeat), 2),
+            (CreateResourceThumbnail(ResourceKind.Wood), DescribeResource(ResourceKind.Wood), 1));
+        AddRepeatableWorkshopRecipeButton(
+            recipes,
+            CraftingRecipeKind.FishRootSoup,
+            CreateFoodThumbnail(FoodKind.CampSoup),
+            DescribeCraftingRecipe(CraftingRecipeKind.FishRootSoup),
+            (CreateFoodThumbnail(FoodKind.Fish), DescribeFood(FoodKind.Fish), 1),
+            (CreateFoodThumbnail(FoodKind.EdibleRoots), DescribeFood(FoodKind.EdibleRoots), 1),
+            (CreateResourceThumbnail(ResourceKind.Wood), DescribeResource(ResourceKind.Wood), 1));
+        AddRepeatableWorkshopRecipeButton(
+            recipes,
+            CraftingRecipeKind.FishMushroomSoup,
+            CreateFoodThumbnail(FoodKind.CampSoup),
+            DescribeCraftingRecipe(CraftingRecipeKind.FishMushroomSoup),
+            (CreateFoodThumbnail(FoodKind.Fish), DescribeFood(FoodKind.Fish), 1),
+            (CreateFoodThumbnail(FoodKind.Mushrooms), DescribeFood(FoodKind.Mushrooms), 1),
+            (CreateResourceThumbnail(ResourceKind.Wood), DescribeResource(ResourceKind.Wood), 1));
+        AddRepeatableWorkshopRecipeButton(
+            recipes,
+            CraftingRecipeKind.MeatRootSoup,
+            CreateFoodThumbnail(FoodKind.CampSoup),
+            DescribeCraftingRecipe(CraftingRecipeKind.MeatRootSoup),
+            (CreateFoodThumbnail(FoodKind.RawMeat), DescribeFood(FoodKind.RawMeat), 1),
+            (CreateFoodThumbnail(FoodKind.EdibleRoots), DescribeFood(FoodKind.EdibleRoots), 1),
+            (CreateResourceThumbnail(ResourceKind.Wood), DescribeResource(ResourceKind.Wood), 1));
+        AddRepeatableWorkshopRecipeButton(
+            recipes,
+            CraftingRecipeKind.MeatMushroomSoup,
+            CreateFoodThumbnail(FoodKind.CampSoup),
+            DescribeCraftingRecipe(CraftingRecipeKind.MeatMushroomSoup),
+            (CreateFoodThumbnail(FoodKind.RawMeat), DescribeFood(FoodKind.RawMeat), 1),
+            (CreateFoodThumbnail(FoodKind.Mushrooms), DescribeFood(FoodKind.Mushrooms), 1),
+            (CreateResourceThumbnail(ResourceKind.Wood), DescribeResource(ResourceKind.Wood), 1));
+        AddRepeatableWorkshopRecipeButton(
+            recipes,
+            CraftingRecipeKind.PreserveFishAndMeat,
+            CreateFoodThumbnail(FoodKind.DriedRations),
+            DescribeCraftingRecipe(CraftingRecipeKind.PreserveFishAndMeat),
+            (CreateFoodThumbnail(FoodKind.Fish), DescribeFood(FoodKind.Fish), 1),
+            (CreateFoodThumbnail(FoodKind.RawMeat), DescribeFood(FoodKind.RawMeat), 1),
+            (CreateResourceThumbnail(ResourceKind.Wood), DescribeResource(ResourceKind.Wood), 1));
+        AddRepeatableWorkshopRecipeButton(
+            recipes,
+            CraftingRecipeKind.BrewRootAndBerryMedicine,
+            CreateFoodThumbnail(FoodKind.Medicine),
+            DescribeCraftingRecipe(CraftingRecipeKind.BrewRootAndBerryMedicine),
+            (CreateFoodThumbnail(FoodKind.EdibleRoots), DescribeFood(FoodKind.EdibleRoots), 1),
+            (CreateFoodThumbnail(FoodKind.Berries), DescribeFood(FoodKind.Berries), 1),
+            (CreateResourceThumbnail(ResourceKind.Wood), DescribeResource(ResourceKind.Wood), 1));
+        AddRepeatableWorkshopRecipeButton(
+            recipes,
+            CraftingRecipeKind.BrewLichenAndMushroomMana,
+            CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.Mana),
+            DescribeCraftingRecipe(CraftingRecipeKind.BrewLichenAndMushroomMana),
+            (CreateResourceThumbnail(ResourceKind.Materials, ResourceVariant.Lichen),
+                DescribeResourceVariant(ResourceVariant.Lichen), 1),
+            (CreateFoodThumbnail(FoodKind.Mushrooms), DescribeFood(FoodKind.Mushrooms), 1));
         var close = new Button
         {
             Text = "Zamknij",
@@ -6778,6 +7106,15 @@ public partial class Main : Node
             resource,
             FoodKind.None,
             variant);
+
+    private Texture2D CreateFoodThumbnail(FoodKind foodKind) => ResourceThumbnails.Create(
+        _itemIconAtlas,
+        _treePartAtlas,
+        _foodIconAtlas,
+        _resourceThumbnailTextures,
+        ResourceKind.Food,
+        foodKind,
+        ResourceVariant.None);
 
     private void AddWorkshopRecipeButton(
         VBoxContainer recipes,
@@ -7639,7 +7976,8 @@ public partial class Main : Node
         WorkDesignationKind kind,
         IReadOnlyList<WorkDesignationSnapshot> targets) => kind switch
     {
-        WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds =>
+        WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds or
+            WorkDesignationKind.GatherLichen =>
             actor.Job.Kind == ActorJobKind.Forage &&
             targets.Any(target => target.Target == actor.Job.Target),
         WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone =>
@@ -7784,6 +8122,7 @@ public partial class Main : Node
     {
         WorkDesignationKind.GatherFood => "zbieranie żywności",
         WorkDesignationKind.GatherReeds => "zbieranie sitowia",
+        WorkDesignationKind.GatherLichen => Ui("action-tiles", "GatherLichen"),
         WorkDesignationKind.GatherBrushwood => "zbieranie chrustu",
         WorkDesignationKind.GatherStone => "zbieranie kamienia",
         WorkDesignationKind.UprootBerryBush => "karczowanie krzaków",
@@ -8256,12 +8595,17 @@ public partial class Main : Node
                     return;
                 }
                 AddDisabledContextHeading(
-                    $"{DescribeResourceVariant(stack.Resource, stack.FoodKind, stack.Variant)} ×{stack.Quantity}");
+                    $"{DescribeResourceVariant(stack.Resource, stack.FoodKind, stack.Variant)} " +
+                    $"×{stack.Quantity}{DescribeFoodPreservation(stack)}");
                 var hasSingleGoblin = _selectedActorIds.Count == 1;
                 _worldContextMenu.AddItem(
                     Ui("context-menu", "pick-up-stack"),
                     (int)WorldContextAction.PickUpItem);
-                _worldContextMenu.SetItemDisabled(_worldContextMenu.ItemCount - 1, !hasSingleGoblin);
+                _worldContextMenu.SetItemDisabled(
+                    _worldContextMenu.ItemCount - 1,
+                    !hasSingleGoblin ||
+                    stack.Resource == ResourceKind.Food &&
+                    !FoodUsePolicy.CanBePacked(stack.FoodKind));
                 if (stack.Resource == ResourceKind.Equipment &&
                     EquipmentCatalog.FindDefinition(stack.Variant) is not null)
                 {
@@ -8273,6 +8617,10 @@ public partial class Main : Node
                 _worldContextMenu.AddItem(
                     Ui("context-menu", "prioritize-hauling"),
                     (int)WorldContextAction.PrioritizeItemHauling);
+                _worldContextMenu.SetItemDisabled(
+                    _worldContextMenu.ItemCount - 1,
+                    stack.Resource == ResourceKind.Food &&
+                    !FoodUsePolicy.CanBePacked(stack.FoodKind));
                 if (!hasSingleGoblin)
                 {
                     _worldContextMenu.AddSeparator();
@@ -8293,6 +8641,22 @@ public partial class Main : Node
                 break;
         }
         PositionWorldContextMenu(screenPosition);
+    }
+
+    private string DescribeFoodPreservation(ItemStackSnapshot stack)
+    {
+        if (stack.Resource != ResourceKind.Food || stack.FreshUntilTick is not { } freshUntil)
+        {
+            return string.Empty;
+        }
+
+        var calendar = SimulationCalendar.At(_engine.CurrentTick, _engine.Definitions.Clock);
+        var remainingTicks = Math.Max(0, freshUntil - _engine.CurrentTick.Value);
+        var days = Math.Max(1, (remainingTicks + calendar.TicksInDay - 1) / calendar.TicksInDay);
+        var freshness = UiFormat("food-preservation", "fresh-days", days);
+        return stack.FoodKind == FoodKind.CampSoup
+            ? freshness + Ui("food-preservation", "camp-only")
+            : freshness;
     }
 
     private void AddDisabledContextHeading(string text)
@@ -8451,7 +8815,7 @@ public partial class Main : Node
         _contextCampAnchor = null;
         _contextCorpseId = corpse.Id;
         var hasCamp = snapshot.WorldObjects.Any(item =>
-            item.Kind == WorldObjectKind.GoblinFieldCamp &&
+            item.Kind is (WorldObjectKind.GoblinFieldCamp or WorldObjectKind.GoblinCompost) &&
             item.Owner == WorldObjectOwner.GoblinTribe);
         _worldContextMenu.Clear();
         _worldContextMenu.AddItem(UiFormat("context-menu", "corpse-heading", corpse.Name));

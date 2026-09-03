@@ -97,6 +97,13 @@ public enum ConstructionKind : byte
     StoneFloor = 25,
     WoodenRamp = 26,
     StoneRamp = 27,
+    GoblinCompost = 28,
+    WoodenWatchtower = 29,
+    ReedSleepingMat = 30,
+    StandingTorch = 31,
+    CookingFire = 32,
+    FittedWorkshop = 33,
+    WoodenLadder = 34,
 }
 
 public enum CraftingRecipeKind : byte
@@ -120,6 +127,14 @@ public enum CraftingRecipeKind : byte
     WoodenBulkBin = 17,
     PrimitiveAxe = 18,
     PrimitivePickaxe = 19,
+    CookRawMeat = 20,
+    FishRootSoup = 21,
+    FishMushroomSoup = 22,
+    MeatRootSoup = 23,
+    MeatMushroomSoup = 24,
+    PreserveFishAndMeat = 25,
+    BrewRootAndBerryMedicine = 26,
+    BrewLichenAndMushroomMana = 27,
 }
 
 public readonly record struct SimulationCommand(
@@ -573,6 +588,54 @@ public readonly record struct SimulationCommand(
             ResourceKind.Wood,
             Amount: 8);
 
+    public static SimulationCommand BuildGoblinCompost(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.GoblinCompost,
+            ResourceKind.Reeds,
+            Amount: 2);
+
+    public static SimulationCommand BuildWoodenWatchtower(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position with { X = position.X + 1, Y = position.Y + 1 },
+            ConstructionKind.WoodenWatchtower,
+            ResourceKind.Wood,
+            Amount: 8);
+
+    public static SimulationCommand BuildReedSleepingMat(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.ReedSleepingMat,
+            ResourceKind.Reeds,
+            Amount: 2);
+
     public static SimulationCommand BuildWoodenWall(
         SimulationTick executeAt,
         ulong sequence,
@@ -717,6 +780,25 @@ public readonly record struct SimulationCommand(
             Amount: 3,
             MaterialVariant: materialVariant);
 
+    public static SimulationCommand BuildWoodenLadder(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition lower,
+        GridPosition upper,
+        ResourceVariant materialVariant = ResourceVariant.None) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            lower,
+            upper,
+            ConstructionKind.WoodenLadder,
+            ResourceKind.Wood,
+            Amount: 2,
+            MaterialVariant: materialVariant);
+
     public static SimulationCommand BuildStoneDoorFrame(
         SimulationTick executeAt,
         ulong sequence,
@@ -748,6 +830,22 @@ public readonly record struct SimulationCommand(
             position,
             position,
             ConstructionKind.WallTorch,
+            ResourceKind.Wood,
+            Amount: 1);
+
+    public static SimulationCommand BuildStandingTorch(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition position) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.Build,
+            EntityId.None,
+            EntityId.None,
+            position,
+            position,
+            ConstructionKind.StandingTorch,
             ResourceKind.Wood,
             Amount: 1);
 
@@ -791,9 +889,12 @@ public readonly record struct SimulationCommand(
             WorkshopKind.Bloomery => ConstructionKind.Bloomery,
             WorkshopKind.SmeltingFurnace => ConstructionKind.SmeltingFurnace,
             WorkshopKind.CrucibleFurnace => ConstructionKind.CrucibleFurnace,
+            WorkshopKind.CookingFire => ConstructionKind.CookingFire,
+            WorkshopKind.FittedWorkshop => ConstructionKind.FittedWorkshop,
             _ => throw new ArgumentOutOfRangeException(nameof(workshop), workshop, null),
         };
-        var resource = workshop == WorkshopKind.PrimitiveWorkshop
+        var resource = workshop is WorkshopKind.PrimitiveWorkshop or WorkshopKind.CookingFire or
+            WorkshopKind.FittedWorkshop
             ? ResourceKind.Wood
             : ResourceKind.Stone;
         return new(
@@ -910,6 +1011,23 @@ public readonly record struct SimulationCommand(
             default,
             ResourceKind.Any,
             Amount: (int)WorkDesignationKind.FellTree);
+
+    public static SimulationCommand DesignateLichenGathering(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.GatherLichen);
 
     public static SimulationCommand DesignateBoulderQuarrying(
         SimulationTick executeAt,

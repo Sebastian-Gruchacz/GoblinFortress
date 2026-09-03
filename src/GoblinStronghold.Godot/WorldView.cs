@@ -473,6 +473,7 @@ public partial class WorldView : Node2D
     private void DrawTerrain()
     {
         DrawLowerLevelTextures();
+        DrawLowerLevelDetails();
         DrawLowerLevelActors();
         if (_visibleLevel < 0)
         {
@@ -577,6 +578,88 @@ public partial class WorldView : Node2D
             DrawLowerLevelActorGroup(group.ToArray(), CellCenter(group.Key), compact: false);
         }
     }
+
+    private void DrawLowerLevelDetails()
+    {
+        var visibleLevels = _lowerLevelPresentation.VisibleRegions
+            .Select(region => region.Level)
+            .Distinct()
+            .ToArray();
+        if (visibleLevels.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var level in visibleLevels)
+        {
+            foreach (var worldObject in _snapshot.WorldObjects.Where(worldObject =>
+                         IsDetailedLowerLevelStructure(worldObject.Kind) &&
+                         worldObject.GetAbsoluteParts().Any(item =>
+                             item.Position.Z == level &&
+                             _lowerLevelPresentation.IsDynamicPresentationActive(
+                                 item.Position))))
+            {
+                switch (worldObject.Kind)
+                {
+                    case WorldObjectKind.GoblinRuin:
+                        GoblinRuinPainter.Paint(this, worldObject, level);
+                        break;
+                    case WorldObjectKind.GoblinCompost:
+                        GoblinRuinPainter.PaintCompost(this, worldObject, level);
+                        break;
+                    case WorldObjectKind.WoodenWatchtower:
+                        WoodenWatchtowerPainter.Paint(this, worldObject, level);
+                        break;
+                    case WorldObjectKind.WoodenLadder:
+                        WoodenLadderPainter.Paint(this, worldObject, level);
+                        break;
+                    case WorldObjectKind.ReedSleepingMat:
+                        ReedSleepingMatPainter.Paint(this, worldObject, level);
+                        break;
+                    case WorldObjectKind.StandingTorch:
+                        StandingTorchPainter.Paint(this, worldObject, level);
+                        break;
+                    case WorldObjectKind.CookingFire:
+                        CookingFirePainter.Paint(this, worldObject, level);
+                        break;
+                    case WorldObjectKind.WoodenRamp:
+                    case WorldObjectKind.StoneRamp:
+                        DrawConstructedRamp(worldObject);
+                        break;
+                    case WorldObjectKind.PrimitiveWorkshop:
+                    case WorldObjectKind.Bloomery:
+                    case WorldObjectKind.SmeltingFurnace:
+                    case WorldObjectKind.CrucibleFurnace:
+                    case WorldObjectKind.FittedWorkshop:
+                        DrawWorkshop(worldObject);
+                        break;
+                }
+            }
+        }
+
+        foreach (var stack in _snapshot.ItemStacks.Where(stack =>
+                     stack.Location.Kind == ItemLocationKind.Ground &&
+                     _lowerLevelPresentation.IsDynamicPresentationActive(
+                         stack.Location.Position)))
+        {
+            DrawItemStack(stack);
+        }
+        foreach (var corpse in _snapshot.Corpses.Where(corpse =>
+                     _lowerLevelPresentation.IsDynamicPresentationActive(corpse.Position)))
+        {
+            DrawCorpse(corpse);
+        }
+    }
+
+    private static bool IsDetailedLowerLevelStructure(WorldObjectKind kind) => kind is
+        WorldObjectKind.GoblinRuin or WorldObjectKind.GoblinCompost or
+        WorldObjectKind.WoodenWatchtower or WorldObjectKind.WoodenLadder or
+        WorldObjectKind.ReedSleepingMat or
+        WorldObjectKind.StandingTorch or WorldObjectKind.CookingFire or
+        WorldObjectKind.WoodenRamp or WorldObjectKind.StoneRamp or
+        WorldObjectKind.PrimitiveWorkshop or WorldObjectKind.Bloomery or
+        WorldObjectKind.SmeltingFurnace or WorldObjectKind.CrucibleFurnace or
+        WorldObjectKind.FittedWorkshop;
 
     private void DrawLowerLevelActorGroup(
         IReadOnlyList<LowerLevelActorMarker> actors,
@@ -1492,7 +1575,7 @@ public partial class WorldView : Node2D
             for (var x = bounds.MinimumX; x < bounds.MaximumX; x++)
             {
                 var position = new GridPosition(x, y, _visibleLevel);
-                if (!CaveFloraGenerator.TryGet(_engine.Map, position, out var flora))
+                if (!_engine.World.TryGetCaveFlora(position, out var flora))
                 {
                     continue;
                 }
@@ -1605,6 +1688,48 @@ public partial class WorldView : Node2D
                 continue;
             }
 
+            if (worldObject.Kind == WorldObjectKind.GoblinRuin)
+            {
+                DrawGoblinRuin(worldObject);
+                continue;
+            }
+
+            if (worldObject.Kind == WorldObjectKind.GoblinCompost)
+            {
+                DrawGoblinCompost(worldObject);
+                continue;
+            }
+
+            if (worldObject.Kind == WorldObjectKind.WoodenWatchtower)
+            {
+                WoodenWatchtowerPainter.Paint(this, worldObject, _visibleLevel);
+                continue;
+            }
+
+            if (worldObject.Kind == WorldObjectKind.WoodenLadder)
+            {
+                WoodenLadderPainter.Paint(this, worldObject, _visibleLevel);
+                continue;
+            }
+
+            if (worldObject.Kind == WorldObjectKind.ReedSleepingMat)
+            {
+                ReedSleepingMatPainter.Paint(this, worldObject, _visibleLevel);
+                continue;
+            }
+
+            if (worldObject.Kind == WorldObjectKind.StandingTorch)
+            {
+                StandingTorchPainter.Paint(this, worldObject, _visibleLevel);
+                continue;
+            }
+
+            if (worldObject.Kind == WorldObjectKind.CookingFire)
+            {
+                CookingFirePainter.Paint(this, worldObject, _visibleLevel);
+                continue;
+            }
+
             if (worldObject.Kind is WorldObjectKind.GoblinHut or WorldObjectKind.GoblinFieldCamp)
             {
                 DrawIllustratedGoblinStructure(worldObject);
@@ -1620,7 +1745,8 @@ public partial class WorldView : Node2D
 
             if (worldObject.Kind is WorldObjectKind.PrimitiveWorkshop or
                     WorldObjectKind.Bloomery or WorldObjectKind.SmeltingFurnace or
-                    WorldObjectKind.CrucibleFurnace &&
+                    WorldObjectKind.CrucibleFurnace or WorldObjectKind.FittedWorkshop or
+                    WorldObjectKind.CookingFire &&
                 worldObject.Anchor.Z == _visibleLevel)
             {
                 DrawWorkshop(worldObject);
@@ -1657,6 +1783,23 @@ public partial class WorldView : Node2D
         DrawFloorCoveredVerticalPassages(structureCache);
     }
 
+    private void DrawGoblinRuin(WorldObjectSnapshot ruin)
+    {
+        var ruinPositions = GoblinRuinPainter.Paint(this, ruin, _visibleLevel);
+        foreach (var torch in _snapshot.WorldObjects.Where(item =>
+                     item.Kind == WorldObjectKind.WallTorch &&
+                     item.Anchor.Z == _visibleLevel &&
+                     ruinPositions.Contains(item.Anchor)))
+        {
+            DrawWallTorch(torch.Anchor, torch.Orientation, PaletteFor(torch));
+        }
+    }
+
+    private void DrawGoblinCompost(WorldObjectSnapshot compost)
+    {
+        GoblinRuinPainter.PaintCompost(this, compost, _visibleLevel);
+    }
+
     private void DrawFloorCoveredVerticalPassages(StructureRenderCache structureCache)
     {
         if (structureCache.Floors.Count == 0)
@@ -1684,7 +1827,8 @@ public partial class WorldView : Node2D
             : MaterialPaletteColors.For(workshop.MaterialVariant);
         var rect = CellRect(position.X, position.Y).Grow(-2.5f);
         DrawRect(rect, palette?.Edge ?? new Color("37281d"));
-        if (kind != WorldObjectKind.PrimitiveWorkshop)
+        if (kind != WorldObjectKind.PrimitiveWorkshop &&
+            kind != WorldObjectKind.FittedWorkshop)
         {
             var bodyColor = palette?.Midtone ?? kind switch
             {
@@ -1702,6 +1846,24 @@ public partial class WorldView : Node2D
             DrawCircle(body.Position + new Vector2(
                 body.Size.X * 0.5f,
                 body.Size.Y * 0.75f), 2.2f, new Color("ff8a2b"));
+            return;
+        }
+
+        if (kind == WorldObjectKind.FittedWorkshop)
+        {
+            var body = rect.Grow(-1.5f);
+            DrawRect(body, palette?.Midtone ?? new Color("76502f"));
+            DrawLine(body.Position + new Vector2(2f, 4f),
+                new Vector2(body.End.X - 2f, body.Position.Y + 4f),
+                palette?.Highlight ?? new Color("b27b46"), 1.5f);
+            DrawLine(body.Position + new Vector2(3f, body.Size.Y - 3f),
+                body.Position + new Vector2(3f, 5f),
+                palette?.Shadow ?? new Color("432b1d"), 2f);
+            DrawCircle(body.GetCenter() + new Vector2(3f, 1f), 2.4f,
+                new Color("8e9594"));
+            DrawLine(body.GetCenter() + new Vector2(-4f, 2f),
+                body.GetCenter() + new Vector2(2f, -4f),
+                new Color("d7d0b2"), 1.5f);
             return;
         }
 
@@ -2560,6 +2722,7 @@ public partial class WorldView : Node2D
             {
                 WorkDesignationKind.GatherFood => new Color(0.55f, 0.9f, 0.28f, 0.72f),
                 WorkDesignationKind.GatherReeds => new Color(0.72f, 0.86f, 0.32f, 0.78f),
+                WorkDesignationKind.GatherLichen => new Color(0.48f, 0.72f, 0.6f, 0.8f),
                 WorkDesignationKind.GatherBrushwood => new Color(0.72f, 0.46f, 0.22f, 0.78f),
                 WorkDesignationKind.UprootBerryBush => new Color(0.92f, 0.3f, 0.2f, 0.82f),
                 WorkDesignationKind.FellTree => new Color(0.95f, 0.72f, 0.18f, 0.86f),
@@ -2963,17 +3126,22 @@ public partial class WorldView : Node2D
                      _snapshot.GetVisibility(corpse.Position, _engine.Map.Width) !=
                          CellVisibility.Unknown))
         {
-            var center = CellCenter(corpse.Position);
-            var color = corpse.Kind == CorpseKind.Goblin
-                ? new Color("52693f")
-                : new Color("765f4a");
-            DrawCircle(center, 5.2f, new Color(0.05f, 0.04f, 0.03f, 0.72f));
-            DrawCircle(center + new Vector2(0f, 1f), 4.1f, color);
-            DrawLine(center + new Vector2(-2.2f, -1.2f), center + new Vector2(2.2f, 1.2f),
-                new Color(0.16f, 0.11f, 0.09f, 0.95f), 1.3f, true);
-            DrawLine(center + new Vector2(2.2f, -1.2f), center + new Vector2(-2.2f, 1.2f),
-                new Color(0.16f, 0.11f, 0.09f, 0.95f), 1.3f, true);
+            DrawCorpse(corpse);
         }
+    }
+
+    private void DrawCorpse(CorpseSnapshot corpse)
+    {
+        var center = CellCenter(corpse.Position);
+        var color = corpse.Kind == CorpseKind.Goblin
+            ? new Color("52693f")
+            : new Color("765f4a");
+        DrawCircle(center, 5.2f, new Color(0.05f, 0.04f, 0.03f, 0.72f));
+        DrawCircle(center + new Vector2(0f, 1f), 4.1f, color);
+        DrawLine(center + new Vector2(-2.2f, -1.2f), center + new Vector2(2.2f, 1.2f),
+            new Color(0.16f, 0.11f, 0.09f, 0.95f), 1.3f, true);
+        DrawLine(center + new Vector2(2.2f, -1.2f), center + new Vector2(-2.2f, 1.2f),
+            new Color(0.16f, 0.11f, 0.09f, 0.95f), 1.3f, true);
     }
 
     private void DrawGoblinBuds()
@@ -3297,58 +3465,63 @@ public partial class WorldView : Node2D
                          stack.Location.Position,
                          _engine.Map.Width).IsDiscovered()))
         {
-            var center = CellCenter(stack.Location.Position);
-            var size = 11f + Math.Min(5f, stack.Quantity / 4f);
-            var icon = ItemIcons.ForResource(stack.Resource);
-            var isStoneCluster = icon == ItemIcon.Stone;
-            var dimensions = isStoneCluster
-                ? new Vector2(size, size * 0.86f)
-                : new Vector2(size, size);
-            var visualCenter = center + (isStoneCluster
-                ? new Vector2(0f, -0.5f)
-                : Vector2.Zero);
-            var destination = new Rect2(visualCenter - dimensions / 2f, dimensions);
-            DrawCircle(center + new Vector2(0.5f, 1f), size * 0.43f,
-                new Color(0, 0, 0, 0.46f));
+            DrawItemStack(stack);
+        }
+    }
 
-            if (stack.Resource is ResourceKind.Food or ResourceKind.Wood ||
-                ResourceThumbnails.UsesDedicatedMaterialIcon(
-                    stack.Resource,
-                    stack.Variant))
-            {
-                DrawTextureRect(
-                    ResourceThumbnails.Create(
-                        _itemIconAtlas,
-                        _treePartAtlas,
-                        _foodIconAtlas,
-                        _materialPaletteTextures,
-                        stack.Resource,
-                        stack.FoodKind,
-                        stack.Variant),
-                    destination,
-                    tile: false);
-            }
-            else if (isStoneCluster && stack.Variant != ResourceVariant.None)
-            {
-                DrawTextureRect(
-                    _materialPaletteTextures.Get(
-                        _itemIconAtlas,
-                        GetNeutralStoneRegion(),
-                        stack.Variant,
-                        MaterialPaletteTextureProfile.CompleteSurface),
-                    destination,
-                    tile: false);
-            }
-            else
-            {
-                DrawTextureRectRegion(
+    private void DrawItemStack(ItemStackSnapshot stack)
+    {
+        var center = CellCenter(stack.Location.Position);
+        var size = 11f + Math.Min(5f, stack.Quantity / 4f);
+        var icon = ItemIcons.ForResource(stack.Resource);
+        var isStoneCluster = icon == ItemIcon.Stone;
+        var dimensions = isStoneCluster
+            ? new Vector2(size, size * 0.86f)
+            : new Vector2(size, size);
+        var visualCenter = center + (isStoneCluster
+            ? new Vector2(0f, -0.5f)
+            : Vector2.Zero);
+        var destination = new Rect2(visualCenter - dimensions / 2f, dimensions);
+        DrawCircle(center + new Vector2(0.5f, 1f), size * 0.43f,
+            new Color(0, 0, 0, 0.46f));
+
+        if (stack.Resource is ResourceKind.Food or ResourceKind.Wood ||
+            ResourceThumbnails.UsesDedicatedMaterialIcon(
+                stack.Resource,
+                stack.Variant))
+        {
+            DrawTextureRect(
+                ResourceThumbnails.Create(
                     _itemIconAtlas,
-                    destination,
-                    isStoneCluster
-                        ? GetNeutralStoneRegion()
-                        : ItemIcons.GetRegion(_itemIconAtlas, icon),
-                    ItemIcons.TintForResource(stack.Resource));
-            }
+                    _treePartAtlas,
+                    _foodIconAtlas,
+                    _materialPaletteTextures,
+                    stack.Resource,
+                    stack.FoodKind,
+                    stack.Variant),
+                destination,
+                tile: false);
+        }
+        else if (isStoneCluster && stack.Variant != ResourceVariant.None)
+        {
+            DrawTextureRect(
+                _materialPaletteTextures.Get(
+                    _itemIconAtlas,
+                    GetNeutralStoneRegion(),
+                    stack.Variant,
+                    MaterialPaletteTextureProfile.CompleteSurface),
+                destination,
+                tile: false);
+        }
+        else
+        {
+            DrawTextureRectRegion(
+                _itemIconAtlas,
+                destination,
+                isStoneCluster
+                    ? GetNeutralStoneRegion()
+                    : ItemIcons.GetRegion(_itemIconAtlas, icon),
+                ItemIcons.TintForResource(stack.Resource));
         }
     }
 

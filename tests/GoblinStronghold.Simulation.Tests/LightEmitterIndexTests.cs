@@ -112,6 +112,7 @@ public sealed class LightEmitterIndexTests
     {
         var torch = LightEmitterCatalog.Get(LightEmitterCatalog.WallTorchId);
         var furnace = LightEmitterCatalog.Get(LightEmitterCatalog.SmeltingFurnaceId);
+        var cookingFire = LightEmitterCatalog.Get(LightEmitterCatalog.CookingFireId);
 
         Assert.True(LightEmitterActivationPolicy.IsStaticallyActive(torch));
         Assert.True(LightEmitterActivationPolicy.IsActive(torch, default));
@@ -121,6 +122,15 @@ public sealed class LightEmitterIndexTests
             new LightEmitterActivationContext(IsWorking: true)));
         Assert.True(LightEmitterActivationPolicy.IsActive(
             furnace,
+            new LightEmitterActivationContext(
+                IsWorking: true,
+                HasWorkOrderFuel: true)));
+        Assert.False(LightEmitterActivationPolicy.IsStaticallyActive(cookingFire));
+        Assert.False(LightEmitterActivationPolicy.IsActive(
+            cookingFire,
+            new LightEmitterActivationContext(IsWorking: true)));
+        Assert.True(LightEmitterActivationPolicy.IsActive(
+            cookingFire,
             new LightEmitterActivationContext(
                 IsWorking: true,
                 HasWorkOrderFuel: true)));

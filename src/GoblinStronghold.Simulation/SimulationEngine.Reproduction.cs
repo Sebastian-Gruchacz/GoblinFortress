@@ -1,5 +1,7 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Reproduction;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Shelter;
 
 namespace GoblinStronghold.Simulation;
 
@@ -26,7 +28,7 @@ public sealed partial class SimulationEngine
             return;
         }
 
-        ConsumeResource(ResourceKind.Food, Definitions.Reproduction.FoodCost);
+        ConsumeReproductionSubstrate(Definitions.Reproduction.FoodCost);
         var budId = AllocateEntityId();
         _goblinBuds.Add(budId, new GoblinBudState(
             budId,
@@ -112,18 +114,13 @@ public sealed partial class SimulationEngine
     }
 
     private IEnumerable<GridPosition> EnumerateSuitableBudSites(bool onlyVacant) =>
-        World.EnumerateWorldObjects()
-            .Where(worldObject =>
-                worldObject.Kind == WorldObjectKind.GoblinHut &&
-                worldObject.Owner == WorldObjectOwner.GoblinTribe)
-            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
-            .Where(item =>
-                item.Position.Z == 0 &&
-                item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door &&
-                World.IsTerrainTraversable(item.Position) &&
-                Map.GetCell(item.Position).Moisture >= Definitions.Reproduction.MinimumMoisture &&
-                (!onlyVacant || _goblinBuds.Values.All(bud => bud.Position != item.Position)))
-            .Select(item => item.Position)
+        GoblinReproductionSitePolicy.EnumerateSites(
+                World.EnumerateWorldObjects(),
+                World.IsTerrainTraversable,
+                position => Map.GetCell(position).Moisture >=
+                    Definitions.Reproduction.MinimumMoisture)
+            .Where(position =>
+                !onlyVacant || _goblinBuds.Values.All(bud => bud.Position != position))
             .Distinct();
 
     public GoblinReproductionReadinessSnapshot InspectReproductionReadiness() =>
@@ -132,10 +129,11 @@ public sealed partial class SimulationEngine
     private GoblinReproductionReadinessSnapshot CreateReproductionReadinessSnapshot()
     {
         var availableFood = GetAvailableResourceQuantity(ResourceKind.Food);
-        var requiredFood = checked(
-            Definitions.Reproduction.FoodCost +
+        var reserveFood = checked(
             (_actors.Count + 1) * Definitions.PersonalFoodCapacity *
             Definitions.Reproduction.FoodReserveDays);
+        var requiredFood = checked(
+            Definitions.Reproduction.FoodCost + reserveFood);
         var adultPopulation = _actors.Values.Count(actor => !IsJuvenile(actor));
         var juvenilePopulation = _actors.Count - adultPopulation;
         var juvenileCapacity = Math.Max(
@@ -159,7 +157,8 @@ public sealed partial class SimulationEngine
                     ? GoblinReproductionReadinessKind.JuvenileCapacityReached
                     : adultPopulation < Definitions.Reproduction.MinimumAdultPopulation
                         ? GoblinReproductionReadinessKind.InsufficientAdultPopulation
-                        : availableFood < requiredFood
+                        : availableFood < reserveFood ||
+                          checked(availableFood + _compostNutrients) < requiredFood
                             ? GoblinReproductionReadinessKind.InsufficientFood
                             : occupiedShelter >= GetShelterCapacity()
                                 ? GoblinReproductionReadinessKind.InsufficientShelter
@@ -206,25 +205,23 @@ public sealed partial class SimulationEngine
             WorkDemand: checked(
                 _workDesignations.Count + _constructionSites.Count + _goblinBuds.Count),
             HumanHostility: _humanVillage.Hostility,
+            CompostNutrients: _compostNutrients,
             Reproduction: CreateReproductionReadinessSnapshot());
     }
 
-    private int GetShelterCapacity()
+    private void ConsumeReproductionSubstrate(int quantity)
     {
-        var hutCapacity = World.EnumerateWorldObjects()
-            .Where(worldObject =>
-                worldObject.Kind == WorldObjectKind.GoblinHut &&
-                worldObject.Owner == WorldObjectOwner.GoblinTribe)
-            .SelectMany(worldObject => worldObject.GetAbsoluteParts())
-            .Where(item => item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door)
-            .Select(item => item.Position)
-            .Distinct()
-            .Count();
-        var fieldCampCapacity = World.EnumerateWorldObjects().Count(worldObject =>
-            worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
-            worldObject.Owner == WorldObjectOwner.GoblinTribe) * SimulationDefinitions.FieldCampCapacity;
-        return checked(hutCapacity + fieldCampCapacity);
+        var compostConsumed = Math.Min(quantity, _compostNutrients);
+        _compostNutrients -= compostConsumed;
+        var remainingFood = quantity - compostConsumed;
+        if (remainingFood > 0)
+        {
+            ConsumeResource(ResourceKind.Food, remainingFood);
+        }
     }
+
+    private int GetShelterCapacity() =>
+        GoblinShelterPolicy.CalculateCapacity(World.EnumerateWorldObjects());
 
     private bool TryPlanTendBudJob(ActorState actor)
     {
@@ -464,15 +461,13 @@ public sealed partial class SimulationEngine
     }
 
     private bool IsSuitableBudSite(GridPosition position) =>
-        position.Z == 0 &&
-        Map.IsWithin(position) &&
-        Map.GetCell(position).Moisture >= Definitions.Reproduction.MinimumMoisture &&
-        World.GetWorldObjectsAt(position).Any(worldObject =>
-            worldObject.Kind == WorldObjectKind.GoblinHut &&
-            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
-            worldObject.GetAbsoluteParts().Any(item =>
-                item.Position == position &&
-                item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door));
+        position.Z == 0 && Map.IsWithin(position) &&
+        GoblinReproductionSitePolicy.EnumerateSites(
+                World.GetWorldObjectsAt(position),
+                World.IsTerrainTraversable,
+                candidate => Map.GetCell(candidate).Moisture >=
+                    Definitions.Reproduction.MinimumMoisture)
+            .Contains(position);
 
     private void ValidateLoadedTendBudJob(ActorState actor)
     {

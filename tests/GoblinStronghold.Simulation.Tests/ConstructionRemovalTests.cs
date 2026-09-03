@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Construction;
+using GoblinStronghold.Simulation.Lighting;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -78,6 +79,180 @@ public sealed class ConstructionRemovalTests
         Assert.True(engine.World.CanBuildFloors([position]));
         Assert.Contains(engine.DrainWorldChanges(), change =>
             change.Kind == WorldChangeKind.StructureDismantled);
+    }
+
+    [Fact]
+    public void TribalCompostCanBeBuiltDismantledAndRebuilt()
+    {
+        var engine = AddLooseStack(
+            CreateEngine(initialWoodStock: 0),
+            ResourceKind.Reeds,
+            quantity: 4);
+        var position = Enumerable.Range(0, engine.Map.Width)
+            .SelectMany(x => Enumerable.Range(0, engine.Map.Height)
+                .Select(y => new GridPosition(x, y)))
+            .First(candidate =>
+                engine.Visibility.TryGet(candidate, out var visibility) &&
+                visibility.IsDiscovered() &&
+                engine.World.CanBuildGoblinCompost(candidate));
+
+        engine.QueueCommand(SimulationCommand.BuildGoblinCompost(
+            engine.CurrentTick.Next(), sequence: 1, position));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.GoblinCompost, site.Kind);
+        var material = Assert.Single(site.Materials);
+        Assert.Equal(ResourceKind.Reeds, material.Resource);
+        Assert.Equal(2, material.RequiredQuantity);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        var compost = Assert.Single(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.GoblinCompost);
+
+        engine = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        engine.QueueCommand(SimulationCommand.DismantleWorldObject(
+            engine.CurrentTick.Next(), sequence: 2, compost.Id, compost.Anchor));
+        AdvanceUntil(engine, () => engine.World.GetWorldObjectsAt(position)
+            .All(worldObject => worldObject.Id != compost.Id));
+
+        Assert.True(engine.World.CanBuildGoblinCompost(position));
+        engine.QueueCommand(SimulationCommand.BuildGoblinCompost(
+            engine.CurrentTick.Next(), sequence: 3, position));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+
+        Assert.Contains(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.GoblinCompost);
+    }
+
+    [Fact]
+    public void WoodenWatchtowerBuildsAReachableUpperPlatform()
+    {
+        var engine = CreateEngine(initialWoodStock: 8);
+        var actorPositions = engine.CreateSnapshot().Actors
+            .Select(actor => actor.Position)
+            .ToHashSet();
+        var position = Enumerable.Range(0, engine.Map.Width - 1)
+            .SelectMany(x => Enumerable.Range(0, engine.Map.Height - 1)
+                .Select(y => new GridPosition(x, y)))
+            .First(candidate =>
+            {
+                var footprint = SimulationCommand.GetAreaCells(
+                    candidate,
+                    candidate with { X = candidate.X + 1, Y = candidate.Y + 1 });
+                return footprint.All(cell =>
+                           engine.Visibility.TryGet(cell, out var visibility) &&
+                           visibility.IsDiscovered() &&
+                           !actorPositions.Contains(cell)) &&
+                       engine.World.CanBuildWoodenWatchtower(candidate);
+            });
+
+        engine.QueueCommand(SimulationCommand.BuildWoodenWatchtower(
+            engine.CurrentTick.Next(), sequence: 1, position));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.WoodenWatchtower, site.Kind);
+        Assert.Equal(4, site.Footprint.Count);
+        Assert.Equal(8, Assert.Single(site.Materials).RequiredQuantity);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        engine = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        var watchtower = Assert.Single(engine.World.GetWorldObjectsAt(position), worldObject =>
+            worldObject.Kind == WorldObjectKind.WoodenWatchtower);
+
+        Assert.Equal(8, watchtower.Parts.Count);
+        Assert.Equal(4, watchtower.Parts.Count(part =>
+            part.Channel == SpatialOccupancyChannel.Solid &&
+            part.Kind == WorldObjectPartKind.WatchtowerSupport &&
+            part.RelativePosition.Z == 0));
+        Assert.Equal(4, watchtower.Parts.Count(part =>
+            part.Channel == SpatialOccupancyChannel.Surface &&
+            part.Kind == WorldObjectPartKind.WatchtowerPlatform &&
+            part.RelativePosition.Z == 1));
+        Assert.All(watchtower.Parts.Where(part => part.RelativePosition.Z == 1), part =>
+            Assert.True(engine.World.IsTerrainTraversable(new GridPosition(
+                watchtower.Anchor.X + part.RelativePosition.X,
+                watchtower.Anchor.Y + part.RelativePosition.Y,
+                watchtower.Anchor.Z + part.RelativePosition.Z))));
+        Assert.True(ConstructionDismantlingPolicy.TryGetConstructionKind(
+            watchtower.Kind,
+            out var construction));
+        Assert.Equal(ConstructionKind.WoodenWatchtower, construction);
+    }
+
+    [Fact]
+    public void ReedSleepingMatBuildsOutsideShelterAndSurvivesSaveLoad()
+    {
+        var engine = AddLooseStack(
+            CreateEngine(initialWoodStock: 0),
+            ResourceKind.Reeds,
+            quantity: 2);
+        var ruin = Assert.Single(engine.World.CreateWorldObjectSnapshot(), worldObject =>
+            worldObject.Kind == WorldObjectKind.GoblinRuin);
+        var shelterCells = ruin.GetAbsoluteParts()
+            .Select(item => item.Position)
+            .ToHashSet();
+        var position = Enumerable.Range(0, engine.Map.Width)
+            .SelectMany(x => Enumerable.Range(0, engine.Map.Height)
+                .Select(y => new GridPosition(x, y)))
+            .First(candidate =>
+                !shelterCells.Contains(candidate) &&
+                engine.Visibility.TryGet(candidate, out var visibility) &&
+                visibility.IsDiscovered() &&
+                engine.World.CanBuildReedSleepingMat(candidate));
+
+        Assert.True(engine.World.IsOpenToSky(position));
+
+        engine.QueueCommand(SimulationCommand.BuildReedSleepingMat(
+            engine.CurrentTick.Next(), sequence: 1, position));
+        engine.AdvanceTicks(1);
+
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ConstructionKind.ReedSleepingMat, site.Kind);
+        Assert.Equal(2, Assert.Single(site.Materials).RequiredQuantity);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        engine = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+
+        var sleepingMat = Assert.Single(
+            engine.World.GetWorldObjectsAt(position),
+            worldObject => worldObject.Kind == WorldObjectKind.ReedSleepingMat);
+        Assert.Equal(WorldObjectPartKind.SleepingMat, Assert.Single(sleepingMat.Parts).Kind);
+        Assert.True(engine.World.IsTerrainTraversable(position));
+        Assert.True(ConstructionDismantlingPolicy.TryGetConstructionKind(
+            sleepingMat.Kind,
+            out var construction));
+        Assert.Equal(ConstructionKind.ReedSleepingMat, construction);
+    }
+
+    [Fact]
+    public void StandingTorchBuildsAsATraversableOmnidirectionalLight()
+    {
+        var engine = CreateEngine(initialWoodStock: 1);
+        var position = Enumerable.Range(0, engine.Map.Width)
+            .SelectMany(x => Enumerable.Range(0, engine.Map.Height)
+                .Select(y => new GridPosition(x, y)))
+            .First(candidate =>
+                engine.Visibility.TryGet(candidate, out var visibility) &&
+                visibility.IsDiscovered() &&
+                engine.World.CanBuildStandingTorch(candidate));
+
+        engine.QueueCommand(SimulationCommand.BuildStandingTorch(
+            engine.CurrentTick.Next(), sequence: 1, position));
+        engine.AdvanceTicks(1);
+
+        Assert.Equal(
+            ConstructionKind.StandingTorch,
+            Assert.Single(engine.CreateSnapshot().ConstructionSites).Kind);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        engine = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+
+        var torch = Assert.Single(
+            engine.World.GetWorldObjectsAt(position),
+            worldObject => worldObject.Kind == WorldObjectKind.StandingTorch);
+        Assert.Equal(WorldObjectPartKind.StandingTorch, Assert.Single(torch.Parts).Kind);
+        Assert.True(engine.World.IsTerrainTraversable(position));
+        Assert.True(LightEmitterCatalog.TryGet(torch.Kind, out var light));
+        Assert.Equal(LightEmitterCatalog.WallTorchId, light.Id);
     }
 
     [Fact]
@@ -287,6 +462,31 @@ public sealed class ConstructionRemovalTests
             initialGoblinCount: 1,
             initialFoodStock: initialFoodStock,
             initialWoodStock: initialWoodStock);
+
+    private static SimulationEngine AddLooseStack(
+        SimulationEngine engine,
+        ResourceKind resource,
+        int quantity)
+    {
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var nextId = save["nextEntityId"]!.GetValue<ulong>();
+        var position = engine.Map.GoblinSpawn;
+        save["itemStacks"]!.AsArray().Add(new JsonObject
+        {
+            ["id"] = nextId,
+            ["resource"] = (int)resource,
+            ["foodKind"] = (int)FoodKind.None,
+            ["variant"] = (int)ResourceVariant.None,
+            ["quantity"] = quantity,
+            ["locationKind"] = (int)ItemLocationKind.Ground,
+            ["x"] = position.X,
+            ["y"] = position.Y,
+            ["z"] = position.Z,
+            ["ownerId"] = EntityId.None.Value,
+        });
+        save["nextEntityId"] = nextId + 1;
+        return SimulationEngine.Load(save.ToJsonString(), SimulationDefinitions.Foundation);
+    }
 
     private static GridPosition FindElevatedUnsupportedPosition(SimulationEngine engine) =>
         Enumerable.Range(0, engine.Map.Width)

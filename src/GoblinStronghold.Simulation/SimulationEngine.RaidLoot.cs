@@ -17,10 +17,10 @@ public sealed partial class SimulationEngine
                 return false;
             }
 
-            var camp = FindNearestReachableFieldCamp(actor);
-            return camp is not null && BeginRaidCorpseRecoveryTravel(
+            var site = FindNearestReachableCorpseSite(actor);
+            return site is not null && BeginRaidCorpseRecoveryTravel(
                 actor,
-                camp.Value,
+                site.Value,
                 ActorJobStage.Delivering);
         }
 
@@ -80,7 +80,7 @@ public sealed partial class SimulationEngine
             return false;
         }
         if (handling != CorpseDirective.BudInPlace &&
-            FindNearestReachableFieldCamp(actor) is null)
+            FindNearestReachableCorpseSite(actor) is null)
         {
             actor.ClearJob();
             return false;
@@ -119,11 +119,9 @@ public sealed partial class SimulationEngine
         return true;
     }
 
-    private GridPosition? FindNearestReachableFieldCamp(ActorState actor) =>
+    private GridPosition? FindNearestReachableCorpseSite(ActorState actor) =>
         World.EnumerateWorldObjects()
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
-                worldObject.Owner == WorldObjectOwner.GoblinTribe &&
-                World.IsTerrainTraversable(worldObject.Anchor))
+            .Where(worldObject => IsCorpseRecoverySite(worldObject.Anchor))
             .Select(worldObject => new
             {
                 worldObject.Anchor,
@@ -135,6 +133,14 @@ public sealed partial class SimulationEngine
             .ThenBy(candidate => candidate.Anchor.X)
             .Select(candidate => (GridPosition?)candidate.Anchor)
             .FirstOrDefault();
+
+    private bool IsCorpseRecoverySite(GridPosition position) =>
+        World.IsTerrainTraversable(position) &&
+        World.GetWorldObjectsAt(position).Any(worldObject =>
+            worldObject.Kind is (WorldObjectKind.GoblinFieldCamp or
+                WorldObjectKind.GoblinCompost) &&
+            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            worldObject.Anchor == position);
 
     private bool TryPlanRaidLoot(ActorState actor)
     {

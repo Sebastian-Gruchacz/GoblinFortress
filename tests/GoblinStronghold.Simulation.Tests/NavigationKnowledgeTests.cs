@@ -241,7 +241,7 @@ public sealed class NavigationKnowledgeTests
             initialFoodStock: 8);
         var shelter = engine.World.CreateWorldObjectSnapshot()
             .Where(worldObject =>
-                worldObject.Kind == WorldObjectKind.GoblinHut &&
+                worldObject.Kind is (WorldObjectKind.GoblinHut or WorldObjectKind.GoblinRuin) &&
                 worldObject.Owner == WorldObjectOwner.GoblinTribe)
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .First(part =>

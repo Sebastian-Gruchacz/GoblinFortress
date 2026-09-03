@@ -18,7 +18,7 @@
       },
       "spawn": {
         "mode": "InitialSingleLevel", "order": 10, "minimumDepth": 0,
-        "maximumDepth": 0, "minimumPopulation": 6, "mapCellsPerAnimal": 400,
+        "maximumDepth": 0, "minimumPopulation": 12, "mapCellsPerAnimal": 300,
         "scalePopulationWithDepth": false, "populationIncreaseDepth": null,
         "populationIncrease": 0
       },
@@ -52,7 +52,7 @@
       },
       "spawn": {
         "mode": "InitialSingleLevel", "order": 20, "minimumDepth": 0,
-        "maximumDepth": 0, "minimumPopulation": 3, "mapCellsPerAnimal": 1200,
+        "maximumDepth": 0, "minimumPopulation": 4, "mapCellsPerAnimal": 1000,
         "scalePopulationWithDepth": false, "populationIncreaseDepth": null,
         "populationIncrease": 0
       },

@@ -33,6 +33,7 @@ internal static class WorkToolCatalog
         {
             WorkDesignationKind.GatherFood or
             WorkDesignationKind.GatherReeds or
+            WorkDesignationKind.GatherLichen or
             WorkDesignationKind.GatherBrushwood or
             WorkDesignationKind.GatherStone or
             WorkDesignationKind.UprootBerryBush or
@@ -49,6 +50,8 @@ internal static class WorkToolCatalog
             new(new Color(0.65f, 1f, 0.3f, 0.9f), 1.5f, 2f),
         WorkDesignationKind.GatherReeds =>
             new(new Color(0.78f, 0.96f, 0.36f, 0.92f), 1.5f, 2f),
+        WorkDesignationKind.GatherLichen =>
+            new(new Color(0.56f, 0.72f, 0.62f, 0.92f), 1.5f, 2f),
         WorkDesignationKind.GatherBrushwood =>
             new(new Color(0.9f, 0.58f, 0.25f, 0.9f), 1.5f, 2f),
         WorkDesignationKind.UprootBerryBush =>

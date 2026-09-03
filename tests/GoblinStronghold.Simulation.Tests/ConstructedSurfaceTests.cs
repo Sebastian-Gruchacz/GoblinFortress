@@ -378,6 +378,76 @@ public sealed class ConstructedSurfaceTests
     }
 
     [Fact]
+    public void WoodenLadderConnectsAWatchtowerPlatformAndSurvivesSaveLoad()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var actorPosition = Assert.Single(engine.CreateSnapshot().Actors).Position;
+        var towerAnchor = EnumerateWorldPositions(engine)
+            .Where(position => position.Z == 0)
+            .First(position =>
+            {
+                var footprint = SimulationCommand.GetAreaCells(
+                    position,
+                    position with { X = position.X + 1, Y = position.Y + 1 });
+                return !footprint.Contains(actorPosition) &&
+                    engine.World.CanBuildWoodenWatchtower(position) &&
+                    footprint.Any(platform => engine.World.GetCardinalWorldNeighbors(platform)
+                        .Any(lower => !footprint.Contains(lower) &&
+                            engine.World.IsTerrainTraversable(lower)));
+            });
+        engine.World.BuildWoodenWatchtower(
+            towerAnchor,
+            new SimulationTick(1),
+            ResourceVariant.OakWood);
+        var watchtower = Assert.Single(engine.World.GetWorldObjectsAt(towerAnchor),
+            worldObject => worldObject.Kind == WorldObjectKind.WoodenWatchtower);
+        var placement = watchtower.GetAbsoluteParts()
+            .Where(item => item.Part.Kind == WorldObjectPartKind.WatchtowerPlatform)
+            .SelectMany(item => engine.World.GetCardinalWorldNeighbors(
+                    item.Position with { Z = item.Position.Z - 1 })
+                .Select(lower => (Lower: lower, Upper: item.Position)))
+            .First(candidate => engine.World.CanBuildWoodenLadder(
+                candidate.Lower,
+                candidate.Upper));
+
+        Assert.DoesNotContain(
+            placement.Upper,
+            engine.World.GetTerrainNeighbors(placement.Lower));
+        engine.World.BuildWoodenLadder(
+            placement.Lower,
+            placement.Upper,
+            new SimulationTick(2),
+            ResourceVariant.OakWood);
+
+        Assert.Contains(placement.Upper, engine.World.GetTerrainNeighbors(placement.Lower));
+        Assert.Contains(placement.Lower, engine.World.GetTerrainNeighbors(placement.Upper));
+        var ladder = Assert.Single(engine.World.GetWorldObjectsAt(placement.Lower),
+            worldObject => worldObject.Kind == WorldObjectKind.WoodenLadder);
+        Assert.Equal(2, ladder.Parts.Count);
+        Assert.All(ladder.Parts, part =>
+        {
+            Assert.Equal(SpatialOccupancyChannel.Fixture, part.Channel);
+            Assert.Equal(WorldObjectPartKind.Ladder, part.Kind);
+        });
+        Assert.Equal(ResourceVariant.OakWood, ladder.MaterialVariant);
+        var route = engine.World.FindTerrainPath(actorPosition, placement.Upper);
+        Assert.NotNull(route);
+        Assert.Contains(placement.Lower, route);
+        Assert.Equal(placement.Upper, route[^1]);
+
+        engine = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Contains(placement.Upper, engine.World.GetTerrainNeighbors(placement.Lower));
+        Assert.True(ConstructionDismantlingPolicy.TryGetConstructionKind(
+            ladder.Kind,
+            out var construction));
+        Assert.Equal(ConstructionKind.WoodenLadder, construction);
+
+        engine.World.DismantleWorldObject(ladder.Id, new SimulationTick(3));
+        Assert.DoesNotContain(placement.Upper, engine.World.GetTerrainNeighbors(placement.Lower));
+        Assert.True(engine.World.CanBuildWoodenLadder(placement.Lower, placement.Upper));
+    }
+
+    [Fact]
     public void FloorToolTurnsNaturalSlopeIntoMatchingMaterialRamp()
     {
         var engine = CreateEngine(initialWoodStock: 2);

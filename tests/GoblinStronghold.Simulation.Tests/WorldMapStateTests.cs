@@ -570,7 +570,7 @@ public sealed class WorldMapStateTests
     }
 
     [Fact]
-    public void VegetationRegrowsAtStableLogicalIntervals()
+    public void HarvestedSeasonalFoodDoesNotRegrowAtOrdinaryGrowthIntervals()
     {
         var engine = MoveToStartOfSummer(CreateEngine());
         var position = engine.Map.GoblinSpawn;
@@ -587,19 +587,14 @@ public sealed class WorldMapStateTests
         engine.AdvanceTicks(
             SimulationDefinitions.Foundation.PlantGrowthIntervalTicks - 1);
 
-        var change = Assert.Single(
+        Assert.DoesNotContain(
             engine.DrainWorldChanges(),
             item => item.Kind == WorldChangeKind.VegetationRegrown && item.Position == position);
-        Assert.Equal(WorldChangeKind.VegetationRegrown, change.Kind);
-        Assert.Equal(
-            new SimulationTick(engine.Definitions.Clock.Climate.GetSeasonStartTick(SeasonKind.Summer) +
-                engine.Definitions.PlantGrowthIntervalTicks),
-            change.Tick);
-        Assert.Equal(1, change.Amount);
+        Assert.Equal(harvested.Biomass, engine.World.GetPlantPatch(position)!.Value.Biomass);
     }
 
     [Fact]
-    public void HarvestedBerryBushRemainsInWorldWhileItsFruitRegrows()
+    public void HarvestedBerryBushRemainsBareUntilTheNextSummerStarts()
     {
         var engine = MoveToStartOfSummer(CreateEngine());
         var position = engine.Map.GoblinSpawn;
@@ -619,9 +614,39 @@ public sealed class WorldMapStateTests
         Assert.Equal(PlantKind.BerryBush, bareBush.Value.Kind);
         Assert.Equal(0, bareBush.Value.Biomass);
 
-        engine.AdvanceTicks(SimulationDefinitions.Foundation.PlantGrowthIntervalTicks - 1);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var nextSummer = checked(
+            engine.Definitions.Clock.Climate.TicksPerYear +
+            engine.Definitions.Clock.Climate.GetSeasonStartTick(SeasonKind.Summer));
+        save["currentTick"] = nextSummer - 1;
+        engine = SimulationEngine.Load(save.ToJsonString(), engine.Definitions);
+        engine.AdvanceTicks(1);
 
-        Assert.Equal(1, engine.World.GetPlantPatch(position)!.Value.Biomass);
+        Assert.Equal(capacity, engine.World.GetPlantPatch(position)!.Value.Biomass);
+        Assert.Contains(engine.DrainWorldChanges(), change =>
+            change.Kind == WorldChangeKind.SeasonalFoodChanged &&
+            change.Position == position &&
+            change.Amount == capacity);
+    }
+
+    [Fact]
+    public void WildBerriesSpoilWhenWinterBegins()
+    {
+        var engine = CreateEngine();
+        var position = engine.Map.GoblinSpawn;
+        Assert.True(engine.World.GetPlantPatch(position)!.Value.Biomass > 0);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["currentTick"] =
+            engine.Definitions.Clock.Climate.GetSeasonStartTick(SeasonKind.Winter) - 1;
+        engine = SimulationEngine.Load(save.ToJsonString(), engine.Definitions);
+
+        engine.AdvanceTicks(1);
+
+        Assert.Equal(0, engine.World.GetPlantPatch(position)!.Value.Biomass);
+        Assert.Contains(engine.DrainWorldChanges(), change =>
+            change.Kind == WorldChangeKind.SeasonalFoodChanged &&
+            change.Position == position &&
+            change.Amount < 0);
     }
 
     [Fact]
@@ -667,7 +692,8 @@ public sealed class WorldMapStateTests
         var engine = CreateEngine();
         var actor = Assert.Single(engine.CreateSnapshot().Actors);
         var destinations = engine.World.CreateWorldObjectSnapshot()
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut)
+            .Where(worldObject => worldObject.Kind is
+                WorldObjectKind.GoblinHut or WorldObjectKind.GoblinRuin)
             .SelectMany(worldObject => worldObject.GetAbsoluteParts())
             .Where(item => item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door)
             .Select(item => item.Position)

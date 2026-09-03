@@ -10,16 +10,20 @@ namespace GoblinStronghold.Simulation;
 public sealed record CraftingMaterialRequirement(
     ResourceKind Resource,
     ResourceVariant Variant,
-    int Quantity)
+    int Quantity,
+    FoodKind FoodKind = FoodKind.None)
 {
-    public bool Matches(ResourceKind resource, ResourceVariant variant) =>
-        Resource == resource && (Variant == ResourceVariant.None || Variant == variant);
+    public bool Matches(ResourceKind resource, FoodKind foodKind, ResourceVariant variant) =>
+        Resource == resource &&
+        (FoodKind == FoodKind.None || FoodKind == foodKind) &&
+        (Variant == ResourceVariant.None || Variant == variant);
 }
 
 public sealed record CraftingOutputDefinition(
     ResourceKind Resource,
     ResourceVariant Variant,
-    int Quantity);
+    int Quantity,
+    FoodKind FoodKind = FoodKind.None);
 
 public sealed record CraftingRecipeDefinition(
     string Id,
@@ -57,8 +61,18 @@ public static class CraftingRecipeCatalog
     public static CraftingMaterialRequirement? FindMaterial(
         CraftingRecipeKind recipe,
         ResourceKind resource,
+        FoodKind foodKind,
         ResourceVariant variant) => Get(recipe).Materials
-        .SingleOrDefault(material => material.Matches(resource, variant));
+        .SingleOrDefault(material => material.Matches(resource, foodKind, variant));
+
+    public static CraftingMaterialRequirement? FindMaterial(
+        CraftingRecipeKind recipe,
+        ResourceKind resource,
+        ResourceVariant variant) => FindMaterial(
+        recipe,
+        resource,
+        FoodKind.None,
+        variant);
 
     public static int GetRecipeLevel(CraftingRecipeKind recipe) => Get(recipe).Level;
 
@@ -104,17 +118,32 @@ public static class CraftingRecipeCatalog
             source.Materials.Any(material =>
                 !Enum.IsDefined(material.Resource) || material.Resource == ResourceKind.Any ||
                 !Enum.IsDefined(material.Variant) ||
+                !Enum.IsDefined(material.FoodKind) ||
+                (material.Resource == ResourceKind.Food) !=
+                    (material.FoodKind != FoodKind.None) ||
+                material.FoodKind != FoodKind.None &&
+                    material.Variant != ResourceVariant.None ||
                 material.Quantity < 1) ||
-            source.Materials.Select(material => (material.Resource, material.Variant))
+            source.Materials.Select(material => (
+                    material.Resource,
+                    material.FoodKind,
+                    material.Variant))
                 .Distinct().Count() !=
                 source.Materials.Count ||
-            source.Materials.GroupBy(material => material.Resource).Any(group =>
+            source.Materials.GroupBy(material => (
+                    material.Resource,
+                    material.FoodKind)).Any(group =>
                 group.Count() > 1 && group.Any(material =>
                     material.Variant == ResourceVariant.None)) ||
             !Enum.IsDefined(source.Output.Resource) ||
             source.Output.Resource == ResourceKind.Any ||
             !Enum.IsDefined(source.Output.Variant) ||
-            source.Output.Variant == ResourceVariant.None ||
+            !Enum.IsDefined(source.Output.FoodKind) ||
+            (source.Output.Resource == ResourceKind.Food
+                ? source.Output.FoodKind == FoodKind.None ||
+                  source.Output.Variant != ResourceVariant.None
+                : source.Output.FoodKind != FoodKind.None ||
+                  source.Output.Variant == ResourceVariant.None) ||
             source.Output.Quantity < 1)
         {
             throw new InvalidOperationException(
@@ -131,11 +160,13 @@ public static class CraftingRecipeCatalog
                 new CraftingMaterialRequirement(
                     material.Resource,
                     material.Variant,
-                    material.Quantity)).ToArray()),
+                    material.Quantity,
+                    material.FoodKind)).ToArray()),
             new CraftingOutputDefinition(
                 source.Output.Resource,
                 source.Output.Variant,
-                source.Output.Quantity));
+                source.Output.Quantity,
+                source.Output.FoodKind));
     }
 
     private static void ValidateCompleteness(CraftingRecipeDefinition[] definitions)
@@ -214,6 +245,7 @@ public static class CraftingRecipeCatalog
     {
         public ResourceKind Resource { get; init; }
         public ResourceVariant Variant { get; init; }
+        public FoodKind FoodKind { get; init; }
         public int Quantity { get; init; }
     }
 
@@ -221,6 +253,7 @@ public static class CraftingRecipeCatalog
     {
         public ResourceKind Resource { get; init; }
         public ResourceVariant Variant { get; init; }
+        public FoodKind FoodKind { get; init; }
         public int Quantity { get; init; }
     }
 }

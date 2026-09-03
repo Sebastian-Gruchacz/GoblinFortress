@@ -50,6 +50,18 @@ public sealed class AnimalSpeciesCatalogTests
     }
 
     [Fact]
+    public void SurfaceSpeciesSupportTheLargerStartingTribe()
+    {
+        var hare = AnimalSpeciesCatalog.Core.Get(AnimalKind.MarshHare);
+        var boar = AnimalSpeciesCatalog.Core.Get(AnimalKind.SwampBoar);
+
+        Assert.Equal(12, hare.Spawn.MinimumPopulation);
+        Assert.Equal(300, hare.Spawn.MapCellsPerAnimal);
+        Assert.Equal(4, boar.Spawn.MinimumPopulation);
+        Assert.Equal(1_000, boar.Spawn.MapCellsPerAnimal);
+    }
+
+    [Fact]
     public void CatalogRejectsMissingOrDuplicatedLegacyAdapters()
     {
         var hare = new AnimalSpeciesDefinition(

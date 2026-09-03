@@ -25,6 +25,17 @@ public sealed class WorkshopCatalogTests
                 CraftingRecipeCatalog.Get(recipe).Workshop == WorkshopKind.PrimitiveWorkshop), recipe =>
             Assert.True(primitive.SupportsRecipe(recipe, recipeLevel: 1)));
         Assert.False(primitive.SupportsRecipe(CraftingRecipeKind.SmeltIronBar, recipeLevel: 1));
+
+        var cookingFire = WorkshopCatalog.Get(WorkshopKind.CookingFire);
+        Assert.All(Enum.GetValues<CraftingRecipeKind>().Where(recipe =>
+                CraftingRecipeCatalog.Get(recipe).Workshop == WorkshopKind.CookingFire), recipe =>
+            Assert.True(cookingFire.SupportsRecipe(recipe, recipeLevel: 1)));
+        Assert.False(cookingFire.SupportsRecipe(CraftingRecipeKind.BoneKnife, recipeLevel: 1));
+
+        var fitted = WorkshopCatalog.Get(WorkshopKind.FittedWorkshop);
+        Assert.True(fitted.SupportsRecipe(CraftingRecipeKind.ReinforcedPickaxe, recipeLevel: 2));
+        Assert.True(fitted.SupportsRecipe(CraftingRecipeKind.WoodenChest, recipeLevel: 2));
+        Assert.False(fitted.SupportsRecipe(CraftingRecipeKind.PrimitiveAxe, recipeLevel: 1));
     }
 
     [Fact]
@@ -64,6 +75,12 @@ public sealed class WorkshopCatalogTests
         Assert.Equal(
             "piec tyglowy",
             TranslationCatalog.Get("pl", "workshops", "names", "crucible-furnace"));
+        Assert.Equal(
+            "palenisko",
+            TranslationCatalog.Get("pl", "workshops", "names", "cooking-fire"));
+        Assert.Equal(
+            "cook meat",
+            TranslationCatalog.Get("en", "recipes", "names", "CookRawMeat"));
         Assert.Equal(
             "drewniana beczka",
             TranslationCatalog.Get("pl", "recipes", "names", "WoodenBarrel"));

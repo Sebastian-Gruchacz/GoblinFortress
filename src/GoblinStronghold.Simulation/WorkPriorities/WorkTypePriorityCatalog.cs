@@ -15,7 +15,8 @@ public static class WorkTypePriorityCatalog
 {
     private static readonly WorkTypePriorityDefinition[] Definitions =
     [
-        Define("gathering", WorkDesignationKind.GatherFood, WorkDesignationKind.GatherReeds),
+        Define("gathering", WorkDesignationKind.GatherFood, WorkDesignationKind.GatherReeds,
+            WorkDesignationKind.GatherLichen),
         Define("hauling", WorkDesignationKind.GatherBrushwood, WorkDesignationKind.GatherStone),
         Define("clearing", WorkDesignationKind.UprootBerryBush),
         Define("logging", WorkDesignationKind.FellTree),

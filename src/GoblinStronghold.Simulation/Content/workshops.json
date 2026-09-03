@@ -10,8 +10,21 @@
       "constructionRequirements": [
         { "quantity": 4, "allowedMaterialTypes": ["Wood", "PlantFiber"], "minimumStrength": 15, "minimumDurability": 20 }
       ],
-      "availableRecipes": ["PrimitiveSling", "PrimitiveAxe", "PrimitivePickaxe", "BoneKnife", "FightingStick", "StoneClub", "HideClothes", "ReedClothes", "PrimitiveWaterskin", "ReinforcedPickaxe", "WoodenBucket", "WoodenBarrel", "WoodenBox", "WoodenChest", "WoodenBulkBin"],
+      "availableRecipes": ["PrimitiveSling", "PrimitiveAxe", "PrimitivePickaxe", "BoneKnife", "FightingStick", "StoneClub", "HideClothes", "ReedClothes", "PrimitiveWaterskin", "WoodenBucket", "WoodenBox"],
       "servedMaterialTypes": ["Wood", "Stone", "PlantFiber", "Bone", "Hide"],
+      "servedMaterialIds": []
+    },
+    {
+      "id": "fitted-workshop",
+      "kind": "FittedWorkshop",
+      "level": 2,
+      "workSpeedPercent": 115,
+      "maximumRecipeLevel": 2,
+      "constructionRequirements": [
+        { "quantity": 8, "allowedMaterialTypes": ["Wood"], "minimumStrength": 15, "minimumDurability": 20 }
+      ],
+      "availableRecipes": ["ReinforcedPickaxe", "WoodenBarrel", "WoodenChest", "WoodenBulkBin"],
+      "servedMaterialTypes": ["Wood", "Stone", "PlantFiber", "Bone"],
       "servedMaterialIds": []
     },
     {
@@ -52,6 +65,28 @@
       "availableRecipes": ["SmeltSilverBar", "SmeltGoldBar"],
       "servedMaterialTypes": ["Metal"],
       "servedMaterialIds": ["silver-bar", "gold-bar"]
+    },
+    {
+      "id": "cooking-fire",
+      "kind": "CookingFire",
+      "level": 1,
+      "workSpeedPercent": 100,
+      "maximumRecipeLevel": 1,
+      "constructionRequirements": [
+        { "quantity": 3, "allowedMaterialTypes": ["Wood"], "minimumStrength": 0, "minimumDurability": 0 }
+      ],
+      "availableRecipes": [
+        "CookRawMeat",
+        "FishRootSoup",
+        "FishMushroomSoup",
+        "MeatRootSoup",
+        "MeatMushroomSoup",
+        "PreserveFishAndMeat",
+        "BrewRootAndBerryMedicine",
+        "BrewLichenAndMushroomMana"
+      ],
+      "servedMaterialTypes": ["Wood"],
+      "servedMaterialIds": []
     }
   ]
 }

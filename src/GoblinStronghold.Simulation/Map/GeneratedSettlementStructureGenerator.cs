@@ -1,3 +1,5 @@
+using GoblinStronghold.Simulation.Map.Generation;
+
 namespace GoblinStronghold.Simulation.Map;
 
 internal static class GeneratedSettlementStructureGenerator
@@ -64,26 +66,39 @@ internal static class GeneratedSettlementStructureGenerator
             new WorldObjectId(nextId++),
             map.HumanVillage);
 
-        var hutCount = 2 + DeterministicRandom.NextInt(
-            map.Seed,
-            RandomDomain.MapGeneration,
-            EntityId.None,
-            SimulationTick.Zero,
-            sampleKey: 30_001,
-            minimumInclusive: 0,
-            maximumExclusive: 2);
-        for (var index = 0; index < hutCount; index++)
+        if (map.GeneratorVersion >= 16)
         {
-            AddBuilding(
-                objects,
-                reservedCells,
-                map,
-                new WorldObjectId(nextId++),
-                WorldObjectKind.GoblinHut,
-                WorldObjectOwner.GoblinTribe,
-                map.GoblinSpawn,
-                width: 3,
-                height: 3);
+            var ruinObjects = GoblinStarterRuinPlanner.Generate(map, reservedCells, nextId);
+            objects.AddRange(ruinObjects);
+            nextId = checked(nextId + (ulong)ruinObjects.Count);
+            foreach (var worldObject in ruinObjects)
+            {
+                ReserveFootprint(worldObject, reservedCells);
+            }
+        }
+        else
+        {
+            var hutCount = 2 + DeterministicRandom.NextInt(
+                map.Seed,
+                RandomDomain.MapGeneration,
+                EntityId.None,
+                SimulationTick.Zero,
+                sampleKey: 30_001,
+                minimumInclusive: 0,
+                maximumExclusive: 2);
+            for (var index = 0; index < hutCount; index++)
+            {
+                AddBuilding(
+                    objects,
+                    reservedCells,
+                    map,
+                    new WorldObjectId(nextId++),
+                    WorldObjectKind.GoblinHut,
+                    WorldObjectOwner.GoblinTribe,
+                    map.GoblinSpawn,
+                    width: 3,
+                    height: 3);
+            }
         }
 
         if (map.GeneratorVersion >= 4)

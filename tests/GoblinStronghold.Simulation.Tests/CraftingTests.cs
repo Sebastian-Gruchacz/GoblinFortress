@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using GoblinStronghold.Simulation.Crafting;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Workshops;
@@ -8,6 +9,20 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class CraftingTests
 {
+    [Fact]
+    public void AutomaticCookingRecognizesLichenAndMushroomsAsManaIngredients()
+    {
+        var available = new Dictionary<(ResourceKind, FoodKind, ResourceVariant), int>
+        {
+            [(ResourceKind.Materials, FoodKind.None, ResourceVariant.Lichen)] = 1,
+            [(ResourceKind.Food, FoodKind.Mushrooms, ResourceVariant.None)] = 1,
+        };
+
+        var recipe = Assert.Single(AutomaticCookingPolicy.FindFeasibleRecipes(available));
+
+        Assert.Equal(CraftingRecipeKind.BrewLichenAndMushroomMana, recipe.Kind);
+    }
+
     [Fact]
     public void StartingTribeReceivesUpToThreePrimitivePickaxes()
     {
@@ -136,6 +151,162 @@ public sealed class CraftingTests
             simulationEvent.Kind == SimulationEventKind.CraftingCompleted);
         var restored = SimulationEngine.Load(engine.Save(), definitions);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
+    }
+
+    [Fact]
+    public void CookingFireConsumesOnlyRawMeatAndProducesCookedFood()
+    {
+        var definitions = SimulationDefinitions.Foundation;
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0xC00C1EUL),
+            definitions,
+            initialGoblinCount: 4,
+            initialFoodStock: 12,
+            initialWoodStock: 0);
+        var fire = Assert.Single(engine.World.CreateWorldObjectSnapshot(), item =>
+            item.Kind == WorldObjectKind.CookingFire).Anchor;
+        var available = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.IsTerrainTraversable)
+            .Where(position => engine.Navigation.HasSurfacePath(engine.Map.GoblinSpawn, position))
+            .Where(position => engine.World.GetWorldObjectsAt(position).Count == 0)
+            .Where(position => engine.CreateSnapshot().ItemStacks.All(stack =>
+                stack.Location.Position != position))
+            .OrderBy(position => Math.Abs(position.X - fire.X) + Math.Abs(position.Y - fire.Y))
+            .Take(2)
+            .ToArray();
+
+        Assert.Equal(2, available.Length);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            available[0],
+            ResourceKind.Food,
+            capacity: 16));
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            available[1],
+            ResourceKind.Wood,
+            capacity: 16));
+        engine.AdvanceTicks(1);
+
+        var storageByResource = engine.CreateSnapshot().StorageZones
+            .Where(zone => zone.AcceptedResource is ResourceKind.Food or ResourceKind.Wood)
+            .ToDictionary(zone => zone.AcceptedResource);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var nextId = save["nextEntityId"]!.GetValue<ulong>();
+        save["itemStacks"]!.AsArray().Add(CreateStack(
+            nextId++,
+            ResourceKind.Food,
+            storageByResource[ResourceKind.Food].Position,
+            quantity: 2,
+            storageZoneId: storageByResource[ResourceKind.Food].Id,
+            foodKind: FoodKind.RawMeat));
+        save["itemStacks"]!.AsArray().Add(CreateStack(
+            nextId++,
+            ResourceKind.Wood,
+            storageByResource[ResourceKind.Wood].Position,
+            quantity: 1,
+            storageZoneId: storageByResource[ResourceKind.Wood].Id));
+        save["nextEntityId"] = nextId;
+        engine = SimulationEngine.Load(save.ToJsonString(), definitions);
+
+        engine.QueueCommand(SimulationCommand.QueueCraftingRecipe(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            fire,
+            CraftingRecipeKind.CookRawMeat));
+        engine.AdvanceTicks(1);
+        Assert.Single(engine.CreateSnapshot().CraftingOrders);
+
+        for (var tick = 0; tick < 10_000 &&
+             engine.CreateSnapshot().CraftingOrders.Count > 0; tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.Empty(snapshot.CraftingOrders);
+        Assert.Contains(snapshot.ItemStacks, stack =>
+            stack.Resource == ResourceKind.Food &&
+            stack.FoodKind == FoodKind.CookedMeat &&
+            stack.Quantity == 2);
+        Assert.DoesNotContain(snapshot.ItemStacks, stack =>
+            stack.Resource == ResourceKind.Food &&
+            stack.FoodKind == FoodKind.RawMeat);
+        Assert.DoesNotContain(snapshot.ItemStacks, stack =>
+            stack.Resource == ResourceKind.Wood &&
+            stack.Location.OwnerId == storageByResource[ResourceKind.Wood].Id);
+        Assert.Equal(engine.ComputeStateHash(),
+            SimulationEngine.Load(engine.Save(), definitions).ComputeStateHash());
+    }
+
+    [Fact]
+    public void CookingFireAutomaticallyChoosesFeasibleRecipeUntilPlayerQueuesOne()
+    {
+        var definitions = SimulationDefinitions.Foundation;
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0xA070C00CUL),
+            definitions,
+            initialGoblinCount: 3,
+            initialFoodStock: 0,
+            initialWoodStock: 0);
+        var fire = Assert.Single(engine.World.CreateWorldObjectSnapshot(), item =>
+            item.Kind == WorldObjectKind.CookingFire).Anchor;
+        var positions = Enumerable.Range(0, engine.Map.Height)
+            .SelectMany(y => Enumerable.Range(0, engine.Map.Width)
+                .Select(x => new GridPosition(x, y)))
+            .Where(engine.World.IsTerrainTraversable)
+            .Where(position => engine.Navigation.HasSurfacePath(engine.Map.GoblinSpawn, position))
+            .Where(position => engine.World.GetWorldObjectsAt(position).Count == 0)
+            .OrderBy(position => Math.Abs(position.X - fire.X) + Math.Abs(position.Y - fire.Y))
+            .Take(2)
+            .ToArray();
+        Assert.Equal(2, positions.Length);
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), engine.NextAvailableCommandSequence,
+            positions[0], ResourceKind.Food, capacity: 16));
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(), engine.NextAvailableCommandSequence,
+            positions[1], ResourceKind.Wood, capacity: 16));
+        engine.AdvanceTicks(1);
+
+        var zones = engine.CreateSnapshot().StorageZones
+            .Where(zone => zone.AcceptedResource is ResourceKind.Food or ResourceKind.Wood)
+            .ToDictionary(zone => zone.AcceptedResource);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var nextId = save["nextEntityId"]!.GetValue<ulong>();
+        var stacks = save["itemStacks"]!.AsArray();
+        stacks.Add(CreateStack(nextId++, ResourceKind.Food,
+            zones[ResourceKind.Food].Position, quantity: 1,
+            storageZoneId: zones[ResourceKind.Food].Id, foodKind: FoodKind.Fish));
+        stacks.Add(CreateStack(nextId++, ResourceKind.Food,
+            zones[ResourceKind.Food].Position, quantity: 2,
+            storageZoneId: zones[ResourceKind.Food].Id, foodKind: FoodKind.RawMeat));
+        stacks.Add(CreateStack(nextId++, ResourceKind.Wood,
+            zones[ResourceKind.Wood].Position, quantity: 2,
+            storageZoneId: zones[ResourceKind.Wood].Id));
+        save["nextEntityId"] = nextId;
+        engine = SimulationEngine.Load(save.ToJsonString(), definitions);
+
+        engine.AdvanceTicks(1);
+
+        var automatic = Assert.Single(engine.CreateSnapshot().CraftingOrders);
+        Assert.True(automatic.IsAutomatic);
+        Assert.Equal(CraftingRecipeKind.PreserveFishAndMeat, automatic.Recipe);
+
+        engine.QueueCommand(SimulationCommand.QueueCraftingRecipe(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            fire,
+            CraftingRecipeKind.CookRawMeat));
+        engine.AdvanceTicks(1);
+
+        var manual = Assert.Single(engine.CreateSnapshot().CraftingOrders);
+        Assert.False(manual.IsAutomatic);
+        Assert.Equal(CraftingRecipeKind.CookRawMeat, manual.Recipe);
     }
 
     [Fact]
@@ -478,7 +649,7 @@ public sealed class CraftingTests
     }
 
     [Fact]
-    public void PrimitiveWorkshopCraftsBasicToolsWeaponsClothesAndContainers()
+    public void PrimitiveWorkshopCraftsBasicToolsWeaponsClothesAndSimpleContainers()
     {
         var definitions = SimulationDefinitions.Foundation;
         var engine = SimulationEngine.Create(
@@ -539,7 +710,7 @@ public sealed class CraftingTests
                      CraftingRecipeKind.ReedClothes,
                      CraftingRecipeKind.PrimitiveWaterskin,
                      CraftingRecipeKind.WoodenBucket,
-                     CraftingRecipeKind.WoodenBarrel,
+                     CraftingRecipeKind.WoodenBox,
                  })
         {
             engine.QueueCommand(SimulationCommand.QueueCraftingRecipe(
@@ -589,11 +760,66 @@ public sealed class CraftingTests
         }
         Assert.Contains(snapshot.ItemStacks, stack =>
             stack.Resource == ResourceKind.Equipment &&
-            stack.Variant == ResourceVariant.EquipmentWoodenBarrel &&
+            stack.Variant == ResourceVariant.EquipmentWoodenBox &&
             stack.Quantity == 1);
         Assert.DoesNotContain(snapshot.ItemStacks, stack =>
             stack.Resource == ResourceKind.Equipment &&
             stack.Location.Kind == ItemLocationKind.Ground);
+    }
+
+    [Fact]
+    public void FittedWorkshopCanBeBuiltFromEarlyWoodAndCraftsAdvancedContainers()
+    {
+        var definitions = SimulationDefinitions.Foundation;
+        var engine = SimulationEngine.Create(
+            new WorldSeed(0xF177EDUL),
+            definitions,
+            initialGoblinCount: 4,
+            initialFoodStock: 20,
+            initialWoodStock: 16);
+        var workshop = engine.Map.GetCardinalNeighbors(engine.Map.GoblinSpawn)
+            .First(engine.World.CanBuildWorkshop);
+
+        engine.QueueCommand(SimulationCommand.BuildWorkshop(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            workshop,
+            WorkshopKind.FittedWorkshop));
+        for (var tick = 0; tick < 10_000 &&
+             !engine.World.HasWorkshop(workshop, WorkshopKind.FittedWorkshop); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        Assert.True(engine.World.HasWorkshop(workshop, WorkshopKind.FittedWorkshop));
+        var builtWorkshop = Assert.Single(engine.World.GetWorldObjectsAt(workshop),
+            worldObject => worldObject.Kind == WorldObjectKind.FittedWorkshop);
+        Assert.NotEqual(ResourceVariant.None, builtWorkshop.MaterialVariant);
+        engine = SimulationEngine.Load(engine.Save(), definitions);
+        Assert.True(engine.World.HasWorkshop(workshop, WorkshopKind.FittedWorkshop));
+
+        engine = AddCraftingMaterials(engine, definitions, engine.Map.GoblinSpawn,
+            (ResourceKind.Wood, 3),
+            (ResourceKind.Reeds, 2));
+        engine.QueueCommand(SimulationCommand.QueueCraftingRecipe(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            workshop,
+            CraftingRecipeKind.WoodenBarrel));
+        for (var tick = 0; tick < 10_000 &&
+             (engine.CreateSnapshot().CraftingOrders.Count > 0 || tick == 0); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        var snapshot = engine.CreateSnapshot();
+        Assert.Empty(snapshot.CraftingOrders);
+        Assert.Contains(snapshot.ItemStacks, stack =>
+            stack.Resource == ResourceKind.Equipment &&
+            stack.Variant == ResourceVariant.EquipmentWoodenBarrel &&
+            stack.Quantity == 1);
+        Assert.Equal(engine.ComputeStateHash(),
+            SimulationEngine.Load(engine.Save(), definitions).ComputeStateHash());
     }
 
     private static SimulationEngine AddCraftingMaterials(
@@ -710,11 +936,12 @@ public sealed class CraftingTests
         GridPosition position,
         int quantity = 1,
         EntityId storageZoneId = default,
-        ResourceVariant variant = ResourceVariant.None) => new()
+        ResourceVariant variant = ResourceVariant.None,
+        FoodKind foodKind = FoodKind.None) => new()
     {
         ["id"] = id,
         ["resource"] = (int)resource,
-        ["foodKind"] = (int)FoodKind.None,
+        ["foodKind"] = (int)foodKind,
         ["variant"] = (int)variant,
         ["quantity"] = quantity,
         ["locationKind"] = (int)(storageZoneId == EntityId.None

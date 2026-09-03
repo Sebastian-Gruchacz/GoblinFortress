@@ -28,6 +28,9 @@ public enum FoodKind : byte
     EdibleRoots = 4,
     Fish = 5,
     RawMeat = 6,
+    CookedMeat = 7,
+    CampSoup = 8,
+    Medicine = 9,
 }
 
 public enum ResourceVariant : byte
@@ -76,6 +79,8 @@ public enum ResourceVariant : byte
     SpiderVenom = 41,
     SpiderSilk = 42,
     SpiderChitin = 43,
+    Lichen = 44,
+    Mana = 45,
 }
 
 public enum ItemLocationKind : byte
@@ -232,6 +237,8 @@ public readonly record struct ItemStackSnapshot(
     ItemLocation Location)
 {
     public StoragePriority HaulPriority { get; init; } = StoragePriority.Normal;
+
+    public long? FreshUntilTick { get; init; }
 }
 
 public readonly record struct StorageZoneSnapshot(

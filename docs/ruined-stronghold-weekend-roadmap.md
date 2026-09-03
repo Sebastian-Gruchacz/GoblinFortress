@@ -11,6 +11,58 @@ The weekend tester build prioritizes a convincing, playable 2D starting site.
 It must keep deterministic generation, save compatibility, navigation, lighting,
 English/Polish localization parity and current construction behavior intact.
 
+## Implementation status — 2026-09-03
+
+The selected weekend slice is implemented for generator v16: a new tribe starts
+with 12 goblins in an adapted ruin, four usable reed sleeping mats, a completed
+primitive workshop, two fueled wall torches, one freestanding fire basket, one
+functional cooking fire and a functional compost hollow. The ruin is permanent shelter and
+participates in rest, visibility, return-to-shelter and tribal-knowledge rules.
+Fresh goblin corpses default to recovery at the nearest camp or compost and can
+produce a corpse-origin bud there. The compost can be dismantled and rebuilt as
+a two-reed primitive construction, so losing the generated site does not remove
+that population path permanently. Surface hare and boar populations are raised
+through the species catalog. Generator v15 retains its original hut layout.
+
+The 3D prototype is intentionally unavailable in the tester UI and through F3.
+The dedicated 2D ruin painter uses sharp procedural masonry and flat top-down
+dressing for plank repairs, reed-and-stick wall patches, lashed
+scaffolding, a cooking fire, a smaller ember fire, the workshop, compost and
+torches. A first illustrated atlas was rejected because its three-quarter
+perspective conflicted with the world view.
+Exposed lower slices now use the same 20-pixel cell resolution as the active
+top-down view. Ruins, compost, sleeping mats, watchtowers, fires, torches,
+workshops and constructed ramps retain their detailed painters when seen from
+above; loose items and corpses remain live overlays instead of being frozen or
+omitted by the lower-level texture cache.
+The first buildable wooden watchtower is also present as a 2×2 solid lookout:
+it costs 8 wood and acts as a passive tribal observer with radius 7. It has no
+walkable upper floor yet, so the current top-down ladder mark is visual only.
+Sleeping mats are authoritative one-goblin resting places. A resting or
+approaching goblin reserves one deterministically; when no free mat is reachable,
+goblins retain the old shelter-floor fallback so old saves and compact maps
+cannot deadlock. Players can build a mat for 2 reeds on any free reachable
+cell. Covered mats are preferred, but exposed mats remain valid for the flat
+starter ruin and other primitive camps.
+The full starter ruin also contains one authoritative freestanding fire basket.
+Players can build more standing torches for 1 wood on a free cell; they reuse
+the wall torch's established light profile but illuminate every direction.
+The generated cooking fire is a separate authoritative workshop. Players can
+build another for 3 wood. The fire supports cooked meat, four fish/meat and
+root/mushroom soups, dried fish-and-meat rations, and root-and-berry medicine.
+When the player has not queued a specific order, each idle fire deterministically
+chooses a random feasible recipe from stored ingredients; explicit and repeating
+orders take priority. Soup remains on the cooking-site floor and cannot be packed
+or stockpiled. Its light is active only while its work order has ingredients and
+is being worked. Explored underground lichen can now be designated for gathering;
+each deterministic patch yields two physical lichen units and remains depleted
+across save/load. One lichen plus one mushroom brews one stored mana reagent at a
+cooking fire, including automatic recipe selection. Mana has no consumer yet.
+The first workshop-progression step is also playable: an 8-wood fitted workshop
+requires a primitive axe and Building level 1, retains its delivered wood
+identity and unlocks the reinforced pickaxe, barrel, chest and bulk bin. Real
+ladders remain post-weekend work.
+
 ## Current reusable foundations
 
 The game already has most of the authoritative pieces needed for the first
@@ -41,9 +93,10 @@ The title illustration suggests three rules for the in-game version:
    broken wall heights, short platforms, braces, hanging mats and scaffold
    shadows create layers without lying about traversable levels.
 
-At 20 pixels per cell, readability is more important than literal detail. Use a
-small atlas with strong silhouettes and several deterministic variants rather
-than unique large illustrations.
+At 20 pixels per cell, readability is more important than literal detail. Use
+sharp procedural marks with strong silhouettes and several deterministic
+variants. Any future atlas must be orthographic top-down and match the existing
+world view before it replaces those marks.
 
 ## Weekend release scope
 
@@ -86,27 +139,29 @@ Acceptance:
 - generation succeeds across the supported minimum dimensions and a broad seed
   sample without silent rerolls.
 
-#### 2. Ruin dressing atlas and dedicated renderer
+#### 2. Top-down ruin dressing and dedicated renderer
 
-Create a compact 2D atlas and a focused renderer under the extracted rendering
-area. It may derive decoration placements from the immutable starter-ruin plan,
-but simulation occupancy remains authoritative.
+Create a focused painter under the extracted rendering area. It may derive
+decoration placements from the immutable starter-ruin plan, but simulation
+occupancy remains authoritative. The weekend version is procedural so every
+mark stays sharp and orthographic in the existing top-down view.
 
-Minimum atlas set:
+Minimum dressing set:
 
 - cracked masonry edges, missing caps, loose stones and moss;
 - reed-and-stick wall patches in several orientations;
 - timber braces, lashed posts and short scaffold/platform details;
-- reed sleeping mats, bedroll clutter and hanging reed screens;
+- authoritative reed sleeping mats, bedroll clutter and hanging reed screens;
 - a primitive workshop skin that reads as a stump/slab, stone tools and lashings;
-- cold hearth, active communal fire, cookpot/spit and two food-clutter variants;
+- cold hearth, authoritative communal cooking fire, cookpot/spit and two
+  food-clutter variants;
 - refuse/compost heap with food scraps, bones and a restrained corpse cue;
-- freestanding torch basket plus rope, sacks and drying bundles.
+- authoritative freestanding torch basket plus rope, sacks and drying bundles.
 
 Decorations must not create invisible collision or imply a usable second level.
 Blocking reed patches are rendered only over authoritative wall objects.
-Sleeping mats and hearths are decorative in P0 and must not advertise an action
-the player cannot perform.
+The small ember hearth remains decorative; the cooking fire and sleeping mats
+are ordinary authoritative world objects with separate top-down painters.
 
 Acceptance:
 
@@ -118,12 +173,14 @@ Acceptance:
   details above the correct structure edge;
 - no new per-frame allocation or full-map redraw is introduced.
 
-#### 3. Starter shelter without new sleeping simulation
+#### 3. Starter shelter and primitive sleeping places
 
-The ruin should provide enough initial shelter for the starting tribe using a
-small focused shelter policy or a generated shelter marker. Do not model beds,
-bed ownership or sleep quality for this release. Existing rest behavior remains
-unchanged; reed mats explain it visually.
+The ruin provides enough initial shelter for the starting tribe through the
+focused shelter policy. Four generated reed mats seed a minimal sleeping-place
+system: covered free mats are preferred over exposed free mats and reserved per
+resting goblin, while other shelter floor remains a compatibility fallback.
+There is no persistent bed ownership, outdoor-sleep penalty or sleep-quality
+simulation in this release.
 
 The old `GoblinHut` remains buildable for expansion unless the final design
 decision replaces it with modular rooms later.
@@ -158,6 +215,21 @@ Acceptance:
   at least ten minutes of accelerated simulation on several seeds;
 - `git diff --check` and a hardcoded-player-text review.
 
+The deterministic simulation portion now has a permanent smoke test over three
+64 x 64 seeds. Each seed runs the 12-goblin start for 6,000 unthrottled ticks
+(ten minutes at normal simulation speed), reloads at the midpoint and verifies
+identical continuation, valid living positions, intact starter objects and
+unique sleeping-mat reservations. Visual darkness, hunting interaction and
+manual construction/dismantling remain items for the human tester pass.
+
+The 2026-09-03 automated gate passes 673 solution tests, the Godot Release C#
+build and the content/localization checks. The previously refreshed Windows
+tester package launched headlessly with exit code 0, but it predates the food
+preservation slice. Godot completed that earlier packing run but its editor
+process remained idle after its shutdown messages and had to be interrupted;
+repeat the export on a workstation with the Godot executable available before
+treating the new tester package as release-clean.
+
 ### P1: include only after P0 is green
 
 #### Functional compost hollow
@@ -175,31 +247,60 @@ than add another conditional to `SimulationEngine.Reproduction.cs`.
 
 #### Primitive cooking fire
 
-Enable the existing disabled cooking-fire slot only if it gains a complete
-blueprint, fuel/input contract, work order and at least one useful recipe. Raw
-meat already exists, but cooked food requires an explicit food identity,
-nutrition values, hauling behavior, localization and save validation. A purely
-decorative active hearth remains preferable to a misleading half-working tool.
+Implemented end to end. The enabled cooking-fire slot has a one-cell blueprint,
+a 3-wood construction requirement, the shared workshop work-order flow and a
+dedicated top-down painter. Its seven primitive recipes retain exact food
+identity through hauling, workshop delivery, cancellation, save/load and state
+hashing. Raw ingredients remain perishable even after delivery to a waiting
+order. The light emitter uses the existing `WorkOrderInput` activation contract,
+so an idle or unsupplied fire does not pretend to burn. EN/PL names, automatic
+order labels and recipe text are catalog-driven.
+
+Physical food now carries a saved expiry tick on the ground, in storage, while
+being hauled, in personal provisions and in workshop buffers. Fish and raw meat
+last 2 days, berries and mushrooms 4, roots 8, cooked food and medicine 30, and
+dried rations 180 demo-calendar days. Spoiled portions disappear at a day
+boundary and add one nutrient each to an existing tribal compost. Compost
+nutrients may pay the direct substrate cost of a new bud but never replace the
+tribe's required edible reserve. Wild berry and mushroom biomass is cleared at
+the beginning of winter and restored at the beginning of summer.
+
+#### Lichen and mana reagent
+
+Implemented as a complete acquisition-to-stock slice. The dedicated cave-lichen
+designation targets only visible generated lichen, ordinary foraging work removes
+the selected patch, and the depleted-position set participates in world versioning,
+format-79 persistence and deterministic hashes. Lichen and mana are concrete
+`Materials` variants, so existing hauling and materials storage handle them without
+introducing a second inventory system. The cooking fire converts one lichen and one
+mushroom into one mana and may select the recipe automatically. Spell casting,
+mana consumption and lichen regrowth are deliberately deferred.
 
 #### Workshop progression split
 
-Keep genuinely primitive recipes at the starting workshop: sling, primitive
+Implemented as an attainable second production tier. The starting workshop
+keeps genuinely primitive recipes: sling, primitive
 axe and pickaxe, bone knife, fighting stick, stone club, hide/reed clothes and
-waterskin. Candidate recipes for a later carpentry or fitted workshop are the
-reinforced pickaxe, barrel, chest and bulk bin. The wooden bucket and simple box
-can remain primitive unless playtesting shows that early storage is too easy.
+waterskin, together with the wooden bucket and simple box. The fitted workshop
+costs 8 suitable wood, requires Building level 1 and a primitive axe, and owns
+the reinforced pickaxe, barrel, chest and bulk-bin recipes at workshop level 2.
+It is available in the advanced-production menu, has its own top-down bench/tool
+silhouette and survives save/load with the concrete delivered wood variant.
 
-Do not move recipes until the replacement workshop is constructible and the
-player cannot be trapped without a required tool or container.
+The progression cannot trap a new tribe: a ready primitive workshop is generated,
+it can craft the axe required to build the fitted workshop, and the early bucket
+and simple storage box remain primitive.
 
 ### P2: after the first tester weekend
 
 #### Buildable watchtower
 
-First ship a single-level 2 x 2 timber watch platform with a clear silhouette
-and a modest vision bonus. Keep its visibility behavior behind a structure
-observer policy. A truly walkable multi-level tower belongs with supported
-platforms and vertical navigation.
+Implemented as a single-level 2 x 2 timber lookout with a dedicated top-down
+painter and a passive radius-7 vision source. Its visibility behavior lives in
+`Visibility/GoblinStructureObserverPolicy`; construction uses the ordinary
+catalog, hauling, save/load and dismantling contracts. The footprint is solid
+and deliberately not walkable. A truly walkable multi-level tower belongs with
+supported platforms and vertical navigation.
 
 #### Ladders and real vertical scaffolds
 
@@ -220,13 +321,13 @@ replacement for treating a ruin as a disguised hut.
    initial reachability and shelter with tests.
 2. Implement and validate the pure starter-ruin plan.
 3. Materialize only existing authoritative structure kinds and prove save/load.
-4. Add the 2D atlas, dedicated renderer and deterministic dressing variants.
+4. Add the dedicated top-down painter and deterministic dressing variants.
 5. Add minimal shelter adaptation and fauna exclusion/tuning if required.
 6. Run the complete release gate and capture screenshots from several seeds.
-7. Decide whether remaining time is spent on functional compost or cooking;
-   do not start both before one is end-to-end complete.
-8. Treat watchtowers, ladders and workshop progression as subsequent vertical
-   slices unless P0 and the selected P1 slice are already release-clean.
+7. Functional compost, primitive cooking, food preservation and the first
+   lichen-to-mana reagent loop are now complete vertical slices.
+8. The first workshop-progression and single-level watchtower slices are complete;
+   treat ladders and further production tiers as subsequent vertical slices.
 
 ## Explicit non-goals for the weekend build
 
@@ -238,7 +339,7 @@ replacement for treating a ruin as a disguised hut.
 - mandatory 3D visual parity unless the tester build exposes the 3D view;
 - moving recipes without a complete replacement production path.
 
-## Decisions required before implementation
+## Decisions selected for implementation
 
 1. Is the tester build 2D-only, allowing the 3D view to use its current generic
    structure fallback for the new starting composition?
@@ -248,6 +349,7 @@ replacement for treating a ruin as a disguised hut.
    shelter at no construction cost, or should goblins start among ruins and
    spend the first minutes adapting them?
 
-Recommended defaults are: 2D-first; decorative compost for this weekend; one
-completed primitive workshop and enough inherited shelter for the starting
-tribe. These choices maximize visible atmosphere while minimizing release risk.
+Selected answers are: hide 3D completely; ship functional corpse-fed compost;
+start with a larger weak tribe; and provide a completed primitive workshop plus
+enough inherited shelter. A harder adaptation-first opening remains a later
+scenario or challenge mode.

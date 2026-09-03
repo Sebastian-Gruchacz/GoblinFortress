@@ -1,7 +1,9 @@
 using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Contamination;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Shelter;
 using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Terrain.Jobs;
 
@@ -639,7 +641,11 @@ public sealed partial class SimulationEngine
         Dictionary<EntityId, int> sourceReservations,
         Dictionary<EntityId, int> destinationReservations,
         Dictionary<EntityId, int> constructionReservations,
-        Dictionary<(EntityId OrderId, ResourceKind Resource, ResourceVariant Variant), int>
+        Dictionary<(
+            EntityId OrderId,
+            ResourceKind Resource,
+            FoodKind FoodKind,
+            ResourceVariant Variant), int>
             craftingReservations,
         bool allowDesignatedForage)
     {
@@ -683,6 +689,7 @@ public sealed partial class SimulationEngine
                 order.GetMissing(material) - craftingReservations.GetValueOrDefault((
                     order.Id,
                     material.Resource,
+                    material.FoodKind,
                     material.Variant)) > 0));
         var hasCraftingWork = _craftingOrders.Values.Any(order => order.HasAllMaterials);
         var rampPriority = _workDesignations.Values
@@ -754,6 +761,13 @@ public sealed partial class SimulationEngine
                     reservedForageTargets,
                     requireDesignation: true,
                     designationKind: WorkDesignationKind.GatherReeds)),
+            ("gather-lichen", ScoreWork(WorkDesignationKind.GatherLichen,
+                    actor.WorkPreferences.Foraging), 12,
+                () => TryPlanForageJob(
+                    actor,
+                    reservedForageTargets,
+                    requireDesignation: true,
+                    designationKind: WorkDesignationKind.GatherLichen)),
             ("hunt", ScoreWork(WorkDesignationKind.HuntAnimal,
                     actor.WorkPreferences.Foraging), 13,
                 () => TryPlanHuntAnimalJob(actor, reservedFellingDesignations)),
@@ -918,6 +932,9 @@ public sealed partial class SimulationEngine
             WorkDesignationKind.GatherReeds =>
                 World.GetPlantPatch(designation.Target) is
                     { Kind: PlantKind.ReedBed, Biomass: > 0 },
+            WorkDesignationKind.GatherLichen =>
+                World.TryGetCaveFlora(designation.Target, out var flora) &&
+                flora.Kind == CaveFloraKind.LichenPatch,
             WorkDesignationKind.GatherBrushwood =>
                 _itemStacks.TryGetValue(designation.TargetEntityId, out var wood) &&
                 wood.Resource == ResourceKind.Wood &&
@@ -991,7 +1008,8 @@ public sealed partial class SimulationEngine
 
         return kind switch
         {
-            WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds =>
+            WorkDesignationKind.GatherFood or WorkDesignationKind.GatherReeds or
+                WorkDesignationKind.GatherLichen =>
                 ActorJobKind.Forage,
             WorkDesignationKind.GatherBrushwood or WorkDesignationKind.GatherStone =>
                 ActorJobKind.Haul,
@@ -1229,16 +1247,7 @@ public sealed partial class SimulationEngine
             actor.CarriedStackId != EntityId.None ||
             actor.JobKind is ActorJobKind.None or ActorJobKind.Rest or ActorJobKind.Eat or
                 ActorJobKind.Resupply ||
-            !World.CreateWorldObjectSnapshot()
-                .Where(worldObject =>
-                    (worldObject.Kind is WorldObjectKind.GoblinHut or
-                        WorldObjectKind.GoblinFieldCamp) &&
-                    worldObject.Owner == WorldObjectOwner.GoblinTribe)
-                .SelectMany(worldObject => worldObject.GetAbsoluteParts())
-                .Any(item =>
-                    item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door &&
-                    World.IsTerrainTraversable(item.Position) &&
-                    FindActorPath(actor, item.Position) is not null))
+            FindRestRoute(actor) is null)
         {
             return false;
         }
@@ -1325,21 +1334,7 @@ public sealed partial class SimulationEngine
 
     private bool TryPlanRestJob(ActorState actor)
     {
-        var shelters = World.CreateWorldObjectSnapshot()
-            .Where(worldObject => worldObject.Owner == WorldObjectOwner.GoblinTribe)
-            .ToArray();
-        var destinations = shelters
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut)
-            .SelectMany(GetShelterFloorCells)
-            .Concat(shelters
-                .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
-                    CanReserveFieldCampBed(actor, worldObject))
-                .SelectMany(GetShelterFloorCells))
-            .Where(item =>
-                World.IsTerrainTraversable(item))
-            .Distinct()
-            .ToHashSet();
-        var route = FindActorPathToNearest(actor, destinations);
+        var route = FindRestRoute(actor);
         if (route is null)
         {
             return false;
@@ -1349,6 +1344,38 @@ public sealed partial class SimulationEngine
         actor.JobTarget = route.Count == 0 ? actor.Position : route[^1];
         BeginJobLeg(actor, route, GetRestWorkTicks(actor));
         return true;
+    }
+
+    private IReadOnlyList<GridPosition>? FindRestRoute(ActorState actor)
+    {
+        var worldObjects = World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .ToArray();
+        var shelterCells = worldObjects
+            .Where(GoblinShelterPolicy.IsPermanentShelter)
+            .SelectMany(GetShelterFloorCells)
+            .Concat(worldObjects
+                .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+                    CanReserveFieldCampBed(actor, worldObject))
+                .SelectMany(GetShelterFloorCells))
+            .Where(World.IsTerrainTraversable)
+            .Distinct()
+            .ToHashSet();
+        var reservedSleepingMats = _actors.Values
+            .Where(candidate => candidate.Id != actor.Id && candidate.Health > 0 &&
+                candidate.JobKind == ActorJobKind.Rest)
+            .Select(candidate => candidate.JobTarget)
+            .ToHashSet();
+        var sleepingPlaces = GoblinSleepingPlacePolicy.CreateOptions(
+            worldObjects,
+            reservedSleepingMats,
+            shelterCells,
+            World.IsTerrainTraversable,
+            World.IsOpenToSky);
+
+        return FindActorPathToNearest(actor, sleepingPlaces.CoveredSleepingMats) ??
+            FindActorPathToNearest(actor, sleepingPlaces.ExposedSleepingMats) ??
+            FindActorPathToNearest(actor, sleepingPlaces.ShelterFloorFallback);
     }
 
     private HashSet<EntityId> CreateFieldCampEvacuees()
@@ -1386,8 +1413,7 @@ public sealed partial class SimulationEngine
     {
         var worldObjects = World.CreateWorldObjectSnapshot();
         var destinations = worldObjects
-            .Where(worldObject => worldObject.Kind == WorldObjectKind.GoblinHut &&
-                worldObject.Owner == WorldObjectOwner.GoblinTribe)
+            .Where(GoblinShelterPolicy.IsPermanentShelter)
             .SelectMany(GetShelterFloorCells)
             .Where(World.IsTerrainTraversable)
             .Distinct()
@@ -1535,7 +1561,11 @@ public sealed partial class SimulationEngine
                 BeginJobLeg(actor, route, workTicks: 0);
                 return true;
             case ActorJobKind.Forage:
-                if (World.GetPlantPatch(target) is not { Biomass: > 0 })
+                var isHarvestablePlant = World.GetPlantPatch(target) is { Biomass: > 0 };
+                var isHarvestableLichen =
+                    World.TryGetCaveFlora(target, out var flora) &&
+                    flora.Kind == CaveFloraKind.LichenPatch;
+                if (!isHarvestablePlant && !isHarvestableLichen)
                 {
                     return false;
                 }
@@ -1741,7 +1771,8 @@ public sealed partial class SimulationEngine
             actor,
             ResourceKind.Food,
             itemReservations,
-            requiredPosition);
+            requiredPosition,
+            filter: stack => FoodUsePolicy.CanBePacked(stack.FoodKind));
         if (best is not { } source)
         {
             return false;
@@ -2001,6 +2032,7 @@ public sealed partial class SimulationEngine
             actor.PersonalFood < Definitions.PersonalFoodCapacity &&
             _itemStacks.TryGetValue(actor.SourceStackId, out var food) &&
             food.Resource == ResourceKind.Food &&
+            FoodUsePolicy.CanBePacked(food.FoodKind) &&
             food.Location.Kind is ItemLocationKind.Ground or ItemLocationKind.StorageZone &&
             food.Location.Position == actor.JobTarget &&
             food.Quantity >= actor.ReservedQuantity,
@@ -2043,6 +2075,11 @@ public sealed partial class SimulationEngine
             var food = _itemStacks[actor.SourceStackId];
             food.Quantity--;
             actor.PersonalFoodKinds.Add(food.FoodKind);
+            actor.PersonalFoodFreshUntilTicks.Add(food.FreshUntilTick ??
+                FoodPreservationPolicy.GetFreshUntilTick(
+                    food.FoodKind,
+                    CurrentTick,
+                    Definitions.Clock));
             Publish(SimulationEventKind.ActorProvisionedFood, actor.Id, food.Id, 1);
             if (food.Quantity == 0)
             {
@@ -2256,16 +2293,34 @@ public sealed partial class SimulationEngine
             return false;
         }
 
-        var route = Navigation.FindNearestHarvestablePlantPath(
-            actor.Position,
-            reservedTargets,
-            position =>
-                Visibility.Get(position) != CellVisibility.Unknown &&
-                (designationKind == WorkDesignationKind.GatherReeds
-                    ? World.GetPlantPatch(position) is { Kind: PlantKind.ReedBed }
-                    : World.GetPlantPatch(position) is not { Kind: PlantKind.ReedBed }) &&
-                (!requireDesignation ||
-                 IsWorkDesignated(designationKind, position)));
+        IReadOnlyList<GridPosition>? route;
+        if (designationKind == WorkDesignationKind.GatherLichen)
+        {
+            var destinations = _workDesignations.Values
+                .Where(designation => designation.Kind == WorkDesignationKind.GatherLichen &&
+                    !designation.IsSuspended &&
+                    !reservedTargets.Contains(designation.Target) &&
+                    World.TryGetCaveFlora(designation.Target, out var flora) &&
+                    flora.Kind == CaveFloraKind.LichenPatch)
+                .Select(designation => designation.Target)
+                .ToHashSet();
+            route = destinations.Count == 0
+                ? null
+                : Navigation.FindPathToNearest(actor.Position, destinations);
+        }
+        else
+        {
+            route = Navigation.FindNearestHarvestablePlantPath(
+                actor.Position,
+                reservedTargets,
+                position =>
+                    Visibility.Get(position) != CellVisibility.Unknown &&
+                    (designationKind == WorkDesignationKind.GatherReeds
+                        ? World.GetPlantPatch(position) is { Kind: PlantKind.ReedBed }
+                        : World.GetPlantPatch(position) is not { Kind: PlantKind.ReedBed }) &&
+                    (!requireDesignation ||
+                     IsWorkDesignated(designationKind, position)));
+        }
         if (route is null)
         {
             return false;
@@ -3202,7 +3257,8 @@ public sealed partial class SimulationEngine
                 actor.ReservedQuantity,
                 ItemLocation.CarriedBy(actor.Id),
                 source.FoodKind,
-                source.Variant);
+                source.Variant,
+                source.FreshUntilTick);
         }
 
         actor.CarriedStackId = carried.Id;
@@ -3540,7 +3596,8 @@ public sealed partial class SimulationEngine
                 actor.ReservedQuantity,
                 ItemLocation.CarriedBy(actor.Id),
                 source.FoodKind,
-                source.Variant);
+                source.Variant,
+                source.FreshUntilTick);
         }
 
         MoveItemStack(carried, ItemLocation.CarriedBy(actor.Id));
@@ -3918,7 +3975,7 @@ public sealed partial class SimulationEngine
             ConstructionKind.StoneWall or ConstructionKind.WoodenDoor or
             ConstructionKind.WallTorch or ConstructionKind.PrimitiveWorkshop or
             ConstructionKind.Bloomery or ConstructionKind.SmeltingFurnace or
-            ConstructionKind.CrucibleFurnace or
+            ConstructionKind.CrucibleFurnace or ConstructionKind.FittedWorkshop or
             ConstructionKind.GoblinHut
             ? footprint.SelectMany(World.GetCardinalWorldNeighbors)
             : footprint.SelectMany(position =>
@@ -3949,7 +4006,7 @@ public sealed partial class SimulationEngine
             ConstructionKind.StoneWall or ConstructionKind.WoodenDoor or
             ConstructionKind.WallTorch or ConstructionKind.PrimitiveWorkshop or
             ConstructionKind.Bloomery or ConstructionKind.SmeltingFurnace or
-            ConstructionKind.CrucibleFurnace or
+            ConstructionKind.CrucibleFurnace or ConstructionKind.FittedWorkshop or
             ConstructionKind.GoblinHut
             ? footprint.SelectMany(World.GetCardinalWorldNeighbors)
             : footprint.SelectMany(position =>
@@ -4368,6 +4425,9 @@ public sealed partial class SimulationEngine
                 WorkDesignationKind.GatherReeds =>
                     World.GetPlantPatch(designation.Target) is not
                         { Kind: PlantKind.ReedBed, Biomass: > 0 },
+                WorkDesignationKind.GatherLichen =>
+                    !World.TryGetCaveFlora(designation.Target, out var flora) ||
+                    flora.Kind != CaveFloraKind.LichenPatch,
                 WorkDesignationKind.GatherBrushwood =>
                     !_itemStacks.TryGetValue(designation.TargetEntityId, out var stack) ||
                     stack.Resource != ResourceKind.Wood ||
@@ -4573,7 +4633,8 @@ public sealed partial class SimulationEngine
                 actor.ReservedQuantity,
                 ItemLocation.CarriedBy(actor.Id),
                 source.FoodKind,
-                source.Variant);
+                source.Variant,
+                source.FreshUntilTick);
         }
 
         actor.CarriedStackId = carried.Id;
@@ -5039,6 +5100,28 @@ public sealed partial class SimulationEngine
             return;
         }
 
+        if (_workDesignations.Values.Any(designation =>
+                designation.Kind == WorkDesignationKind.GatherLichen &&
+                designation.Target == actor.Position) &&
+            World.TryHarvestLichen(actor.Position, CurrentTick, out var lichenChange))
+        {
+            _undeliveredWorldChanges.Add(lichenChange);
+            var stack = FindMergeableGroundStack(
+                    ResourceKind.Materials,
+                    actor.Position,
+                    variant: ResourceVariant.Lichen)
+                ?? AllocateItemStack(
+                    ResourceKind.Materials,
+                    quantity: 0,
+                    ItemLocation.OnGround(actor.Position),
+                    variant: ResourceVariant.Lichen);
+            stack.Quantity = checked(stack.Quantity + 2);
+            GainForagingExperience(actor, 4);
+            Publish(SimulationEventKind.ItemDropped, actor.Id, stack.Id, 2);
+            actor.ClearJob();
+            return;
+        }
+
         var randomYield = DeterministicRandom.NextInt(
             WorldSeed,
             RandomDomain.Foraging,
@@ -5240,7 +5323,13 @@ public sealed partial class SimulationEngine
 
     private void ValidateLoadedRaidCorpseRecoveryJob(ActorState actor)
     {
-        if (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id) ||
+        var orderedCorpseId = actor.CarriedCorpseId != EntityId.None
+            ? actor.CarriedCorpseId
+            : actor.SourceStackId;
+        var isGenericOrder = _corpses.TryGetValue(orderedCorpseId, out var orderedCorpse) &&
+            (orderedCorpse.Directives & CorpseHandlingDirectives) != 0;
+        if ((!isGenericOrder &&
+                (_raidPhase != GoblinRaidPhase.Looting || !_raidPartyIds.Contains(actor.Id))) ||
             actor.CarriedStackId != EntityId.None || actor.DestinationZoneId != EntityId.None ||
             actor.ReservedQuantity != 0)
         {
@@ -5251,16 +5340,20 @@ public sealed partial class SimulationEngine
         {
             if (actor.CarriedCorpseId != EntityId.None ||
                 !_corpses.TryGetValue(actor.SourceStackId, out var corpse) ||
-                corpse.Position != actor.JobTarget)
+                corpse.Position != actor.JobTarget ||
+                isGenericOrder && (corpse.Directives & CorpseHandlingDirectives) == 0)
             {
                 throw new InvalidDataException("The save contains invalid corpse collection.");
             }
             return;
         }
 
+        var hasInvalidDestination = isGenericOrder
+            ? !IsCorpseRecoverySite(actor.JobTarget)
+            : actor.JobTarget != _raidRallyPoint;
         if (actor.JobStage != ActorJobStage.Delivering ||
             actor.SourceStackId != EntityId.None || actor.CarriedCorpseId == EntityId.None ||
-            actor.JobTarget != _raidRallyPoint)
+            hasInvalidDestination)
         {
             throw new InvalidDataException("The save contains invalid corpse delivery.");
         }
@@ -5287,7 +5380,12 @@ public sealed partial class SimulationEngine
             actor.SourceStackId != EntityId.None ||
             actor.DestinationZoneId != EntityId.None ||
             actor.ReservedQuantity != 0 ||
-            World.GetPlantPatch(actor.JobTarget) is null)
+            World.GetPlantPatch(actor.JobTarget) is null &&
+            !_workDesignations.Values.Any(designation =>
+                designation.Kind == WorkDesignationKind.GatherLichen &&
+                designation.Target == actor.JobTarget &&
+                World.TryGetCaveFlora(actor.JobTarget, out var flora) &&
+                flora.Kind == CaveFloraKind.LichenPatch))
         {
             throw new InvalidDataException("The save contains an invalid forage job.");
         }
@@ -5763,6 +5861,7 @@ public sealed partial class SimulationEngine
             if (!_craftingOrders.TryGetValue(reservation.Key.OrderId, out var order) ||
                 reservation.Value > order.GetMissing(
                     reservation.Key.Resource,
+                    reservation.Key.FoodKind,
                     reservation.Key.Variant))
             {
                 throw new InvalidDataException("Jobs over-reserve crafting material demand.");
@@ -5990,8 +6089,7 @@ public sealed partial class SimulationEngine
 
     private bool IsRestLocation(GridPosition position) =>
         World.GetWorldObjectsAt(position).Any(worldObject =>
-            (worldObject.Kind is WorldObjectKind.GoblinHut or WorldObjectKind.GoblinFieldCamp) &&
-            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            GoblinShelterPolicy.IsShelter(worldObject) &&
             worldObject.GetAbsoluteParts().Any(item =>
                 item.Position == position &&
                 item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door));

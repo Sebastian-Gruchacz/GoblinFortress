@@ -93,6 +93,8 @@ internal static class ResourceThumbnails
             ResourceVariant.SpiderVenom => ItemIcon.PrimitiveWaterskin,
             ResourceVariant.SpiderSilk => ItemIcon.Reeds,
             ResourceVariant.SpiderChitin => ItemIcon.Bone,
+            ResourceVariant.Lichen => ItemIcon.Reeds,
+            ResourceVariant.Mana => ItemIcon.PrimitiveWaterskin,
             _ => (ItemIcon?)null,
         };
         if (spiderMaterialIcon is { } icon)
@@ -152,7 +154,13 @@ internal static class ResourceThumbnails
 
     private static AtlasTexture CreateFoodTexture(Texture2D atlas, FoodKind foodKind)
     {
-        var index = (int)foodKind - 1;
+        var index = foodKind switch
+        {
+            FoodKind.CookedMeat => (int)FoodKind.RawMeat - 1,
+            FoodKind.CampSoup => (int)FoodKind.Mushrooms - 1,
+            FoodKind.Medicine => (int)FoodKind.EdibleRoots - 1,
+            _ => (int)foodKind - 1,
+        };
         if (index is < 0 or >= FoodColumns * FoodRows)
         {
             throw new ArgumentOutOfRangeException(nameof(foodKind));

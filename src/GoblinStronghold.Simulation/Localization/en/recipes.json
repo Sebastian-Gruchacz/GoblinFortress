@@ -22,7 +22,15 @@
       "SmeltIronBar": "smelt iron bar",
       "SmeltCopperBar": "smelt copper bar",
       "SmeltSilverBar": "smelt silver bar",
-      "SmeltGoldBar": "smelt gold bar"
+      "SmeltGoldBar": "smelt gold bar",
+      "CookRawMeat": "cook meat",
+      "FishRootSoup": "fish and root soup",
+      "FishMushroomSoup": "fish and mushroom soup",
+      "MeatRootSoup": "meat and root soup",
+      "MeatMushroomSoup": "meat and mushroom soup",
+      "PreserveFishAndMeat": "prepare dried rations",
+      "BrewRootAndBerryMedicine": "brew root and berry medicine",
+      "BrewLichenAndMushroomMana": "brew lichen and mushroom mana"
     }
   }
 }

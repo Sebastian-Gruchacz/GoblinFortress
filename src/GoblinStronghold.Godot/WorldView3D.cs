@@ -495,6 +495,7 @@ public partial class WorldView3D : Node3D
         {
             case WorldObjectPartKind.Floor:
             case WorldObjectPartKind.Walkway:
+            case WorldObjectPartKind.WatchtowerPlatform:
                 AddBox(surface, center + Vector3.Up * 0.06f,
                     new Vector3(CellSize * 0.9f, 0.12f, CellSize * 0.9f), color);
                 break;
@@ -524,8 +525,13 @@ public partial class WorldView3D : Node3D
                     new Vector3(CellSize * 0.74f, 0.5f, CellSize * 0.74f), color);
                 break;
             case WorldObjectPartKind.TreeTrunk:
+            case WorldObjectPartKind.WatchtowerSupport:
                 AddBox(surface, center + Vector3.Up * (LevelHeight * 0.48f),
                     new Vector3(0.34f, LevelHeight * 0.96f, 0.34f), color);
+                break;
+            case WorldObjectPartKind.Ladder:
+                AddBox(surface, center + Vector3.Up * (LevelHeight * 0.42f),
+                    new Vector3(CellSize * 0.62f, LevelHeight * 0.84f, 0.12f), color);
                 break;
             case WorldObjectPartKind.TreeStump:
                 AddBox(surface, center + Vector3.Up * 0.13f,
@@ -540,12 +546,14 @@ public partial class WorldView3D : Node3D
                     new Vector2(CellSize * 1.55f, LevelHeight * 1.7f), color);
                 break;
             case WorldObjectPartKind.PrimitiveWorkshop:
+            case WorldObjectPartKind.FittedWorkshop:
                 AddBox(surface, center + Vector3.Up * 0.2f,
                     new Vector3(CellSize * 0.82f, 0.4f, CellSize * 0.58f), color);
                 break;
             case WorldObjectPartKind.Bloomery:
             case WorldObjectPartKind.SmeltingFurnace:
             case WorldObjectPartKind.CrucibleFurnace:
+            case WorldObjectPartKind.CookingFire:
                 AddBox(surface, center + Vector3.Up * (LevelHeight * 0.32f),
                     new Vector3(CellSize * 0.78f, LevelHeight * 0.64f, CellSize * 0.78f), color);
                 break;

@@ -1,3 +1,4 @@
+using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.Simulation;
@@ -126,7 +127,7 @@ public sealed partial class SimulationEngine
         IEnumerable<CorpseItemSnapshot> contents)
     {
         var id = AllocateEntityId();
-        _corpses.Add(id, new CorpseState(
+        var corpse = new CorpseState(
             id,
             kind,
             name,
@@ -135,7 +136,15 @@ public sealed partial class SimulationEngine
             containedWater,
             GetInitialCorpseEdiblePortions(kind),
             inheritanceImprint,
-            contents));
+            contents);
+        if (kind == CorpseKind.Goblin &&
+            World.CountWorldObjects(
+                WorldObjectKind.GoblinCompost,
+                WorldObjectOwner.GoblinTribe) > 0)
+        {
+            corpse.Directives = CorpseDirective.RecoverAndBudAtCamp;
+        }
+        _corpses.Add(id, corpse);
     }
 
     private static GoblinInheritanceImprint CreateHumanInheritanceImprint(

@@ -8,7 +8,7 @@ public static class SwampMapGenerator
     public static readonly ContentId DefaultProfileId =
         ContentId.Parse("core:demo-swamp-frontier");
 
-    public const int CurrentVersion = 15;
+    public const int CurrentVersion = 16;
     public const int MinimumSaveCompatibleVersion = 14;
     public const int MinimumInitialCaveLevelCount = 2;
     public static int DefaultDimension => DefaultProfile.DefaultDimension;

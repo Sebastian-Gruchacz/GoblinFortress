@@ -98,7 +98,7 @@ internal sealed class ActiveLevelLightIndex
                 if (!engine.World.TryGetFluid(position, out var fluid, out _) ||
                     fluid != CellFluidKind.Lava)
                 {
-                    if (CaveFloraGenerator.TryGet(engine.Map, position, out var flora) &&
+                    if (engine.World.TryGetCaveFlora(position, out var flora) &&
                         flora.Kind == CaveFloraKind.GlowcapCluster)
                     {
                         var floraId = checked(

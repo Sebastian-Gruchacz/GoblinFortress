@@ -239,7 +239,7 @@
       "crucible-furnace": "Budowa pieca tyglowego: wskaż pole LPM • koszt 20 kamieni o sile co najmniej 60 i trwałości 65 • wymaga budowania 2 i narzędzia poziomu 1 • PPM lub Esc anuluje"
     },
     "work-prompts": {
-      "gather-food": "Praca: przeciągnij obszar zbierania żywności • PPM lub Esc anuluje",
+      "gather-food": "Praca: przeciągnij obszar zbierania żywności; pod ziemią zaznacza możliwe do zebrania porosty • PPM lub Esc anuluje",
       "gather-reeds": "Praca: przeciągnij obszar zbierania sitowia • PPM lub Esc anuluje",
       "gather-lichen": "Praca: przeciągnij po odkrytych porostach w jaskini • każde stanowisko można zebrać raz • PPM lub Esc anuluje",
       "gather-brushwood": "Praca: przeciągnij obszar zbierania chrustu • PPM lub Esc anuluje",
@@ -729,7 +729,7 @@
       "bloomery": "Dymarka\nKoszt: 12 odpowiednich kamieni • budowanie 1 • narzędzie poziomu 1 • żelazo",
       "smelting-furnace": "Piec hutniczy\nKoszt: 16 mocnych kamieni • budowanie 2 • narzędzie poziomu 1 • miedź",
       "crucible-furnace": "Piec tyglowy\nKoszt: 20 trwałych kamieni • budowanie 2 • narzędzie poziomu 1 • srebro i złoto",
-      "gather-food": "Zbierz żywność\nJagody, grzyby, korzonki i ryby",
+      "gather-food": "Zbierz żywność\nJagody, grzyby, korzonki, ryby i możliwe do zebrania porosty jaskiniowe",
       "gather-reeds": "Zbierz sitowie\nWskaż trzcinowiska na płytkiej wodzie",
       "gather-lichen": "Zbierz porosty\nWskaż blade skupiska na odkrytych dnach jaskiń",
       "gather-brushwood": "Zbierz chrust\nPrzeciągnij obszar",

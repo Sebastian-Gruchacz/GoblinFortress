@@ -239,7 +239,7 @@
       "crucible-furnace": "Build a crucible furnace: select a cell with LMB • cost 20 stones with strength of at least 60 and durability 65 • requires building 2 and tool level 1 • RMB or Esc cancels"
     },
     "work-prompts": {
-      "gather-food": "Work: drag a food-gathering area • RMB or Esc cancels",
+      "gather-food": "Work: drag a food-gathering area; underground this selects harvestable cave lichen • RMB or Esc cancels",
       "gather-reeds": "Work: drag a reed-gathering area • RMB or Esc cancels",
       "gather-lichen": "Work: drag over explored cave lichen • each patch can be gathered once • RMB or Esc cancels",
       "gather-brushwood": "Work: drag a brushwood-gathering area • RMB or Esc cancels",
@@ -729,7 +729,7 @@
       "bloomery": "Bloomery\nCost: 12 suitable stones • building 1 • tool level 1 • iron",
       "smelting-furnace": "Smelting furnace\nCost: 16 strong stones • building 2 • tool level 1 • copper",
       "crucible-furnace": "Crucible furnace\nCost: 20 durable stones • building 2 • tool level 1 • silver and gold",
-      "gather-food": "Gather food\nBerries, mushrooms, roots, and fish",
+      "gather-food": "Gather food\nBerries, mushrooms, roots, fish, and harvestable cave lichen",
       "gather-reeds": "Gather reeds\nSelect reed beds in shallow water",
       "gather-lichen": "Gather lichen\nSelect pale patches on explored cave floors",
       "gather-brushwood": "Gather brushwood\nDrag an area",

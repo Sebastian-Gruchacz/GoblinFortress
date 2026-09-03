@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
 
@@ -187,6 +188,44 @@ public sealed class WorkDispatcherTests
         var designation = Assert.Single(engine.CreateSnapshot().WorkDesignations);
         Assert.Equal(WorkDesignationKind.GatherReeds, designation.Kind);
         Assert.Equal(target.Position, designation.Target);
+    }
+
+    [Fact]
+    public void ExploredLichenOnThirdCaveLevelAcceptsGatheringDesignation()
+    {
+        var seed = new WorldSeed(0x4C494348454EUL);
+        var map = SwampMapGenerator.Generate(seed, 64, 64);
+        map.MaterializeCaveLevel(-3);
+        var target = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => new GridPosition(x, y, -3)))
+            .First(position => CaveFloraGenerator.TryGet(map, position, out var flora) &&
+                flora.Kind == CaveFloraKind.LichenPatch);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 0,
+            initialFoodStock: 0);
+        engine.Visibility.Reveal([target], radius: 1);
+
+        Assert.Equal(
+            [target],
+            engine.QueryWorkDesignationTargets(
+                WorkDesignationKind.GatherLichen,
+                target,
+                target));
+
+        engine.QueueCommand(SimulationCommand.DesignateLichenGathering(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            target,
+            target));
+        engine.AdvanceTicks(1);
+
+        var designation = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(WorkDesignationKind.GatherLichen, designation.Kind);
+        Assert.Equal(target, designation.Target);
     }
 
     [Fact]

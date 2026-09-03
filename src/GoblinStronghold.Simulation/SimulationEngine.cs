@@ -6309,7 +6309,8 @@ public sealed partial class SimulationEngine
                         (int)WorkDesignationKind.HuntAnimal or
                         (int)WorkDesignationKind.CarveRampDown or
                         (int)WorkDesignationKind.CarveRampUp or
-                        (int)WorkDesignationKind.CleanBlood;
+                        (int)WorkDesignationKind.CleanBlood or
+                        (int)WorkDesignationKind.GatherLichen;
                 var isLegacyDesignation =
                     command.Resource is ResourceKind.Food or ResourceKind.Reeds or ResourceKind.Wood or
                         ResourceKind.Stone or ResourceKind.Vegetation &&

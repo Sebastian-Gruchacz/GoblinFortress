@@ -4303,7 +4303,7 @@ public partial class Main : Node
         var area = _isDraggingWorkArea
             ? GetAreaCells(_workAreaStart, cell)
             : new[] { cell };
-        var designationKind = ToDesignationKind(_workMode);
+        var designationKind = ToDesignationKind(_workMode, _visibleLevel);
         var behavior = _workMode == WorkMode.Clear
             ? WorkAreaSelectionBehavior.ApplyToApplicableCells
             : WorkToolCatalog.GetSelectionBehavior(designationKind);
@@ -4381,7 +4381,7 @@ public partial class Main : Node
         }
 
         var executeAt = _engine.CurrentTick.Next();
-        var designationKind = ToDesignationKind(_workMode);
+        var designationKind = ToDesignationKind(_workMode, _workAreaStart.Z);
         var command = TerrainModificationCatalog.TryGet(designationKind, out var terrain)
             ? TerrainModificationCommandFactory.CreateDesignation(
                 terrain,
@@ -4391,6 +4391,12 @@ public partial class Main : Node
                 end)
             : _workMode switch
         {
+            WorkMode.GatherFood when designationKind == WorkDesignationKind.GatherLichen =>
+                SimulationCommand.DesignateLichenGathering(
+                    executeAt,
+                    _commandSequence++,
+                    _workAreaStart,
+                    end),
             WorkMode.GatherFood => SimulationCommand.DesignateWork(
                 executeAt,
                 _commandSequence++,
@@ -4669,6 +4675,11 @@ public partial class Main : Node
         WorkMode.CleanBlood => WorkDesignationKind.CleanBlood,
         _ => default,
     };
+
+    private static WorkDesignationKind ToDesignationKind(WorkMode mode, int level) =>
+        mode == WorkMode.GatherFood && level < 0
+            ? WorkDesignationKind.GatherLichen
+            : ToDesignationKind(mode);
 
     private static WorkMode ToWorkMode(WorkDesignationKind kind) => kind switch
     {

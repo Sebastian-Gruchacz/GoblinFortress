@@ -113,6 +113,24 @@ public sealed class WorkshopCatalogTests
             "Odżywienie: {0}/{1}",
             TranslationCatalog.Get("pl", "interface", "goblin-roster", "nutrition"));
         Assert.Equal(
+            "Known skills: {0}",
+            TranslationCatalog.Get("en", "interface", "goblin-details", "known-skills"));
+        Assert.Equal(
+            "Znane umiejętności: {0}",
+            TranslationCatalog.Get("pl", "interface", "goblin-details", "known-skills"));
+        Assert.Equal(
+            "building",
+            TranslationCatalog.Get("en", "interface", "skills", "Building"));
+        Assert.Equal(
+            "budowanie",
+            TranslationCatalog.Get("pl", "interface", "skills", "Building"));
+        Assert.Equal(
+            "traveling",
+            TranslationCatalog.Get("en", "interface", "actor-job-phases", "Traveling"));
+        Assert.Equal(
+            "w drodze",
+            TranslationCatalog.Get("pl", "interface", "actor-job-phases", "Traveling"));
+        Assert.Equal(
             "Keyboard shortcuts",
             TranslationCatalog.Get("en", "interface", "options", "shortcuts"));
         Assert.Equal(

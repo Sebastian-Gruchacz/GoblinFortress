@@ -19,7 +19,7 @@ HeightTransitionAtlasBaker.cs::CSharpScript::487304473525921410::1787656317::0::
 HumanStructureSprites.cs::CSharpScript::1636649240612434515::1788034499::0::1::::<><><>0<>0<><>::
 ItemIcons.cs::CSharpScript::6682173192107189819::1788468518::0::1::::<><><>0<>0<><>::
 LocaleSettings.cs::CSharpScript::8936338357864917165::1788261106::0::1::::<><><>0<>0<><>::
-Main.cs::CSharpScript::3703657148517459982::1788471860::0::1::::<>Node<><>0<>0<><>::
+Main.cs::CSharpScript::3703657148517459982::1788473071::0::1::::<>Node<><>0<>0<><>::
 Main.Localization.cs::CSharpScript::4134850900415758833::1788470355::0::1::::<><><>0<>0<><>::
 Main.Mods.cs::CSharpScript::7501005075246728110::1788346600::0::1::::<><><>0<>0<><>::
 Main.tscn::PackedScene::3532332411017293483::1788280255::0::1::::<><><>0<>0<><>::uid://bs1cxsdjs5hlm::::res://Main.cs<>uid://bj3vlm6nwub68::::res://WorldView.cs<>uid://b48qk8at1y7er::::res://MinimapView.cs<>uid://c1b4r0mtuevu7::::res://SeasonCycleView.cs<>uid://hgf05hai8kbk::::res://WorldView3D.cs<>uid://1vn87bjmjh6j::::res://Assets/Branding/goblin-stronghold-menu-background-v1.png<>uid://3tvuy82cgyo2::::res://Assets/Branding/goblin-stronghold-icon-v1.png<>uid://4lbmfrm2rlxt::::res://Assets/Branding/goblin-stronghold-title-v1.png<>uid://bd62rn0ndx2hn::::res://Assets/Audio/the-hollow-council-title-demo.mp3
@@ -118,8 +118,9 @@ title-splashes.pl.txt::TextFile::-1::1787846514::0::1::::<><><>0<>0<><>::
 ::res://Platform/Steam/::1788295957
 SteamPlayerIdentityProvider.cs::CSharpScript::2691703554239061575::1788294957::0::1::::<><><>0<>0<><>::
 ::res://UI/::1788294222
-::res://UI/Actors/::1788471745
+::res://UI/Actors/::1788472995
 ActorJobTextPresenter.cs::CSharpScript::6417674771276341281::1788298883::0::1::::<><><>0<>0<><>::
+GoblinDetailsTextPresenter.cs::CSharpScript::2860733662621272627::1788472995::0::1::::<><><>0<>0<><>::
 GoblinEquipmentPaperDoll.cs::CSharpScript::4898646587794042859::1788471348::0::1::::<>VBoxContainer<><>0<>0<><>::
 GoblinRosterView.cs::CSharpScript::4762829933050203317::1788471792::0::1::::<><><>0<>0<><>::
 ::res://UI/Animals/::1788277328

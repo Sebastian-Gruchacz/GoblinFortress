@@ -19,7 +19,6 @@ using GoblinStronghold.GodotClient.UI.WorldPlanning;
 using GoblinStronghold.GodotClient.UI.WorldRendering;
 using GoblinStronghold.GodotClient.Application.Profiles;
 using GoblinStronghold.GodotClient.Platform.Steam;
-using System.Text;
 
 namespace GoblinStronghold.GodotClient;
 
@@ -3450,13 +3449,19 @@ public partial class Main : Node
         var goblinNeeds = goblinCivilization.Needs!;
         var grid = GetNode<GridContainer>("GoblinDetails/Scroll/Content/Needs");
         _healthBar = CreateNeedIndicator(
-            grid, UiIcon.Health, "Zdrowie", goblinCivilization.Vitals!.MaximumHealth);
+            grid,
+            UiIcon.Health,
+            Ui("goblin-details", "health-name"),
+            goblinCivilization.Vitals!.MaximumHealth);
         _hungerBar = CreateNeedIndicator(
-            grid, UiIcon.Hunger, "Nasycenie", goblinNeeds.MaximumHunger);
+            grid, UiIcon.Hunger, Ui("goblin-details", "nutrition-name"),
+            goblinNeeds.MaximumHunger);
         _thirstBar = CreateNeedIndicator(
-            grid, UiIcon.Thirst, "Nawodnienie", goblinNeeds.MaximumThirst);
+            grid, UiIcon.Thirst, Ui("goblin-details", "hydration-name"),
+            goblinNeeds.MaximumThirst);
         _fatigueBar = CreateNeedIndicator(
-            grid, UiIcon.FieldCamp, "Wytrzymałość", goblinNeeds.MaximumFatigue);
+            grid, UiIcon.FieldCamp, Ui("goblin-details", "stamina-name"),
+            goblinNeeds.MaximumFatigue);
     }
 
     private ProgressBar CreateNeedIndicator(
@@ -6578,26 +6583,39 @@ public partial class Main : Node
             return;
         }
 
-        UpdateNeedBar(_healthBar, actor.Health, actor.EffectiveMaximumHealth, "Zdrowie");
+        UpdateNeedBar(
+            _healthBar,
+            actor.Health,
+            actor.EffectiveMaximumHealth,
+            Ui("goblin-details", "health-name"));
         UpdateNeedBar(
             _hungerBar,
             _engine.MaximumGoblinHunger - actor.Hunger,
             _engine.MaximumGoblinHunger,
-            "Nasycenie");
+            Ui("goblin-details", "nutrition-name"));
         UpdateNeedBar(
             _thirstBar,
             _engine.MaximumGoblinThirst - actor.Thirst,
             _engine.MaximumGoblinThirst,
-            "Nawodnienie");
+            Ui("goblin-details", "hydration-name"));
         UpdateNeedBar(
             _fatigueBar,
             _engine.MaximumGoblinFatigue - actor.Fatigue,
             _engine.MaximumGoblinFatigue,
-            "Wytrzymałość");
-        _healthBar.TooltipText += $" • aktualna wydolność maksymalna: " +
-            $"{actor.EffectiveMaximumHealth:N0}/{_engine.MaximumGoblinHealth:N0}";
-        _hungerBar.TooltipText += " • obrażenia z głodu zaczynają się poniżej 500";
-        _thirstBar.TooltipText += " • obrażenia z odwodnienia zaczynają się poniżej 500";
+            Ui("goblin-details", "stamina-name"));
+        _healthBar.TooltipText += UiFormat(
+            "goblin-details",
+            "health-capacity-note",
+            actor.EffectiveMaximumHealth,
+            _engine.MaximumGoblinHealth);
+        _hungerBar.TooltipText += UiFormat(
+            "goblin-details",
+            "starvation-note",
+            _engine.MaximumGoblinHunger - _engine.GoblinNeeds.StarvationHungerThreshold);
+        _thirstBar.TooltipText += UiFormat(
+            "goblin-details",
+            "dehydration-note",
+            _engine.MaximumGoblinThirst - _engine.GoblinNeeds.DehydrationThirstThreshold);
 
         var cargo = actor.CarriedStackId == EntityId.None
             ? (ItemStackSnapshot?)null
@@ -6606,9 +6624,12 @@ public partial class Main : Node
             .Where(zone => zone.AssignedHaulerId == actor.Id)
             .OrderByDescending(zone => zone.Priority)
             .ThenBy(zone => zone.Id)
-            .Select(zone =>
-                $"skład {zone.Id} ({DescribeResource(zone.AcceptedResource)}, " +
-                $"{DescribeStoragePriority(zone.Priority)})")
+            .Select(zone => UiFormat(
+                "goblin-details",
+                "storage-assignment",
+                zone.Id,
+                DescribeResource(zone.AcceptedResource),
+                DescribeStoragePriority(zone.Priority)))
             .ToArray();
         UpdateInventoryIcons(actor, cargo);
         _goblinEquipment.Update(
@@ -6623,140 +6644,23 @@ public partial class Main : Node
                 "water",
                 actor.PersonalWater,
                 _engine.Definitions.PersonalWaterCapacity));
-        var text = new StringBuilder()
-            .AppendLine($"{actor.Name}  [#{actor.Id}]")
-            .AppendLine($"Pozycja: {actor.Position}")
-            .AppendLine(actor.IsJuvenile
-                ? $"Wiek: {actor.AgeDays} dni • młode, przenosi tylko lekkie ładunki i szybciej się męczy"
-                : actor.IsElderly
-                    ? $"Wiek: {actor.AgeDays} dni " +
-                      $"({(double)actor.AgeDays / _engine.Definitions.Clock.Climate.DaysPerYear:0.0} lat) • " +
-                      $"starość {actor.SenescenceProgress:P0}, wydolność " +
-                      $"{actor.EffectiveMaximumHealth:N0}/{_engine.MaximumGoblinHealth:N0}"
-                    : $"Wiek: {actor.AgeDays} dni " +
-                      $"({(double)actor.AgeDays / _engine.Definitions.Clock.Climate.DaysPerYear:0.0} lat) • dorosły")
-            .AppendLine(actor.BleedingTicksRemaining > 0
-                ? $"Stan: krwawi ({actor.BleedingTicksRemaining} ticków do samoistnego ustania)"
-                : "Stan: nie krwawi")
-            .AppendLine()
-            .AppendLine($"Znane umiejętności: {DescribeSkills(actor.KnownSkills)}")
-            .AppendLine($"Doświadczenie: {DescribeExperience(actor.Experience)}")
-            .AppendLine($"Preferencje pracy: zbieractwo {DescribeWorkPreference(actor.WorkPreferences.Foraging)}, " +
-                $"transport {DescribeWorkPreference(actor.WorkPreferences.Hauling)}, " +
-                $"budowanie {DescribeWorkPreference(actor.WorkPreferences.Building)}")
-            .AppendLine($"Znane cechy: {DescribeTraits(actor.KnownTraits)}")
-            .AppendLine($"Wyposażenie: {string.Join(", ", actor.Loadout.Items.Select(item =>
-                $"{Ui("equipment-slots", item.Slot.ToString())}: " +
-                $"{DescribeResourceVariant(item.Variant)} ({item.Weight} wag.)"))}")
-            .AppendLine($"Obciążenie: sprzęt {actor.Loadout.EquipmentWeight}, plecak " +
-                $"{actor.Loadout.PackWeight}, ładunek {actor.Loadout.CarriedCargoWeight}; " +
-                $"razem {actor.Loadout.TotalWeight}/{actor.Loadout.CarryingCapacity}")
-            .AppendLine($"Służba logistyczna: " +
-                (logisticsDuty.Length == 0 ? "brak przydziału" : string.Join(", ", logisticsDuty)))
-            .AppendLine($"Rozkaz nadrzędny: {DescribeTacticalOrder(actor.TacticalOrder)}")
-            .AppendLine();
-        text.AppendLine("Plan działań:");
-        if (actor.Plan.Count == 0)
-        {
-            text.AppendLine("— brak kolejnych zamiarów");
-        }
-        else
-        {
-            for (var index = 0; index < actor.Plan.Count; index++)
-            {
-                text.AppendLine($"{index + 1}. {DescribePlanEntry(actor.Plan[index])}");
-            }
-        }
-        text.AppendLine()
-            .AppendLine("Aktualne zadanie:")
-            .AppendLine(DescribeJob(actor.Job))
-            .AppendLine($"Faza: {actor.Job.Phase} • etap: {actor.Job.Stage}")
-            .AppendLine($"Cel: {actor.Job.Target} • pozostała trasa: {actor.Job.RemainingRouteSteps} pól")
-            .AppendLine($"Pozostała praca: {actor.Job.RemainingWorkTicks} ticków")
-            .AppendLine($"Źródło: {actor.Job.SourceStackId} • skład docelowy: {actor.Job.DestinationZoneId}")
-            .Append($"Rezerwacja ładunku: {actor.Job.ReservedQuantity}");
         _goblinDetails.Title = actor.Name;
-        _goblinDetailsText.Text = text.ToString();
+        _goblinDetailsText.Text = GoblinDetailsTextPresenter.Describe(
+            _currentLocale,
+            actor,
+            _engine.Definitions.Clock.Climate.DaysPerYear,
+            _engine.MaximumGoblinHealth,
+            logisticsDuty,
+            slot => Ui("equipment-slots", slot.ToString()),
+            DescribeResourceVariant,
+            DescribeJob);
     }
 
-    private static string DescribeTacticalOrder(ActorTacticalOrderSnapshot order) =>
-        order.Kind switch
-        {
-            ActorTacticalOrderKind.Patrol =>
-                $"patrol przez {order.PatrolPoints.Count} punktów " +
-                $"(następny {order.PatrolPointIndex + 1})",
-            ActorTacticalOrderKind.AttackArea =>
-                $"atakuj wrogów wokół {order.Center}, promień {order.Radius}",
-            ActorTacticalOrderKind.HuntArea =>
-                $"poluj wokół {order.Center}, promień {order.Radius}",
-            _ => "brak",
-        };
-
-    private string DescribePlanEntry(ActorPlanEntrySnapshot entry)
-    {
-        var action = entry.Kind switch
-        {
-            ActorPlanIntentKind.CurrentJob => $"kontynuuje: {DescribeJobKind(entry.JobKind)}",
-            ActorPlanIntentKind.Eat => "zje niesioną rację",
-            ActorPlanIntentKind.FindFood => "poszuka posiłku",
-            ActorPlanIntentKind.Drink => "napije się z bukłaka",
-            ActorPlanIntentKind.RefillWater => "poszuka wody",
-            ActorPlanIntentKind.Rest => "pójdzie odpocząć",
-            ActorPlanIntentKind.ResumeSuspendedJob =>
-                $"wróci do: {DescribeJobKind(entry.JobKind)} → {entry.Target}",
-            ActorPlanIntentKind.NextPublicWork =>
-                $"następnie: {DescribeJobKind(entry.JobKind)} → {entry.Target} " +
-                $"(zlecenie {entry.WorkOrderId})",
-            _ => "nieznany zamiar",
-        };
-        return $"{action}  [nacisk {entry.Priority}]";
-    }
-
-    private string DescribeJobKind(ActorJobKind kind) => kind switch
-    {
-        ActorJobKind.Forage => "zbierania",
-        ActorJobKind.Haul => "transportu",
-        ActorJobKind.Rest => "odpoczynku",
-        ActorJobKind.Eat => "jedzenia",
-        ActorJobKind.Explore => "zwiadu",
-        ActorJobKind.Move => "marszu",
-        ActorJobKind.Resupply => "uzupełniania zapasów",
-        ActorJobKind.SupplyCrafting => "dostawy do warsztatu",
-        ActorJobKind.Craft => "rzemiosła",
-        ActorJobKind.ClearConstructionSite => "uprzątania placu budowy",
-        ActorJobKind.ClearVegetation => "karczowania",
-        ActorJobKind.SupplyConstruction => "dostawy na budowę",
-        ActorJobKind.BuildConstruction => "budowy",
-        ActorJobKind.DismantleConstruction => Ui("actor-job-kinds", "dismantling"),
-        ActorJobKind.Collapsed => "przymusowego snu",
-        ActorJobKind.FellTree => "wyrębu",
-        ActorJobKind.QuarryBoulder => "wydobycia kamienia",
-        ActorJobKind.MineRock => "kopania w skale",
-        ActorJobKind.CarveRamp => "wykuwania pochylni",
-        ActorJobKind.TendBud => "opieki nad pąkiem",
-        ActorJobKind.HuntAnimal => "polowania",
-        ActorJobKind.CleanBlood => "sprzątania krwi",
-        ActorJobKind.LootRaid => "plądrowania",
-        ActorJobKind.RecoverRaidCorpse => "przenoszenia zwłok",
-        ActorJobKind.ConsumeRaidCorpse => "pożerania zwłok",
-        _ => "bezczynności",
-    };
-
-    private static string DescribeWorkPreference(int preference) => preference switch
-    {
-        -2 => "unika",
-        -1 => "nie lubi",
-        0 => "obojętne",
-        1 => "lubi",
-        2 => "uwielbia",
-        _ => "nieznane",
-    };
-
-    private static void UpdateNeedBar(ProgressBar bar, int value, int maximum, string name)
+    private void UpdateNeedBar(ProgressBar bar, int value, int maximum, string name)
     {
         bar.MaxValue = maximum;
         bar.Value = value;
-        bar.TooltipText = $"{name}: {value:N0} / {maximum:N0}";
+        bar.TooltipText = UiFormat("goblin-details", "need-value", name, value, maximum);
     }
 
     private void UpdateInventoryIcons(ActorSnapshot actor, ItemStackSnapshot? cargo)
@@ -6780,7 +6684,10 @@ public partial class Main : Node
         if (actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))
         {
             AddInventoryIcon(ItemIcon.WoodenBucket,
-                "Drewniane wiadro • narzędzie do transportu wody do beczek");
+                UiFormat(
+                    "goblin-details",
+                    "bucket-tooltip",
+                    DescribeResourceVariant(ResourceVariant.EquipmentWoodenBucket)));
         }
         if (cargo is not null)
         {
@@ -6793,7 +6700,7 @@ public partial class Main : Node
                     cargo.Value.Resource,
                     cargo.Value.FoodKind,
                     cargo.Value.Variant),
-                $"Ładunek roboczy • {DescribeStack(cargo.Value)}",
+                UiFormat("goblin-details", "cargo-tooltip", DescribeStack(cargo.Value)),
                 cargo.Value.Quantity);
         }
     }
@@ -6840,32 +6747,11 @@ public partial class Main : Node
         _inventoryIcons.AddChild(slot);
     }
 
-    private static string DescribeExperience(GoblinExperienceSnapshot experience) =>
-        $"zbieractwo poz. {GoblinExperienceSnapshot.GetLevel(experience.Foraging)} " +
-        $"({GoblinExperienceSnapshot.GetProgressToNextLevel(experience.Foraging)}/100), " +
-        $"transport poz. {GoblinExperienceSnapshot.GetLevel(experience.Hauling)} " +
-        $"({GoblinExperienceSnapshot.GetProgressToNextLevel(experience.Hauling)}/100), " +
-        $"budowanie poz. {GoblinExperienceSnapshot.GetLevel(experience.Building)} " +
-        $"({GoblinExperienceSnapshot.GetProgressToNextLevel(experience.Building)}/100)";
+    private static string DescribeSkills(GoblinSkill skills) =>
+        GoblinDetailsTextPresenter.DescribeSkills(_currentLocale, skills);
 
-    private static string DescribeSkills(GoblinSkill skills) => string.Join(", ", new[]
-    {
-        skills.HasFlag(GoblinSkill.Foraging) ? "zbieractwo" : null,
-        skills.HasFlag(GoblinSkill.Hauling) ? "transport" : null,
-        skills.HasFlag(GoblinSkill.Survival) ? "przetrwanie" : null,
-        skills.HasFlag(GoblinSkill.Scouting) ? "zwiad" : null,
-        skills.HasFlag(GoblinSkill.Building) ? "budowanie" : null,
-    }.Where(item => item is not null));
-
-    private static string DescribeTraits(GoblinTrait traits) => string.Join(", ", new[]
-    {
-        traits.HasFlag(GoblinTrait.Stubborn) ? "uparty" : null,
-        traits.HasFlag(GoblinTrait.Curious) ? "ciekawski" : null,
-        traits.HasFlag(GoblinTrait.Hardy) ? "wytrzymały" : null,
-        traits.HasFlag(GoblinTrait.Gluttonous) ? "żarłoczny" : null,
-        traits.HasFlag(GoblinTrait.Nimble) ? "zwinny" : null,
-        traits.HasFlag(GoblinTrait.Fastidious) ? "porządnicki" : null,
-    }.Where(item => item is not null));
+    private static string DescribeTraits(GoblinTrait traits) =>
+        GoblinDetailsTextPresenter.DescribeTraits(_currentLocale, traits);
 
     private void ToggleWorldView()
     {

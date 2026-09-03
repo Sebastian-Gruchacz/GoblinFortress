@@ -11,6 +11,10 @@ internal static class RenderingPerformanceOptionsPanel
         Func<int, string> formatChunkSize,
         string warmCaches,
         string warmCachesHelp,
+        string onionLayers,
+        string onionLayersHelp,
+        string undergroundOnionLayers,
+        string undergroundOnionLayersHelp,
         Action<RenderingPerformanceOptions> optionsChanged)
     {
         var content = new VBoxContainer();
@@ -22,6 +26,43 @@ internal static class RenderingPerformanceOptionsPanel
         });
 
         var options = initialOptions.Clamp();
+        var onionLayersToggle = new CheckButton
+        {
+            Text = onionLayers,
+            ButtonPressed = options.OnionLayers,
+            TooltipText = onionLayersHelp,
+        };
+        onionLayersToggle.Toggled += enabled =>
+        {
+            options = options with { OnionLayers = enabled };
+            optionsChanged(options);
+        };
+        content.AddChild(onionLayersToggle);
+        content.AddChild(new Label
+        {
+            Text = onionLayersHelp,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
+
+        var undergroundOnionLayersToggle = new CheckButton
+        {
+            Text = undergroundOnionLayers,
+            ButtonPressed = options.UndergroundOnionLayers,
+            TooltipText = undergroundOnionLayersHelp,
+        };
+        undergroundOnionLayersToggle.Toggled += enabled =>
+        {
+            options = options with { UndergroundOnionLayers = enabled };
+            optionsChanged(options);
+        };
+        content.AddChild(undergroundOnionLayersToggle);
+        content.AddChild(new Label
+        {
+            Text = undergroundOnionLayersHelp,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
+        content.AddChild(new HSeparator());
+
         var refreshLabel = new Label { Text = formatRefresh(options.LowerLayerRefreshSeconds) };
         var refreshSlider = new HSlider
         {

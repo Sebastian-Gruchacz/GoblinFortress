@@ -122,6 +122,14 @@ public partial class WorldView : Node2D
     private int _nextCombatAudioPlayer;
     private WorldRenderPass _renderPass = WorldRenderPass.Combined;
     private WorldView? _staticLayer;
+    private LowerLevelCompositeTextureCache? _lowerLevelComposite;
+    private OnionLayerPainter? _onionLayerPainter;
+    private bool _useOnionLayers;
+    private bool _useUndergroundOnionLayers;
+    private ulong? _onionActiveTopologySignature;
+
+    private bool UsesOnionLayersAtVisibleLevel =>
+        _visibleLevel <= 0 ? _useUndergroundOnionLayers : _useOnionLayers;
 
     public int VisibleLevel => _visibleLevel;
 
@@ -200,6 +208,11 @@ public partial class WorldView : Node2D
         _mineralDepositAtlas = UndergroundSprites.LoadMineralAtlas();
         _stoneHitSound = CreateCombatSound(720f, 0.075f, 0.22f);
         _meleeHitSound = CreateCombatSound(145f, 0.11f, 0.38f);
+        if (_renderPass == WorldRenderPass.Static)
+        {
+            _lowerLevelComposite = new LowerLevelCompositeTextureCache(this);
+            _onionLayerPainter = new OnionLayerPainter();
+        }
         if (_renderPass != WorldRenderPass.Static)
         {
             for (var index = 0; index < _combatAudioPlayers.Length; index++)
@@ -234,10 +247,13 @@ public partial class WorldView : Node2D
         _animalPaletteTextures.Dispose();
         _activeLevelLightMap.Dispose();
         _lowerLevelPresentation.Dispose();
+        _lowerLevelComposite?.Dispose();
+        _onionLayerPainter?.Dispose();
     }
 
     public void SetWorld(SimulationEngine engine, int visibleLevel = 0)
     {
+        var usedOnionLayers = UsesOnionLayersAtVisibleLevel;
         _visualActorPositions.Clear();
         _targetActorPositions.Clear();
         _actorsById.Clear();
@@ -253,6 +269,8 @@ public partial class WorldView : Node2D
         _activeLevelLights.Reset();
         _activeLevelLightMap.Reset();
         _lowerLevelPresentation.Reset();
+        _lowerLevelComposite?.Reset();
+        _onionActiveTopologySignature = null;
         _worldDraws.Reset();
         _lowerLevelRefreshElapsed = 0d;
         _presentationElapsedSeconds = 0d;
@@ -262,9 +280,10 @@ public partial class WorldView : Node2D
         _hasSnapshot = false;
         _engine = engine;
         _visibleLevel = visibleLevel;
+        ApplyOnionLayerModeTransition(usedOnionLayers);
         _staticLayer?.SetWorld(engine, visibleLevel);
         Refresh(engine.CreatePresentationSnapshot());
-        if (_renderPass != WorldRenderPass.Dynamic)
+        if (_renderPass != WorldRenderPass.Dynamic && !UsesOnionLayersAtVisibleLevel)
         {
             SynchronizeLowerLevelPresentation();
         }
@@ -272,17 +291,29 @@ public partial class WorldView : Node2D
 
     public void Refresh(SimulationSnapshot snapshot)
     {
+        var activeTopologySignature = _onionActiveTopologySignature;
+        if (UsesOnionLayersAtVisibleLevel && _renderPass == WorldRenderPass.Static &&
+            (!_hasSnapshot || _snapshotTopologyVersion != _engine.World.TopologyVersion ||
+             activeTopologySignature is null))
+        {
+            activeTopologySignature =
+                ActiveLevelTopologySignaturePolicy.Create(_engine.World, _visibleLevel);
+        }
         var redrawStaticImmediately = !_hasSnapshot ||
-            snapshot.WorldVersion != _snapshot.WorldVersion ||
-            _snapshotTopologyVersion != _engine.World.TopologyVersion;
+            !UsesOnionLayersAtVisibleLevel &&
+            (snapshot.WorldVersion != _snapshot.WorldVersion ||
+             _snapshotTopologyVersion != _engine.World.TopologyVersion);
         var staticPresentationChanged = _renderPass == WorldRenderPass.Static &&
             (!_hasSnapshot || ActiveStaticPresentationChangePolicy.HasChanged(
                 _snapshot,
                 snapshot,
-                _visibleLevel));
+                _visibleLevel,
+                includeAnyWorldVersion: !UsesOnionLayersAtVisibleLevel) ||
+             activeTopologySignature != _onionActiveTopologySignature);
         _snapshot = snapshot;
         _hasSnapshot = true;
         _snapshotTopologyVersion = _engine.World.TopologyVersion;
+        _onionActiveTopologySignature = activeTopologySignature;
         if (_renderPass == WorldRenderPass.Static)
         {
             if (redrawStaticImmediately)
@@ -314,16 +345,58 @@ public partial class WorldView : Node2D
         }
 
         var normalized = options.Clamp();
+        var usedOnionLayers = UsesOnionLayersAtVisibleLevel;
+        var onionOptionsChanged = _useOnionLayers != normalized.OnionLayers ||
+            _useUndergroundOnionLayers != normalized.UndergroundOnionLayers;
+        _useOnionLayers = normalized.OnionLayers;
+        _useUndergroundOnionLayers = normalized.UndergroundOnionLayers;
         _lowerLevelRefreshSeconds = normalized.LowerLayerRefreshSeconds;
         _staticRetainedChunkSize = normalized.LowerLayerChunkSize;
         _hasStaticRetainedBounds = false;
-        _lowerLevelPresentation.ConfigureChunkSize(normalized.LowerLayerChunkSize);
+        ApplyOnionLayerModeTransition(usedOnionLayers);
+        if (!UsesOnionLayersAtVisibleLevel)
+        {
+            _lowerLevelPresentation.ConfigureChunkSize(normalized.LowerLayerChunkSize);
+        }
         _lowerLevelRefreshElapsed = _lowerLevelRefreshSeconds;
         if (_engine is not null && _snapshot is not null)
         {
-            SynchronizeLowerLevelPresentation();
+            if (!UsesOnionLayersAtVisibleLevel)
+            {
+                SynchronizeLowerLevelPresentation();
+            }
+            if (onionOptionsChanged)
+            {
+                _hasStaticRetainedBounds = false;
+            }
             QueueRedraw();
         }
+    }
+
+    private void ApplyOnionLayerModeTransition(bool usedOnionLayers)
+    {
+        if (usedOnionLayers == UsesOnionLayersAtVisibleLevel)
+        {
+            return;
+        }
+
+        _onionActiveTopologySignature = null;
+        _lowerLevelComposite?.Reset();
+        if (UsesOnionLayersAtVisibleLevel)
+        {
+            _lowerLevelPresentation.Reset();
+            _lowerLevelPresentation.Dispose();
+            return;
+        }
+
+        _lowerLevelPresentation.Initialize(
+            _terrainAtlas,
+            _caveAtlas,
+            _environmentAtlas,
+            _itemIconAtlas,
+            _treePartAtlas,
+            _treeCrownAtlas);
+        _lowerLevelPresentation.ConfigureChunkSize(_staticRetainedChunkSize);
     }
 
     public void SetSimulationSpeed(int speed, double secondsPerTick)
@@ -336,7 +409,10 @@ public partial class WorldView : Node2D
 
     public void SetVisibleLevel(int level)
     {
+        var usedOnionLayers = UsesOnionLayersAtVisibleLevel;
         _visibleLevel = level;
+        _onionActiveTopologySignature = null;
+        ApplyOnionLayerModeTransition(usedOnionLayers);
         _staticLayer?.SetVisibleLevel(level);
         if (_engine is not null && _snapshot is not null)
         {
@@ -344,7 +420,7 @@ public partial class WorldView : Node2D
             {
                 _activeLevelLights.Synchronize(_engine, _snapshot, _visibleLevel);
             }
-            if (_renderPass != WorldRenderPass.Dynamic)
+            if (_renderPass != WorldRenderPass.Dynamic && !UsesOnionLayersAtVisibleLevel)
             {
                 SynchronizeLowerLevelPresentation();
             }
@@ -568,20 +644,26 @@ public partial class WorldView : Node2D
         }
 
         _presentationElapsedSeconds += delta;
-        _lowerLevelRefreshElapsed += delta;
         _waterAnimationElapsed = (_waterAnimationElapsed + delta) % WaterAnimationCycleSeconds;
         var lowerPresentationSynchronized = false;
-        if (_lowerLevelRefreshElapsed >= _lowerLevelRefreshSeconds &&
+        if (!UsesOnionLayersAtVisibleLevel)
+        {
+            _lowerLevelRefreshElapsed += delta;
+        }
+        if (!UsesOnionLayersAtVisibleLevel &&
+            _lowerLevelRefreshElapsed >= _lowerLevelRefreshSeconds &&
             SynchronizeLowerLevelPresentation())
         {
             lowerPresentationSynchronized = true;
             QueueRedraw();
         }
-        if (_lowerLevelRefreshElapsed >= _lowerLevelRefreshSeconds)
+        if (!UsesOnionLayersAtVisibleLevel &&
+            _lowerLevelRefreshElapsed >= _lowerLevelRefreshSeconds)
         {
             _lowerLevelRefreshElapsed %= _lowerLevelRefreshSeconds;
         }
-        if (!lowerPresentationSynchronized &&
+        if (!UsesOnionLayersAtVisibleLevel &&
+            !lowerPresentationSynchronized &&
             _lowerLevelPresentation.RebuildReadyTextures(
                 _engine,
                 _snapshot,
@@ -589,6 +671,7 @@ public partial class WorldView : Node2D
                 _presentationElapsedSeconds,
                 _lowerLevelRefreshSeconds))
         {
+            SynchronizeLowerLevelComposite();
             QueueRedraw();
         }
 
@@ -700,6 +783,17 @@ public partial class WorldView : Node2D
     private void DrawTerrain()
     {
         DrawLowerLevelTextures();
+        if (UsesOnionLayersAtVisibleLevel && _onionLayerPainter is not null)
+        {
+            var onionBounds = GetVisibleCellBounds();
+            _onionLayerPainter.DrawPlane(
+                this,
+                new Rect2(
+                    onionBounds.MinimumX * TileSize,
+                    onionBounds.MinimumY * TileSize,
+                    (onionBounds.MaximumX - onionBounds.MinimumX) * TileSize,
+                    (onionBounds.MaximumY - onionBounds.MinimumY) * TileSize));
+        }
         if (_visibleLevel < 0)
         {
             DrawCaveTerrain();
@@ -759,7 +853,8 @@ public partial class WorldView : Node2D
                     continue;
                 }
 
-                if (_visibleLevel <= 0 &&
+                if (!UsesOnionLayersAtVisibleLevel &&
+                    _visibleLevel <= 0 &&
                     !_lowerLevelPresentation.HasCachedGeometryAt(
                         new GridPosition(x, y, cell.SurfaceLevel)))
                 {
@@ -771,30 +866,40 @@ public partial class WorldView : Node2D
 
     private void DrawLowerLevelTextures()
     {
-        foreach (var chunk in _lowerLevelPresentation.VisibleTextures)
+        if (UsesOnionLayersAtVisibleLevel)
         {
-            var depth = Math.Max(1, _visibleLevel - chunk.Key.Level);
-            var brightness = LowerLevelVisualDegradationPolicy.ResolveBrightness(depth);
-            var chunkWorldSize = chunk.ChunkSize * TileSize;
-            DrawTextureRect(
-                chunk.Lighting,
-                new Rect2(
-                    chunk.Key.X * chunkWorldSize,
-                    chunk.Key.Y * chunkWorldSize,
-                    chunkWorldSize,
-                    chunkWorldSize),
-                tile: false,
-                modulate: new Color(brightness, brightness, brightness, 1f));
-            DrawTextureRect(
-                chunk.SkyLighting,
-                new Rect2(
-                    chunk.Key.X * chunkWorldSize,
-                    chunk.Key.Y * chunkWorldSize,
-                    chunkWorldSize,
-                    chunkWorldSize),
-                tile: false,
-                modulate: new Color(brightness, brightness, brightness, 1f));
+            return;
         }
+
+        var chunks = _lowerLevelPresentation.VisibleTextures;
+        if (_lowerLevelComposite is not null)
+        {
+            if (_lowerLevelComposite.Current is { } ready)
+            {
+                DrawTextureRect(ready.Texture, ready.WorldRect, tile: false);
+                return;
+            }
+        }
+
+        foreach (var chunk in chunks)
+        {
+            DrawLowerLevelChunk(chunk);
+        }
+    }
+
+    private void DrawLowerLevelChunk(LowerLevelChunkTexture chunk)
+    {
+        var depth = Math.Max(1, _visibleLevel - chunk.Key.Level);
+        var brightness = LowerLevelVisualDegradationPolicy.ResolveBrightness(depth);
+        var chunkWorldSize = chunk.ChunkSize * TileSize;
+        var destination = new Rect2(
+            chunk.Key.X * chunkWorldSize,
+            chunk.Key.Y * chunkWorldSize,
+            chunkWorldSize,
+            chunkWorldSize);
+        var modulate = new Color(brightness, brightness, brightness, 1f);
+        DrawTextureRect(chunk.Lighting, destination, tile: false, modulate: modulate);
+        DrawTextureRect(chunk.SkyLighting, destination, tile: false, modulate: modulate);
     }
 
     private void DrawLowerLevelActorGroup(
@@ -1158,6 +1263,14 @@ public partial class WorldView : Node2D
 
     private void DrawLowerLevelOpening(GridPosition upperPosition)
     {
+        if (UsesOnionLayersAtVisibleLevel)
+        {
+            OnionLayerPainter.DrawOpeningVignette(
+                this,
+                CellRect(upperPosition.X, upperPosition.Y));
+            return;
+        }
+
         if (!_lowerLevelPresentation.TryGetOpeningTexture(
                 upperPosition,
                 out var opening))
@@ -4133,7 +4246,7 @@ public partial class WorldView : Node2D
     private bool SynchronizeLowerLevelPresentation()
     {
         var bounds = GetVisibleCellBounds();
-        return _lowerLevelPresentation.Synchronize(
+        var changed = _lowerLevelPresentation.Synchronize(
             _engine,
             _snapshot,
             _visibleLevel,
@@ -4144,7 +4257,17 @@ public partial class WorldView : Node2D
                 bounds.MaximumY),
             _presentationElapsedSeconds,
             _lowerLevelRefreshSeconds);
+        if (changed)
+        {
+            SynchronizeLowerLevelComposite();
+        }
+        return changed;
     }
+
+    private void SynchronizeLowerLevelComposite() =>
+        _lowerLevelComposite?.Synchronize(
+            _lowerLevelPresentation.VisibleTextures,
+            _visibleLevel);
 
     private IReadOnlySet<GridPosition> GetCachedCaveSolids()
     {

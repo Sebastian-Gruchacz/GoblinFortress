@@ -6,7 +6,9 @@ namespace GoblinStronghold.GodotClient;
 internal readonly record struct RenderingPerformanceOptions(
     double LowerLayerRefreshSeconds,
     int LowerLayerChunkSize,
-    bool WarmPresentationCachesBeforeShowingWorld)
+    bool WarmPresentationCachesBeforeShowingWorld,
+    bool OnionLayers,
+    bool UndergroundOnionLayers)
 {
     public const double DefaultLowerLayerRefreshSeconds = 1d;
     public const int DefaultLowerLayerChunkSize = 16;
@@ -18,7 +20,9 @@ internal readonly record struct RenderingPerformanceOptions(
     public static RenderingPerformanceOptions Default => new(
         DefaultLowerLayerRefreshSeconds,
         DefaultLowerLayerChunkSize,
-        WarmPresentationCachesBeforeShowingWorld: false);
+        WarmPresentationCachesBeforeShowingWorld: false,
+        OnionLayers: false,
+        UndergroundOnionLayers: false);
 
     public RenderingPerformanceOptions Clamp() => new(
         Math.Clamp(
@@ -29,7 +33,12 @@ internal readonly record struct RenderingPerformanceOptions(
             RoundChunkSize(LowerLayerChunkSize),
             MinimumLowerLayerChunkSize,
             MaximumLowerLayerChunkSize),
-        WarmPresentationCachesBeforeShowingWorld);
+        WarmPresentationCachesBeforeShowingWorld,
+        OnionLayers,
+        UndergroundOnionLayers);
+
+    public bool UsesOnionLayersAt(int level) =>
+        level <= 0 ? UndergroundOnionLayers : OnionLayers;
 
     private static int RoundChunkSize(int value) =>
         (int)Math.Round(value / 8d, MidpointRounding.AwayFromZero) * 8;

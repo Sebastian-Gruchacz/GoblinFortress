@@ -418,6 +418,19 @@ caches.
   uses a separate lower-level overlay. Keep spatial resolution fixed until
   playtesting justifies depth-dependent downsampling; deeper chunks already lose
   temporal fidelity through their linearly increasing refresh interval.
+- [x] Composite visible lower-level source chunks in a retained transparent GPU
+  viewport. The main world canvas now draws one viewport texture regardless of
+  depth, while chunk replacement, exposure changes, camera retention changes,
+  and active-level changes request a one-shot recomposition. Keep direct chunk
+  drawing as a compatibility fallback; introduce dirty-rectangle recomposition
+  only if profiling shows the one-shot GPU pass remains material.
+- [x] Add the optional localized `Onion layers` fallback for low-end hardware.
+  It resets and bypasses all lower-level presentation state, skips cache warmup,
+  and draws one retained dark-gray hatched cross-section plane beneath the
+  active slice. Active terrain and structures cover the plane; explicit holes
+  receive a lightweight vignette without observing lower-level changes. Keep
+  independent upper (`Z > 0`) and `Underground Onion Layers` (`Z <= 0`)
+  switches so detailed cached openings remain available where affordable.
 - [x] Extend cached geometry with simplified static structures and apply the
   exposure mask while composing openings in the active plane. Lower slices use
   deliberately reduced structure silhouettes instead of live structure draw

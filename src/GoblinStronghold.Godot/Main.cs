@@ -1387,7 +1387,10 @@ public partial class Main : Node
             await SetLoadingStage(
                 "initializing-views",
                 progressStart + (progressRange * 0.74d));
-            ReplaceEngine(loaded, loadedPreferences.VisibleLevel);
+            ReplaceEngine(
+                loaded,
+                loadedPreferences.VisibleLevel,
+                loadedPreferences.CameraView);
             await WarmPresentationCaches(
                 progressStart + (progressRange * 0.84d),
                 progressStart + (progressRange * 0.98d));
@@ -1436,7 +1439,8 @@ public partial class Main : Node
 
     private async Task WarmPresentationCaches(double progressStart, double progressEnd)
     {
-        if (!_renderingPerformanceSettings.Options.WarmPresentationCachesBeforeShowingWorld)
+        if (!_renderingPerformanceSettings.Options.WarmPresentationCachesBeforeShowingWorld ||
+            _renderingPerformanceSettings.Options.UsesOnionLayersAt(_visibleLevel))
         {
             return;
         }
@@ -1705,6 +1709,10 @@ public partial class Main : Node
             value => UiFormat("options", "chunk-size-value", value),
             Ui("options", "warm-caches"),
             Ui("options", "warm-caches-help"),
+            Ui("options", "onion-layers"),
+            Ui("options", "onion-layers-help"),
+            Ui("options", "underground-onion-layers"),
+            Ui("options", "underground-onion-layers-help"),
             options =>
             {
                 _renderingPerformanceSettings.Set(options);
@@ -2116,13 +2124,18 @@ public partial class Main : Node
     private string CreateSaveJson()
     {
         _sessionPreferences.VisibleLevel = _visibleLevel;
+        var cameraCell = _worldView.WorldToCell(_camera.Position);
+        _sessionPreferences.SetCameraView(cameraCell.X, cameraCell.Y, _camera.Zoom.X);
         return _sessionPreferences.AddToSave(_engine.Save());
     }
 
     private void ScheduleNextAutosave() => _nextAutosaveTick =
         SimulationCalendar.NextDayStart(_engine.CurrentTick, _engine.Definitions.Clock);
 
-    private void ReplaceEngine(SimulationEngine engine, int preferredVisibleLevel = 0)
+    private void ReplaceEngine(
+        SimulationEngine engine,
+        int preferredVisibleLevel = 0,
+        SavedCameraView? preferredCameraView = null)
     {
         CancelActiveTool();
         SelectActor(EntityId.None);
@@ -2161,7 +2174,16 @@ public partial class Main : Node
         _worldView.Visible = !_use3DView;
         _camera.Enabled = !_use3DView;
         _worldView3D.SetActive(_use3DView);
-        _camera.Position = _worldView.CellToWorld(engine.Map.GoblinSpawn);
+        var minimumZoom = GetMinimumCameraZoom();
+        var maximumZoom = Math.Max(3.5f, minimumZoom);
+        var restoredZoom = preferredCameraView?.Zoom ?? 1f;
+        _camera.Zoom = Vector2.One * Math.Clamp(restoredZoom, minimumZoom, maximumZoom);
+        _camera.Position = preferredCameraView is { } cameraView
+            ? _worldView.CellToWorld(new GridPosition(
+                cameraView.CellX,
+                cameraView.CellY,
+                _visibleLevel))
+            : _worldView.CellToWorld(engine.Map.GoblinSpawn);
         UpdateLayerToolAvailability();
         ScheduleNextAutosave();
         ConstrainCameraToMap();

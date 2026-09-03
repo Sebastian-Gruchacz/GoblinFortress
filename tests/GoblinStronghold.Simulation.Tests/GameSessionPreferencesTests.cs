@@ -12,6 +12,7 @@ public sealed class GameSessionPreferencesTests
     public void ConstructionMaterialChoicesRoundTripInsideGameSave()
     {
         var preferences = new GameSessionPreferences("Lo 20260901-2245", visibleLevel: -2);
+        preferences.SetCameraView(41, 73, 1.75f);
         preferences.SetConstructionMaterial("Wall", ResourceVariant.Granite);
         preferences.SetConstructionMaterial("Door", ResourceVariant.OakWood);
 
@@ -24,6 +25,7 @@ public sealed class GameSessionPreferencesTests
         Assert.Equal(ResourceVariant.OakWood, door);
         Assert.Equal("Lo 20260901-2245", restored.ProfileName);
         Assert.Equal(-2, restored.VisibleLevel);
+        Assert.Equal(new SavedCameraView(41, 73, 1.75f), restored.CameraView);
         using var document = JsonDocument.Parse(json);
         Assert.Equal(17, document.RootElement.GetProperty("currentTick").GetInt32());
     }
@@ -36,6 +38,7 @@ public sealed class GameSessionPreferencesTests
         Assert.False(preferences.TryGetConstructionMaterial("Wall", out _));
         Assert.Empty(preferences.ProfileName);
         Assert.Equal(0, preferences.VisibleLevel);
+        Assert.Null(preferences.CameraView);
     }
 
     [Fact]
@@ -45,6 +48,26 @@ public sealed class GameSessionPreferencesTests
             "{\"clientPreferences\":{\"visibleLevel\":\"underground\"}}");
 
         Assert.Equal(0, preferences.VisibleLevel);
+    }
+
+    [Theory]
+    [InlineData(-1, 12, 1.0)]
+    [InlineData(12, -1, 1.0)]
+    [InlineData(12, 12, 0.0)]
+    public void InvalidSavedCameraViewIsIgnored(int x, int y, float zoom)
+    {
+        var preferences = GameSessionPreferences.FromSave(
+            JsonSerializer.Serialize(new
+            {
+                clientPreferences = new
+                {
+                    cameraCellX = x,
+                    cameraCellY = y,
+                    cameraZoom = zoom,
+                },
+            }));
+
+        Assert.Null(preferences.CameraView);
     }
 
     [Fact]

@@ -68,6 +68,49 @@ public sealed class LowerLevelPresentationCacheTests
         var current = engine.CreatePresentationSnapshot();
 
         Assert.True(ActiveStaticPresentationChangePolicy.HasChanged(previous, current, 0));
+        Assert.False(ActiveStaticPresentationChangePolicy.HasChanged(
+            previous,
+            current,
+            level: 1,
+            includeAnyWorldVersion: false));
+    }
+
+    [Fact]
+    public void ActiveTopologySignatureIgnoresExcavationOnAnotherLevel()
+    {
+        var seed = new WorldSeed(0x4F4E494F4EUL);
+        var map = SwampMapGenerator.Generate(seed, width: 24, height: 24);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 0);
+        var target = (from z in Enumerable.Range(
+                          map.MinimumWorldLevel,
+                          1 - map.MinimumWorldLevel)
+                      from y in Enumerable.Range(0, map.Height)
+                      from x in Enumerable.Range(0, map.Width)
+                      let position = new GridPosition(x, y, z)
+                      where engine.World.CanExcavateRock(position)
+                      select position).First();
+        var otherLevel = target.Z == 0 ? -1 : 0;
+        var activeBefore = ActiveLevelTopologySignaturePolicy.Create(engine.World, target.Z);
+        var otherBefore = ActiveLevelTopologySignaturePolicy.Create(engine.World, otherLevel);
+
+        Assert.True(engine.World.TryExcavateRock(
+            target,
+            new SimulationTick(1),
+            out _,
+            out _,
+            out _));
+
+        Assert.NotEqual(
+            activeBefore,
+            ActiveLevelTopologySignaturePolicy.Create(engine.World, target.Z));
+        Assert.Equal(
+            otherBefore,
+            ActiveLevelTopologySignaturePolicy.Create(engine.World, otherLevel));
     }
 
     [Fact]

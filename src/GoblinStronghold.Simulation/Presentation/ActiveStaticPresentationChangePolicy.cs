@@ -7,12 +7,26 @@ public static class ActiveStaticPresentationChangePolicy
     public static bool HasChanged(
         SimulationSnapshot previous,
         SimulationSnapshot current,
-        int level)
+        int level,
+        bool includeAnyWorldVersion = true)
     {
         ArgumentNullException.ThrowIfNull(previous);
         ArgumentNullException.ThrowIfNull(current);
 
-        return previous.WorldVersion != current.WorldVersion ||
+        return includeAnyWorldVersion && previous.WorldVersion != current.WorldVersion ||
+            !FilteredSequenceEqual(
+                previous.WorldObjects,
+                current.WorldObjects,
+                level,
+                static (worldObject, activeLevel) =>
+                    WorldObjectTouchesLevel(worldObject, activeLevel),
+                WorldObjectsEqual) ||
+            !FilteredSequenceEqual(
+                previous.PlantPatches,
+                current.PlantPatches,
+                level,
+                static (plant, activeLevel) => plant.Position.Z == activeLevel,
+                static (left, right) => left == right) ||
             !FilteredSequenceEqual(
                 previous.ItemStacks,
                 current.ItemStacks,
@@ -78,6 +92,17 @@ public static class ActiveStaticPresentationChangePolicy
                 static (left, right) => left.Id == right.Id &&
                     left.Position == right.Position && left.Phase == right.Phase);
     }
+
+    private static bool WorldObjectTouchesLevel(WorldObjectSnapshot worldObject, int level) =>
+        worldObject.Anchor.Z == level ||
+        worldObject.Parts.Any(part =>
+            worldObject.Anchor.Z + part.RelativePosition.Z == level);
+
+    private static bool WorldObjectsEqual(WorldObjectSnapshot left, WorldObjectSnapshot right) =>
+        left.Id == right.Id && left.Kind == right.Kind && left.Owner == right.Owner &&
+        left.Anchor == right.Anchor && left.Orientation == right.Orientation &&
+        left.MaterialVariant == right.MaterialVariant &&
+        SequenceEqual(left.Parts, right.Parts, static (first, second) => first == second);
 
     private static bool ItemsEqual(Resources.ItemStackSnapshot left,
         Resources.ItemStackSnapshot right) =>

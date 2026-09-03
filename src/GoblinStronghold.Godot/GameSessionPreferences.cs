@@ -5,23 +5,45 @@ using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.GodotClient;
 
+internal readonly record struct SavedCameraView(int CellX, int CellY, float Zoom)
+{
+    internal bool IsValid =>
+        CellX >= 0 && CellY >= 0 && float.IsFinite(Zoom) && Zoom > 0f;
+}
+
 internal sealed class GameSessionPreferences
 {
     private const string SavePropertyName = "clientPreferences";
     private readonly Dictionary<string, ResourceVariant> _constructionMaterials =
         new(StringComparer.OrdinalIgnoreCase);
 
-    internal GameSessionPreferences(string? profileName = null, int visibleLevel = 0)
+    internal GameSessionPreferences(
+        string? profileName = null,
+        int visibleLevel = 0,
+        SavedCameraView? cameraView = null)
     {
         ProfileName = GameProfileName.TryNormalize(profileName, out var normalized)
             ? normalized
             : string.Empty;
         VisibleLevel = visibleLevel;
+        CameraView = cameraView is { IsValid: true } ? cameraView : null;
     }
 
     internal string ProfileName { get; }
 
     internal int VisibleLevel { get; set; }
+
+    internal SavedCameraView? CameraView { get; private set; }
+
+    internal void SetCameraView(int cellX, int cellY, float zoom)
+    {
+        var view = new SavedCameraView(cellX, cellY, zoom);
+        if (!view.IsValid)
+        {
+            throw new ArgumentOutOfRangeException(nameof(zoom));
+        }
+        CameraView = view;
+    }
 
     internal bool TryGetConstructionMaterial(string group, out ResourceVariant variant) =>
         _constructionMaterials.TryGetValue(group, out variant);
@@ -45,6 +67,9 @@ internal sealed class GameSessionPreferences
         {
             ["profileName"] = ProfileName,
             ["visibleLevel"] = VisibleLevel,
+            ["cameraCellX"] = CameraView?.CellX,
+            ["cameraCellY"] = CameraView?.CellY,
+            ["cameraZoom"] = CameraView?.Zoom,
             ["constructionMaterials"] = new JsonObject(
                 _constructionMaterials
                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
@@ -74,7 +99,18 @@ internal sealed class GameSessionPreferences
             visibleLevelValue.TryGetInt32(out var storedVisibleLevel)
                 ? storedVisibleLevel
                 : 0;
-        var preferences = new GameSessionPreferences(profileName, visibleLevel);
+        SavedCameraView? cameraView = null;
+        if (client.TryGetProperty("cameraCellX", out var cameraXValue) &&
+            cameraXValue.TryGetInt32(out var cameraX) &&
+            client.TryGetProperty("cameraCellY", out var cameraYValue) &&
+            cameraYValue.TryGetInt32(out var cameraY) &&
+            client.TryGetProperty("cameraZoom", out var cameraZoomValue) &&
+            cameraZoomValue.TryGetSingle(out var cameraZoom))
+        {
+            var candidate = new SavedCameraView(cameraX, cameraY, cameraZoom);
+            cameraView = candidate.IsValid ? candidate : null;
+        }
+        var preferences = new GameSessionPreferences(profileName, visibleLevel, cameraView);
         if (!client.TryGetProperty("constructionMaterials", out var materials) ||
             materials.ValueKind != JsonValueKind.Object)
         {

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GoblinStronghold.Simulation.ContentPacks;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Planning;
 using GoblinStronghold.Simulation.Resources;
@@ -167,6 +168,11 @@ public static class ConstructionBlueprintDefinitions
             !Enum.IsDefined(source.RequiredVariant) ||
             !Enum.IsDefined(source.QuantityMode) || source.MaterialQuantity < 1 ||
             source.WorkTicks < 1 || capabilities.MinimumBuildingLevel < 0 ||
+            capabilities.MinimumToolLevel < 0 ||
+            !Enum.IsDefined(capabilities.RequiredToolFunction) ||
+            (capabilities.RequiredToolFunction == ToolFunction.None
+                ? capabilities.MinimumToolLevel != 0
+                : capabilities.MinimumToolLevel < 1) ||
             !Enum.IsDefined(capabilities.RequiredSkills) ||
             !Enum.IsDefined(capabilities.RequiredEquipment) ||
             source.Footprint == ConstructionFootprintKind.FixedRectangle &&
@@ -202,7 +208,9 @@ public static class ConstructionBlueprintDefinitions
             new ConstructionCapabilityRequirements(
                 capabilities.RequiredSkills,
                 capabilities.MinimumBuildingLevel,
-                capabilities.RequiredEquipment),
+                capabilities.RequiredEquipment,
+                capabilities.RequiredToolFunction,
+                capabilities.MinimumToolLevel),
             source.Workshop);
     }
 
@@ -305,5 +313,7 @@ public static class ConstructionBlueprintDefinitions
         public GoblinSkill RequiredSkills { get; init; }
         public int MinimumBuildingLevel { get; init; }
         public PersonalEquipment RequiredEquipment { get; init; }
+        public ToolFunction RequiredToolFunction { get; init; }
+        public int MinimumToolLevel { get; init; }
     }
 }

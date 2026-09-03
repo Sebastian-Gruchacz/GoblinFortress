@@ -24,6 +24,7 @@ public sealed class CivilizationCatalogTests
             ContentId.Parse("core:goblin-syllables"),
             goblins.Identity.NameGeneratorId);
         Assert.Equal(10_000, goblins.Vitals!.MaximumHealth);
+        Assert.Equal(10_000, goblins.Vitals.MaximumMana);
         Assert.Equal(260, goblins.Combat!.MinimumMeleeDamage);
         Assert.Equal(160, goblins.Combat.MeleeDamageVariance);
         Assert.Equal(
@@ -50,6 +51,7 @@ public sealed class CivilizationCatalogTests
             ContentId.Parse("core:human-frontier-names"),
             humans.Identity.NameGeneratorId);
         Assert.Equal(6_000, humans.Vitals!.MaximumHealth);
+        Assert.Equal(0, humans.Vitals.MaximumMana);
         Assert.Equal(320, humans.Combat!.MinimumMeleeDamage);
         Assert.Equal(180, humans.Combat.MeleeDamageVariance);
         Assert.Equal(

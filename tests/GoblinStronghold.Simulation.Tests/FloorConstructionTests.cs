@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -62,6 +63,12 @@ public sealed class FloorConstructionTests
             ResourceKind.Stone,
             ResourceVariant.Sandstone,
             quantity: 1);
+        var saveWithHammer = JsonNode.Parse(engine.Save())!.AsObject();
+        Assert.Single(saveWithHammer["actors"]!.AsArray())!["equipment"] =
+            (int)(PersonalEquipment.RagClothes | PersonalEquipment.WoodenHammer);
+        engine = SimulationEngine.Load(
+            saveWithHammer.ToJsonString(),
+            SimulationDefinitions.Foundation);
         var position = FindFloorRectangle(engine, width: 1, height: 1)[0];
         engine.QueueCommand(SimulationCommand.BuildStoneFloor(
             new SimulationTick(1),
@@ -82,6 +89,56 @@ public sealed class FloorConstructionTests
             .Where(worldObject => worldObject.Kind == WorldObjectKind.StoneFloor));
         Assert.Equal(ResourceVariant.Sandstone, floor.MaterialVariant);
         Assert.True(engine.World.IsTerrainTraversable(position));
+    }
+
+    [Theory]
+    [InlineData(SimulationSaveFormat.ConstructionToolsMigrationVersion)]
+    [InlineData(SimulationSaveFormat.ConstructionHammerMigrationVersion)]
+    [InlineData(SimulationSaveFormat.ConstructionToolLevelsMigrationVersion)]
+    [InlineData(SimulationSaveFormat.ConstructionToolFunctionsMigrationVersion)]
+    public void LegacyConstructionRequirementIsReplacedWithToolFunctionAndLevel(
+        int formatVersion)
+    {
+        var engine = CreateWithMaterial(
+            new WorldSeed(0x544F4F4C4D494752UL),
+            ResourceKind.Stone,
+            ResourceVariant.Sandstone,
+            quantity: 1);
+        var position = FindFloorRectangle(engine, width: 1, height: 1)[0];
+        engine.QueueCommand(SimulationCommand.BuildStoneFloor(
+            new SimulationTick(1),
+            sequence: 1,
+            position,
+            position,
+            ResourceVariant.Sandstone));
+        engine.AdvanceTicks(1);
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["formatVersion"] = formatVersion;
+        Assert.Single(save["constructionSites"]!.AsArray())!["requiredEquipment"] =
+            (int)PersonalEquipment.PrimitivePickaxe;
+        Assert.Single(save["constructionSites"]!.AsArray())!["requiredToolFunction"] =
+            (int)ToolFunction.None;
+        Assert.Single(save["constructionSites"]!.AsArray())!["minimumToolLevel"] = 0;
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Equal(
+            PersonalEquipment.None,
+            Assert.Single(restored.CreateSnapshot().ConstructionSites)
+                .Capabilities.RequiredEquipment);
+        Assert.Equal(
+            ToolFunction.Construction,
+            Assert.Single(restored.CreateSnapshot().ConstructionSites)
+                .Capabilities.RequiredToolFunction);
+        Assert.Equal(
+            1,
+            Assert.Single(restored.CreateSnapshot().ConstructionSites)
+                .Capabilities.MinimumToolLevel);
+        Assert.Equal(
+            SimulationSaveFormat.CurrentVersion,
+            JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
     }
 
     [Fact]

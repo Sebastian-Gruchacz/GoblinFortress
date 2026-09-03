@@ -8,6 +8,7 @@ using GoblinStronghold.Simulation.Civilizations.Naming;
 using GoblinStronghold.Simulation.Civilizations.Polities;
 using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.ContentPacks;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
@@ -129,6 +130,8 @@ public sealed partial class SimulationEngine
     public SimulationDebugSettings DebugSettings { get; }
 
     public int MaximumGoblinHealth => GoblinVitals.MaximumHealth;
+
+    public int MaximumGoblinMana => GoblinVitals.MaximumMana;
 
     public CivilizationCombatDefinition GoblinCombat => _goblinCivilization.Combat!;
 
@@ -297,6 +300,7 @@ public sealed partial class SimulationEngine
                 actor.KnownSkills |= GoblinSkill.Building;
             }
         }
+        engine.EnsureTribeHasStarterHammers();
         engine.EnsureTribeHasStarterPickaxe();
         engine.CreateInitialAnimals();
 
@@ -441,13 +445,9 @@ public sealed partial class SimulationEngine
                 engine.World.IsTerrainReachable(stain.Position) &&
                 engine.IsConstructedCleanableSurface(stain.Position))
             .ToArray();
-        if (validSurfaceGrime.Length != surfaceGrime.Length &&
-            !save.DiscardMisplacedLegacySurfaceGrime)
-        {
-            throw new InvalidDataException("The save contains misplaced surface grime.");
-        }
         engine._surfaceGrime.Restore(validSurfaceGrime, engine.CurrentTick);
-        engine.RebuildAutonomousCleaningAreas();
+        engine.RestoreReportedCleaningAreas(save.ReportedCleaningPositions.Select(model =>
+            new GridPosition(model.X, model.Y, model.Z)));
         engine.Visibility = WorldVisibilityState.Restore(
             map,
             save.Visibility,
@@ -605,6 +605,8 @@ public sealed partial class SimulationEngine
                 Sex = actor.Sex,
                 PolityId = CorePolityIds.PlayerTribe,
                 Loadout = CreateEquipmentLoadout(actor),
+                Mana = actor.Mana,
+                MaximumMana = GoblinVitals.MaximumMana,
                 CarriedCorpseId = actor.CarriedCorpseId,
                 TacticalOrder = new ActorTacticalOrderSnapshot(
                     actor.TacticalOrderKind,
@@ -1269,6 +1271,13 @@ public sealed partial class SimulationEngine
                     CreatedAtTick = stain.CreatedAt.Value,
                     LastChangedAtTick = stain.LastChangedAt.Value,
                 }).ToList(),
+            ReportedCleaningPositions = CreateReportedCleaningSnapshot()
+                .Select(position => new GridPositionSaveModel
+                {
+                    X = position.X,
+                    Y = position.Y,
+                    Z = position.Z,
+                }).ToList(),
             ExcavatedCaveCells = World.ExcavatedCaveCells
                 .OrderBy(position => position.Z)
                 .ThenBy(position => position.Y)
@@ -1355,6 +1364,8 @@ public sealed partial class SimulationEngine
                     RequiredSkills = site.Capabilities.RequiredSkills,
                     MinimumBuildingLevel = site.Capabilities.MinimumBuildingLevel,
                     RequiredEquipment = site.Capabilities.RequiredEquipment,
+                    RequiredToolFunction = site.Capabilities.RequiredToolFunction,
+                    MinimumToolLevel = site.Capabilities.MinimumToolLevel,
                     Priority = site.Priority,
                     OrderId = site.OrderId.Value,
                     SequenceIndex = site.SequenceIndex,
@@ -1577,6 +1588,13 @@ public sealed partial class SimulationEngine
             Append(canonical, stain.LastChangedAt.Value);
         }
 
+        var reportedCleaningPositions = CreateReportedCleaningSnapshot();
+        Append(canonical, reportedCleaningPositions.Count);
+        foreach (var position in reportedCleaningPositions)
+        {
+            Append(canonical, position);
+        }
+
         var excavatedCaveCells = World.ExcavatedCaveCells
             .OrderBy(position => position.Z)
             .ThenBy(position => position.Y)
@@ -1725,6 +1743,7 @@ public sealed partial class SimulationEngine
             Append(canonical, actor.Hunger);
             Append(canonical, actor.Fatigue);
             Append(canonical, actor.Health);
+            Append(canonical, actor.Mana);
             Append(canonical, actor.BleedingTicksRemaining);
             Append(canonical, actor.Thirst);
             Append(canonical, actor.PersonalFood);
@@ -1895,6 +1914,8 @@ public sealed partial class SimulationEngine
             Append(canonical, (int)site.Capabilities.RequiredSkills);
             Append(canonical, site.Capabilities.MinimumBuildingLevel);
             Append(canonical, (int)site.Capabilities.RequiredEquipment);
+            Append(canonical, (int)site.Capabilities.RequiredToolFunction);
+            Append(canonical, site.Capabilities.MinimumToolLevel);
             Append(canonical, (int)site.Priority);
             Append(canonical, site.OrderId.Value);
             Append(canonical, site.SequenceIndex);
@@ -2063,7 +2084,7 @@ public sealed partial class SimulationEngine
                 actorPolityId != CorePolityIds.PlayerTribe ||
                 !HasOnlyKnownFlags(actorModel.KnownSkills, GoblinSkill.Building) ||
                 !HasOnlyKnownFlags(actorModel.KnownTraits, GoblinTrait.Fastidious) ||
-                !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.WoodenBucket) ||
+                !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.WoodenHammer) ||
                 actorModel.ForagingExperience < 0 ||
                 actorModel.HaulingExperience < 0 ||
                 actorModel.BuildingExperience < 0 ||
@@ -2071,6 +2092,7 @@ public sealed partial class SimulationEngine
                 actorModel.Hunger < 0 || actorModel.Hunger > GoblinNeeds.MaximumHunger ||
                 actorModel.Fatigue < 0 || actorModel.Fatigue > GoblinNeeds.MaximumFatigue ||
                 actorModel.Health <= 0 || actorModel.Health > GoblinVitals.MaximumHealth ||
+                actorModel.Mana < 0 || actorModel.Mana > GoblinVitals.MaximumMana ||
                 actorModel.Thirst < 0 || actorModel.Thirst > GoblinNeeds.MaximumThirst ||
                 actorModel.PersonalFood < 0 || actorModel.PersonalFood > Definitions.PersonalFoodCapacity ||
                 personalFoodKinds.Length != actorModel.PersonalFood ||
@@ -2130,6 +2152,7 @@ public sealed partial class SimulationEngine
                 CarriedCorpseId = new EntityId(actorModel.CarriedCorpseId),
                 Fatigue = actorModel.Fatigue,
                 Health = actorModel.Health,
+                Mana = actorModel.Mana,
                 Thirst = actorModel.Thirst,
                 PersonalWater = actorModel.PersonalWater,
                 PersonalStoneAmmo = actorModel.PersonalStoneAmmo,
@@ -2484,8 +2507,8 @@ public sealed partial class SimulationEngine
             var requiredVariant = model.RequiredVariant ?? ResourceVariant.None;
             if (id == EntityId.None ||
                 !Enum.IsDefined(model.Kind) ||
-                requiredResource is not (ResourceKind.Wood or ResourceKind.Stone or
-                    ResourceKind.Equipment) ||
+                requiredResource is not (ResourceKind.Wood or ResourceKind.Reeds or
+                    ResourceKind.Stone or ResourceKind.Equipment) ||
                 requiredVariant != ResourceVariant.None &&
                     requiredResource is ResourceKind.Wood or ResourceKind.Stone &&
                     (!MaterialCatalog.TryGet(requiredVariant, out var requiredMaterial) ||
@@ -2512,7 +2535,12 @@ public sealed partial class SimulationEngine
                 model.RemainingWorkTicks > model.TotalWorkTicks ||
                 !HasOnlyKnownFlags(model.RequiredSkills, GoblinSkill.Building) ||
                 model.MinimumBuildingLevel < 0 ||
-                !HasOnlyKnownFlags(model.RequiredEquipment, PersonalEquipment.WoodenBucket))
+                model.MinimumToolLevel < 0 ||
+                !Enum.IsDefined(model.RequiredToolFunction) ||
+                (model.RequiredToolFunction == ToolFunction.None
+                    ? model.MinimumToolLevel != 0
+                    : model.MinimumToolLevel < 1) ||
+                !HasOnlyKnownFlags(model.RequiredEquipment, PersonalEquipment.WoodenHammer))
             {
                 throw new InvalidDataException("The save contains an invalid construction site.");
             }
@@ -2530,7 +2558,9 @@ public sealed partial class SimulationEngine
                 expected.Capabilities != new ConstructionCapabilityRequirements(
                     model.RequiredSkills,
                     model.MinimumBuildingLevel,
-                    model.RequiredEquipment))
+                    model.RequiredEquipment,
+                    model.RequiredToolFunction,
+                    model.MinimumToolLevel))
             {
                 throw new InvalidDataException("The saved construction site does not match its blueprint.");
             }
@@ -2560,8 +2590,12 @@ public sealed partial class SimulationEngine
                     !ConstructionMaterialMatches(
                         site,
                         site.RequiredResource,
-                        site.DeliveredVariant) ||
-                !CanPlaceConstruction(site.Kind, site.Anchor, site.End, site.GetFootprint()) ||
+                        site.DeliveredVariant))
+            {
+                throw new InvalidDataException("The save contains an invalid construction site.");
+            }
+
+            if (
                 _constructionSites.Values.Any(other =>
                     other.GetFootprint().Intersect(site.GetFootprint()).Any()) ||
                 !_constructionSites.TryAdd(id, site))
@@ -5269,7 +5303,7 @@ public sealed partial class SimulationEngine
 
         foreach (var position in site.GetFootprint())
         {
-            RefreshAutonomousCleaningRegistration(position);
+            RefreshReportedCleaningRegistration(position);
         }
         _constructionSites.Remove(site.Id);
         GainBuildingExperience(builder, experience);
@@ -6945,7 +6979,7 @@ public sealed partial class SimulationEngine
                      .Where(actor =>
                          !actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe))
                      .OrderBy(actor =>
-                         actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) ? 1 : 0)
+                         HasEquippedTool(actor.Equipment) ? 1 : 0)
                      .ThenBy(actor => actor.Id)
                      .Take(missing))
         {
@@ -6953,6 +6987,33 @@ public sealed partial class SimulationEngine
             miner.KnownSkills |= GoblinSkill.Building;
         }
     }
+
+    private void EnsureTribeHasStarterHammers()
+    {
+        const int starterHammerTarget = 2;
+        var missing = Math.Min(starterHammerTarget, _actors.Count) -
+            _actors.Values.Count(actor =>
+                actor.Equipment.HasFlag(PersonalEquipment.WoodenHammer));
+        if (missing <= 0)
+        {
+            return;
+        }
+
+        foreach (var builder in _actors.Values
+                     .Where(actor =>
+                         !actor.Equipment.HasFlag(PersonalEquipment.WoodenHammer))
+                     .OrderBy(actor =>
+                         HasEquippedTool(actor.Equipment) ? 1 : 0)
+                     .ThenBy(actor => actor.Id)
+                     .Take(missing))
+        {
+            builder.Equipment |= PersonalEquipment.WoodenHammer;
+            builder.KnownSkills |= GoblinSkill.Building;
+        }
+    }
+
+    private static bool HasEquippedTool(PersonalEquipment equipment) =>
+        ToolCapabilityCatalog.GetFunctions(equipment) != ToolFunction.None;
 
     private void ScatterInitialBrushwood()
     {
@@ -7428,6 +7489,7 @@ public sealed partial class SimulationEngine
         ResourceKind.Equipment => variant is >= ResourceVariant.EquipmentPrimitiveSling and
                 <= ResourceVariant.EquipmentWoodenSpear or
             ResourceVariant.EquipmentReinforcedPickaxe or
+            ResourceVariant.EquipmentWoodenHammer or
             ResourceVariant.EquipmentWoodenBarrel or
             ResourceVariant.EquipmentWoodenBox or
             ResourceVariant.EquipmentWoodenChest or
@@ -7802,6 +7864,7 @@ public sealed partial class SimulationEngine
         Hunger = actor.Hunger,
         Fatigue = actor.Fatigue,
         Health = actor.Health,
+        Mana = actor.Mana,
         Thirst = actor.Thirst,
         PersonalFood = actor.PersonalFood,
         PersonalFoodKind = actor.PersonalFoodKind,
@@ -8062,6 +8125,8 @@ public sealed partial class SimulationEngine
         public int Fatigue { get; set; }
 
         public int Health { get; set; }
+
+        public int Mana { get; set; }
 
         public int Thirst { get; set; }
 

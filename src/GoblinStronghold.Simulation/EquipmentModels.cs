@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.Simulation;
@@ -7,7 +8,7 @@ public enum EquipmentSlot : byte
 {
     Head = 1,
     Torso = 2,
-    MainHand = 3,
+    Tool = 3,
     RangedWeapon = 4,
     Ammunition = 5,
     RingLeft = 6,
@@ -20,6 +21,13 @@ public enum EquipmentSlot : byte
     Waterskin = 13,
     Backpack = 14,
     Utility = 15,
+    MeleeWeapon = 16,
+    ConstructionTool = 17,
+    MiningTool = 18,
+    FellingTool = 19,
+    Cloak = 20,
+    Legs = 21,
+    Feet = 22,
 }
 
 public readonly record struct EquipmentItemDefinition(
@@ -98,17 +106,19 @@ public static class EquipmentCatalog
             ResourceVariant.EquipmentHideClothes, 2, 3),
         new(PersonalEquipment.ReedClothes, EquipmentSlot.Torso,
             ResourceVariant.EquipmentReedClothes, 1, 2),
-        new(PersonalEquipment.BoneKnife, EquipmentSlot.MainHand,
+        new(PersonalEquipment.BoneKnife, EquipmentSlot.MeleeWeapon,
             ResourceVariant.EquipmentBoneKnife, 1, 30),
-        new(PersonalEquipment.WoodenAxe, EquipmentSlot.MainHand,
+        new(PersonalEquipment.WoodenAxe, EquipmentSlot.FellingTool,
             ResourceVariant.EquipmentWoodenAxe, 3, 100),
-        new(PersonalEquipment.PrimitivePickaxe, EquipmentSlot.MainHand,
+        new(PersonalEquipment.PrimitivePickaxe, EquipmentSlot.MiningTool,
             ResourceVariant.EquipmentPrimitivePickaxe, 4, 110),
-        new(PersonalEquipment.ReinforcedPickaxe, EquipmentSlot.MainHand,
+        new(PersonalEquipment.ReinforcedPickaxe, EquipmentSlot.MiningTool,
             ResourceVariant.EquipmentReinforcedPickaxe, 5, 160),
-        new(PersonalEquipment.FightingStick, EquipmentSlot.MainHand,
+        new(PersonalEquipment.WoodenHammer, EquipmentSlot.ConstructionTool,
+            ResourceVariant.EquipmentWoodenHammer, 3, 90),
+        new(PersonalEquipment.FightingStick, EquipmentSlot.MeleeWeapon,
             ResourceVariant.EquipmentFightingStick, 2, 80),
-        new(PersonalEquipment.StoneClub, EquipmentSlot.MainHand,
+        new(PersonalEquipment.StoneClub, EquipmentSlot.MeleeWeapon,
             ResourceVariant.EquipmentStoneClub, 4, 140),
         new(PersonalEquipment.PrimitiveSling, EquipmentSlot.RangedWeapon,
             ResourceVariant.EquipmentPrimitiveSling, 1, 1),

@@ -3,6 +3,7 @@ using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Civilizations;
 using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Diagnostics;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Localization;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Map.Generation;
@@ -15,6 +16,7 @@ using GoblinStronghold.GodotClient.UI.Animals;
 using GoblinStronghold.GodotClient.UI.MainMenu;
 using GoblinStronghold.GodotClient.UI.Windows;
 using GoblinStronghold.GodotClient.UI.WorldPlanning;
+using GoblinStronghold.GodotClient.UI.WorldRendering;
 using GoblinStronghold.GodotClient.Application.Profiles;
 using GoblinStronghold.GodotClient.Platform.Steam;
 using System.Text;
@@ -68,10 +70,12 @@ public partial class Main : Node
     private Texture2D? _foodIconAtlas;
     private readonly MaterialPaletteTextureCache _resourceThumbnailTextures = new();
     private Texture2D _pickaxeIcon = null!;
+    private Texture2D _woodenHammerIcon = null!;
     private Texture2D _commandingHandIcon = null!;
     private Texture2D _woodenBarrelIcon = null!;
     private Window _goblinDetails = null!;
     private Label _goblinDetailsText = null!;
+    private GoblinEquipmentPaperDoll _goblinEquipment = null!;
     private ProgressBar _healthBar = null!;
     private ProgressBar _hungerBar = null!;
     private ProgressBar _thirstBar = null!;
@@ -90,7 +94,7 @@ public partial class Main : Node
     private string _looseResourcesSignature = string.Empty;
     private Window _goblinRosterWindow = null!;
     private VBoxContainer _goblinRosterRows = null!;
-    private string _goblinRosterSignature = string.Empty;
+    private GoblinRosterView _goblinRosterView = null!;
     private Window _statisticsWindow = null!;
     private Label _statisticsText = null!;
     private Window _raidWindow = null!;
@@ -137,6 +141,13 @@ public partial class Main : Node
     private double _presentationRefreshElapsed;
     private double _fpsRefreshElapsed;
     private readonly RuntimeFramePerformanceProfiler _runtimePerformanceProfiler = new();
+    private long _observedEmitterQueryCalls;
+    private long _observedActiveLightMapBuildCalls;
+    private long _observedActiveFogMapBuildCalls;
+    private long _observedLowerChunkRebuildCalls;
+    private long _observedDynamicWorldDrawCalls;
+    private long _observedStaticWorldDrawCalls;
+    private readonly WindowEscapeDismissalRouter _windowEscapeDismissalRouter = new();
     private ulong _commandSequence = 1;
     private EntityId _selectedActorId = EntityId.None;
     private readonly HashSet<EntityId> _selectedActorIds = [];
@@ -207,6 +218,7 @@ public partial class Main : Node
     private RenderingPerformanceSettings _renderingPerformanceSettings = null!;
     private LoadingProgressOverlay _loadingProgress = null!;
     private bool _loadingOperationActive;
+    private int _saveInspectionVersion;
     private Theme _gameUiTheme = null!;
     private readonly Dictionary<GameShortcutId, Action> _shortcutActions = [];
     private readonly Dictionary<GameShortcutId, Button> _shortcutBindingButtons = [];
@@ -448,11 +460,20 @@ public partial class Main : Node
         _treePartAtlas = TreePartSprites.LoadAtlas();
         _foodIconAtlas = ResourceThumbnails.TryLoadFoodAtlas();
         _pickaxeIcon = GD.Load<Texture2D>("res://Assets/UI/primitive-pickaxe-v1.svg");
+        _woodenHammerIcon = ResourceThumbnails.LoadWoodenHammerIcon();
         _commandingHandIcon = GD.Load<Texture2D>("res://Assets/UI/commanding-hand-v1.svg");
         _woodenBarrelIcon = GD.Load<Texture2D>("res://Assets/UI/wooden-barrel-v1.svg");
         _goblinDetails = GetNode<Window>("GoblinDetails");
         _goblinDetailsText = GetNode<Label>("GoblinDetails/Scroll/Content/Text");
         _inventoryIcons = GetNode<HBoxContainer>("GoblinDetails/Scroll/Content/Inventory");
+        _goblinEquipment = new GoblinEquipmentPaperDoll
+        {
+            Name = "EquipmentPaperDoll",
+        };
+        var goblinDetailsContent = GetNode<VBoxContainer>("GoblinDetails/Scroll/Content");
+        goblinDetailsContent.AddChild(_goblinEquipment);
+        goblinDetailsContent.MoveChild(_goblinEquipment, _inventoryIcons.GetIndex());
+        ConfigureGoblinEquipmentPaperDoll();
         _storedResourcesWindow = GetNode<Window>("StoredResourcesWindow");
         _storedResourcesSummary = GetNode<Label>("StoredResourcesWindow/Margin/Content/Summary");
         _storedResourcesDetailed = GetNode<CheckButton>(
@@ -471,6 +492,13 @@ public partial class Main : Node
         _looseResourcesGrid.Columns = 3;
         _goblinRosterWindow = GetNode<Window>("GoblinRosterWindow");
         _goblinRosterRows = GetNode<VBoxContainer>("GoblinRosterWindow/Scroll/Rows");
+        _goblinRosterView = new GoblinRosterView(
+            _goblinRosterRows,
+            ActivateGoblinFromRoster,
+            actor => DescribeJob(actor.Job),
+            DescribeResourceVariant,
+            variant => CreateResourceThumbnail(ResourceKind.Equipment, variant),
+            key => Ui("goblin-roster", key));
         _statisticsWindow = GetNode<Window>("StatisticsWindow");
         _statisticsText = GetNode<Label>("StatisticsWindow/Margin/Content/Text");
         GetViewport().GuiEmbedSubwindows = true;
@@ -777,6 +805,7 @@ public partial class Main : Node
         AddChild(_mainWindowSettingsController);
         ApplyGameThemeToWindows();
         ApplyStaticTranslations();
+        _windowEscapeDismissalRouter.RegisterDescendants(this, DismissWindow);
         UpdateSpeedButtons();
         ShowMainMenu();
     }
@@ -792,6 +821,12 @@ public partial class Main : Node
 
         if ((_capturedShortcut is not null || _activeShortcutMenu is not null) &&
             TryHandleShortcutInput(key))
+        {
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (TryDismissTopmostWindow(inputEvent))
         {
             GetViewport().SetInputAsHandled();
         }
@@ -913,13 +948,39 @@ public partial class Main : Node
             AutosaveDuration: autosaveDuration,
             TicksAdvanced: ticksAdvanced,
             ActiveActors: simulation.ActiveActors,
-            EmitterQueryDuration: presentation.EmitterQueries.LastDuration,
-            ActiveLightMapDuration: presentation.ActiveLightMapBuilds.LastDuration,
-            LowerChunkRebuildDuration: presentation.LowerChunkRebuildBatches.LastDuration,
+            EmitterQueryDuration: GetNewOperationDuration(
+                presentation.EmitterQueries,
+                ref _observedEmitterQueryCalls),
+            ActiveLightMapDuration: GetNewOperationDuration(
+                presentation.ActiveLightMapBuilds,
+                ref _observedActiveLightMapBuildCalls),
+            ActiveFogMapDuration: GetNewOperationDuration(
+                presentation.ActiveFogMapBuilds,
+                ref _observedActiveFogMapBuildCalls),
+            LowerChunkRebuildDuration: GetNewOperationDuration(
+                presentation.LowerChunkRebuildBatches,
+                ref _observedLowerChunkRebuildCalls),
             VisibleDirtyChunks: presentation.VisibleDirtyChunks,
             SliceWorkload: presentation.SliceWorkload,
-            DynamicWorldDrawDuration: presentation.DynamicWorldDraws.LastDuration,
-            StaticWorldDrawDuration: presentation.StaticWorldDraws.LastDuration));
+            DynamicWorldDrawDuration: GetNewOperationDuration(
+                presentation.DynamicWorldDraws,
+                ref _observedDynamicWorldDrawCalls),
+            StaticWorldDrawDuration: GetNewOperationDuration(
+                presentation.StaticWorldDraws,
+                ref _observedStaticWorldDrawCalls)));
+    }
+
+    private static TimeSpan GetNewOperationDuration(
+        TimedPresentationOperationMetrics metrics,
+        ref long observedCalls)
+    {
+        if (metrics.Calls == observedCalls)
+        {
+            return TimeSpan.Zero;
+        }
+
+        observedCalls = metrics.Calls;
+        return metrics.LastDuration;
     }
 
     public override void _UnhandledInput(InputEvent inputEvent)
@@ -1480,9 +1541,17 @@ public partial class Main : Node
         (_hasActiveSession ? _resumeGameButton : _newGameButton).GrabFocus();
     }
 
-    private void RefreshLoadMenuButton()
+    private async void RefreshLoadMenuButton()
     {
-        var candidates = _saveStore.InspectCandidates();
+        var inspectionVersion = ++_saveInspectionVersion;
+        _loadMenuButton.Disabled = true;
+        _chooseSaveButton.Disabled = true;
+        var candidates = await Task.Run(() => _saveStore.InspectCandidates());
+        if (inspectionVersion != _saveInspectionVersion || !IsInsideTree())
+        {
+            return;
+        }
+
         _loadMenuButton.Disabled = candidates.Count == 0;
         _chooseSaveButton.Disabled = candidates.Count == 0;
         if (candidates.Count == 0)
@@ -1754,13 +1823,21 @@ public partial class Main : Node
         shortcutMargin.AddChild(_shortcutRows);
         RebuildShortcutRows();
 
-        content.AddChild(new HSeparator());
-        content.AddChild(new Label
+        var about = new VBoxContainer
+        {
+            Name = "AboutOptions",
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        about.AddThemeConstantOverride("separation", 10);
+        tabs.AddChild(about);
+        tabs.SetTabTitle(2, Ui("options", "about"));
+        about.AddChild(new Label
         {
             Text = Ui("options", "about"),
             ThemeTypeVariation = "HeaderSmall",
         });
-        content.AddChild(new Label
+        about.AddChild(new Label
         {
             Text = Ui("options", "credits"),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
@@ -1772,7 +1849,7 @@ public partial class Main : Node
         };
         musicNotice.AddThemeColorOverride("font_color", GameUiTheme.MutedText);
         musicNotice.AddThemeFontSizeOverride("font_size", 10);
-        content.AddChild(musicNotice);
+        about.AddChild(musicNotice);
 
         var close = new Button { Text = Ui("common", "close") };
         close.Pressed += CloseOptions;
@@ -2156,7 +2233,6 @@ public partial class Main : Node
         _contextCampAnchor = null;
         _storedResourcesSignature = string.Empty;
         _looseResourcesSignature = string.Empty;
-        _goblinRosterSignature = string.Empty;
         _engine = engine;
         _latestSnapshot = engine.CreatePresentationSnapshot();
         _commandSequence = engine.NextAvailableCommandSequence;
@@ -2226,15 +2302,19 @@ public partial class Main : Node
             return false;
         }
 
+        DismissWindow(window);
+        return true;
+    }
+
+    private void DismissWindow(Window window)
+    {
         if (window == _optionsWindow)
         {
             CloseOptions();
+            return;
         }
-        else
-        {
-            window.Hide();
-        }
-        return true;
+
+        window.Hide();
     }
 
     private static void ConfigureOverviewWindow(Window window)
@@ -4946,6 +5026,17 @@ public partial class Main : Node
         }
 
         var snapshot = GetDisplayedSnapshot();
+        var visuallyHitActorId = _use3DView
+            ? EntityId.None
+            : _worldView.HitTestVisibleActor(ScreenToWorld(screenPosition));
+        if (visuallyHitActorId != EntityId.None)
+        {
+            var actor = snapshot.Actors.First(item => item.Id == visuallyHitActorId);
+            SelectOrToggleActor(actor.Id, extendActorSelection, showActorDetails);
+            _inspector.Text = DescribeActorSelection(actor, actor.Position);
+            return;
+        }
+
         if (_visibleLevel != 0)
         {
             var levelPosition = cell with { Z = _visibleLevel };
@@ -5367,6 +5458,10 @@ public partial class Main : Node
         _ => string.Empty,
     };
 
+    private Vector2 ScreenToWorld(Vector2 screenPosition) =>
+        _camera.GetScreenCenterPosition() +
+        ((screenPosition - GetViewport().GetVisibleRect().Size / 2f) / _camera.Zoom);
+
     private GridPosition ScreenToCell(Vector2 screenPosition)
     {
         if (_use3DView)
@@ -5374,9 +5469,7 @@ public partial class Main : Node
             return _worldView3D.ScreenToCell(screenPosition);
         }
 
-        var worldPosition = _camera.GetScreenCenterPosition() +
-            ((screenPosition - GetViewport().GetVisibleRect().Size / 2f) / _camera.Zoom);
-        return _worldView.WorldToCell(worldPosition);
+        return _worldView.WorldToCell(ScreenToWorld(screenPosition));
     }
 
     private GridPosition ScreenToVisibleCell(Vector2 screenPosition) =>
@@ -5415,10 +5508,39 @@ public partial class Main : Node
             return TranslationCatalog.Get(_currentLocale, "materials", "names", material.Id);
         }
 
-        var key = EquipmentCatalog.FindDefinition(variant) is null
+        var equipment = EquipmentCatalog.FindDefinition(variant);
+        var key = equipment is null
             ? "unknown"
             : variant.ToString();
-        return TranslationCatalog.Get(_currentLocale, "interface", "equipment-names", key);
+        var name = TranslationCatalog.Get(
+            _currentLocale,
+            "interface",
+            "equipment-names",
+            key);
+        var toolLevel = equipment is { } definition
+            ? ToolCapabilityCatalog.GetLevel(definition.Equipment)
+            : 0;
+        var toolFunction = equipment is { } toolDefinition
+            ? ToolCapabilityCatalog.GetFunctions(toolDefinition.Equipment)
+            : ToolFunction.None;
+        var toolDescriptionKey = toolFunction switch
+        {
+            ToolFunction.Construction => "construction-tool-level",
+            ToolFunction.Mining => "mining-tool-level",
+            ToolFunction.Felling => "felling-tool-level",
+            _ => "tool-level",
+        };
+        return toolLevel > 0
+            ? string.Format(
+                GetFormattingCulture(),
+                TranslationCatalog.Get(
+                    _currentLocale,
+                    "interface",
+                    "equipment-descriptions",
+                    toolDescriptionKey),
+                name,
+                toolLevel)
+            : name;
     }
 
     private string DescribeMineralDeposit(MineralDepositKind deposit) =>
@@ -5586,7 +5708,7 @@ public partial class Main : Node
 
     private void ShowGoblinRoster()
     {
-        UpdateGoblinRoster(_latestSnapshot, force: true);
+        UpdateGoblinRoster(_latestSnapshot);
         _goblinRosterWindow.Popup();
     }
 
@@ -5835,61 +5957,16 @@ public partial class Main : Node
         ResourceVariant Variant,
         int Quantity);
 
-    private void UpdateGoblinRoster(SimulationSnapshot snapshot, bool force = false)
+    private void UpdateGoblinRoster(SimulationSnapshot snapshot)
     {
-        var signature = string.Join('|', snapshot.Actors.Select(actor =>
-            $"{actor.Id.Value}:{actor.Name}:{actor.Health}:{actor.EffectiveMaximumHealth}:" +
-            $"{(int)actor.Job.Kind}:{(int)actor.Job.Phase}"));
-        if (!force && signature == _goblinRosterSignature)
-        {
-            return;
-        }
-
-        _goblinRosterSignature = signature;
-        foreach (var child in _goblinRosterRows.GetChildren())
-        {
-            child.QueueFree();
-        }
-
-        foreach (var actor in snapshot.Actors.OrderBy(actor => actor.Id))
-        {
-            var row = new HBoxContainer
-            {
-                CustomMinimumSize = new Vector2(0, 38),
-                TooltipText = DescribeJob(actor.Job),
-            };
-            var name = new Button
-            {
-                Text = actor.Name,
-                Alignment = HorizontalAlignment.Left,
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                FocusMode = Control.FocusModeEnum.None,
-                TooltipText = $"Pokaż {actor.Name} na mapie",
-            };
-            var actorId = actor.Id;
-            name.Pressed += () => FocusGoblinFromRoster(actorId);
-            var health = new Label
-            {
-                CustomMinimumSize = new Vector2(145, 0),
-                Text = $"zdrowie {actor.Health:N0}/{actor.EffectiveMaximumHealth:N0}",
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            var job = new Label
-            {
-                CustomMinimumSize = new Vector2(54, 0),
-                Text = DescribeJobSymbol(actor.Job.Kind),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                TooltipText = DescribeJob(actor.Job),
-            };
-            row.AddChild(name);
-            row.AddChild(health);
-            row.AddChild(job);
-            _goblinRosterRows.AddChild(row);
-        }
+        _goblinRosterView.Update(
+            snapshot.Actors,
+            _engine.MaximumGoblinFatigue,
+            _engine.MaximumGoblinHunger,
+            _engine.MaximumGoblinThirst);
     }
 
-    private void FocusGoblinFromRoster(EntityId actorId)
+    private void ActivateGoblinFromRoster(EntityId actorId, bool showDetails)
     {
         var actor = _latestSnapshot.Actors.FirstOrDefault(actor => actor.Id == actorId);
         if (actor.Id == EntityId.None)
@@ -5897,48 +5974,20 @@ public partial class Main : Node
             return;
         }
 
-        _goblinRosterWindow.Hide();
-        if (!_use3DView && _visibleLevel != actor.Position.Z)
+        if (showDetails && !_use3DView && _visibleLevel != actor.Position.Z)
         {
             _visibleLevel = actor.Position.Z;
             _worldView.SetVisibleLevel(_visibleLevel);
             _minimap.SetVisibleLevel(_visibleLevel);
             UpdateLayerToolAvailability();
         }
-        CenterCameraOn(actor.Position);
-        SelectActor(actor.Id);
+        if (showDetails)
+        {
+            CenterCameraOn(actor.Position);
+        }
+        SelectActor(actor.Id, showDetails);
         UpdateStatus();
     }
-
-    private static string DescribeJobSymbol(ActorJobKind kind) => kind switch
-    {
-        ActorJobKind.Forage => "⌕",
-        ActorJobKind.Haul => "⇢",
-        ActorJobKind.Rest => "Zz",
-        ActorJobKind.Eat => "●",
-        ActorJobKind.Explore => "⌖",
-        ActorJobKind.Move => "→",
-        ActorJobKind.Resupply => "↺",
-        ActorJobKind.ClearVegetation => "×",
-        ActorJobKind.SupplyConstruction => "⇥",
-        ActorJobKind.BuildConstruction => "⚒",
-        ActorJobKind.DismantleConstruction => "⚒",
-        ActorJobKind.Collapsed => "!",
-        ActorJobKind.FellTree => "♣",
-        ActorJobKind.QuarryBoulder => "◆",
-        ActorJobKind.MineRock => "⛏",
-        ActorJobKind.CarveRamp => "⇅",
-        ActorJobKind.TendBud => "♧",
-        ActorJobKind.HuntAnimal => "⚔",
-        ActorJobKind.SupplyCrafting => "⇥",
-        ActorJobKind.Craft => "⚒",
-        ActorJobKind.ClearConstructionSite => "↗",
-        ActorJobKind.CleanBlood => "✦",
-        ActorJobKind.LootRaid => "▣",
-        ActorJobKind.RecoverRaidCorpse => "†",
-        ActorJobKind.ConsumeRaidCorpse => "☠",
-        _ => "·",
-    };
 
     private void UpdateStatistics(SimulationSnapshot snapshot)
     {
@@ -6562,6 +6611,18 @@ public partial class Main : Node
                 $"{DescribeStoragePriority(zone.Priority)})")
             .ToArray();
         UpdateInventoryIcons(actor, cargo);
+        _goblinEquipment.Update(
+            actor.Loadout.Items,
+            actor.PersonalStoneAmmo,
+            UiFormat("equipment-paper-doll", "ammunition", actor.PersonalStoneAmmo),
+            actor.PersonalFood,
+            UiFormat("equipment-paper-doll", "provisions", actor.PersonalFood),
+            actor.PersonalWater,
+            UiFormat(
+                "equipment-paper-doll",
+                "water",
+                actor.PersonalWater,
+                _engine.Definitions.PersonalWaterCapacity));
         var text = new StringBuilder()
             .AppendLine($"{actor.Name}  [#{actor.Id}]")
             .AppendLine($"Pozycja: {actor.Position}")
@@ -6585,7 +6646,8 @@ public partial class Main : Node
                 $"budowanie {DescribeWorkPreference(actor.WorkPreferences.Building)}")
             .AppendLine($"Znane cechy: {DescribeTraits(actor.KnownTraits)}")
             .AppendLine($"Wyposażenie: {string.Join(", ", actor.Loadout.Items.Select(item =>
-                $"{item.Slot}: {DescribeResourceVariant(item.Variant)} ({item.Weight} wag.)"))}")
+                $"{Ui("equipment-slots", item.Slot.ToString())}: " +
+                $"{DescribeResourceVariant(item.Variant)} ({item.Weight} wag.)"))}")
             .AppendLine($"Obciążenie: sprzęt {actor.Loadout.EquipmentWeight}, plecak " +
                 $"{actor.Loadout.PackWeight}, ładunek {actor.Loadout.CarriedCargoWeight}; " +
                 $"razem {actor.Loadout.TotalWeight}/{actor.Loadout.CarryingCapacity}")
@@ -6708,73 +6770,13 @@ public partial class Main : Node
         }
 
         _inventorySignature = signature;
+        _inventoryIcons.Visible = false;
         foreach (var child in _inventoryIcons.GetChildren())
         {
             _inventoryIcons.RemoveChild(child);
             child.QueueFree();
         }
 
-        if (actor.Equipment.HasFlag(PersonalEquipment.RagClothes))
-        {
-            AddInventoryIcon(ItemIcon.RagClothes, "Łachmany • ubranie osobiste");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.BoneKnife))
-        {
-            AddInventoryIcon(ItemIcon.BoneKnife, "Kościany nóż • broń i narzędzie osobiste");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe))
-        {
-            AddInventoryIcon(ItemIcon.WoodenAxe, "Prymitywna siekiera • narzędzie do wyrębu");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe))
-        {
-            AddInventoryIcon(_pickaxeIcon, "Prymitywny kilof • narzędzie do rozbijania głazów");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.ReinforcedPickaxe))
-        {
-            AddInventoryIcon(_pickaxeIcon,
-                "Wzmocniony kilof • narzędzie wymagane do obsydianu");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling))
-        {
-            AddInventoryIcon(
-                CreateSlingIcon(),
-                "Prymitywna proca • broń dystansowa na małe kamienie");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.FightingStick))
-        {
-            AddInventoryIcon(ItemIcon.Wood, "Kij bojowy • prymitywna broń osobista");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.StoneClub))
-        {
-            AddInventoryIcon(ItemIcon.Stone, "Kamienna maczuga • ciężka broń osobista");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.HideClothes))
-        {
-            AddInventoryIcon(ItemIcon.RagClothes, "Skórzany ubiór • ubranie osobiste");
-        }
-        if (actor.Equipment.HasFlag(PersonalEquipment.ReedClothes))
-        {
-            AddInventoryIcon(ItemIcon.Reeds, "Sitowiowy ubiór • lekkie ubranie osobiste");
-        }
-        AddInventoryIcon(
-            ItemIcon.Stone,
-            "Osobiste kamienie do rzucania i procy",
-            actor.PersonalStoneAmmo);
-        AddInventoryIcon(
-            ItemIcon.Food,
-            actor.PersonalFood == 0
-                ? "Osobiste racje żywności • pusto"
-                : "Osobiste racje • " + string.Join(", ", actor.PersonalFoodKinds
-                    .GroupBy(kind => kind)
-                    .Select(group =>
-                        $"{DescribeFood(group.Key)} ×{group.Count()} " +
-                        $"(sytość {_engine.Definitions.Food.GetSatiety(group.Key):N0})")),
-            actor.PersonalFood);
-        if (actor.Equipment.HasFlag(PersonalEquipment.PrimitiveWaterskin))
-        {
-            AddWaterskinIcon(actor.PersonalWater);
-        }
         if (actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))
         {
             AddInventoryIcon(ItemIcon.WoodenBucket,
@@ -6796,11 +6798,22 @@ public partial class Main : Node
         }
     }
 
+    private void ConfigureGoblinEquipmentPaperDoll() => _goblinEquipment.Configure(
+        slot => Ui("equipment-slots", slot.ToString()),
+        DescribeResourceVariant,
+        variant => CreateResourceThumbnail(ResourceKind.Equipment, variant),
+        ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone),
+        ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Food),
+        ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.PrimitiveWaterskin),
+        Ui("equipment-paper-doll", "belt"),
+        Ui("equipment-paper-doll", "empty"));
+
     private void AddInventoryIcon(ItemIcon icon, string tooltip, int? quantity = null)
         => AddInventoryIcon(ItemIcons.CreateTexture(_itemIconAtlas, icon), tooltip, quantity);
 
     private void AddInventoryIcon(Texture2D texture, string tooltip, int? quantity = null)
     {
+        _inventoryIcons.Visible = true;
         var slot = new VBoxContainer
         {
             CustomMinimumSize = new Vector2(48, 54),
@@ -6824,35 +6837,6 @@ public partial class Main : Node
                 TooltipText = tooltip,
             });
         }
-        _inventoryIcons.AddChild(slot);
-    }
-
-    private void AddWaterskinIcon(int water)
-    {
-        var tooltip = $"Prymitywny bukłak • woda {water}/{_engine.Definitions.PersonalWaterCapacity} " +
-            "umownych porcji • obecnie jedno picie zużywa jedną porcję";
-        var slot = new HBoxContainer
-        {
-            CustomMinimumSize = new Vector2(62, 44),
-            TooltipText = tooltip,
-        };
-        slot.AddChild(new TextureRect
-        {
-            CustomMinimumSize = new Vector2(44, 40),
-            Texture = ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.PrimitiveWaterskin),
-            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            TooltipText = tooltip,
-        });
-        slot.AddChild(new ProgressBar
-        {
-            CustomMinimumSize = new Vector2(12, 40),
-            MaxValue = _engine.Definitions.PersonalWaterCapacity,
-            Value = water,
-            FillMode = (int)ProgressBar.FillModeEnum.BottomToTop,
-            ShowPercentage = false,
-            TooltipText = tooltip,
-        });
         _inventoryIcons.AddChild(slot);
     }
 
@@ -7165,6 +7149,13 @@ public partial class Main : Node
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood), "Drewno", 2),
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone), "Kamień", 2),
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds), "Sitowie", 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.WoodenHammer,
+            _woodenHammerIcon,
+            DescribeCraftingRecipe(CraftingRecipeKind.WoodenHammer),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood),
+                DescribeResource(ResourceKind.Wood), 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds),
+                DescribeResource(ResourceKind.Reeds), 1));
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.BoneKnife,
             ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.BoneKnife), "Kościany nóż",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Bone), "Kość", 1));

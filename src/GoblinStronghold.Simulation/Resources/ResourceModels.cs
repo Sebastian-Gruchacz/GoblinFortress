@@ -81,6 +81,7 @@ public enum ResourceVariant : byte
     SpiderChitin = 43,
     Lichen = 44,
     Mana = 45,
+    EquipmentWoodenHammer = 46,
 }
 
 public enum ItemLocationKind : byte

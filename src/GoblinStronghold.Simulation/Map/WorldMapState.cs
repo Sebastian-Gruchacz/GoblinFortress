@@ -717,7 +717,8 @@ public sealed class WorldMapState
         SpatialOccupancyChannel channel,
         out SpatialOccupancyClaim claim)
     {
-        if (_occupancy.TryGetValue(new SpatialOccupancyKey(position, channel), out claim))
+        if (_occupancy.TryGetValue(new SpatialOccupancyKey(position, channel), out claim) &&
+            OccupancyClaimAppliesAt(position, channel, claim))
         {
             return true;
         }
@@ -725,13 +726,40 @@ public sealed class WorldMapState
         if (position.Z == 0 || !Baseline.IsTerrainSurfacePosition(position) ||
             !_occupancy.TryGetValue(
                 new SpatialOccupancyKey(position with { Z = 0 }, channel),
-                out claim))
+                out claim) ||
+            !OccupancyClaimAppliesAt(position, channel, claim))
         {
+            claim = default;
             return false;
         }
 
         return _worldObjects.TryGetValue(claim.ObjectId, out var worldObject) &&
             worldObject.Owner is WorldObjectOwner.Nature or WorldObjectOwner.HumanVillage;
+    }
+
+    private bool OccupancyClaimAppliesAt(
+        GridPosition position,
+        SpatialOccupancyChannel channel,
+        SpatialOccupancyClaim claim)
+    {
+        if (!_worldObjects.TryGetValue(claim.ObjectId, out var worldObject))
+        {
+            return false;
+        }
+
+        var effectiveAnchor = GetEffectiveWorldObjectAnchor(worldObject);
+        if (effectiveAnchor == worldObject.Anchor)
+        {
+            return true;
+        }
+
+        return worldObject.Parts.Any(part =>
+            part.Channel == channel &&
+            part.Kind == claim.PartKind &&
+            new GridPosition(
+                effectiveAnchor.X + part.RelativePosition.X,
+                effectiveAnchor.Y + part.RelativePosition.Y,
+                effectiveAnchor.Z + part.RelativePosition.Z) == position);
     }
 
     public bool TryGetFluid(

@@ -1,5 +1,6 @@
 using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Contamination;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
@@ -38,6 +39,31 @@ public sealed partial class SimulationEngine
 
     public IReadOnlyList<ActorPlanningAttemptProfile> GetLastActorPlanningAttempts() =>
         _lastPlanningAttempts;
+
+    private bool ProfileActorPlanner(
+        ActorState actor,
+        string category,
+        Func<bool> planner)
+    {
+        var navigationBefore = Navigation.GetMetrics();
+        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        var result = planner();
+        var duration = System.Diagnostics.Stopwatch.GetTimestamp() - startedAt;
+        var navigationAfter = Navigation.GetMetrics();
+        if (duration > System.Diagnostics.Stopwatch.Frequency / 1_000 ||
+            navigationAfter.Searches != navigationBefore.Searches)
+        {
+            _lastPlanningAttempts.Add(new ActorPlanningAttemptProfile(
+                actor.Id,
+                category,
+                StopwatchTicksToTimeSpan(duration),
+                navigationAfter.Requests - navigationBefore.Requests,
+                navigationAfter.Searches - navigationBefore.Searches,
+                actor.JobKind != ActorJobKind.None));
+        }
+
+        return result;
+    }
 
     private void UpdateActorJobs()
     {
@@ -175,9 +201,12 @@ public sealed partial class SimulationEngine
                     }
                     // Young goblins only help with light transport during their first local season.
                 }
-                else if (TryPlanCorpseDirective(actor))
+                else if (actor.CarriedCorpseId != EntityId.None && ProfileActorPlanner(
+                             actor,
+                             "carried-corpse-directive",
+                             () => TryPlanCorpseDirective(actor)))
                 {
-                    // A specific carcass order remains available outside the raid lifecycle.
+                    // A carried body must be routed before the actor can accept other work.
                 }
                 else if (_raidPhase == GoblinRaidPhase.Marching &&
                          raidPartyIds.Contains(actor.Id) &&
@@ -242,6 +271,13 @@ public sealed partial class SimulationEngine
                              allowDesignatedForage: !reserveForExploration))
                 {
                     // Public priority dominates preference; preference breaks comparable work apart.
+                }
+                else if (ProfileActorPlanner(
+                             actor,
+                             "corpse-directive",
+                             () => TryPlanCorpseDirective(actor)))
+                {
+                    // Explicit carcass orders use otherwise idle dispatcher capacity.
                 }
                 else if (TryPlanFastidiousCleaning(actor, reservedFellingDesignations))
                 {
@@ -900,7 +936,7 @@ public sealed partial class SimulationEngine
             return false;
         }
         if (designation.Kind == WorkDesignationKind.FellTree &&
-            (!actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) ||
+            (!HasFellingTool(actor.Equipment) ||
              !actor.KnownSkills.HasFlag(GoblinSkill.Building)))
         {
             return false;
@@ -1598,7 +1634,7 @@ public sealed partial class SimulationEngine
                 BeginJobLeg(actor, route, GetSurfaceCleaningWorkTicks(target));
                 return true;
             case ActorJobKind.FellTree:
-                if (!actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe))
+                if (!HasFellingTool(actor.Equipment))
                 {
                     return false;
                 }
@@ -1807,7 +1843,9 @@ public sealed partial class SimulationEngine
             itemReservations,
             requiredPosition: null,
             storageOnly: true);
-        var naturalRoute = FindNearestShallowWaterPath(actor.Position);
+        var naturalRoute = stored is null
+            ? FindNearestShallowWaterPath(actor.Position)
+            : null;
         if (stored is null && naturalRoute is null)
         {
             return false;
@@ -2621,7 +2659,7 @@ public sealed partial class SimulationEngine
         ActorState actor,
         ISet<EntityId> reservedDesignations)
     {
-        if (!actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) ||
+        if (!HasFellingTool(actor.Equipment) ||
             !actor.KnownSkills.HasFlag(GoblinSkill.Building))
         {
             return false;
@@ -2661,7 +2699,7 @@ public sealed partial class SimulationEngine
 
     private void UpdateFellTreeJob(ActorState actor)
     {
-        if (!actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) ||
+        if (!HasFellingTool(actor.Equipment) ||
             !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
             designation.Kind != WorkDesignationKind.FellTree ||
             designation.IsSuspended ||
@@ -3634,6 +3672,11 @@ public sealed partial class SimulationEngine
                 IsConstructionSequenceReady(site) &&
                 !HasGroundStackInConstructionFootprint(site) &&
                 !reservedSites.Contains(site.Id) &&
+                CanPlaceConstruction(
+                    site.Kind,
+                    site.Anchor,
+                    site.End,
+                    site.GetFootprint()) &&
                 CanActorBuild(actor, site))
             .OrderByDescending(site => site.Priority)
             .ThenBy(site => ManhattanDistance(actor.Position, site.Anchor))
@@ -3877,7 +3920,12 @@ public sealed partial class SimulationEngine
                      .Select(part => part.Position)
                      .Distinct())
         {
-            RefreshAutonomousCleaningRegistration(position);
+            if (!IsConstructedCleanableSurface(position))
+            {
+                _surfaceGrime.Remove(position);
+                RemoveBloodCleaningDesignations(position);
+            }
+            RefreshReportedCleaningRegistration(position);
         }
         _workDesignations.Remove(designation.Id);
         ResolveUnsupportedOccupants(unsupportedPositions);
@@ -3945,15 +3993,23 @@ public sealed partial class SimulationEngine
     private bool CanActorBuild(ActorState actor, ConstructionSiteState site) =>
         (actor.KnownSkills & site.Capabilities.RequiredSkills) == site.Capabilities.RequiredSkills &&
         HasRequiredConstructionEquipment(actor.Equipment, site.Capabilities.RequiredEquipment) &&
+        ToolCapabilityCatalog.MeetsRequirement(
+            actor.Equipment,
+            site.Capabilities.RequiredToolFunction,
+            site.Capabilities.MinimumToolLevel) &&
         GoblinExperienceSnapshot.GetLevel(actor.BuildingExperience) >=
             site.Capabilities.MinimumBuildingLevel;
+
+    private static bool HasFellingTool(PersonalEquipment equipment) =>
+        ToolCapabilityCatalog.MeetsRequirement(
+            equipment,
+            ToolFunction.Felling,
+            minimumLevel: 1);
 
     private static bool HasRequiredConstructionEquipment(
         PersonalEquipment equipment,
         PersonalEquipment requiredEquipment) =>
-        requiredEquipment == PersonalEquipment.PrimitivePickaxe
-            ? MiningCapabilityPolicy.HasPickaxe(equipment)
-            : (equipment & requiredEquipment) == requiredEquipment;
+        (equipment & requiredEquipment) == requiredEquipment;
 
     private IReadOnlyList<GridPosition>? FindConstructionAccessPath(
         GridPosition start,
@@ -4687,7 +4743,7 @@ public sealed partial class SimulationEngine
                 : designation.Kind switch
             {
                 WorkDesignationKind.FellTree =>
-                    actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) &&
+                    HasFellingTool(actor.Equipment) &&
                     World.GetFellableWood(designation.Target) is not null,
                 WorkDesignationKind.QuarryBoulder =>
                     MiningCapabilityPolicy.HasPickaxe(actor.Equipment) &&
@@ -5441,7 +5497,7 @@ public sealed partial class SimulationEngine
             actor.CarriedStackId != EntityId.None ||
             actor.DestinationZoneId != EntityId.None ||
             actor.ReservedQuantity != 0 ||
-            !actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe) ||
+            !HasFellingTool(actor.Equipment) ||
             !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
             designation.Kind != WorkDesignationKind.FellTree ||
             World.GetFellableWood(designation.Target) is null ||

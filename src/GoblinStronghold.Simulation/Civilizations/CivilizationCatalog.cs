@@ -197,7 +197,7 @@ public sealed class CivilizationCatalog : ICivilizationCatalog
             !nameGenerators.Contains(definition.Identity.NameGeneratorId) ||
             (definition.LegacyRole is CivilizationLegacyRole.PlayerGoblins or
                 CivilizationLegacyRole.HumanVillage) && vitals is null ||
-            vitals is not null && vitals.MaximumHealth < 1 ||
+            vitals is not null && (vitals.MaximumHealth < 1 || vitals.MaximumMana < 0) ||
             (definition.LegacyRole is CivilizationLegacyRole.PlayerGoblins or
                 CivilizationLegacyRole.HumanVillage) && combat is null ||
             combat is not null && (
@@ -275,11 +275,11 @@ public sealed class CivilizationCatalog : ICivilizationCatalog
             generation.TraitSampleKeys.Count ||
         !HasOnlyKnownFlags(
             generation.GuaranteedEquipment,
-            PersonalEquipment.WoodenBucket) ||
+            PersonalEquipment.WoodenHammer) ||
         generation.GuaranteedEquipment == PersonalEquipment.None ||
         !HasOnlyKnownFlags(
             generation.OptionalEquipment,
-            PersonalEquipment.WoodenBucket) ||
+            PersonalEquipment.WoodenHammer) ||
         generation.OptionalEquipment == PersonalEquipment.None ||
         (generation.GuaranteedEquipment & generation.OptionalEquipment) != 0 ||
         generation.OptionalEquipmentRollMaximumExclusive < 1 ||

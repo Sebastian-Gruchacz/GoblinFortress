@@ -14,7 +14,9 @@ public sealed record CivilizationIdentityDefinition(
     ContentId ControllerId,
     ContentId NameGeneratorId);
 
-public sealed record CivilizationVitalsDefinition(int MaximumHealth);
+public sealed record CivilizationVitalsDefinition(
+    int MaximumHealth,
+    int MaximumMana = 0);
 
 public sealed record CivilizationCombatDefinition(
     int MinimumMeleeDamage,

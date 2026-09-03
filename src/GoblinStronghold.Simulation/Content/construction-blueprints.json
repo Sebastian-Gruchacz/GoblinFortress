@@ -121,7 +121,8 @@
       "workTicksPerFootprintCell": true,
       "capabilities": {
         "requiredSkills": "Building",
-        "requiredEquipment": "PrimitivePickaxe"
+        "requiredToolFunction": "Construction",
+        "minimumToolLevel": 1
       }
     },
     {
@@ -138,7 +139,8 @@
       "workTicks": 45,
       "capabilities": {
         "requiredSkills": "Building",
-        "requiredEquipment": "PrimitivePickaxe"
+        "requiredToolFunction": "Construction",
+        "minimumToolLevel": 1
       }
     },
     {
@@ -196,7 +198,8 @@
       "capabilities": {
         "requiredSkills": "Building",
         "minimumBuildingLevel": 1,
-        "requiredEquipment": "WoodenAxe"
+        "requiredToolFunction": "Construction",
+        "minimumToolLevel": 1
       },
       "workshop": "FittedWorkshop"
     },
@@ -308,7 +311,8 @@
       "capabilities": {
         "requiredSkills": "Building",
         "minimumBuildingLevel": 2,
-        "requiredEquipment": "PrimitivePickaxe"
+        "requiredToolFunction": "Construction",
+        "minimumToolLevel": 1
       }
     },
     {
@@ -326,7 +330,8 @@
       "capabilities": {
         "requiredSkills": "Building",
         "minimumBuildingLevel": 1,
-        "requiredEquipment": "PrimitivePickaxe"
+        "requiredToolFunction": "Construction",
+        "minimumToolLevel": 1
       },
       "workshop": "Bloomery"
     },
@@ -345,7 +350,8 @@
       "capabilities": {
         "requiredSkills": "Building",
         "minimumBuildingLevel": 1,
-        "requiredEquipment": "PrimitivePickaxe"
+        "requiredToolFunction": "Construction",
+        "minimumToolLevel": 1
       },
       "workshop": "SmeltingFurnace"
     },
@@ -364,7 +370,8 @@
       "capabilities": {
         "requiredSkills": "Building",
         "minimumBuildingLevel": 2,
-        "requiredEquipment": "PrimitivePickaxe"
+        "requiredToolFunction": "Construction",
+        "minimumToolLevel": 1
       },
       "workshop": "CrucibleFurnace"
     },
@@ -436,7 +443,8 @@
       "workTicksPerFootprintCell": true,
       "capabilities": {
         "requiredSkills": "Building",
-        "requiredEquipment": "PrimitivePickaxe"
+        "requiredToolFunction": "Construction",
+        "minimumToolLevel": 1
       }
     },
     {
@@ -466,7 +474,8 @@
       "workTicks": 65,
       "capabilities": {
         "requiredSkills": "Building",
-        "requiredEquipment": "PrimitivePickaxe"
+        "requiredToolFunction": "Mining",
+        "minimumToolLevel": 2
       }
     },
     {

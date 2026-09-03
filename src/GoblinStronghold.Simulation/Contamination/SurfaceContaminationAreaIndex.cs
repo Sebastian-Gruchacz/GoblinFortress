@@ -18,6 +18,8 @@ internal sealed class SurfaceContaminationAreaIndex
 
     public int AreaCount => _areas.Count;
 
+    public bool Contains(GridPosition position) => _areaByPosition.ContainsKey(position);
+
     public bool Add(GridPosition position)
     {
         if (_areaByPosition.ContainsKey(position))
@@ -113,6 +115,9 @@ internal sealed class SurfaceContaminationAreaIndex
         _areas.Values
             .OrderBy(area => area.Anchor, PositionComparer)
             .Select(area => new SurfaceContaminationArea(area.Anchor, area.Positions));
+
+    public IReadOnlyList<GridPosition> CreatePositionSnapshot() =>
+        _areaByPosition.Keys.OrderBy(position => position, PositionComparer).ToArray();
 
     public void Clear()
     {

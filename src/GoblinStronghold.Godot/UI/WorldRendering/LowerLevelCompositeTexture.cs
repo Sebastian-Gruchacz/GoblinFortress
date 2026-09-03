@@ -18,6 +18,7 @@ internal sealed class LowerLevelCompositeTextureCache : IDisposable
     private readonly Dictionary<CompositeSourceKey, Sprite2D> _sources = [];
     private ulong? _signature;
     private LowerLevelCompositeTexture? _snapshot;
+    private LowerLevelCompositeTexture? _pendingSnapshot;
 
     public LowerLevelCompositeTexture? Current => _snapshot;
 
@@ -53,7 +54,7 @@ internal sealed class LowerLevelCompositeTextureCache : IDisposable
         }
 
         var signature = CreateSignature(chunks, activeLevel);
-        if (_signature == signature && _snapshot is not null)
+        if (_signature == signature)
         {
             return _snapshot;
         }
@@ -110,12 +111,25 @@ internal sealed class LowerLevelCompositeTextureCache : IDisposable
 
         _viewport.RenderTargetClearMode = SubViewport.ClearMode.Always;
         _viewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
-        _snapshot = new LowerLevelCompositeTexture(
+        _pendingSnapshot = new LowerLevelCompositeTexture(
             _viewport.GetTexture(),
             new Rect2(pixelOrigin, pixelSize),
             _sources.Count);
+        _snapshot = null;
         _signature = signature;
-        return _snapshot;
+        return null;
+    }
+
+    public bool PromoteRenderedSnapshot()
+    {
+        if (_pendingSnapshot is not { } ready)
+        {
+            return false;
+        }
+
+        _snapshot = ready;
+        _pendingSnapshot = null;
+        return true;
     }
 
     public void Reset()
@@ -124,6 +138,7 @@ internal sealed class LowerLevelCompositeTextureCache : IDisposable
         _viewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
         _signature = null;
         _snapshot = null;
+        _pendingSnapshot = null;
     }
 
     public void Dispose()

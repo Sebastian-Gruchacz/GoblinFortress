@@ -14,6 +14,8 @@ public readonly record struct WorldPresentationPerformanceMetrics(
     TimedPresentationOperationMetrics ActiveLightMapBuilds,
     long ActiveLightCells,
     long ActiveLightEmitterEvaluations,
+    TimedPresentationOperationMetrics ActiveFogMapBuilds,
+    long ActiveFogCells,
     TimedPresentationOperationMetrics LowerChunkRebuildBatches,
     long LowerChunksRebuilt,
     long GeometryTextureRebuilds,

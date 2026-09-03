@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Crafting;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Workshops;
@@ -41,6 +42,131 @@ public sealed class CraftingTests
             actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe)));
         Assert.All(smallTribe.CreateSnapshot().Actors, actor => Assert.True(
             actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe)));
+    }
+
+    [Fact]
+    public void StartingTribeReceivesTwoWoodenHammersWhenPossible()
+    {
+        var largeTribe = SimulationEngine.Create(
+            new WorldSeed(0x48414D4D455253UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 5,
+            initialFoodStock: 12);
+        var loneGoblin = SimulationEngine.Create(
+            new WorldSeed(0x48414D4D455254UL),
+            SimulationDefinitions.Foundation,
+            initialGoblinCount: 1,
+            initialFoodStock: 12);
+
+        Assert.Equal(2, largeTribe.CreateSnapshot().Actors.Count(actor =>
+            actor.Equipment.HasFlag(PersonalEquipment.WoodenHammer)));
+        var loneActor = Assert.Single(loneGoblin.CreateSnapshot().Actors);
+        Assert.True(loneActor.Equipment.HasFlag(PersonalEquipment.WoodenHammer));
+        Assert.True(loneActor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe));
+    }
+
+    [Fact]
+    public void ToolsMeleeWeaponsAndRangedWeaponsUseSeparateSlots()
+    {
+        Assert.Equal(
+            EquipmentSlot.ConstructionTool,
+            EquipmentCatalog.FindDefinition(PersonalEquipment.WoodenHammer)!.Value.Slot);
+        Assert.Equal(
+            EquipmentSlot.MiningTool,
+            EquipmentCatalog.FindDefinition(PersonalEquipment.PrimitivePickaxe)!.Value.Slot);
+        Assert.Equal(
+            EquipmentSlot.FellingTool,
+            EquipmentCatalog.FindDefinition(PersonalEquipment.WoodenAxe)!.Value.Slot);
+        Assert.Equal(
+            EquipmentSlot.MeleeWeapon,
+            EquipmentCatalog.FindDefinition(PersonalEquipment.StoneClub)!.Value.Slot);
+        Assert.Equal(
+            EquipmentSlot.RangedWeapon,
+            EquipmentCatalog.FindDefinition(PersonalEquipment.PrimitiveSling)!.Value.Slot);
+    }
+
+    [Fact]
+    public void ToolFunctionsUseIndependentToolBeltPockets()
+    {
+        Assert.Equal(1, ToolCapabilityCatalog.GetLevel(PersonalEquipment.WoodenHammer));
+        Assert.Equal(1, ToolCapabilityCatalog.GetLevel(PersonalEquipment.WoodenAxe));
+        Assert.Equal(2, ToolCapabilityCatalog.GetLevel(PersonalEquipment.PrimitivePickaxe));
+        Assert.Equal(3, ToolCapabilityCatalog.GetLevel(PersonalEquipment.ReinforcedPickaxe));
+        Assert.Equal(ToolFunction.Construction,
+            ToolCapabilityCatalog.GetFunctions(PersonalEquipment.WoodenHammer));
+        Assert.Equal(ToolFunction.Felling,
+            ToolCapabilityCatalog.GetFunctions(PersonalEquipment.WoodenAxe));
+        Assert.Equal(ToolFunction.Mining,
+            ToolCapabilityCatalog.GetFunctions(PersonalEquipment.PrimitivePickaxe));
+        Assert.True(EquipmentCatalog.IsUpgrade(
+            PersonalEquipment.WoodenHammer,
+            PersonalEquipment.PrimitivePickaxe));
+        Assert.True(EquipmentCatalog.IsUpgrade(
+            PersonalEquipment.PrimitivePickaxe,
+            PersonalEquipment.WoodenHammer));
+        Assert.True(EquipmentCatalog.IsUpgrade(
+            PersonalEquipment.PrimitivePickaxe,
+            PersonalEquipment.ReinforcedPickaxe));
+        Assert.Empty(EquipmentCatalog.GetReplacedDefinitions(
+            PersonalEquipment.WoodenHammer,
+            PersonalEquipment.PrimitivePickaxe));
+        Assert.Equal(
+            PersonalEquipment.PrimitivePickaxe,
+            Assert.Single(EquipmentCatalog.GetReplacedDefinitions(
+                PersonalEquipment.WoodenHammer | PersonalEquipment.PrimitivePickaxe,
+                PersonalEquipment.ReinforcedPickaxe)).Equipment);
+    }
+
+    [Fact]
+    public void ToolLevelDoesNotGrantAnUnrelatedWorkFunction()
+    {
+        Assert.True(ToolCapabilityCatalog.MeetsRequirement(
+            PersonalEquipment.WoodenHammer,
+            ToolFunction.Construction,
+            minimumLevel: 1));
+        Assert.False(ToolCapabilityCatalog.MeetsRequirement(
+            PersonalEquipment.WoodenAxe,
+            ToolFunction.Construction,
+            minimumLevel: 1));
+        Assert.True(ToolCapabilityCatalog.MeetsRequirement(
+            PersonalEquipment.WoodenAxe,
+            ToolFunction.Felling,
+            minimumLevel: 1));
+        Assert.False(ToolCapabilityCatalog.MeetsRequirement(
+            PersonalEquipment.WoodenHammer,
+            ToolFunction.Felling,
+            minimumLevel: 1));
+        Assert.True(ToolCapabilityCatalog.MeetsRequirement(
+            PersonalEquipment.PrimitivePickaxe,
+            ToolFunction.Mining,
+            minimumLevel: 2));
+    }
+
+    [Fact]
+    public void CombatUsesWhicheverMeleeWeaponOrToolDealsMoreDamage()
+    {
+        var settings = SimulationDefinitions.Foundation.PrimitiveEquipment;
+
+        Assert.Equal(
+            settings.PrimitivePickaxeDamageBonus,
+            EquipmentCombatPolicy.GetBestMeleeDamageBonus(
+                PersonalEquipment.BoneKnife | PersonalEquipment.PrimitivePickaxe,
+                settings));
+        Assert.Equal(
+            settings.StoneClubDamageBonus,
+            EquipmentCombatPolicy.GetBestMeleeDamageBonus(
+                PersonalEquipment.StoneClub | PersonalEquipment.PrimitivePickaxe,
+                settings));
+        Assert.Equal(
+            settings.WoodenHammerDamageBonus,
+            EquipmentCombatPolicy.GetBestMeleeDamageBonus(
+                PersonalEquipment.WoodenHammer,
+                settings));
+        Assert.Equal(
+            settings.WoodenAxeDamageBonus,
+            EquipmentCombatPolicy.GetBestMeleeDamageBonus(
+                PersonalEquipment.BoneKnife | PersonalEquipment.WoodenAxe,
+                settings));
     }
 
     [Fact]
@@ -596,7 +722,7 @@ public sealed class CraftingTests
     }
 
     [Fact]
-    public void BetterMainHandEquipmentReplacesAndStoresPreviousWeapon()
+    public void BetterMeleeWeaponReplacesAndStoresPreviousWeapon()
     {
         var definitions = SimulationDefinitions.Foundation;
         var engine = SimulationEngine.Create(
@@ -639,7 +765,7 @@ public sealed class CraftingTests
         Assert.True(equipped.HasFlag(PersonalEquipment.StoneClub));
         Assert.False(equipped.HasFlag(PersonalEquipment.FightingStick));
         Assert.Single(EquipmentCatalog.GetDefinitions(equipped), item =>
-            item.Slot == EquipmentSlot.MainHand);
+            item.Slot == EquipmentSlot.MeleeWeapon);
         Assert.Contains(snapshot.ItemStacks, stack =>
             stack.Resource == ResourceKind.Equipment &&
             stack.Variant == ResourceVariant.EquipmentFightingStick &&
@@ -683,7 +809,8 @@ public sealed class CraftingTests
             actor!["equipment"] = actor["equipment"]!.GetValue<int>() &
                 ~((int)PersonalEquipment.PrimitiveWaterskin |
                   (int)PersonalEquipment.WoodenAxe |
-                  (int)PersonalEquipment.PrimitivePickaxe);
+                  (int)PersonalEquipment.PrimitivePickaxe |
+                  (int)PersonalEquipment.WoodenHammer);
             actor["personalWater"] = 0;
         }
         engine = SimulationEngine.Load(save.ToJsonString(), definitions);
@@ -693,17 +820,20 @@ public sealed class CraftingTests
             actor.Equipment.HasFlag(PersonalEquipment.WoodenAxe));
         Assert.DoesNotContain(engine.CreateSnapshot().Actors, actor =>
             actor.Equipment.HasFlag(PersonalEquipment.PrimitivePickaxe));
+        Assert.DoesNotContain(engine.CreateSnapshot().Actors, actor =>
+            actor.Equipment.HasFlag(PersonalEquipment.WoodenHammer));
         engine = AddCraftingMaterials(engine, definitions, engine.Map.GoblinSpawn,
             (ResourceKind.Bone, 1),
-            (ResourceKind.Wood, 12),
+            (ResourceKind.Wood, 14),
             (ResourceKind.Stone, 4),
             (ResourceKind.Hide, 3),
-            (ResourceKind.Reeds, 8));
+            (ResourceKind.Reeds, 9));
         foreach (var recipe in new[]
                  {
                      CraftingRecipeKind.BoneKnife,
                      CraftingRecipeKind.PrimitiveAxe,
                      CraftingRecipeKind.PrimitivePickaxe,
+                     CraftingRecipeKind.WoodenHammer,
                      CraftingRecipeKind.FightingStick,
                      CraftingRecipeKind.StoneClub,
                      CraftingRecipeKind.HideClothes,
@@ -741,6 +871,7 @@ public sealed class CraftingTests
                      ResourceVariant.EquipmentBoneKnife,
                      ResourceVariant.EquipmentWoodenAxe,
                      ResourceVariant.EquipmentPrimitivePickaxe,
+                     ResourceVariant.EquipmentWoodenHammer,
                      ResourceVariant.EquipmentFightingStick,
                      ResourceVariant.EquipmentStoneClub,
                      ResourceVariant.EquipmentHideClothes,

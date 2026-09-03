@@ -52,6 +52,20 @@ public sealed class ConstructionRemovalTests
         SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
         var floor = Assert.Single(engine.World.GetWorldObjectsAt(position), worldObject =>
             worldObject.Kind == WorldObjectKind.WoodenFloor);
+        var dirtySave = JsonNode.Parse(engine.Save())!.AsObject();
+        dirtySave["surfaceGrime"] = new JsonArray(new JsonObject
+        {
+            ["x"] = position.X,
+            ["y"] = position.Y,
+            ["z"] = position.Z,
+            ["volume"] = 8,
+            ["createdAtTick"] = engine.CurrentTick.Value,
+            ["lastChangedAtTick"] = engine.CurrentTick.Value,
+        });
+        engine = SimulationEngine.Load(
+            dirtySave.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        Assert.Single(engine.CreateSnapshot().SurfaceGrime);
 
         engine.QueueCommand(SimulationCommand.DismantleWorldObject(
             engine.CurrentTick.Next(),
@@ -77,6 +91,10 @@ public sealed class ConstructionRemovalTests
             .All(worldObject => worldObject.Id != floor.Id));
 
         Assert.True(engine.World.CanBuildFloors([position]));
+        Assert.Empty(engine.CreateSnapshot().SurfaceGrime);
+        Assert.Empty(SimulationEngine.Load(
+            engine.Save(),
+            SimulationDefinitions.Foundation).CreateSnapshot().SurfaceGrime);
         Assert.Contains(engine.DrainWorldChanges(), change =>
             change.Kind == WorldChangeKind.StructureDismantled);
     }
@@ -105,6 +123,10 @@ public sealed class ConstructionRemovalTests
         var material = Assert.Single(site.Materials);
         Assert.Equal(ResourceKind.Reeds, material.Resource);
         Assert.Equal(2, material.RequiredQuantity);
+
+        engine = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        Assert.Equal(ResourceKind.Reeds, Assert.Single(site.Materials).Resource);
         SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
         var compost = Assert.Single(engine.World.GetWorldObjectsAt(position), worldObject =>
             worldObject.Kind == WorldObjectKind.GoblinCompost);

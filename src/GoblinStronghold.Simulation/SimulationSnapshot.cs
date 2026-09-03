@@ -244,6 +244,7 @@ public enum PersonalEquipment : ushort
     ReedClothes = 1 << 9,
     ReinforcedPickaxe = 1 << 10,
     WoodenBucket = 1 << 11,
+    WoodenHammer = 1 << 12,
 }
 
 public sealed class PersonalFoodContentsSnapshot : IReadOnlyList<FoodKind>,
@@ -324,6 +325,10 @@ public readonly record struct ActorSnapshot(
     public PolityId PolityId { get; init; }
 
     public EquipmentLoadoutSnapshot Loadout { get; init; } = new([], 0, 0, 0);
+
+    public int Mana { get; init; }
+
+    public int MaximumMana { get; init; }
 
     public EntityId CarriedCorpseId { get; init; }
 

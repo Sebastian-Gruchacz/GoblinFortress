@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Construction;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Planning;
 using GoblinStronghold.Simulation.Resources;
@@ -117,9 +118,60 @@ public sealed class ConstructionBlueprintCatalogTests
         Assert.True(definition.RetainsMaterialIdentity);
         Assert.Equal(8, definition.GetRequiredQuantity(1));
         Assert.Equal(1, definition.Capabilities.MinimumBuildingLevel);
-        Assert.Equal(PersonalEquipment.WoodenAxe,
+        Assert.Equal(PersonalEquipment.None,
             definition.Capabilities.RequiredEquipment);
+        Assert.Equal(ToolFunction.Construction,
+            definition.Capabilities.RequiredToolFunction);
+        Assert.Equal(1, definition.Capabilities.MinimumToolLevel);
         Assert.Equal(2, workshop.Level);
+    }
+
+    [Fact]
+    public void ConstructionUsesMinimumToolLevels()
+    {
+        var ordinaryConstruction = new[]
+        {
+            ConstructionKind.StoneWall,
+            ConstructionKind.StoneDoorFrame,
+            ConstructionKind.FittedWorkshop,
+            ConstructionKind.BasaltWalkway,
+            ConstructionKind.Bloomery,
+            ConstructionKind.SmeltingFurnace,
+            ConstructionKind.CrucibleFurnace,
+            ConstructionKind.StoneFloor,
+        };
+
+        Assert.All(ordinaryConstruction, kind =>
+        {
+            var capabilities = ConstructionBlueprintDefinitions.Get(kind).Capabilities;
+            Assert.Equal(PersonalEquipment.None, capabilities.RequiredEquipment);
+            Assert.Equal(ToolFunction.Construction, capabilities.RequiredToolFunction);
+            Assert.Equal(1, capabilities.MinimumToolLevel);
+        });
+        Assert.Equal(
+            PersonalEquipment.None,
+            ConstructionBlueprintDefinitions.Get(ConstructionKind.PrimitiveWorkshop)
+                .Capabilities.RequiredEquipment);
+        Assert.Equal(
+            ToolFunction.None,
+            ConstructionBlueprintDefinitions.Get(ConstructionKind.PrimitiveWorkshop)
+                .Capabilities.RequiredToolFunction);
+        Assert.Equal(
+            0,
+            ConstructionBlueprintDefinitions.Get(ConstructionKind.PrimitiveWorkshop)
+                .Capabilities.MinimumToolLevel);
+        Assert.Equal(
+            PersonalEquipment.None,
+            ConstructionBlueprintDefinitions.Get(ConstructionKind.StoneRamp)
+                .Capabilities.RequiredEquipment);
+        Assert.Equal(
+            ToolFunction.Mining,
+            ConstructionBlueprintDefinitions.Get(ConstructionKind.StoneRamp)
+                .Capabilities.RequiredToolFunction);
+        Assert.Equal(
+            2,
+            ConstructionBlueprintDefinitions.Get(ConstructionKind.StoneRamp)
+                .Capabilities.MinimumToolLevel);
     }
 
     [Fact]

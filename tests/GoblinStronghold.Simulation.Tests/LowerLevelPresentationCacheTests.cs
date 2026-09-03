@@ -26,6 +26,22 @@ public sealed class LowerLevelPresentationCacheTests
     }
 
     [Fact]
+    public void RetainedViewportBoundsCanReserveTwoChunksForPanning()
+    {
+        var expanded = RetainedPresentationBoundsPolicy.ExpandToChunks(
+            new PresentationCellBounds(48, 48, 80, 80),
+            chunkSize: 16,
+            mapWidth: 128,
+            mapHeight: 128,
+            marginChunks: 2);
+
+        Assert.Equal(new PresentationCellBounds(16, 16, 112, 112), expanded);
+        Assert.True(RetainedPresentationBoundsPolicy.Contains(
+            expanded,
+            new PresentationCellBounds(40, 40, 88, 88)));
+    }
+
+    [Fact]
     public void ActiveStaticPresentationIgnoresActorOnlyTickChanges()
     {
         var seed = new WorldSeed(0x535441544943UL);

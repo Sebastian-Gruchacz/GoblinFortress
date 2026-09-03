@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -620,8 +621,9 @@ public sealed class SimulationEngineTests
         var frameSite = Assert.Single(engine.CreateSnapshot().ConstructionSites);
         Assert.Equal(ConstructionKind.StoneDoorFrame, frameSite.Kind);
         Assert.Equal(ResourceKind.Stone, Assert.Single(frameSite.Materials).Resource);
-        Assert.Equal(PersonalEquipment.PrimitivePickaxe,
-            frameSite.Capabilities.RequiredEquipment);
+        Assert.Equal(PersonalEquipment.None, frameSite.Capabilities.RequiredEquipment);
+        Assert.Equal(ToolFunction.Construction, frameSite.Capabilities.RequiredToolFunction);
+        Assert.Equal(1, frameSite.Capabilities.MinimumToolLevel);
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
         SimulationTestSteps.AdvanceUntilConstructionCompletes(restored);

@@ -40,6 +40,7 @@ public partial class WorldView : Node2D
     ];
 
     private const float TileSize = 20f;
+    private const int StaticRetainedMarginChunks = 2;
     private const double WaterAnimationCycleSeconds = 4.0;
     private const double WorkAnimationCycleSeconds = 0.68;
     private const double WorkAnimationRedrawSeconds = 1d / 20d;
@@ -109,6 +110,8 @@ public partial class WorldView : Node2D
     private readonly Dictionary<int, StructureRenderCache> _structureRenderCaches = [];
     private readonly ActiveLevelLightIndex _activeLevelLights = new();
     private readonly ActiveLevelLightMap _activeLevelLightMap = new();
+    private readonly ActiveLevelFogMap _activeLevelFogMap = new();
+    private VisibleLightEmitterCache? _visibleLightEmitterCache;
     private readonly LowerLevelPresentationState _lowerLevelPresentation = new();
     private readonly TimedPresentationOperationCounter _worldDraws = new();
     private readonly MaterialPaletteTextureCache _materialPaletteTextures = new();
@@ -141,6 +144,7 @@ public partial class WorldView : Node2D
     {
         var emitterQueries = _activeLevelLights.GetQueryMetrics();
         var activeLight = _activeLevelLightMap.GetMetrics();
+        var activeFog = _activeLevelFogMap.GetMetrics();
         var lower = (_staticLayer?._lowerLevelPresentation ?? _lowerLevelPresentation)
             .GetPerformanceMetrics();
         return new WorldPresentationPerformanceMetrics(
@@ -149,6 +153,8 @@ public partial class WorldView : Node2D
             activeLight.Timings,
             activeLight.Cells,
             activeLight.EmitterEvaluations,
+            activeFog.Timings,
+            activeFog.Cells,
             lower.Timings,
             lower.Chunks,
             lower.GeometryTextures,
@@ -246,6 +252,7 @@ public partial class WorldView : Node2D
         _materialPaletteTextures.Dispose();
         _animalPaletteTextures.Dispose();
         _activeLevelLightMap.Dispose();
+        _activeLevelFogMap.Dispose();
         _lowerLevelPresentation.Dispose();
         _lowerLevelComposite?.Dispose();
         _onionLayerPainter?.Dispose();
@@ -268,6 +275,8 @@ public partial class WorldView : Node2D
         _structureRenderCaches.Clear();
         _activeLevelLights.Reset();
         _activeLevelLightMap.Reset();
+        _activeLevelFogMap.Reset();
+        _visibleLightEmitterCache = null;
         _lowerLevelPresentation.Reset();
         _lowerLevelComposite?.Reset();
         _onionActiveTopologySignature = null;
@@ -292,7 +301,7 @@ public partial class WorldView : Node2D
     public void Refresh(SimulationSnapshot snapshot)
     {
         var activeTopologySignature = _onionActiveTopologySignature;
-        if (UsesOnionLayersAtVisibleLevel && _renderPass == WorldRenderPass.Static &&
+        if (_renderPass == WorldRenderPass.Static &&
             (!_hasSnapshot || _snapshotTopologyVersion != _engine.World.TopologyVersion ||
              activeTopologySignature is null))
         {
@@ -300,15 +309,13 @@ public partial class WorldView : Node2D
                 ActiveLevelTopologySignaturePolicy.Create(_engine.World, _visibleLevel);
         }
         var redrawStaticImmediately = !_hasSnapshot ||
-            !UsesOnionLayersAtVisibleLevel &&
-            (snapshot.WorldVersion != _snapshot.WorldVersion ||
-             _snapshotTopologyVersion != _engine.World.TopologyVersion);
+            activeTopologySignature != _onionActiveTopologySignature;
         var staticPresentationChanged = _renderPass == WorldRenderPass.Static &&
             (!_hasSnapshot || ActiveStaticPresentationChangePolicy.HasChanged(
                 _snapshot,
                 snapshot,
                 _visibleLevel,
-                includeAnyWorldVersion: !UsesOnionLayersAtVisibleLevel) ||
+                includeAnyWorldVersion: false) ||
              activeTopologySignature != _onionActiveTopologySignature);
         _snapshot = snapshot;
         _hasSnapshot = true;
@@ -350,6 +357,7 @@ public partial class WorldView : Node2D
             _useUndergroundOnionLayers != normalized.UndergroundOnionLayers;
         _useOnionLayers = normalized.OnionLayers;
         _useUndergroundOnionLayers = normalized.UndergroundOnionLayers;
+        _visibleLightEmitterCache = null;
         _lowerLevelRefreshSeconds = normalized.LowerLayerRefreshSeconds;
         _staticRetainedChunkSize = normalized.LowerLayerChunkSize;
         _hasStaticRetainedBounds = false;
@@ -432,6 +440,29 @@ public partial class WorldView : Node2D
     {
         _selectedActorIds = actorIds.ToHashSet();
         QueueRedraw();
+    }
+
+    public EntityId HitTestVisibleActor(Vector2 worldPosition)
+    {
+        const float hitRadius = 8f;
+        var visibleActors = _snapshot.Actors
+            .Where(actor => actor.Position.Z == _visibleLevel &&
+                _snapshot.GetVisibility(actor.Position, _engine.Map.Width) ==
+                    CellVisibility.Visible)
+            .ToArray();
+        var offsets = CreateActorOffsets(visibleActors);
+        return visibleActors
+            .Select(actor => new
+            {
+                actor.Id,
+                DistanceSquared = worldPosition.DistanceSquaredTo(
+                    GetVisualActorPosition(actor) + offsets[actor.Id]),
+            })
+            .Where(candidate => candidate.DistanceSquared <= hitRadius * hitRadius)
+            .OrderBy(candidate => candidate.DistanceSquared)
+            .ThenBy(candidate => candidate.Id)
+            .Select(candidate => candidate.Id)
+            .FirstOrDefault();
     }
 
     public void SetConstructionPreview(
@@ -632,7 +663,13 @@ public partial class WorldView : Node2D
 
     private void ProcessStaticLayer(double delta)
     {
-        var viewportBounds = GetViewportCellBounds(padding: 2);
+        if (_lowerLevelComposite?.PromoteRenderedSnapshot() == true)
+        {
+            QueueRedraw();
+        }
+
+        var viewportBounds = GetViewportCellBounds(
+            padding: Math.Max(2, _staticRetainedChunkSize / 2));
         if (!_hasStaticRetainedBounds ||
             !RetainedPresentationBoundsPolicy.Contains(
                 ToPresentationBounds(_staticRetainedBounds),
@@ -640,6 +677,10 @@ public partial class WorldView : Node2D
         {
             _staticRetainedBounds = CreateStaticRetainedBounds(viewportBounds);
             _hasStaticRetainedBounds = true;
+            if (!UsesOnionLayersAtVisibleLevel)
+            {
+                _lowerLevelRefreshElapsed = _lowerLevelRefreshSeconds;
+            }
             QueueRedraw();
         }
 
@@ -3599,10 +3640,7 @@ public partial class WorldView : Node2D
             bounds.MinimumY * TileSize,
             (bounds.MaximumX - bounds.MinimumX) * TileSize,
             (bounds.MaximumY - bounds.MinimumY) * TileSize);
-        var emitters = QueryVisibleLightEmitters(bounds)
-            .Where(emitter => _snapshot.GetVisibility(emitter.Position, _engine.Map.Width) !=
-                CellVisibility.Unknown)
-            .ToArray();
+        var emitters = QueryVisibleLightEmitters(bounds);
         var texture = _activeLevelLightMap.Render(
             _engine,
             _snapshot,
@@ -3628,15 +3666,37 @@ public partial class WorldView : Node2D
     }
 
     private IReadOnlyList<LightEmitterSnapshot> QueryVisibleLightEmitters(
-        (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds) =>
-        _activeLevelLights.Query(
+        (int MinimumX, int MinimumY, int MaximumX, int MaximumY) bounds)
+    {
+        var lowerPresentation = _staticLayer?._lowerLevelPresentation ??
+            _lowerLevelPresentation;
+        var key = new VisibleLightEmitterCacheKey(
+            _snapshot.Tick.Value,
+            _engine.World.TopologyVersion,
+            lowerPresentation.GetPerformanceMetrics().GeometryTextures,
+            _visibleLevel,
+            bounds.MinimumX,
+            bounds.MinimumY,
+            bounds.MaximumX,
+            bounds.MaximumY);
+        if (_visibleLightEmitterCache is { } cached && cached.Key == key)
+        {
+            return cached.Emitters;
+        }
+
+        var emitters = _activeLevelLights.Query(
                 _visibleLevel,
                 bounds.MinimumX,
                 bounds.MinimumY,
                 bounds.MaximumX,
                 bounds.MaximumY)
-            .Concat(_lowerLevelPresentation.ProjectedLightEmitters)
+            .Concat(lowerPresentation.ProjectedLightEmitters)
+            .Where(emitter => _snapshot.GetVisibility(emitter.Position, _engine.Map.Width) !=
+                CellVisibility.Unknown)
             .ToArray();
+        _visibleLightEmitterCache = new VisibleLightEmitterCache(key, emitters);
+        return emitters;
+    }
 
     private bool HasVisibleFlickeringLight()
     {
@@ -3648,6 +3708,20 @@ public partial class WorldView : Node2D
         return QueryVisibleLightEmitters(GetVisibleCellBounds(padding: 0))
             .Any(emitter => LightEmitterCatalog.Get(emitter.Handle.DefinitionId).FlickerAmount > 0f);
     }
+
+    private readonly record struct VisibleLightEmitterCacheKey(
+        long Tick,
+        ulong TopologyVersion,
+        long LowerGeometryTextureRebuilds,
+        int Level,
+        int MinimumX,
+        int MinimumY,
+        int MaximumX,
+        int MaximumY);
+
+    private sealed record VisibleLightEmitterCache(
+        VisibleLightEmitterCacheKey Key,
+        IReadOnlyList<LightEmitterSnapshot> Emitters);
 
     private void DrawStorageAreas()
     {
@@ -3937,24 +4011,23 @@ public partial class WorldView : Node2D
     private void DrawFog()
     {
         var bounds = GetVisibleCellBounds();
-        for (var y = bounds.MinimumY; y < bounds.MaximumY; y++)
-        {
-            for (var x = bounds.MinimumX; x < bounds.MaximumX; x++)
-            {
-                var position = new GridPosition(x, y, _visibleLevel);
-                var visibility = GetRenderedVisibility(position);
-                var color = visibility switch
-                {
-                    CellVisibility.Unknown => new Color(0.035f, 0.045f, 0.04f, 0.97f),
-                    CellVisibility.Explored => new Color(0.04f, 0.06f, 0.05f, 0.58f),
-                    _ => Colors.Transparent,
-                };
-                if (color.A > 0)
-                {
-                    DrawRect(CellRect(x, y), color);
-                }
-            }
-        }
+        var texture = _activeLevelFogMap.Render(
+            _snapshot,
+            _engine.World.TopologyVersion,
+            _visibleLevel,
+            bounds.MinimumX,
+            bounds.MinimumY,
+            bounds.MaximumX,
+            bounds.MaximumY,
+            GetRenderedVisibility);
+        DrawTextureRect(
+            texture,
+            new Rect2(
+                bounds.MinimumX * TileSize,
+                bounds.MinimumY * TileSize,
+                (bounds.MaximumX - bounds.MinimumX) * TileSize,
+                (bounds.MaximumY - bounds.MinimumY) * TileSize),
+            tile: false);
     }
 
     private CellVisibility GetRenderedVisibility(GridPosition position)
@@ -4232,7 +4305,8 @@ public partial class WorldView : Node2D
             ToPresentationBounds(viewportBounds),
             _staticRetainedChunkSize,
             _engine.Map.Width,
-            _engine.Map.Height);
+            _engine.Map.Height,
+            StaticRetainedMarginChunks);
         return (expanded.MinimumX, expanded.MinimumY, expanded.MaximumX, expanded.MaximumY);
     }
 

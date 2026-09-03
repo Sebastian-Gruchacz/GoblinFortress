@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -151,7 +152,9 @@ public sealed class DeepGeologyTests
         Assert.Equal(3, site.RequiredQuantity);
         Assert.Equal(GoblinSkill.Building, site.Capabilities.RequiredSkills);
         Assert.Equal(2, site.Capabilities.MinimumBuildingLevel);
-        Assert.Equal(PersonalEquipment.PrimitivePickaxe, site.Capabilities.RequiredEquipment);
+        Assert.Equal(PersonalEquipment.None, site.Capabilities.RequiredEquipment);
+        Assert.Equal(ToolFunction.Construction, site.Capabilities.RequiredToolFunction);
+        Assert.Equal(1, site.Capabilities.MinimumToolLevel);
     }
 
     [Fact]

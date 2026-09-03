@@ -1,5 +1,7 @@
 using System.Text.Json;
 using GoblinStronghold.Simulation.Civilizations.Polities;
+using GoblinStronghold.Simulation.Construction;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Map.Generation;
 
@@ -16,7 +18,13 @@ public static class SimulationSaveFormat
     public const int WorkTypePrioritiesMigrationVersion = 76;
     public const int FoodPreservationMigrationVersion = 77;
     public const int CaveFloraHarvestMigrationVersion = 78;
-    public const int CurrentVersion = 79;
+    public const int ReportedCleaningMigrationVersion = 79;
+    public const int ConstructionToolsMigrationVersion = 80;
+    public const int ConstructionHammerMigrationVersion = 81;
+    public const int ConstructionToolLevelsMigrationVersion = 82;
+    public const int ConstructionToolFunctionsMigrationVersion = 83;
+    public const int GoblinManaMigrationVersion = 84;
+    public const int CurrentVersion = 85;
 
     public static bool IsLoadableVersion(int version) =>
         version is SurfaceGrimeMigrationVersion or
@@ -28,6 +36,12 @@ public static class SimulationSaveFormat
             WorkTypePrioritiesMigrationVersion or
             FoodPreservationMigrationVersion or
             CaveFloraHarvestMigrationVersion or
+            ReportedCleaningMigrationVersion or
+            ConstructionToolsMigrationVersion or
+            ConstructionHammerMigrationVersion or
+            ConstructionToolLevelsMigrationVersion or
+            ConstructionToolFunctionsMigrationVersion or
+            GoblinManaMigrationVersion or
             CurrentVersion;
 }
 
@@ -53,6 +67,12 @@ internal static class SimulationSaveReader
                 $"{SimulationSaveFormat.WorkTypePrioritiesMigrationVersion} and " +
                 $"{SimulationSaveFormat.FoodPreservationMigrationVersion} and " +
                 $"{SimulationSaveFormat.CaveFloraHarvestMigrationVersion} and " +
+                $"{SimulationSaveFormat.ReportedCleaningMigrationVersion} and " +
+                $"{SimulationSaveFormat.ConstructionToolsMigrationVersion} and " +
+                $"{SimulationSaveFormat.ConstructionHammerMigrationVersion} and " +
+                $"{SimulationSaveFormat.ConstructionToolLevelsMigrationVersion} and " +
+                $"{SimulationSaveFormat.ConstructionToolFunctionsMigrationVersion} and " +
+                $"{SimulationSaveFormat.GoblinManaMigrationVersion} and " +
                 $"{SimulationSaveFormat.CurrentVersion}.");
         }
 
@@ -91,6 +111,30 @@ internal static class SimulationSaveReader
         if (save.FormatVersion == SimulationSaveFormat.CaveFloraHarvestMigrationVersion)
         {
             MigrateCaveFloraHarvest(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.ReportedCleaningMigrationVersion)
+        {
+            MigrateReportedCleaning(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.ConstructionToolsMigrationVersion)
+        {
+            MigrateConstructionTools(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.ConstructionHammerMigrationVersion)
+        {
+            MigrateConstructionHammer(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.ConstructionToolLevelsMigrationVersion)
+        {
+            MigrateConstructionToolLevels(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.ConstructionToolFunctionsMigrationVersion)
+        {
+            MigrateConstructionToolFunctions(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.GoblinManaMigrationVersion)
+        {
+            MigrateGoblinMana(save);
         }
 
         return save;
@@ -163,7 +207,6 @@ internal static class SimulationSaveReader
     private static void MigrateWorkTypePriorities(SimulationSaveModel save)
     {
         save.WorkTypePriorities.Clear();
-        save.DiscardMisplacedLegacySurfaceGrime = true;
         save.FormatVersion = SimulationSaveFormat.FoodPreservationMigrationVersion;
     }
 
@@ -176,6 +219,71 @@ internal static class SimulationSaveReader
     private static void MigrateCaveFloraHarvest(SimulationSaveModel save)
     {
         save.HarvestedCaveFlora.Clear();
+        save.FormatVersion = SimulationSaveFormat.ReportedCleaningMigrationVersion;
+    }
+
+    private static void MigrateReportedCleaning(SimulationSaveModel save)
+    {
+        save.ReportedCleaningPositions = save.Actors
+            .Select(actor => new GridPositionSaveModel
+            {
+                X = actor.X,
+                Y = actor.Y,
+                Z = actor.Z,
+            })
+            .DistinctBy(position => (position.X, position.Y, position.Z))
+            .ToList();
+        save.FormatVersion = SimulationSaveFormat.ConstructionToolsMigrationVersion;
+    }
+
+    private static void MigrateConstructionTools(SimulationSaveModel save)
+    {
+        SynchronizeConstructionCapabilities(save);
+        save.FormatVersion = SimulationSaveFormat.ConstructionHammerMigrationVersion;
+    }
+
+    private static void MigrateConstructionHammer(SimulationSaveModel save)
+    {
+        SynchronizeConstructionCapabilities(save);
+        save.FormatVersion = SimulationSaveFormat.ConstructionToolLevelsMigrationVersion;
+    }
+
+    private static void MigrateConstructionToolLevels(SimulationSaveModel save)
+    {
+        SynchronizeConstructionCapabilities(save);
+        save.FormatVersion = SimulationSaveFormat.ConstructionToolFunctionsMigrationVersion;
+    }
+
+    private static void MigrateConstructionToolFunctions(SimulationSaveModel save)
+    {
+        SynchronizeConstructionCapabilities(save);
+        save.FormatVersion = SimulationSaveFormat.GoblinManaMigrationVersion;
+    }
+
+    private static void MigrateGoblinMana(SimulationSaveModel save)
+    {
+        foreach (var actor in save.Actors)
+        {
+            actor.Mana = 0;
+        }
         save.FormatVersion = SimulationSaveFormat.CurrentVersion;
+    }
+
+    private static void SynchronizeConstructionCapabilities(SimulationSaveModel save)
+    {
+        foreach (var site in save.ConstructionSites)
+        {
+            if (!Enum.IsDefined(site.Kind))
+            {
+                continue;
+            }
+
+            var capabilities = ConstructionBlueprintDefinitions.Get(site.Kind).Capabilities;
+            site.RequiredSkills = capabilities.RequiredSkills;
+            site.MinimumBuildingLevel = capabilities.MinimumBuildingLevel;
+            site.RequiredEquipment = capabilities.RequiredEquipment;
+            site.RequiredToolFunction = capabilities.RequiredToolFunction;
+            site.MinimumToolLevel = capabilities.MinimumToolLevel;
+        }
     }
 }

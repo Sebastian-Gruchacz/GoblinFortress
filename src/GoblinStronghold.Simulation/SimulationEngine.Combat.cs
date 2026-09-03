@@ -216,32 +216,10 @@ public sealed partial class SimulationEngine
     private static EntityId HumanVillagerEntityId(int villagerId) =>
         new(0x8000000000000000UL | (uint)villagerId);
 
-    private int GetMeleeEquipmentDamageBonus(PersonalEquipment equipment)
-    {
-        if (equipment.HasFlag(PersonalEquipment.ReinforcedPickaxe))
-        {
-            return Definitions.PrimitiveEquipment.ReinforcedPickaxeDamageBonus;
-        }
-        if (equipment.HasFlag(PersonalEquipment.StoneClub))
-        {
-            return Definitions.PrimitiveEquipment.StoneClubDamageBonus;
-        }
-        if (equipment.HasFlag(PersonalEquipment.PrimitivePickaxe))
-        {
-            return Definitions.PrimitiveEquipment.PrimitivePickaxeDamageBonus;
-        }
-        if (equipment.HasFlag(PersonalEquipment.WoodenAxe))
-        {
-            return Definitions.PrimitiveEquipment.WoodenAxeDamageBonus;
-        }
-        if (equipment.HasFlag(PersonalEquipment.FightingStick))
-        {
-            return Definitions.PrimitiveEquipment.FightingStickDamageBonus;
-        }
-        return equipment.HasFlag(PersonalEquipment.BoneKnife)
-            ? Definitions.PrimitiveEquipment.BoneKnifeDamageBonus
-            : 0;
-    }
+    private int GetMeleeEquipmentDamageBonus(PersonalEquipment equipment) =>
+        Equipment.EquipmentCombatPolicy.GetBestMeleeDamageBonus(
+            equipment,
+            Definitions.PrimitiveEquipment);
 
     private void TryCompleteRaid()
     {

@@ -31,9 +31,53 @@ public sealed class SaveCompatibilityTests
         Assert.Equal(CorePolityIds.HumanVillage, snapshot.HumanVillage.PolityId);
         Assert.All(snapshot.HumanVillage.Villagers, villager =>
             Assert.Equal(CorePolityIds.HumanVillage, villager.PolityId));
+        Assert.All(snapshot.Actors, actor =>
+        {
+            Assert.Equal(0, actor.Mana);
+            Assert.Equal(10_000, actor.MaximumMana);
+        });
         Assert.Equal(
             snapshot.UndergroundFactions.Count,
             snapshot.UndergroundFactions.Select(faction => faction.PolityId).Distinct().Count());
+    }
+
+    [Fact]
+    public void Format84AddsEmptyGoblinManaPools()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["formatVersion"] = SimulationSaveFormat.GoblinManaMigrationVersion;
+        foreach (var actor in save["actors"]!.AsArray())
+        {
+            actor!.AsObject().Remove("mana");
+        }
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        var snapshot = restored.CreateSnapshot();
+
+        Assert.All(snapshot.Actors, actor => Assert.Equal(0, actor.Mana));
+        Assert.Equal(
+            SimulationSaveFormat.CurrentVersion,
+            JsonNode.Parse(restored.Save())!["formatVersion"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void CurrentFormatRoundTripsGoblinMana()
+    {
+        var save = JsonNode.Parse(CreateEngine().Save())!.AsObject();
+        save["actors"]![0]!["mana"] = 750;
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        var actor = restored.CreateSnapshot().Actors[0];
+
+        Assert.Equal(750, actor.Mana);
+        Assert.Equal(10_000, actor.MaximumMana);
+        Assert.Equal(
+            750,
+            JsonNode.Parse(restored.Save())!["actors"]![0]!["mana"]!.GetValue<int>());
     }
 
     [Fact]

@@ -41,26 +41,37 @@ internal static class ItemIcons
 
     public static Rect2 GetRegion(Texture2D atlas, ItemIcon icon)
     {
-        var cellWidth = atlas.GetWidth() / (float)Columns;
-        var cellHeight = atlas.GetHeight() / (float)Rows;
         var index = (int)icon;
-        return new Rect2(
-            index % Columns * cellWidth,
-            index / Columns * cellHeight,
-            cellWidth,
-            cellHeight);
+        var column = index % Columns;
+        var row = index / Columns;
+        var left = Mathf.RoundToInt(column * atlas.GetWidth() / (float)Columns);
+        var right = Mathf.RoundToInt((column + 1) * atlas.GetWidth() / (float)Columns);
+        var top = Mathf.RoundToInt(row * atlas.GetHeight() / (float)Rows);
+        var bottom = Mathf.RoundToInt((row + 1) * atlas.GetHeight() / (float)Rows);
+        var width = right - left;
+        var height = bottom - top;
+        if (icon == ItemIcon.WoodenAxe)
+        {
+            height = Math.Min(270, height);
+        }
+        return new Rect2(left, top, width, height);
     }
 
     public static Rect2I GetRegionFromImage(Image atlas, ItemIcon icon)
     {
-        var cellWidth = atlas.GetWidth() / Columns;
-        var cellHeight = atlas.GetHeight() / Rows;
         var index = (int)icon;
-        return new Rect2I(
-            index % Columns * cellWidth,
-            index / Columns * cellHeight,
-            cellWidth,
-            cellHeight);
+        var column = index % Columns;
+        var row = index / Columns;
+        var left = Mathf.RoundToInt(column * atlas.GetWidth() / (float)Columns);
+        var right = Mathf.RoundToInt((column + 1) * atlas.GetWidth() / (float)Columns);
+        var top = Mathf.RoundToInt(row * atlas.GetHeight() / (float)Rows);
+        var bottom = Mathf.RoundToInt((row + 1) * atlas.GetHeight() / (float)Rows);
+        var height = bottom - top;
+        if (icon == ItemIcon.WoodenAxe)
+        {
+            height = Math.Min(270, height);
+        }
+        return new Rect2I(left, top, right - left, height);
     }
 
     public static ItemIcon ForResource(ResourceKind resource) => resource switch

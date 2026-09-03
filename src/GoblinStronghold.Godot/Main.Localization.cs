@@ -53,6 +53,10 @@ public partial class Main
         SetText<Button>("Interface/MainMenu/Center/Panel/Margin/Controls/Quit", "main-menu", "quit");
         _newGameSetupWindow.RefreshLocalization();
         _workTypePriorityWindow?.RefreshLocalization();
+        if (_goblinEquipment is not null)
+        {
+            ConfigureGoblinEquipmentPaperDoll();
+        }
 
         SetWindowTitle("GoblinDetails", "windows", "goblin");
         SetWindowTitle("StoredResourcesWindow", "windows", "stored-resources");

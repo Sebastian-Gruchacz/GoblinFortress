@@ -179,6 +179,13 @@ and rendering stay outside simulation code.
   constructed floor resolves unsupported goblins, carried or loose corpses, and
   loose item stacks onto the nearest traversable level below. Regression coverage
   also protects floors beneath structures and at the lower end of vertical ramps.
+  Explicit corpse directives now share the staggered background-planning budget
+  and advance at most one incremental route search per attempt, so unreachable
+  remains cannot monopolize idle actors or the simulation tick.
+  Tool functions, capability levels, and melee damage selection now live in focused
+  `Equipment` policies. Construction persists a required tool function plus its
+  minimum level, while the composition boundary still owns equipping, job assignment,
+  and save migration.
 - Replace the central job-kind dispatch with registered executors keyed by a
   stable job ID and a legacy `ActorJobKind` adapter.
 - Keep tick ordering and deterministic tie-breaking explicit and covered by
@@ -246,6 +253,9 @@ and rendering stay outside simulation code.
   apply the same neutral tracked-dirt policy, while goblin movement additionally
   applies blood footprints; the legacy `CleanBlood` job/designation ID remains a
   save-compatible adapter for cleaning either kind of surface contamination.
+  Autonomous cleaning candidates are held in a dedicated, persisted area index:
+  only goblins report substantial contamination they encounter, while cleaning,
+  decay, and surface removal prune stale reports without a global dispatcher scan.
   Move blood state beside this subsystem when the broader combat extraction
   reaches it, then replace the legacy name with a stable cleaning job ID.
 - Move save/load conversion beside the subsystem that owns each state model.
@@ -431,6 +441,11 @@ caches.
   receive a lightweight vignette without observing lower-level changes. Keep
   independent upper (`Z > 0`) and `Underground Onion Layers` (`Z <= 0`)
   switches so detailed cached openings remain available where affordable.
+- [x] Add panning hysteresis to the retained static world. Keep two chunks around
+  the camera, request the next cache slice before the visible edge reaches the
+  retained boundary, and expose lower-level composites only one frame after the
+  GPU viewport update. Until then, draw ready source chunks directly instead of
+  sampling a resized, not-yet-rendered viewport texture.
 - [x] Extend cached geometry with simplified static structures and apply the
   exposure mask while composing openings in the active plane. Lower slices use
   deliberately reduced structure silhouettes instead of live structure draw

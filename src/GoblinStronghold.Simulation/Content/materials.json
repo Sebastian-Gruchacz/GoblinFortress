@@ -95,7 +95,7 @@
       "unitWeight": 2.15, "strength": 38, "hardness": 32, "durability": 40,
       "flexibility": 0, "value": 18, "acquisitionDifficulty": 20,
       "occurrence": { "climates": ["any"], "minimumDepthBelowSurface": 0, "maximumDepthBelowSurface": 9 },
-      "acquisition": { "strategy": "Quarrying", "requiredTool": "Pickaxe", "minimumToolLevel": 1, "minimumSkillLevel": 0, "workMultiplier": 1 },
+      "acquisition": { "strategy": "Quarrying", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 0, "workMultiplier": 1 },
       "uses": ["Construction", "Furniture", "ToolHead", "Weapon", "Decoration", "Sculpture"],
       "palette": { "edge": "#65503C", "keyColors": ["#897055", "#B89A70", "#D9C28F"] }
     },
@@ -105,7 +105,7 @@
       "unitWeight": 2.7, "strength": 78, "hardness": 72, "durability": 84,
       "flexibility": 0, "value": 38, "acquisitionDifficulty": 52,
       "occurrence": { "climates": ["any"], "minimumDepthBelowSurface": 2, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Quarrying", "requiredTool": "Pickaxe", "minimumToolLevel": 1, "minimumSkillLevel": 0, "workMultiplier": 1 },
+      "acquisition": { "strategy": "Quarrying", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 0, "workMultiplier": 1 },
       "uses": ["Construction", "Furniture", "ToolHead", "Weapon", "Decoration", "Sculpture"],
       "palette": { "edge": "#353A42", "keyColors": ["#525965", "#7B8390", "#ADB3BC"] }
     },
@@ -115,7 +115,7 @@
       "unitWeight": 3.0, "strength": 86, "hardness": 84, "durability": 92,
       "flexibility": 0, "value": 52, "acquisitionDifficulty": 70,
       "occurrence": { "climates": ["deep", "volcanic"], "minimumDepthBelowSurface": 8, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Quarrying", "requiredTool": "Pickaxe", "minimumToolLevel": 1, "minimumSkillLevel": 2, "workMultiplier": 3 },
+      "acquisition": { "strategy": "Quarrying", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 2, "workMultiplier": 3 },
       "uses": ["Construction", "Furniture", "ToolHead", "Weapon", "Decoration", "Sculpture"],
       "palette": { "edge": "#17191D", "keyColors": ["#292D34", "#414751", "#626A75"] }
     },
@@ -125,7 +125,7 @@
       "unitWeight": 2.4, "strength": 62, "hardness": 92, "durability": 28,
       "flexibility": 0, "value": 76, "acquisitionDifficulty": 88,
       "occurrence": { "climates": ["deep", "volcanic"], "minimumDepthBelowSurface": 16, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Quarrying", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 3, "workMultiplier": 6 },
+      "acquisition": { "strategy": "Quarrying", "requiredTool": "Pickaxe", "minimumToolLevel": 3, "minimumSkillLevel": 3, "workMultiplier": 6 },
       "uses": ["Construction", "Furniture", "ToolHead", "Weapon", "Decoration", "Sculpture"],
       "palette": { "edge": "#100F18", "keyColors": ["#252137", "#43365E", "#755B8E"] }
     },
@@ -135,7 +135,7 @@
       "unitWeight": 1.3, "strength": 24, "hardness": 22, "durability": 12,
       "flexibility": 0, "value": 26, "acquisitionDifficulty": 36,
       "occurrence": { "climates": ["underground"], "minimumDepthBelowSurface": 2, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 1, "minimumSkillLevel": 0, "workMultiplier": 1 },
+      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 0, "workMultiplier": 1 },
       "uses": ["Fuel"],
       "palette": { "edge": "#111216", "keyColors": ["#23262C", "#393E46", "#5B626C"] }
     },
@@ -145,7 +145,7 @@
       "unitWeight": 3.5, "strength": 58, "hardness": 58, "durability": 52,
       "flexibility": 4, "value": 42, "acquisitionDifficulty": 55,
       "occurrence": { "climates": ["underground"], "minimumDepthBelowSurface": 3, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 1, "minimumSkillLevel": 1, "workMultiplier": 2 },
+      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 1, "workMultiplier": 2 },
       "uses": ["Decoration"],
       "palette": { "edge": "#392E2A", "keyColors": ["#68473B", "#9A6650", "#C18C70"] }
     },
@@ -155,7 +155,7 @@
       "unitWeight": 3.2, "strength": 42, "hardness": 44, "durability": 44,
       "flexibility": 6, "value": 48, "acquisitionDifficulty": 46,
       "occurrence": { "climates": ["underground"], "minimumDepthBelowSurface": 4, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 1, "minimumSkillLevel": 1, "workMultiplier": 2 },
+      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 1, "workMultiplier": 2 },
       "uses": ["Decoration"],
       "palette": { "edge": "#4A2C22", "keyColors": ["#7B4630", "#B66D47", "#DE9A68"] }
     },
@@ -165,7 +165,7 @@
       "unitWeight": 3.8, "strength": 48, "hardness": 52, "durability": 48,
       "flexibility": 5, "value": 78, "acquisitionDifficulty": 72,
       "occurrence": { "climates": ["deep"], "minimumDepthBelowSurface": 8, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 2, "workMultiplier": 3 },
+      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 3, "minimumSkillLevel": 2, "workMultiplier": 3 },
       "uses": ["Decoration"],
       "palette": { "edge": "#3F4650", "keyColors": ["#68727E", "#9DA8B2", "#D4DCE2"] }
     },
@@ -175,7 +175,7 @@
       "unitWeight": 4.4, "strength": 34, "hardness": 42, "durability": 38,
       "flexibility": 8, "value": 92, "acquisitionDifficulty": 84,
       "occurrence": { "climates": ["deep"], "minimumDepthBelowSurface": 10, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 2, "workMultiplier": 3 },
+      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 3, "minimumSkillLevel": 2, "workMultiplier": 3 },
       "uses": ["Decoration"],
       "palette": { "edge": "#5C4517", "keyColors": ["#8C681C", "#C99A2A", "#F2CB57"] }
     },
@@ -185,7 +185,7 @@
       "unitWeight": 1.8, "strength": 90, "hardness": 92, "durability": 68,
       "flexibility": 0, "value": 96, "acquisitionDifficulty": 93,
       "occurrence": { "climates": ["deep"], "minimumDepthBelowSurface": 12, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 3, "workMultiplier": 4 },
+      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 3, "minimumSkillLevel": 3, "workMultiplier": 4 },
       "uses": ["ToolHead", "Weapon", "Decoration", "Sculpture"],
       "palette": { "edge": "#481326", "keyColors": ["#7A1D3D", "#BC2D58", "#F06483"] }
     },
@@ -195,7 +195,7 @@
       "unitWeight": 1.7, "strength": 88, "hardness": 90, "durability": 64,
       "flexibility": 0, "value": 97, "acquisitionDifficulty": 94,
       "occurrence": { "climates": ["deep"], "minimumDepthBelowSurface": 12, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 3, "workMultiplier": 4 },
+      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 3, "minimumSkillLevel": 3, "workMultiplier": 4 },
       "uses": ["ToolHead", "Weapon", "Decoration", "Sculpture"],
       "palette": { "edge": "#123C2B", "keyColors": ["#176442", "#25955D", "#58D28B"] }
     },
@@ -205,7 +205,7 @@
       "unitWeight": 1.55, "strength": 100, "hardness": 100, "durability": 58,
       "flexibility": 0, "value": 100, "acquisitionDifficulty": 100,
       "occurrence": { "climates": ["very-deep"], "minimumDepthBelowSurface": 16, "maximumDepthBelowSurface": null },
-      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 2, "minimumSkillLevel": 4, "workMultiplier": 6 },
+      "acquisition": { "strategy": "Mining", "requiredTool": "Pickaxe", "minimumToolLevel": 3, "minimumSkillLevel": 4, "workMultiplier": 6 },
       "uses": ["ToolHead", "Weapon", "Decoration", "Sculpture"],
       "palette": { "edge": "#527078", "keyColors": ["#78A2AA", "#AED7D8", "#E8FFFF"] }
     },

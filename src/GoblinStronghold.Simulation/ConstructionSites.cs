@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using GoblinStronghold.Simulation.Construction;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Workshops;
@@ -19,7 +20,9 @@ public readonly record struct ConstructionMaterialSnapshot(
 public readonly record struct ConstructionCapabilityRequirements(
     GoblinSkill RequiredSkills,
     int MinimumBuildingLevel,
-    PersonalEquipment RequiredEquipment);
+    PersonalEquipment RequiredEquipment,
+    ToolFunction RequiredToolFunction,
+    int MinimumToolLevel);
 
 public enum ConstructionReadinessState : byte
 {

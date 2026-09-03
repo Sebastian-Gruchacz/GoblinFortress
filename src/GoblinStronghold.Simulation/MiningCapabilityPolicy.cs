@@ -1,3 +1,4 @@
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 
@@ -6,7 +7,10 @@ namespace GoblinStronghold.Simulation;
 public static class MiningCapabilityPolicy
 {
     public static bool HasPickaxe(PersonalEquipment equipment) =>
-        GetPickaxeLevel(equipment) > 0;
+        ToolCapabilityCatalog.MeetsRequirement(
+            equipment,
+            ToolFunction.Mining,
+            minimumLevel: 2);
 
     public static int RequiredSkillLevel(RockKind rock) =>
         GetRockMaterial(rock).Acquisition.MinimumSkillLevel;
@@ -22,18 +26,16 @@ public static class MiningCapabilityPolicy
         PersonalEquipment equipment,
         int buildingExperience)
     {
-        if (GetPickaxeLevel(equipment) < RequiredToolLevel(cell.Rock) ||
+        if (!ToolCapabilityCatalog.MeetsRequirement(
+                equipment,
+                ToolFunction.Mining,
+                RequiredToolLevel(cell.Rock)) ||
             GoblinExperienceSnapshot.GetLevel(buildingExperience) < RequiredSkillLevel(cell.Rock))
         {
             return false;
         }
         return true;
     }
-
-    private static int GetPickaxeLevel(PersonalEquipment equipment) =>
-        equipment.HasFlag(PersonalEquipment.ReinforcedPickaxe)
-            ? 2
-            : equipment.HasFlag(PersonalEquipment.PrimitivePickaxe) ? 1 : 0;
 
     private static MaterialDefinition GetRockMaterial(RockKind rock) =>
         MaterialCatalog.Get(rock switch

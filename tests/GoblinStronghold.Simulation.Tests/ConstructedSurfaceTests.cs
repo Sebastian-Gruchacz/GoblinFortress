@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
@@ -168,6 +169,32 @@ public sealed class ConstructedSurfaceTests
         var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
         Assert.Equal(excavatedHill, site.Anchor);
         Assert.Equal(ConstructionKind.StoneFloor, site.Kind);
+    }
+
+    [Fact]
+    public void ElevatedNaturalObjectDoesNotBlockFloorInExcavatedRockBelowIt()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var candidate = engine.World.CreateWorldObjectSnapshot()
+            .Where(worldObject => worldObject.Owner == WorldObjectOwner.Nature)
+            .Select(worldObject => new
+            {
+                WorldObject = worldObject,
+                EffectiveAnchor = engine.World.GetEffectiveWorldObjectAnchor(worldObject),
+            })
+            .First(item =>
+                item.EffectiveAnchor.Z > item.WorldObject.Anchor.Z &&
+                engine.World.CanExcavateRock(item.WorldObject.Anchor));
+
+        Assert.True(engine.World.TryExcavateRock(
+            candidate.WorldObject.Anchor,
+            new SimulationTick(1),
+            out _,
+            out _,
+            out _));
+
+        Assert.True(engine.World.CanBuildFloors([candidate.WorldObject.Anchor]));
+        Assert.False(engine.World.CanBuildFloors([candidate.EffectiveAnchor]));
     }
 
     [Fact]
@@ -523,6 +550,50 @@ public sealed class ConstructedSurfaceTests
         Assert.Equal(2, material.RequiredQuantity);
     }
 
+    [Fact]
+    public void PendingRampSurvivesSaveWhenAnotherRampClaimsItsUpperCell()
+    {
+        var engine = CreateEngine(initialWoodStock: 2);
+        var placements = FindRampPlacementsSharingUpperCell(engine);
+        engine.QueueCommand(SimulationCommand.BuildWoodenRamp(
+            new SimulationTick(1),
+            sequence: 1,
+            placements[0].Lower,
+            placements[0].Upper,
+            ResourceVariant.OakWood));
+        engine.AdvanceTicks(1);
+
+        Assert.Single(engine.CreateSnapshot().ConstructionSites);
+        engine.World.BuildRamp(
+            placements[1].Lower,
+            placements[1].Upper,
+            engine.CurrentTick.Next(),
+            stone: true,
+            ResourceVariant.Granite);
+        Assert.False(engine.World.CanBuildRamp(placements[0].Lower, placements[0].Upper));
+
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        var savedSite = Assert.Single(save["constructionSites"]!.AsArray());
+        savedSite!["deliveredWood"] = savedSite["requiredWood"]!.GetValue<int>();
+        savedSite["deliveredVariant"] = savedSite["requiredVariant"]!.GetValue<int>();
+        savedSite["remainingWorkTicks"] = 1;
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        var site = Assert.Single(restored.CreateSnapshot().ConstructionSites);
+        Assert.Equal(placements[0].Lower, site.Anchor);
+        Assert.Equal(placements[0].Upper, site.End);
+        restored.AdvanceTicks(
+            SimulationDefinitions.Foundation.ActorPlanning.BackgroundPlanningIntervalTicks * 2);
+        Assert.DoesNotContain(restored.CreateSnapshot().Actors, actor =>
+            actor.Job.Kind == ActorJobKind.BuildConstruction &&
+            actor.Job.DestinationZoneId == site.Id);
+        Assert.Equal(
+            1,
+            Assert.Single(restored.CreateSnapshot().ConstructionSites).RemainingWorkTicks);
+    }
+
     private static SimulationEngine CreateEngine(int initialWoodStock) =>
         SimulationEngine.Create(
             new WorldSeed(0x5355524641434553UL),
@@ -555,6 +626,18 @@ public sealed class ConstructedSurfaceTests
 
         throw new InvalidOperationException("No inferred ramp placement was found.");
     }
+
+    private static (GridPosition Lower, GridPosition Upper)[]
+        FindRampPlacementsSharingUpperCell(SimulationEngine engine) =>
+        EnumerateWorldPositions(engine)
+            .SelectMany(lower => engine.World.GetCardinalWorldNeighbors(lower)
+                .Select(neighbor => (Lower: lower, Upper: neighbor with { Z = lower.Z + 1 })))
+            .Where(placement => engine.World.CanBuildRamp(
+                placement.Lower,
+                placement.Upper))
+            .GroupBy(placement => placement.Upper)
+            .Select(group => group.DistinctBy(placement => placement.Lower).Take(2).ToArray())
+            .First(placements => placements.Length == 2);
 
     private static (GridPosition Lower, GridPosition Upper) FindCoverableNaturalRamp(
         SimulationEngine engine) =>

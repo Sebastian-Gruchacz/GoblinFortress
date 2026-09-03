@@ -11,7 +11,8 @@
         "nameGeneratorId": "core:goblin-syllables"
       },
       "vitals": {
-        "maximumHealth": 10000
+        "maximumHealth": 10000,
+        "maximumMana": 10000
       },
       "combat": {
         "minimumMeleeDamage": 260,
@@ -81,7 +82,8 @@
         "nameGeneratorId": "core:human-frontier-names"
       },
       "vitals": {
-        "maximumHealth": 6000
+        "maximumHealth": 6000,
+        "maximumMana": 0
       },
       "combat": {
         "minimumMeleeDamage": 320,

@@ -58,6 +58,7 @@ public sealed class RuntimeFramePerformanceProfilerTests
         ActiveActors: 8,
         EmitterQueryDuration: TimeSpan.Zero,
         ActiveLightMapDuration: TimeSpan.Zero,
+        ActiveFogMapDuration: TimeSpan.Zero,
         LowerChunkRebuildDuration: TimeSpan.Zero,
         VisibleDirtyChunks: 0,
         SliceWorkload: default,

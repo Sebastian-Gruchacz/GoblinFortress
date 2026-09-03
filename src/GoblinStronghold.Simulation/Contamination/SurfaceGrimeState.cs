@@ -37,6 +37,8 @@ internal sealed class SurfaceGrimeState
 
     public IEnumerable<GridPosition> EnumeratePositions() => _entries.Keys;
 
+    public bool Remove(GridPosition position) => _entries.Remove(position);
+
     public int PickUp(GridPosition position, int carriedAmount, SimulationTick tick)
     {
         if (!_entries.TryGetValue(position, out var entry) || entry.Volume < PickupThreshold)

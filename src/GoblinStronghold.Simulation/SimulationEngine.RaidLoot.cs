@@ -45,24 +45,36 @@ public sealed partial class SimulationEngine
                 : candidate.SourceStackId)
             .Where(id => id != EntityId.None)
             .ToHashSet();
-        var ordered = _corpses.Values
+        var candidates = _corpses.Values
             .Where(corpse => corpse.Directives != CorpseDirective.None &&
                 !reservedCorpseIds.Contains(corpse.Id))
-            .Select(corpse => new
+            .OrderBy(corpse => ManhattanDistance(actor.Position, corpse.Position))
+            .ThenBy(corpse => corpse.Id);
+        CorpseState? target = null;
+        foreach (var candidate in candidates)
+        {
+            var navigationBefore = Navigation.GetMetrics();
+            var routeRequest = RequestActorPath(actor, candidate.Position);
+            if (routeRequest.Status == NavigationPathRequestStatus.Pending)
             {
-                Corpse = corpse,
-                Route = FindActorPath(actor, corpse.Position),
-            })
-            .Where(candidate => candidate.Route is not null)
-            .OrderBy(candidate => candidate.Route!.Count)
-            .ThenBy(candidate => candidate.Corpse.Id)
-            .FirstOrDefault();
-        if (ordered is null)
+                return true;
+            }
+            if (routeRequest.Status == NavigationPathRequestStatus.Complete &&
+                routeRequest.Path is not null)
+            {
+                target = candidate;
+                break;
+            }
+            if (Navigation.GetMetrics().Searches != navigationBefore.Searches)
+            {
+                return true;
+            }
+        }
+        if (target is null)
         {
             return false;
         }
 
-        var target = ordered.Corpse;
         actor.SourceStackId = target.Id;
         if (target.Directives.HasFlag(CorpseDirective.LootContents))
         {

@@ -1,9 +1,9 @@
+using GoblinStronghold.Simulation.Equipment;
+
 namespace GoblinStronghold.Simulation;
 
 internal sealed class SimulationSaveModel
 {
-    internal bool DiscardMisplacedLegacySurfaceGrime;
-
     public int FormatVersion { get; set; }
 
     public string DefinitionsId { get; set; } = string.Empty;
@@ -79,6 +79,8 @@ internal sealed class SimulationSaveModel
     public List<BloodStainSaveModel> BloodStains { get; set; } = [];
 
     public List<SurfaceGrimeSaveModel> SurfaceGrime { get; set; } = [];
+
+    public List<GridPositionSaveModel> ReportedCleaningPositions { get; set; } = [];
 
     public List<GridPositionSaveModel> ExcavatedCaveCells { get; set; } = [];
 
@@ -486,6 +488,8 @@ internal sealed class ActorSaveModel
 
     public int Health { get; set; }
 
+    public int Mana { get; set; }
+
     public int Thirst { get; set; }
 
     public int PersonalFood { get; set; }
@@ -782,6 +786,10 @@ internal sealed class ConstructionSiteSaveModel
     public int MinimumBuildingLevel { get; set; }
 
     public PersonalEquipment RequiredEquipment { get; set; }
+
+    public ToolFunction RequiredToolFunction { get; set; }
+
+    public int MinimumToolLevel { get; set; }
 
     public Resources.StoragePriority? Priority { get; set; }
 

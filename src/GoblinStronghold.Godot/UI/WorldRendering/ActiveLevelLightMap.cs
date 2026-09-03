@@ -17,6 +17,7 @@ internal sealed class ActiveLevelLightMap : IDisposable
     private readonly TimedPresentationOperationCounter _builds = new();
     private ImageTexture? _texture;
     private Vector2I _textureSize;
+    private RenderCacheKey? _renderCacheKey;
     private readonly Dictionary<GridPosition, bool> _skyExposure = [];
     private ulong _skyExposureTopologyVersion = ulong.MaxValue;
     private long _cells;
@@ -41,6 +42,29 @@ internal sealed class ActiveLevelLightMap : IDisposable
         var startedAt = Stopwatch.GetTimestamp();
         var cellWidth = Math.Max(1, maximumX - minimumX);
         var cellHeight = Math.Max(1, maximumY - minimumY);
+        var emitterSignature = CreateEmitterSignature(emitters);
+        var hasFlicker = emitters.Any(emitter =>
+            LightEmitterCatalog.Get(emitter.Handle.DefinitionId).FlickerAmount > 0f);
+        var animationFrame = hasFlicker
+            ? (long)Math.Floor(animationElapsed * 12d)
+            : 0L;
+        var cacheKey = new RenderCacheKey(
+            snapshot.Tick.Value,
+            engine.World.TopologyVersion,
+            level,
+            minimumX,
+            minimumY,
+            maximumX,
+            maximumY,
+            emitterSignature,
+            animationFrame,
+            surfaceAmbient,
+            undergroundAmbient);
+        if (_texture is not null && _renderCacheKey == cacheKey)
+        {
+            return _texture;
+        }
+
         var width = cellWidth * PixelsPerCell;
         var height = cellHeight * PixelsPerCell;
         using var image = Image.CreateEmpty(width, height, false, Image.Format.Rgba8);
@@ -109,6 +133,7 @@ internal sealed class ActiveLevelLightMap : IDisposable
         _cells = checked(_cells + (long)cellWidth * cellHeight);
         _emitterEvaluations = checked(
             _emitterEvaluations + ((long)cellWidth * cellHeight * emitters.Count));
+        _renderCacheKey = cacheKey;
         _builds.Record(startedAt);
         return _texture;
     }
@@ -116,6 +141,7 @@ internal sealed class ActiveLevelLightMap : IDisposable
     public void Reset()
     {
         _blockingCells.Reset();
+        _renderCacheKey = null;
         _skyExposure.Clear();
         _skyExposureTopologyVersion = ulong.MaxValue;
         _builds.Reset();
@@ -146,4 +172,27 @@ internal sealed class ActiveLevelLightMap : IDisposable
         }
         return isOpen;
     }
+
+    private static int CreateEmitterSignature(IReadOnlyList<LightEmitterSnapshot> emitters)
+    {
+        var hash = new HashCode();
+        foreach (var emitter in emitters)
+        {
+            hash.Add(emitter);
+        }
+        return hash.ToHashCode();
+    }
+
+    private readonly record struct RenderCacheKey(
+        long Tick,
+        ulong TopologyVersion,
+        int Level,
+        int MinimumX,
+        int MinimumY,
+        int MaximumX,
+        int MaximumY,
+        int EmitterSignature,
+        long AnimationFrame,
+        WorldAmbientLight SurfaceAmbient,
+        WorldAmbientLight UndergroundAmbient);
 }

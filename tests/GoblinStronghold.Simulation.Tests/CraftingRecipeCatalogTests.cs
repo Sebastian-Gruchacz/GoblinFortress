@@ -118,6 +118,26 @@ public sealed class CraftingRecipeCatalogTests
     }
 
     [Fact]
+    public void WoodenHammerIsCraftedAtPrimitiveWorkshopFromWoodAndReeds()
+    {
+        var hammer = CraftingRecipeCatalog.Get(CraftingRecipeKind.WoodenHammer);
+
+        Assert.Equal(WorkshopKind.PrimitiveWorkshop, hammer.Workshop);
+        Assert.Equal(
+            [
+                new CraftingMaterialRequirement(ResourceKind.Wood, ResourceVariant.None, 2),
+                new CraftingMaterialRequirement(ResourceKind.Reeds, ResourceVariant.None, 1),
+            ],
+            hammer.Materials);
+        Assert.Equal(
+            new CraftingOutputDefinition(
+                ResourceKind.Equipment,
+                ResourceVariant.EquipmentWoodenHammer,
+                1),
+            hammer.Output);
+    }
+
+    [Fact]
     public void CookingFireConsumesRawMeatAndWoodAndProducesCookedMeat()
     {
         var recipe = CraftingRecipeCatalog.Get(CraftingRecipeKind.CookRawMeat);

@@ -135,6 +135,7 @@ public enum CraftingRecipeKind : byte
     PreserveFishAndMeat = 25,
     BrewRootAndBerryMedicine = 26,
     BrewLichenAndMushroomMana = 27,
+    WoodenHammer = 28,
 }
 
 public readonly record struct SimulationCommand(

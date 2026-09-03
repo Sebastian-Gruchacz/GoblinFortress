@@ -8,6 +8,10 @@ internal static class ResourceThumbnails
     private const int FoodColumns = 3;
     private const int FoodRows = 2;
     private const string FoodAtlasPath = "res://Assets/UI/food-icons-v1.png";
+    private const string WoodenHammerIconPath = "res://Assets/UI/wooden-hammer-v1.svg";
+
+    public static Texture2D LoadWoodenHammerIcon() =>
+        TextureResources.LoadRequired(WoodenHammerIconPath, "wooden hammer icon");
 
     public static Texture2D? TryLoadFoodAtlas()
     {
@@ -86,6 +90,11 @@ internal static class ResourceThumbnails
             return paletteTextures.GetResourceIcon(
                 variant,
                 MaterialResourceIconShape.Ingot);
+        }
+
+        if (variant == ResourceVariant.EquipmentWoodenHammer)
+        {
+            return LoadWoodenHammerIcon();
         }
 
         var spiderMaterialIcon = variant switch

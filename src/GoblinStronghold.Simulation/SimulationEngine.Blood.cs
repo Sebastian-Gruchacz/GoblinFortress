@@ -78,7 +78,7 @@ public sealed partial class SimulationEngine
         var combined = checked(stain.Volume + volume);
         stain.Volume = Math.Min(BloodStainMaximumVolume, combined);
         stain.LastChangedAt = CurrentTick;
-        RefreshAutonomousCleaningRegistration(position);
+        RefreshReportedCleaningRegistration(position);
         var overflow = combined - BloodStainMaximumVolume;
         if (!allowSpill || stain.Volume < BloodSpillThreshold || overflow <= 0)
         {
@@ -159,7 +159,7 @@ public sealed partial class SimulationEngine
         {
             _bloodStains.Remove(position);
         }
-        RefreshAutonomousCleaningRegistration(position);
+        RefreshReportedCleaningRegistration(position);
 
         return cleaned;
     }
@@ -186,7 +186,7 @@ public sealed partial class SimulationEngine
                     RemoveBloodCleaningDesignations(stain.Position);
                 }
             }
-            RefreshAutonomousCleaningRegistration(stain.Position);
+            RefreshReportedCleaningRegistration(stain.Position);
         }
     }
 

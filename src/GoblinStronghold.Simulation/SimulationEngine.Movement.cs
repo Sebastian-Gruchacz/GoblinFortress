@@ -11,6 +11,7 @@ public sealed partial class SimulationEngine
             actor.Position,
             destination,
             actor.CarriedGrime);
+        ReportAutonomousCleaning(actor.Position);
 
         actor.Position = destination;
         if (actor.CarriedCorpseId != EntityId.None &&
@@ -20,6 +21,7 @@ public sealed partial class SimulationEngine
         }
 
         DepositBlood(actor, destination);
+        ReportAutonomousCleaning(destination);
     }
 
     private void PickUpBlood(ActorState actor)

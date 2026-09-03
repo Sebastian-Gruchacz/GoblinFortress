@@ -237,6 +237,32 @@ public sealed class BloodCleaningTests
     }
 
     [Fact]
+    public void LoadDiscardsSurfaceGrimeWhoseConstructedSurfaceNoLongerExists()
+    {
+        var seed = new WorldSeed(0xC1EA4D19UL);
+        var map = SwampMapGenerator.Generate(seed, width: 64, height: 64);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 20);
+        var position = Enumerable.Range(0, map.Height)
+            .SelectMany(y => Enumerable.Range(0, map.Width)
+                .Select(x => map.GetTerrainSurfacePosition(new GridPosition(x, y))))
+            .First(candidate => engine.World.IsTerrainReachable(candidate) &&
+                !engine.World.HasConstructedCleanableSurface(candidate));
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        save["surfaceGrime"] = CreateSurfaceGrime(position, engine.CurrentTick, volume: 8);
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Empty(restored.CreateSnapshot().SurfaceGrime);
+    }
+
+    [Fact]
     public void PersistedBleedingAddsBoundedBloodPulsesAndExpires()
     {
         var seed = new WorldSeed(0xB1EED1A6UL);
@@ -352,6 +378,7 @@ public sealed class BloodCleaningTests
             .First();
         var save = JsonNode.Parse(engine.Save())!.AsObject();
         save["bloodStains"] = CreateBloodStains(floor, engine.CurrentTick, volume: 16);
+        save["reportedCleaningPositions"] = CreatePositions(floor);
         foreach (var actor in save["actors"]!.AsArray())
         {
             actor!["knownTraits"] = (int)GoblinTrait.None;
@@ -403,6 +430,7 @@ public sealed class BloodCleaningTests
             floor,
             engine.CurrentTick,
             volume: SurfaceCleaningPolicy.AutomaticCleaningMinimumGrimeVolume);
+        save["reportedCleaningPositions"] = CreatePositions(floor);
         foreach (var actor in save["actors"]!.AsArray())
         {
             actor!["knownTraits"] = (int)GoblinTrait.None;
@@ -573,6 +601,14 @@ public sealed class BloodCleaningTests
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
     }
+
+    private static JsonArray CreatePositions(params GridPosition[] positions) =>
+        new(positions.Select(position => (JsonNode)new JsonObject
+        {
+            ["x"] = position.X,
+            ["y"] = position.Y,
+            ["z"] = position.Z,
+        }).ToArray());
 
     private static JsonArray CreateBloodStains(
         GridPosition position,

@@ -85,6 +85,34 @@ public sealed class WorkshopCatalogTests
             "drewniana beczka",
             TranslationCatalog.Get("pl", "recipes", "names", "WoodenBarrel"));
         Assert.Equal(
+            "wooden hammer",
+            TranslationCatalog.Get("en", "recipes", "names", "WoodenHammer"));
+        Assert.Equal(
+            "drewniany młotek",
+            TranslationCatalog.Get("pl", "interface", "equipment-names",
+                "EquipmentWoodenHammer"));
+        Assert.Equal(
+            "tool",
+            TranslationCatalog.Get("en", "interface", "equipment-slots", "Tool"));
+        Assert.Equal(
+            "broń biała",
+            TranslationCatalog.Get("pl", "interface", "equipment-slots", "MeleeWeapon"));
+        Assert.Equal(
+            "cloak",
+            TranslationCatalog.Get("en", "interface", "equipment-slots", "Cloak"));
+        Assert.Equal(
+            "nogi",
+            TranslationCatalog.Get("pl", "interface", "equipment-slots", "Legs"));
+        Assert.Equal(
+            "narzędzia na pasie",
+            TranslationCatalog.Get("pl", "interface", "equipment-paper-doll", "belt"));
+        Assert.Equal(
+            "Mana: {0}/{1}",
+            TranslationCatalog.Get("en", "interface", "goblin-roster", "mana"));
+        Assert.Equal(
+            "Odżywienie: {0}/{1}",
+            TranslationCatalog.Get("pl", "interface", "goblin-roster", "nutrition"));
+        Assert.Equal(
             "Keyboard shortcuts",
             TranslationCatalog.Get("en", "interface", "options", "shortcuts"));
         Assert.Equal(

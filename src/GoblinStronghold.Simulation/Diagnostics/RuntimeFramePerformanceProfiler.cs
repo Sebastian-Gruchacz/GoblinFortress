@@ -15,6 +15,7 @@ public readonly record struct RuntimeFramePerformanceSample(
     int ActiveActors,
     TimeSpan EmitterQueryDuration,
     TimeSpan ActiveLightMapDuration,
+    TimeSpan ActiveFogMapDuration,
     TimeSpan LowerChunkRebuildDuration,
     int VisibleDirtyChunks,
     PresentationSliceWorkload SliceWorkload,

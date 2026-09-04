@@ -756,6 +756,7 @@ public sealed class SimulationEngineTests
         Assert.Equal(frame.Orientation, closedLeaf.Orientation);
         Assert.Equal(WorldObjectPartKind.ClosedDoorLeaf, Assert.Single(closedLeaf.Parts).Kind);
         Assert.False(engine.World.IsSurfaceTraversable(position));
+        var verticalSightTopologyVersion = engine.World.VerticalSightTopologyVersion;
 
         engine.QueueCommand(SimulationCommand.ToggleWoodenDoor(
             engine.CurrentTick.Next(), sequence: 3, position));
@@ -768,6 +769,7 @@ public sealed class SimulationEngineTests
         Assert.True(engine.World.TryGetWoodenDoorState(position, out var isOpen));
         Assert.True(isOpen);
         Assert.True(engine.World.IsSurfaceTraversable(position));
+        Assert.Equal(verticalSightTopologyVersion, engine.World.VerticalSightTopologyVersion);
         var openSave = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
         Assert.Equal(engine.ComputeStateHash(), openSave.ComputeStateHash());
 

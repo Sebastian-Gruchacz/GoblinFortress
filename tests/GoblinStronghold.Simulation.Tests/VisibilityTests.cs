@@ -299,6 +299,83 @@ public sealed class VisibilityTests
     }
 
     [Fact]
+    public void WatchtowerVisionKeepsOpenVerticalColumnsVisibleUntilTheirFirstBlocker()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x544F574552534947UL),
+            width: 32,
+            height: 32);
+        var visibility = WorldVisibilityState.Create(map, maximumLevel: 4);
+        var observer = new GridPosition(8, 8, 2);
+        var openNeighbor = observer with { X = observer.X + 1 };
+
+        visibility.RevealOpenVerticalColumns(
+            [(observer, 1)],
+            minimumLevel: 0,
+            maximumLevel: 4,
+            topologyVersion: 1,
+            (upper, _) => upper != observer);
+
+        Assert.Equal(CellVisibility.Visible, visibility.Get(observer));
+        Assert.Equal(CellVisibility.Unknown, visibility.Get(observer with { Z = 1 }));
+        Assert.Equal(CellVisibility.Visible, visibility.Get(openNeighbor with { Z = 1 }));
+        Assert.Equal(CellVisibility.Visible, visibility.Get(openNeighbor with { Z = 0 }));
+        Assert.Equal(CellVisibility.Visible, visibility.Get(observer with { Z = 3 }));
+        Assert.Equal(CellVisibility.Visible, visibility.Get(observer with { Z = 4 }));
+        Assert.Equal(
+            CellVisibility.Unknown,
+            visibility.Get(observer with { X = observer.X + 2, Z = 1 }));
+
+        visibility.Reveal([(new GridPosition(20, 20, 0), 1)]);
+
+        Assert.Equal(CellVisibility.Explored, visibility.Get(openNeighbor with { Z = 0 }));
+    }
+
+    [Fact]
+    public void WatchtowerVerticalVisionReusesItsMaskUntilTopologyChanges()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x544F574552434143UL),
+            width: 32,
+            height: 32);
+        var visibility = WorldVisibilityState.Create(map, maximumLevel: 3);
+        var observer = new GridPosition(8, 8, 2);
+        var sightLineChecks = 0;
+        bool CanSeeVertically(GridPosition _, GridPosition __)
+        {
+            sightLineChecks++;
+            return true;
+        }
+
+        visibility.RevealOpenVerticalColumns(
+            [(observer, 1)],
+            minimumLevel: 0,
+            maximumLevel: 3,
+            topologyVersion: 7,
+            CanSeeVertically);
+        var checksAfterInitialBuild = sightLineChecks;
+
+        visibility.RevealOpenVerticalColumns(
+            [(observer, 1)],
+            minimumLevel: 0,
+            maximumLevel: 3,
+            topologyVersion: 7,
+            CanSeeVertically);
+
+        Assert.True(checksAfterInitialBuild > 0);
+        Assert.Equal(checksAfterInitialBuild, sightLineChecks);
+
+        visibility.RevealOpenVerticalColumns(
+            [(observer, 1)],
+            minimumLevel: 0,
+            maximumLevel: 3,
+            topologyVersion: 8,
+            CanSeeVertically);
+
+        Assert.True(sightLineChecks > checksAfterInitialBuild);
+    }
+
+    [Fact]
     public void OpenColumnDiscoveryIsReevaluatedAfterTopologyChanges()
     {
         var map = SwampMapGenerator.Generate(

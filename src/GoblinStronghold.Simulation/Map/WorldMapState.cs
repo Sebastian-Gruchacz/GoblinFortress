@@ -110,6 +110,8 @@ public sealed class WorldMapState
 
     public ulong TopologyVersion { get; private set; }
 
+    public ulong VerticalSightTopologyVersion { get; private set; }
+
     public int PlantPatchCount => _plantPatches.Count;
 
     public int WorldObjectCount => _worldObjects.Count;
@@ -156,7 +158,9 @@ public sealed class WorldMapState
         Baseline.VerticalPassages
             .Concat(_excavatedVerticalPassages)
             .Concat(_strippedFloorSurfaces
-                .Where(position => position.Z > Baseline.MinimumWorldLevel)
+                .Where(position =>
+                    position.Z > Baseline.MinimumWorldLevel &&
+                    !HasConstructedSurface(position))
                 .Select(position => new VerticalPassage(
                     position,
                     position with { Z = position.Z - 1 },
@@ -629,11 +633,17 @@ public sealed class WorldMapState
         !HasConstructedSurface(position) &&
         !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _);
 
-    public bool HasOpenVerticalSightLine(GridPosition upper, GridPosition lower)
+    public bool HasOpenVerticalSightLine(GridPosition upper, GridPosition lower) =>
+        HasOpenVerticalSightLine(upper, lower, MaximumOccupiedLevel);
+
+    internal bool HasOpenVerticalSightLine(
+        GridPosition upper,
+        GridPosition lower,
+        int maximumOccupiedLevel)
     {
         if (upper.X != lower.X || upper.Y != lower.Y || upper.Z != lower.Z + 1 ||
             !Baseline.IsColumnWithin(upper) || lower.Z < Baseline.MinimumWorldLevel ||
-            upper.Z > MaximumOccupiedLevel)
+            upper.Z > maximumOccupiedLevel)
         {
             return false;
         }
@@ -3677,6 +3687,13 @@ public sealed class WorldMapState
             WorldChangeKind.FloorStripped)
         {
             TopologyVersion = checked(TopologyVersion + 1);
+        }
+        if (kind is WorldChangeKind.StructureBuilt or WorldChangeKind.TreeFelled or
+            WorldChangeKind.StumpHarvested or WorldChangeKind.BoulderQuarried or
+            WorldChangeKind.RockExcavated or WorldChangeKind.RampExcavated or
+            WorldChangeKind.StructureDismantled or WorldChangeKind.FloorStripped)
+        {
+            VerticalSightTopologyVersion = checked(VerticalSightTopologyVersion + 1);
         }
         return new WorldChangeEvent(Version, tick, kind, position, amount);
     }

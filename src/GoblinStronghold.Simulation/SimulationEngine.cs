@@ -3142,17 +3142,29 @@ public sealed partial class SimulationEngine
     private void UpdateVisibility()
     {
         var calendar = SimulationCalendar.At(CurrentTick, Definitions.Clock);
+        var maximumOccupiedLevel = World.MaximumOccupiedLevel;
+        bool HasOpenVerticalSightLine(GridPosition upper, GridPosition lower) =>
+            World.HasOpenVerticalSightLine(upper, lower, maximumOccupiedLevel);
         var goblinObservers = _actors.Values
-            .Select(actor => (
-                actor.Position,
-                Radius: WorldVisibilityPolicy.ResolveGoblinVisionRadius(
+            .Select(actor =>
+            {
+                var hasWatchtowerVision = IsWatchtowerGuardAtPost(actor);
+                var radius = WorldVisibilityPolicy.ResolveGoblinVisionRadius(
                     GoblinPerception,
                     actor.Position,
-                    calendar.IsNight) * (IsWatchtowerGuardAtPost(actor)
+                    calendar.IsNight);
+                return (
+                    actor.Position,
+                    Radius: checked(radius * (hasWatchtowerVision
                         ? WatchtowerDutyPolicy.VisionRangeMultiplier
-                        : 1)))
+                        : 1)),
+                    HasWatchtowerVision: hasWatchtowerVision);
+            })
             .ToArray();
-        var observers = goblinObservers.ToList();
+        var planarGoblinObservers = goblinObservers
+            .Select(observer => (observer.Position, observer.Radius))
+            .ToArray();
+        var observers = planarGoblinObservers.ToList();
         var verticalPassages = World.CreateVerticalPassageSnapshot();
         observers.AddRange(GoblinStructureObserverPolicy.SelectObservers(
             World.EnumerateWorldObjects(),
@@ -3169,6 +3181,15 @@ public sealed partial class SimulationEngine
         }
 
         Visibility.Reveal(observers, World.IsSolidHillRock);
+        Visibility.RevealOpenVerticalColumns(
+            goblinObservers
+                .Where(observer => observer.HasWatchtowerVision)
+                .Select(observer => (observer.Position, observer.Radius)),
+            Map.MinimumWorldLevel,
+            maximumOccupiedLevel,
+            World.VerticalSightTopologyVersion,
+            HasOpenVerticalSightLine,
+            World.IsSolidHillRock);
         Visibility.Discover(
             WorldVisibilityPolicy.SelectAdjacentLayerDiscoveries(
                 verticalPassages,
@@ -3176,16 +3197,16 @@ public sealed partial class SimulationEngine
             World.IsSolidHillRock);
         Visibility.Discover(
             WorldVisibilityPolicy.SelectEdgeLookDiscoveries(
-                goblinObservers,
+                planarGoblinObservers,
                 World.IsTerrainTraversable,
                 World.IsOpenUnsupportedVolume,
                 Map.IsWorldPosition),
             World.IsSolidHillRock);
         Visibility.DiscoverOpenVerticalColumns(
             Map.MinimumWorldLevel,
-            World.MaximumOccupiedLevel,
-            World.TopologyVersion,
-            World.HasOpenVerticalSightLine);
+            maximumOccupiedLevel,
+            World.VerticalSightTopologyVersion,
+            HasOpenVerticalSightLine);
         RemoveMiningDesignationsBlockedByRevealedFluid();
         foreach (var actor in _actors.Values.Where(actor =>
                      actor.JobKind == ActorJobKind.Explore &&

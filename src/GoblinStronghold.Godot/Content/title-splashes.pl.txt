@@ -82,7 +82,7 @@ W lesie stoi palisada zwrócona do środka.
 Ostatnia strona kroniki została zapisana jutro.
 W nocy rzeka płynie w przeciwną stronę.
 Niektóre ślady zaczynają się pośrodku błota.
-Podczas ciszy słychać pracę obcych kilofów.
+W ciszy nocy słychać pracę obcych kilofów.
 
 # O grze i gatunku
 Symulator kolonii, generator katastrof.

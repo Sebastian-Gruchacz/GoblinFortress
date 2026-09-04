@@ -25,6 +25,11 @@ public sealed class WorldVisibilityState
     private int _materializedNegativeLevelCount;
     private int _materializedPositiveLevelCount;
     private ulong? _verticalDiscoveryTopologyVersion;
+    private (GridPosition Position, int Radius)[] _verticalRevealObservers = [];
+    private GridPosition[] _verticalRevealPositions = [];
+    private int _verticalRevealMinimumLevel;
+    private int _verticalRevealMaximumLevel;
+    private ulong? _verticalRevealTopologyVersion;
 
     private WorldVisibilityState(
         GeneratedMap map,
@@ -301,6 +306,119 @@ public sealed class WorldVisibilityState
         }
     }
 
+    internal void RevealOpenVerticalColumns(
+        IEnumerable<(GridPosition Position, int Radius)> observers,
+        int minimumLevel,
+        int maximumLevel,
+        ulong topologyVersion,
+        Func<GridPosition, GridPosition, bool> canSeeVertically,
+        Func<GridPosition, bool>? excludeOrigin = null)
+    {
+        ArgumentNullException.ThrowIfNull(observers);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(minimumLevel, maximumLevel);
+        ArgumentNullException.ThrowIfNull(canSeeVertically);
+        EnsureLayerCapacity(maximumLevel);
+        var observerArray = observers
+            .Distinct()
+            .OrderBy(observer => observer.Position.Z)
+            .ThenBy(observer => observer.Position.Y)
+            .ThenBy(observer => observer.Position.X)
+            .ThenBy(observer => observer.Radius)
+            .ToArray();
+        if (observerArray.Any(observer => observer.Radius <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(observers));
+        }
+
+        if (_verticalRevealTopologyVersion != topologyVersion ||
+            _verticalRevealMinimumLevel != minimumLevel ||
+            _verticalRevealMaximumLevel != maximumLevel ||
+            !_verticalRevealObservers.SequenceEqual(observerArray))
+        {
+            _verticalRevealObservers = observerArray;
+            _verticalRevealMinimumLevel = minimumLevel;
+            _verticalRevealMaximumLevel = maximumLevel;
+            _verticalRevealTopologyVersion = topologyVersion;
+            _verticalRevealPositions = BuildOpenVerticalRevealPositions(
+                observerArray,
+                minimumLevel,
+                maximumLevel,
+                canSeeVertically,
+                excludeOrigin);
+        }
+
+        foreach (var position in _verticalRevealPositions)
+        {
+            RevealExact(position);
+        }
+    }
+
+    private GridPosition[] BuildOpenVerticalRevealPositions(
+        IReadOnlyList<(GridPosition Position, int Radius)> observers,
+        int minimumLevel,
+        int maximumLevel,
+        Func<GridPosition, GridPosition, bool> canSeeVertically,
+        Func<GridPosition, bool>? excludeOrigin)
+    {
+        var origins = new HashSet<GridPosition>();
+        foreach (var (observer, radius) in observers)
+        {
+            var radiusSquared = checked(radius * radius);
+            for (var y = observer.Y - radius; y <= observer.Y + radius; y++)
+            {
+                for (var x = observer.X - radius; x <= observer.X + radius; x++)
+                {
+                    var origin = new GridPosition(x, y, observer.Z);
+                    var distanceSquared = checked(
+                        ((x - observer.X) * (x - observer.X)) +
+                        ((y - observer.Y) * (y - observer.Y)));
+                    if (distanceSquared <= radiusSquared && IsVisibilityPosition(origin) &&
+                        !(excludeOrigin?.Invoke(origin) ?? false))
+                    {
+                        origins.Add(origin);
+                    }
+                }
+            }
+        }
+
+        var visible = new HashSet<GridPosition>();
+        foreach (var origin in origins)
+        {
+            visible.Add(origin);
+            var lower = origin;
+            while (lower.Z > minimumLevel)
+            {
+                var next = lower with { Z = lower.Z - 1 };
+                if (!canSeeVertically(lower, next))
+                {
+                    break;
+                }
+
+                visible.Add(next);
+                lower = next;
+            }
+
+            var upper = origin;
+            while (upper.Z < maximumLevel)
+            {
+                var next = upper with { Z = upper.Z + 1 };
+                visible.Add(next);
+                if (!canSeeVertically(next, upper))
+                {
+                    break;
+                }
+
+                upper = next;
+            }
+        }
+
+        return visible
+            .OrderBy(position => position.Z)
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .ToArray();
+    }
+
     private bool IsVisibilityPosition(GridPosition position) =>
         Map.IsColumnWithin(position) &&
         position.Z >= -_materializedNegativeLevelCount &&
@@ -368,6 +486,24 @@ public sealed class WorldVisibilityState
         }
 
         TrackDiscovery(GetIndex(position), isVerticalSeed: false);
+    }
+
+    private void RevealExact(GridPosition position)
+    {
+        if (!IsVisibilityPosition(position))
+        {
+            return;
+        }
+
+        var index = GetIndex(position);
+        if (_cells[index] == CellVisibility.Visible)
+        {
+            return;
+        }
+
+        TrackDiscovery(index, isVerticalSeed: false);
+        _cells[index] = CellVisibility.Visible;
+        _visibleIndices.Add(index);
     }
 
     private void TrackDiscovery(int index, bool isVerticalSeed)

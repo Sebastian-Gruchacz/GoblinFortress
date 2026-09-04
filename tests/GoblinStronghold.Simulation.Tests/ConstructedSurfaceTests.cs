@@ -647,6 +647,7 @@ public sealed class ConstructedSurfaceTests
                 engine.World.CanStripFloor(candidate) &&
                 engine.World.GetCardinalWorldNeighbors(candidate)
                     .Any(engine.World.IsTerrainTraversable));
+        var verticalSightTopologyVersion = engine.World.VerticalSightTopologyVersion;
 
         Assert.True(engine.World.TryStripFloor(
             position,
@@ -656,6 +657,9 @@ public sealed class ConstructedSurfaceTests
             out var change));
 
         Assert.Equal(WorldChangeKind.FloorStripped, change.Kind);
+        Assert.Equal(
+            verticalSightTopologyVersion + 1,
+            engine.World.VerticalSightTopologyVersion);
         Assert.False(engine.World.IsTerrainTraversable(position));
         Assert.True(engine.World.HasOpenVerticalSightLine(
             position,
@@ -671,8 +675,12 @@ public sealed class ConstructedSurfaceTests
     public void PlayerFloorReplacesNaturalFloorAndItsRemovalLeavesAHole()
     {
         var engine = CreateEngine(initialWoodStock: 0);
+        var existingPassageUpperPositions = engine.World.CreateVerticalPassageSnapshot()
+            .Select(passage => passage.Upper)
+            .ToHashSet();
         var position = EnumerateWorldPositions(engine)
             .First(candidate => engine.World.CanBuildFloors([candidate]) &&
+                !existingPassageUpperPositions.Contains(candidate) &&
                 engine.Map.TryGetInitialGeometry(candidate, out var geometry) &&
                 geometry.IsSupported);
         engine.World.BuildFloor(
@@ -683,6 +691,10 @@ public sealed class ConstructedSurfaceTests
 
         Assert.True(engine.World.IsTerrainTraversable(position));
         Assert.Contains(position, engine.World.StrippedFloorSurfaces);
+        Assert.DoesNotContain(engine.World.CreateVerticalPassageSnapshot(), passage =>
+            passage.Kind == VerticalPassageKind.CaveMouth &&
+            passage.Upper == position &&
+            passage.Lower == position with { Z = position.Z - 1 });
         Assert.True(engine.World.TryStripFloor(
             position,
             new SimulationTick(2),
@@ -694,6 +706,10 @@ public sealed class ConstructedSurfaceTests
         Assert.Equal(ResourceVariant.OakWood, variant);
         Assert.False(engine.World.IsTerrainTraversable(position));
         Assert.False(engine.World.HasConstructedFloorSurface(position));
+        Assert.Contains(engine.World.CreateVerticalPassageSnapshot(), passage =>
+            passage.Kind == VerticalPassageKind.CaveMouth &&
+            passage.Upper == position &&
+            passage.Lower == position with { Z = position.Z - 1 });
     }
 
     [Fact]

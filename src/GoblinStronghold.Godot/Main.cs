@@ -346,6 +346,7 @@ public partial class Main : Node
         PickUpItem = 13,
         EquipItem = 14,
         PrioritizeItemHauling = 15,
+        OpenEntityStorage = 16,
         LootCorpse = 100,
         ConsumeCorpse = 101,
         RecoverCorpse = 102,
@@ -8456,9 +8457,8 @@ public partial class Main : Node
             ShowContextEntitySelector(screenPosition, entityChoices);
             return true;
         }
-        if (entityChoices.Count == 1 && entityChoices[0].Target.Kind is
-                ContextEntityKind.Goblin or ContextEntityKind.Animal or
-                ContextEntityKind.HumanVillager or ContextEntityKind.ItemStack)
+        if (entityChoices.Count == 1 &&
+            ShouldShowDirectContextActions(entityChoices[0].Target, snapshot))
         {
             ShowContextEntityActions(entityChoices[0].Target, snapshot, screenPosition);
             return true;
@@ -8599,7 +8599,8 @@ public partial class Main : Node
                     DescribeConstruction(site.Kind)),
                 Section: 2)));
         choices.AddRange(snapshot.StorageZones
-            .Where(zone => zone.Position == clicked)
+            .Where(zone => zone.Position == clicked &&
+                !IsBuiltInObjectStorage(snapshot, zone))
             .OrderBy(zone => zone.Id)
             .Select(zone => new ContextEntityChoice(
                 new ContextEntityTarget(ContextEntityKind.StorageZone, zone.Id.Value, clicked),
@@ -8651,6 +8652,30 @@ public partial class Main : Node
                 $"{DescribeResourceVariant(stack.Resource, stack.FoodKind, stack.Variant)} ×{stack.Quantity}",
                 Section: 3)));
         return choices;
+    }
+
+    private static bool IsBuiltInObjectStorage(
+        SimulationSnapshot snapshot,
+        StorageZoneSnapshot zone) =>
+        snapshot.WatchtowerPosts.Any(post => post.FoodStorageId == zone.Id) ||
+        zone.AcceptedResource == ResourceKind.Food &&
+        snapshot.WorldObjects.Any(worldObject =>
+            worldObject.Kind == WorldObjectKind.GoblinFieldCamp &&
+            worldObject.Anchor == zone.Position);
+
+    private static bool ShouldShowDirectContextActions(
+        ContextEntityTarget target,
+        SimulationSnapshot snapshot)
+    {
+        if (target.Kind != ContextEntityKind.WorldObject)
+        {
+            return target.Kind is not ContextEntityKind.Corpse;
+        }
+
+        var worldObject = snapshot.WorldObjects.FirstOrDefault(item => item.Id.Value == target.Id);
+        return worldObject is not null &&
+            worldObject.Owner == WorldObjectOwner.GoblinTribe &&
+            worldObject.Kind != WorldObjectKind.GoblinFieldCamp;
     }
 
     private void ShowContextEntitySelector(
@@ -8823,8 +8848,31 @@ public partial class Main : Node
                     return;
                 }
                 AddDisabledContextHeading(DescribeWorldObject(worldObject));
-                _worldContextMenu.AddItem(Ui("context-menu", "edit-details"),
+                var detailsLabel = worldObject.Kind switch
+                {
+                    WorldObjectKind.WoodenWatchtower =>
+                        Ui("context-menu", "open-watchtower-control"),
+                    WorldObjectKind.GoblinFieldCamp =>
+                        Ui("context-menu", "edit-raid"),
+                    _ when _engine.World.TryGetWorkshopKind(worldObject.Anchor, out _) =>
+                        Ui("context-menu", "open-workshop"),
+                    _ => Ui("context-menu", "show-details"),
+                };
+                _worldContextMenu.AddItem(detailsLabel,
                     (int)WorldContextAction.OpenEntityDetails);
+                if (worldObject.Kind is WorldObjectKind.WoodenWatchtower or
+                    WorldObjectKind.GoblinFieldCamp)
+                {
+                    var associatedStorage = FindAssociatedStorage(snapshot, worldObject);
+                    _worldContextMenu.AddItem(
+                        Ui("context-menu", worldObject.Kind == WorldObjectKind.WoodenWatchtower
+                            ? "open-food-storage"
+                            : "open-camp-storage"),
+                        (int)WorldContextAction.OpenEntityStorage);
+                    _worldContextMenu.SetItemDisabled(
+                        _worldContextMenu.GetItemIndex((int)WorldContextAction.OpenEntityStorage),
+                        associatedStorage.Id == EntityId.None);
+                }
                 _worldContextMenu.AddSeparator();
                 _worldContextMenu.AddItem(
                     Ui("context-menu", "dismantle-construction"),
@@ -9158,6 +9206,7 @@ public partial class Main : Node
         }
 
         if (action is WorldContextAction.OpenEntityDetails or
+            WorldContextAction.OpenEntityStorage or
             WorldContextAction.OrderGoblinFlee or
             WorldContextAction.OrderGoblinSleep or
             WorldContextAction.SuspendGoblinDispatcher or
@@ -9297,6 +9346,23 @@ public partial class Main : Node
                         break;
                 }
                 break;
+            case WorldContextAction.OpenEntityStorage:
+                if (target.Kind != ContextEntityKind.WorldObject)
+                {
+                    break;
+                }
+                var storageOwner = snapshot.WorldObjects.FirstOrDefault(item =>
+                    item.Id.Value == target.Id);
+                if (storageOwner is null)
+                {
+                    break;
+                }
+                var associatedStorage = FindAssociatedStorage(snapshot, storageOwner);
+                if (associatedStorage.Id != EntityId.None)
+                {
+                    ShowStorageDetails(associatedStorage);
+                }
+                break;
             case WorldContextAction.OrderGoblinFlee:
                 SubmitContextCommand(
                     SimulationCommand.OrderActorFlee(
@@ -9376,6 +9442,26 @@ public partial class Main : Node
         {
             _inspector.Text = acceptedMessage;
         }
+    }
+
+    private static StorageZoneSnapshot FindAssociatedStorage(
+        SimulationSnapshot snapshot,
+        WorldObjectSnapshot worldObject)
+    {
+        if (worldObject.Kind != WorldObjectKind.WoodenWatchtower)
+        {
+            return worldObject.Kind == WorldObjectKind.GoblinFieldCamp
+                ? snapshot.StorageZones.FirstOrDefault(item =>
+                    item.Position == worldObject.Anchor &&
+                    item.AcceptedResource == ResourceKind.Food)
+                : default;
+        }
+
+        var post = snapshot.WatchtowerPosts.FirstOrDefault(item =>
+            item.WatchtowerId == worldObject.Id);
+        return post.FoodStorageId == EntityId.None
+            ? default
+            : snapshot.StorageZones.FirstOrDefault(item => item.Id == post.FoodStorageId);
     }
 
     private void ShowConstructionRemovalConfirmation()

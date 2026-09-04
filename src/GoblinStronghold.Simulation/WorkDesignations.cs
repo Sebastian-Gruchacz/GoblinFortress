@@ -21,6 +21,7 @@ public enum WorkDesignationKind : byte
     DismantleWorldObject = 14,
     DismantleStorageZone = 15,
     GatherLichen = 16,
+    StripFloor = 17,
 }
 
 public readonly record struct WorkDesignationSnapshot(

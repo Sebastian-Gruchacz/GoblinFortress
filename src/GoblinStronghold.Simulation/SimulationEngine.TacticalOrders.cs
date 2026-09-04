@@ -78,6 +78,10 @@ public sealed partial class SimulationEngine
                 ? Definitions.RangedCombat.SlingRange
                 : Definitions.RangedCombat.ThrownStoneRange
             : 1;
+        if (attackRange > 1)
+        {
+            attackRange = ResolveGoblinRangedRange(actor, attackRange);
+        }
         if (Distance(actor.Position, guard.Position) <= attackRange)
         {
             return true;

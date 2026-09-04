@@ -5,8 +5,6 @@ namespace GoblinStronghold.Simulation.Visibility;
 
 public static class GoblinStructureObserverPolicy
 {
-    public const int WoodenWatchtowerVisionRadius = 7;
-
     public static IReadOnlyList<(GridPosition Position, int Radius)> SelectObservers(
         IEnumerable<WorldObjectSnapshot> worldObjects,
         int shelterVisionRadius)
@@ -18,9 +16,6 @@ public static class GoblinStructureObserverPolicy
             .Where(worldObject => worldObject.Owner == WorldObjectOwner.GoblinTribe)
             .Select(worldObject => worldObject.Kind switch
             {
-                WorldObjectKind.WoodenWatchtower =>
-                    (Position: worldObject.Anchor with { Z = worldObject.Anchor.Z + 1 },
-                        Radius: WoodenWatchtowerVisionRadius),
                 _ when shelterVisionRadius > 0 && GoblinShelterPolicy.IsShelter(worldObject) =>
                     (Position: worldObject.Anchor, Radius: shelterVisionRadius),
                 _ => default,

@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Equipment;
 
 namespace GoblinStronghold.Simulation.Terrain.Jobs;
 
@@ -31,6 +32,17 @@ internal static class TerrainWorkPolicy
                         : new CaveCell(RockKind.Sandstone, CaveCellKind.SolidRock),
                     equipment,
                     buildingExperience),
+            WorkDesignationKind.StripFloor =>
+                world.CanStripFloor(target) &&
+                (world.HasConstructedFloorSurface(target)
+                    ? ToolCapabilityCatalog.MeetsRequirement(
+                        equipment,
+                        ToolFunction.Construction,
+                        minimumLevel: 1)
+                    : ExcavationCapabilityPolicy.CanExcavate(
+                        world.GetFloorStrippingCell(target),
+                        equipment,
+                        buildingExperience)),
             WorkDesignationKind.CarveRampDown =>
                 CanCarveRamp(
                     world,
@@ -68,6 +80,7 @@ internal static class TerrainWorkPolicy
                 visibility.Get(target) != CellVisibility.Unknown &&
                 !world.IsSolidRock(target) &&
                 !world.IsTerrainRampIntact(target),
+            WorkDesignationKind.StripFloor => !world.CanStripFloor(target),
             WorkDesignationKind.CarveRampDown => !(rampDestination is { } lower
                 ? world.CanCarveRampDown(target, lower)
                 : world.CanCarveRampDown(target)),
@@ -93,6 +106,7 @@ internal static class TerrainWorkPolicy
         return definition.LegacyDesignation switch
         {
             WorkDesignationKind.MineRock => ActorJobKind.MineRock,
+            WorkDesignationKind.StripFloor => ActorJobKind.StripFloor,
             WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
                 ActorJobKind.CarveRamp,
             _ => ActorJobKind.None,

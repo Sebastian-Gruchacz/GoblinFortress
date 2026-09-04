@@ -295,19 +295,22 @@ and simple storage box remain primitive.
 
 #### Buildable watchtower
 
-Implemented as a single-level 2 x 2 timber lookout with a dedicated top-down
-painter and a passive radius-7 vision source. Its visibility behavior lives in
-`Visibility/GoblinStructureObserverPolicy`; construction uses the ordinary
-catalog, hauling, save/load and dismantling contracts. The footprint is solid
-and deliberately not walkable. A truly walkable multi-level tower belongs with
-supported platforms and vertical navigation.
+Implemented as a 2 x 2 timber lookout with a raised walkable platform and a
+dedicated top-down painter. Up to two assigned guards return to the upper post
+after satisfying personal needs and receive doubled personal vision and ranged
+reach while on the platform. The tower owns two reserved sleeping places and a
+small food store, but no water container. Assignment and amenities survive
+save/load and are removed together with the tower. A built-in ladder uses the
+ordinary vertical-navigation contract, so the post and its food store are
+reachable immediately after construction.
 
 #### Ladders and real vertical scaffolds
 
-Ladders are not cosmetic ramps. They need a new vertical-passage contract,
-pathfinding edges, reservations, construction order, occupancy, visibility,
-save data, 2D/3D rendering and tests for blocked endpoints. Do not squeeze this
-into the tester build unless the design explicitly accepts that full slice.
+Ladders are not cosmetic ramps. The first directional ladder slice now uses a
+real vertical-passage contract, pathfinding edges, construction occupancy,
+visibility, save data and 2D/3D rendering, including access to raised watchtower
+platforms and other player-made elevated surfaces. Watchtowers additionally
+carry their own ladder as part of the completed structure.
 
 #### Modular inhabited ruins
 

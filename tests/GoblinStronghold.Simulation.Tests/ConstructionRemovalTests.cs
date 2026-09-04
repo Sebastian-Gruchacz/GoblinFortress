@@ -181,7 +181,10 @@ public sealed class ConstructionRemovalTests
     [Fact]
     public void WoodenWatchtowerBuildsAReachableUpperPlatform()
     {
-        var engine = CreateEngine(initialWoodStock: 8);
+        var engine = CreateEngine(
+            initialWoodStock: 16,
+            initialFoodStock: 12,
+            initialGoblinCount: 3);
         var actorPositions = engine.CreateSnapshot().Actors
             .Select(actor => actor.Position)
             .ToHashSet();
@@ -209,11 +212,20 @@ public sealed class ConstructionRemovalTests
         Assert.Equal(4, site.Footprint.Count);
         Assert.Equal(8, Assert.Single(site.Materials).RequiredQuantity);
         SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
-        engine = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        var legacyTowerSave = JsonNode.Parse(engine.Save())!.AsObject();
+        var legacyTower = legacyTowerSave["worldObjects"]!.AsArray()
+            .Single(item => item!["kind"]!.GetValue<int>() ==
+                (int)WorldObjectKind.WoodenWatchtower)!;
+        var legacyParts = legacyTower["parts"]!.AsArray();
+        legacyParts.Remove(legacyParts.Single(item =>
+            item!["kind"]!.GetValue<int>() == (int)WorldObjectPartKind.Ladder));
+        engine = SimulationEngine.Load(
+            legacyTowerSave.ToJsonString(),
+            SimulationDefinitions.Foundation);
         var watchtower = Assert.Single(engine.World.GetWorldObjectsAt(position), worldObject =>
             worldObject.Kind == WorldObjectKind.WoodenWatchtower);
 
-        Assert.Equal(8, watchtower.Parts.Count);
+        Assert.Equal(11, watchtower.Parts.Count);
         Assert.Equal(4, watchtower.Parts.Count(part =>
             part.Channel == SpatialOccupancyChannel.Solid &&
             part.Kind == WorldObjectPartKind.WatchtowerSupport &&
@@ -222,6 +234,14 @@ public sealed class ConstructionRemovalTests
             part.Channel == SpatialOccupancyChannel.Surface &&
             part.Kind == WorldObjectPartKind.WatchtowerPlatform &&
             part.RelativePosition.Z == 1));
+        Assert.Equal(2, watchtower.Parts.Count(part =>
+            part.Channel == SpatialOccupancyChannel.Fixture &&
+            part.Kind == WorldObjectPartKind.SleepingMat &&
+            part.RelativePosition.Z == 1));
+        Assert.Contains(watchtower.Parts, part =>
+            part.Channel == SpatialOccupancyChannel.Fixture &&
+            part.Kind == WorldObjectPartKind.Ladder &&
+            part.RelativePosition == new GridPosition(0, 1));
         Assert.All(watchtower.Parts.Where(part => part.RelativePosition.Z == 1), part =>
             Assert.True(engine.World.IsTerrainTraversable(new GridPosition(
                 watchtower.Anchor.X + part.RelativePosition.X,
@@ -231,6 +251,86 @@ public sealed class ConstructionRemovalTests
             watchtower.Kind,
             out var construction));
         Assert.Equal(ConstructionKind.WoodenWatchtower, construction);
+        var post = Assert.Single(engine.CreateSnapshot().WatchtowerPosts);
+        Assert.Equal(watchtower.Id, post.WatchtowerId);
+        Assert.NotNull(engine.World.FindTerrainPath(
+            watchtower.Anchor with { Y = watchtower.Anchor.Y + 1 },
+            post.PlatformPosition));
+        var foodStorage = Assert.Single(engine.CreateSnapshot().StorageZones, zone =>
+            zone.Id == post.FoodStorageId);
+        Assert.Equal(position with { Z = 1 }, foodStorage.Position);
+        Assert.Equal(ResourceKind.Food, foodStorage.AcceptedResource);
+        Assert.Equal(12, foodStorage.Capacity);
+        Assert.Equal(6, foodStorage.DesiredQuantity);
+        AdvanceUntil(engine, () => engine.CreateSnapshot().StorageZones
+            .Single(zone => zone.Id == post.FoodStorageId).StoredQuantity > 0,
+            maximumTicks: 2_000);
+        var secondPosition = Enumerable.Range(0, engine.Map.Width - 1)
+            .SelectMany(x => Enumerable.Range(0, engine.Map.Height - 1)
+                .Select(y => new GridPosition(x, y)))
+            .First(candidate =>
+            {
+                var footprint = SimulationCommand.GetAreaCells(
+                    candidate,
+                    candidate with { X = candidate.X + 1, Y = candidate.Y + 1 });
+                return footprint.All(cell =>
+                           engine.Visibility.TryGet(cell, out var visibility) &&
+                           visibility.IsDiscovered() &&
+                           !actorPositions.Contains(cell)) &&
+                       engine.World.CanBuildWoodenWatchtower(candidate);
+            });
+        engine.QueueCommand(SimulationCommand.BuildWoodenWatchtower(
+            engine.CurrentTick.Next(), sequence: 6, secondPosition));
+        engine.AdvanceTicks(1);
+        SimulationTestSteps.AdvanceUntilConstructionCompletes(engine);
+        var otherPost = Assert.Single(engine.CreateSnapshot().WatchtowerPosts, candidate =>
+            candidate.WatchtowerId != watchtower.Id);
+        var guards = engine.CreateSnapshot().Actors.OrderBy(actor => actor.Id).ToArray();
+        var guard = guards[0];
+        engine.ApplyCommandImmediately(SimulationCommand.ConfigureWatchtowerGuard(
+            engine.CurrentTick,
+            sequence: 7,
+            watchtower.Id,
+            guard.Id,
+            selected: true));
+        engine.ApplyCommandImmediately(SimulationCommand.ConfigureWatchtowerGuard(
+            engine.CurrentTick,
+            sequence: 8,
+            otherPost.WatchtowerId,
+            guard.Id,
+            selected: true));
+        engine.ApplyCommandImmediately(SimulationCommand.ConfigureWatchtowerGuard(
+            engine.CurrentTick,
+            sequence: 9,
+            watchtower.Id,
+            guards[1].Id,
+            selected: true));
+        engine.ApplyCommandImmediately(SimulationCommand.ConfigureWatchtowerGuard(
+            engine.CurrentTick,
+            sequence: 10,
+            watchtower.Id,
+            guards[2].Id,
+            selected: true));
+        engine = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        var restoredPost = Assert.Single(engine.CreateSnapshot().WatchtowerPosts, candidate =>
+            candidate.WatchtowerId == watchtower.Id);
+        Assert.Equal(
+            [guard.Id, guards[1].Id],
+            restoredPost.GuardIds);
+        Assert.DoesNotContain(
+            guard.Id,
+            Assert.Single(engine.CreateSnapshot().WatchtowerPosts, candidate =>
+                candidate.WatchtowerId == otherPost.WatchtowerId).GuardIds);
+        AdvanceUntil(engine, () =>
+        {
+            var restoredGuard = engine.CreateSnapshot().Actors.Single(item =>
+                item.Id == guard.Id);
+            return restoredGuard.Position == restoredPost.PlatformPosition &&
+                restoredGuard.Job.Kind == ActorJobKind.GuardWatchtower;
+        }, maximumTicks: 2_000);
+        Assert.Equal(
+            ActorJobKind.GuardWatchtower,
+            engine.CreateSnapshot().Actors.Single(item => item.Id == guard.Id).Job.Kind);
     }
 
     [Fact]
@@ -399,6 +499,7 @@ public sealed class ConstructionRemovalTests
         Assert.Equal(position.Y, actor.Position.Y);
         Assert.True(actor.Position.Z < position.Z);
         Assert.True(engine.World.IsTerrainTraversable(actor.Position));
+        Assert.True(actor.Health < engine.MaximumGoblinHealth);
     }
 
     [Fact]
@@ -508,11 +609,12 @@ public sealed class ConstructionRemovalTests
 
     private static SimulationEngine CreateEngine(
         int initialWoodStock,
-        int initialFoodStock = 0) =>
+        int initialFoodStock = 0,
+        int initialGoblinCount = 1) =>
         SimulationEngine.Create(
             new WorldSeed(0x52454D4F56414CUL),
             SimulationDefinitions.Foundation,
-            initialGoblinCount: 1,
+            initialGoblinCount: initialGoblinCount,
             initialFoodStock: initialFoodStock,
             initialWoodStock: initialWoodStock);
 

@@ -17,6 +17,7 @@ using GoblinStronghold.Simulation.Terrain;
 using GoblinStronghold.Simulation.Workshops;
 using GoblinStronghold.Simulation.Visibility;
 using GoblinStronghold.Simulation.WorkPriorities;
+using GoblinStronghold.Simulation.Watchtowers;
 
 namespace GoblinStronghold.Simulation;
 
@@ -64,6 +65,7 @@ public sealed partial class SimulationEngine
     private GoblinRaidPhase _raidPhase;
     private GridPosition _raidRallyPoint;
     private readonly SortedSet<EntityId> _raidPartyIds = [];
+    private readonly SortedDictionary<WorldObjectId, WatchtowerPostState> _watchtowerPosts = [];
     private bool _raidRosterConfigured;
     private GridPosition _raidTarget;
     private int _raidTargetRadius = DefaultRaidTargetRadius;
@@ -432,6 +434,8 @@ public sealed partial class SimulationEngine
                 model.Kind)),
             save.HarvestedCaveFlora.Select(model =>
                 new GridPosition(model.X, model.Y, model.Z)),
+            save.StrippedFloorSurfaces.Select(model =>
+                new GridPosition(model.X, model.Y, model.Z)),
             save.ConnectedWaterActivated);
         engine.Navigation = new NavigationPathService(engine.World);
         engine.LoadBloodStains(save.BloodStains);
@@ -494,6 +498,7 @@ public sealed partial class SimulationEngine
         engine._undergroundFactions.Restore(save.UndergroundFactions);
         engine.ValidateLoadedWorkDesignations();
         engine.LoadActors(save.Actors);
+        engine.LoadWatchtowerPosts(save.WatchtowerPosts);
         engine.LoadTribeNavigationBeliefs(save.TribeNavigationBeliefs);
         engine.RestoreLegacyRaidPartyIfNeeded();
         engine.ValidateLoadedRaidParty();
@@ -707,6 +712,7 @@ public sealed partial class SimulationEngine
         var humanVillage = _humanVillage.CreateSnapshot();
         var visibility = Visibility.CreateSnapshot().ToArray();
         var resourceInventory = CreateResourceInventorySnapshot().ToArray();
+        var watchtowerPosts = CreateWatchtowerPostSnapshot();
 
         return new SimulationSnapshot(
             WorldSeed,
@@ -738,6 +744,7 @@ public sealed partial class SimulationEngine
             _raidRallyPoint,
             _raidPartyIds.ToArray(),
             _raidRosterConfigured,
+            watchtowerPosts,
             _raidTarget,
             _raidTargetRadius,
             _raidDirectives,
@@ -1227,6 +1234,13 @@ public sealed partial class SimulationEngine
             RaidRallyZ = _raidRallyPoint.Z,
             RaidPartyIds = _raidPartyIds.Select(id => id.Value).ToList(),
             RaidRosterConfigured = _raidRosterConfigured,
+            WatchtowerPosts = _watchtowerPosts.Values.Select(post =>
+                new WatchtowerPostSaveModel
+                {
+                    WatchtowerId = post.WatchtowerId.Value,
+                    FoodStorageId = post.FoodStorageId.Value,
+                    GuardIds = post.GuardIds.Select(id => id.Value).ToList(),
+                }).ToList(),
             RaidTargetX = _raidTarget.X,
             RaidTargetY = _raidTarget.Y,
             RaidTargetZ = _raidTarget.Z,
@@ -1323,6 +1337,16 @@ public sealed partial class SimulationEngine
                     Kind = passage.Kind,
                 }).ToList(),
             HarvestedCaveFlora = World.HarvestedCaveFlora
+                .OrderBy(position => position.Z)
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X)
+                .Select(position => new GridPositionSaveModel
+                {
+                    X = position.X,
+                    Y = position.Y,
+                    Z = position.Z,
+                }).ToList(),
+            StrippedFloorSurfaces = World.StrippedFloorSurfaces
                 .OrderBy(position => position.Z)
                 .ThenBy(position => position.Y)
                 .ThenBy(position => position.X)
@@ -1461,6 +1485,17 @@ public sealed partial class SimulationEngine
         foreach (var actorId in _raidPartyIds)
         {
             Append(canonical, actorId.Value);
+        }
+        Append(canonical, _watchtowerPosts.Count);
+        foreach (var post in _watchtowerPosts.Values)
+        {
+            Append(canonical, post.WatchtowerId.Value);
+            Append(canonical, post.FoodStorageId.Value);
+            Append(canonical, post.GuardIds.Count);
+            foreach (var guardId in post.GuardIds)
+            {
+                Append(canonical, guardId.Value);
+            }
         }
         AppendNavigationKnowledge(canonical, _tribeNavigationKnowledge);
         Append(canonical, _nextAnimalId);
@@ -1648,6 +1683,16 @@ public sealed partial class SimulationEngine
             .ToArray();
         Append(canonical, harvestedCaveFlora.Length);
         foreach (var position in harvestedCaveFlora)
+        {
+            Append(canonical, position);
+        }
+        var strippedFloorSurfaces = World.StrippedFloorSurfaces
+            .OrderBy(position => position.Z)
+            .ThenBy(position => position.Y)
+            .ThenBy(position => position.X)
+            .ToArray();
+        Append(canonical, strippedFloorSurfaces.Length);
+        foreach (var position in strippedFloorSurfaces)
         {
             Append(canonical, position);
         }
@@ -2481,6 +2526,7 @@ public sealed partial class SimulationEngine
                     WorkDesignationKind.GatherLichen or
                     WorkDesignationKind.UprootBerryBush or WorkDesignationKind.FellTree or
                     WorkDesignationKind.QuarryBoulder or WorkDesignationKind.MineRock or
+                    WorkDesignationKind.StripFloor or
                     WorkDesignationKind.Scout or WorkDesignationKind.CarveRampDown or
                     WorkDesignationKind.CarveRampUp or WorkDesignationKind.CleanBlood &&
                  targetEntityId != EntityId.None) ||
@@ -3099,10 +3145,12 @@ public sealed partial class SimulationEngine
         var goblinObservers = _actors.Values
             .Select(actor => (
                 actor.Position,
-                WorldVisibilityPolicy.ResolveGoblinVisionRadius(
+                Radius: WorldVisibilityPolicy.ResolveGoblinVisionRadius(
                     GoblinPerception,
                     actor.Position,
-                    calendar.IsNight)))
+                    calendar.IsNight) * (IsWatchtowerGuardAtPost(actor)
+                        ? WatchtowerDutyPolicy.VisionRangeMultiplier
+                        : 1)))
             .ToArray();
         var observers = goblinObservers.ToList();
         var verticalPassages = World.CreateVerticalPassageSnapshot();
@@ -3262,6 +3310,8 @@ public sealed partial class SimulationEngine
         SimulationCommandKind.DismantleConstruction => TryExecuteDismantleConstruction(command),
         SimulationCommandKind.AttackHumanVillage => TryExecuteAttackHumanVillage(command),
         SimulationCommandKind.ConfigureRaidMember => TryExecuteConfigureRaidMember(command),
+        SimulationCommandKind.ConfigureWatchtowerGuard =>
+            TryExecuteConfigureWatchtowerGuard(command),
         SimulationCommandKind.SuspendRaidPreparation => TryExecuteSuspendRaidPreparation(),
         SimulationCommandKind.LaunchRaid => TryExecuteLaunchRaid(),
         SimulationCommandKind.ConfigureRaidTarget => TryExecuteConfigureRaidTarget(command),
@@ -3335,6 +3385,10 @@ public sealed partial class SimulationEngine
         if (targetKind == DismantleTargetKind.StorageZone)
         {
             if (!_storageZones.TryGetValue(command.Target, out var zone))
+            {
+                return false;
+            }
+            if (_watchtowerPosts.Values.Any(post => post.FoodStorageId == zone.Id))
             {
                 return false;
             }
@@ -4040,6 +4094,7 @@ public sealed partial class SimulationEngine
             (int)WorkDesignationKind.FellTree => WorkDesignationKind.FellTree,
             (int)WorkDesignationKind.QuarryBoulder => WorkDesignationKind.QuarryBoulder,
             (int)WorkDesignationKind.MineRock => WorkDesignationKind.MineRock,
+            (int)WorkDesignationKind.StripFloor => WorkDesignationKind.StripFloor,
             (int)WorkDesignationKind.Scout => WorkDesignationKind.Scout,
             (int)WorkDesignationKind.HuntAnimal => WorkDesignationKind.HuntAnimal,
             (int)WorkDesignationKind.CarveRampDown => WorkDesignationKind.CarveRampDown,
@@ -4252,6 +4307,10 @@ public sealed partial class SimulationEngine
             actor.SuspendedJobKind == ActorJobKind.MineRock &&
             World.GetCardinalWorldNeighbors(designation.Target)
                 .Contains(actor.SuspendedJobTarget),
+        WorkDesignationKind.StripFloor =>
+            actor.SuspendedJobKind == ActorJobKind.StripFloor &&
+            World.GetCardinalWorldNeighbors(designation.Target)
+                .Contains(actor.SuspendedJobTarget),
         WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
             actor.SuspendedJobKind == ActorJobKind.CarveRamp &&
             actor.SuspendedJobTarget == designation.Target,
@@ -4283,6 +4342,8 @@ public sealed partial class SimulationEngine
             actor.JobKind == ActorJobKind.QuarryBoulder && actor.SourceStackId == designation.Id,
         WorkDesignationKind.MineRock =>
             actor.JobKind == ActorJobKind.MineRock && actor.SourceStackId == designation.Id,
+        WorkDesignationKind.StripFloor =>
+            actor.JobKind == ActorJobKind.StripFloor && actor.SourceStackId == designation.Id,
         WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
             actor.JobKind == ActorJobKind.CarveRamp && actor.SourceStackId == designation.Id,
         WorkDesignationKind.Scout =>
@@ -5215,7 +5276,17 @@ public sealed partial class SimulationEngine
                     site.Anchor,
                     CurrentTick,
                     site.DeliveredVariant));
-                completedTarget = EntityId.None;
+                var watchtower = World.GetWorldObjectsAt(site.Anchor)
+                    .Single(item => item.Kind == WorldObjectKind.WoodenWatchtower);
+                var watchtowerFoodStorage = AllocateStorageZone(
+                    site.Anchor with { Z = site.Anchor.Z + 1 },
+                    ResourceKind.Food,
+                    WatchtowerDutyPolicy.FoodStorageCapacity,
+                    WatchtowerDutyPolicy.FoodStorageTarget);
+                _watchtowerPosts.Add(
+                    watchtower.Id,
+                    new WatchtowerPostState(watchtower.Id, watchtowerFoodStorage.Id));
+                completedTarget = watchtowerFoodStorage.Id;
                 experience = 30;
                 break;
             case ConstructionKind.ReedSleepingMat:
@@ -5873,6 +5944,10 @@ public sealed partial class SimulationEngine
         CreateGoblinCorpse(actor);
 
         _actors.Remove(actor.Id);
+        foreach (var post in _watchtowerPosts.Values)
+        {
+            post.GuardIds.Remove(actor.Id);
+        }
         foreach (var zone in _storageZones.Values.Where(zone =>
                      zone.AssignedHaulerId == actor.Id))
         {
@@ -6331,6 +6406,7 @@ public sealed partial class SimulationEngine
                     (int)WorkDesignationKind.FellTree => WorkDesignationKind.FellTree,
                     (int)WorkDesignationKind.QuarryBoulder => WorkDesignationKind.QuarryBoulder,
                     (int)WorkDesignationKind.MineRock => WorkDesignationKind.MineRock,
+                    (int)WorkDesignationKind.StripFloor => WorkDesignationKind.StripFloor,
                     (int)WorkDesignationKind.Scout => WorkDesignationKind.Scout,
                     (int)WorkDesignationKind.HuntAnimal => WorkDesignationKind.HuntAnimal,
                     (int)WorkDesignationKind.CarveRampDown => WorkDesignationKind.CarveRampDown,
@@ -6351,6 +6427,7 @@ public sealed partial class SimulationEngine
                     designationKindCode is (int)WorkDesignationKind.FellTree or
                         (int)WorkDesignationKind.QuarryBoulder or
                         (int)WorkDesignationKind.MineRock or
+                        (int)WorkDesignationKind.StripFloor or
                         (int)WorkDesignationKind.Scout or
                         (int)WorkDesignationKind.HuntAnimal or
                         (int)WorkDesignationKind.CarveRampDown or
@@ -6713,6 +6790,21 @@ public sealed partial class SimulationEngine
                     command.Resource != ResourceKind.Any || command.Amount is not (0 or 1))
                 {
                     throw new ArgumentException("Raid-member command is invalid.", nameof(command));
+                }
+                break;
+            case SimulationCommandKind.ConfigureWatchtowerGuard:
+                ValidateActor(command.Subject, command);
+                if (command.Target == EntityId.None ||
+                    command.Position != default || command.EndPosition != default ||
+                    command.Construction != default || command.Resource != ResourceKind.Any ||
+                    command.Amount is not (0 or 1) ||
+                    !World.CreateWorldObjectSnapshot().Any(item =>
+                        item.Id.Value == command.Target.Value &&
+                        item.Kind == WorldObjectKind.WoodenWatchtower &&
+                        item.Owner == WorldObjectOwner.GoblinTribe))
+                {
+                    throw new ArgumentException(
+                        "Watchtower-guard command is invalid.", nameof(command));
                 }
                 break;
             case SimulationCommandKind.SuspendRaidPreparation:
@@ -7319,7 +7411,7 @@ public sealed partial class SimulationEngine
                 source.Location.Position.Z == minimum.Z;
             if ((actor.JobKind is ActorJobKind.Forage or ActorJobKind.ClearVegetation && targetWasCleared) ||
                 (actor.JobKind is ActorJobKind.FellTree or ActorJobKind.QuarryBoulder or
-                    ActorJobKind.MineRock &&
+                    ActorJobKind.MineRock or ActorJobKind.StripFloor &&
                  removedDesignationIds.Contains(actor.SourceStackId)) ||
                 (actor.JobKind == ActorJobKind.Haul &&
                  actor.JobStage == ActorJobStage.Collecting &&
@@ -8255,6 +8347,7 @@ public sealed partial class SimulationEngine
             if (JobKind is ActorJobKind.Move or ActorJobKind.Explore or ActorJobKind.Forage or
                 ActorJobKind.ClearVegetation or ActorJobKind.FellTree or
                 ActorJobKind.QuarryBoulder or ActorJobKind.MineRock or ActorJobKind.CarveRamp or
+                ActorJobKind.StripFloor or
                 ActorJobKind.Rest)
             {
                 SuspendedJobKind = JobKind;

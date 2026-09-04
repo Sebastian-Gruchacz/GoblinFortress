@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Construction;
+using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -438,9 +439,9 @@ public sealed class ConstructedSurfaceTests
             .SelectMany(item => engine.World.GetCardinalWorldNeighbors(
                     item.Position with { Z = item.Position.Z - 1 })
                 .Select(lower => (Lower: lower, Upper: item.Position)))
-            .First(candidate => engine.World.CanBuildWoodenLadder(
-                candidate.Lower,
-                candidate.Upper));
+            .First(candidate =>
+                engine.World.CanBuildWoodenLadder(candidate.Lower, candidate.Upper) &&
+                engine.World.CanBuildStandingTorch(candidate.Upper));
 
         Assert.DoesNotContain(
             placement.Upper,
@@ -634,6 +635,164 @@ public sealed class ConstructedSurfaceTests
         Assert.Equal(
             1,
             Assert.Single(restored.CreateSnapshot().ConstructionSites).RemainingWorkTicks);
+    }
+
+    [Fact]
+    public void StrippingNaturalFloorCreatesPersistentVerticalOpening()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var position = EnumerateWorldPositions(engine)
+            .First(candidate =>
+                candidate.Z > engine.Map.MinimumWorldLevel &&
+                engine.World.CanStripFloor(candidate) &&
+                engine.World.GetCardinalWorldNeighbors(candidate)
+                    .Any(engine.World.IsTerrainTraversable));
+
+        Assert.True(engine.World.TryStripFloor(
+            position,
+            new SimulationTick(1),
+            out _,
+            out _,
+            out var change));
+
+        Assert.Equal(WorldChangeKind.FloorStripped, change.Kind);
+        Assert.False(engine.World.IsTerrainTraversable(position));
+        Assert.True(engine.World.HasOpenVerticalSightLine(
+            position,
+            position with { Z = position.Z - 1 }));
+        Assert.Contains(position, engine.World.StrippedFloorSurfaces);
+
+        var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
+        Assert.Contains(position, restored.World.StrippedFloorSurfaces);
+        Assert.False(restored.World.IsTerrainTraversable(position));
+    }
+
+    [Fact]
+    public void PlayerFloorReplacesNaturalFloorAndItsRemovalLeavesAHole()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var position = EnumerateWorldPositions(engine)
+            .First(candidate => engine.World.CanBuildFloors([candidate]) &&
+                engine.Map.TryGetInitialGeometry(candidate, out var geometry) &&
+                geometry.IsSupported);
+        engine.World.BuildFloor(
+            position,
+            new SimulationTick(1),
+            stone: false,
+            ResourceVariant.OakWood);
+
+        Assert.True(engine.World.IsTerrainTraversable(position));
+        Assert.Contains(position, engine.World.StrippedFloorSurfaces);
+        Assert.True(engine.World.TryStripFloor(
+            position,
+            new SimulationTick(2),
+            out var resource,
+            out var variant,
+            out _));
+
+        Assert.Equal(ResourceKind.Wood, resource);
+        Assert.Equal(ResourceVariant.OakWood, variant);
+        Assert.False(engine.World.IsTerrainTraversable(position));
+        Assert.False(engine.World.HasConstructedFloorSurface(position));
+    }
+
+    [Fact]
+    public void FloorStrippingWorkPositionAvoidsAnActiveTargetAndKeepsAnExit()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var pair = EnumerateWorldPositions(engine)
+            .Where(engine.World.CanStripFloor)
+            .SelectMany(target => engine.World.GetCardinalWorldNeighbors(target)
+                .Where(engine.World.IsTerrainTraversable)
+                .Select(workPosition => (Target: target, WorkPosition: workPosition)))
+            .First(pair => engine.World.GetCardinalWorldNeighbors(pair.WorkPosition)
+                .Any(exit => exit != pair.Target && engine.World.IsTerrainTraversable(exit)));
+
+        Assert.True(Terrain.Jobs.FloorStrippingSafetyPolicy.IsSafeWorkPosition(
+            engine.World,
+            pair.WorkPosition,
+            pair.Target,
+            new HashSet<GridPosition> { pair.Target }));
+        Assert.False(Terrain.Jobs.FloorStrippingSafetyPolicy.IsSafeWorkPosition(
+            engine.World,
+            pair.WorkPosition,
+            pair.Target,
+            new HashSet<GridPosition> { pair.Target, pair.WorkPosition }));
+    }
+
+    [Fact]
+    public void FloorStrippingAreaCommandCreatesTargetsOnlyForExistingFloors()
+    {
+        var engine = CreateEngine(initialWoodStock: 0);
+        var position = EnumerateWorldPositions(engine).First(engine.World.CanStripFloor);
+        engine.Visibility.Reveal([position], radius: 1);
+
+        Assert.Equal(
+            [position],
+            engine.QueryWorkDesignationTargets(
+                WorkDesignationKind.StripFloor,
+                position,
+                position));
+        engine.QueueCommand(SimulationCommand.DesignateFloorStripping(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            position,
+            position));
+        engine.AdvanceTicks(1);
+
+        var designation = Assert.Single(engine.CreateSnapshot().WorkDesignations);
+        Assert.Equal(WorkDesignationKind.StripFloor, designation.Kind);
+        Assert.Equal(position, designation.Target);
+    }
+
+    [Fact]
+    public void HammerEquippedGoblinStripsAPlayerFloorFromBesideIt()
+    {
+        var generated = CreateEngine(initialWoodStock: 0);
+        var position = EnumerateWorldPositions(generated)
+            .First(candidate => generated.World.CanBuildFloors([candidate]) &&
+                generated.Map.TryGetInitialGeometry(candidate, out var geometry) &&
+                geometry.IsSupported &&
+                generated.World.GetCardinalWorldNeighbors(candidate)
+                    .Any(neighbor => generated.World.IsTerrainTraversable(neighbor) &&
+                        generated.World.GetCardinalWorldNeighbors(neighbor)
+                            .Any(exit => exit != candidate &&
+                                generated.World.IsTerrainTraversable(exit))));
+        var workPosition = generated.World.GetCardinalWorldNeighbors(position)
+            .First(neighbor => generated.World.IsTerrainTraversable(neighbor) &&
+                generated.World.GetCardinalWorldNeighbors(neighbor)
+                    .Any(exit => exit != position &&
+                        generated.World.IsTerrainTraversable(exit)));
+        generated.World.BuildFloor(
+            position,
+            SimulationTick.Zero,
+            stone: false,
+            ResourceVariant.OakWood);
+        var save = JsonNode.Parse(generated.Save())!.AsObject();
+        var actor = Assert.Single(save["actors"]!.AsArray())!.AsObject();
+        actor["x"] = workPosition.X;
+        actor["y"] = workPosition.Y;
+        actor["z"] = workPosition.Z;
+        actor["equipment"] =
+            (int)(PersonalEquipment.RagClothes | PersonalEquipment.WoodenHammer);
+        var engine = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+        engine.Visibility.Reveal([position, workPosition], radius: 1);
+        engine.QueueCommand(SimulationCommand.DesignateFloorStripping(
+            engine.CurrentTick.Next(),
+            engine.NextAvailableCommandSequence,
+            position,
+            position));
+
+        for (var tick = 0; tick < 500 && engine.World.HasConstructedFloorSurface(position); tick++)
+        {
+            engine.AdvanceTicks(1);
+        }
+
+        Assert.False(engine.World.HasConstructedFloorSurface(position));
+        Assert.False(engine.World.IsTerrainTraversable(position));
+        Assert.Equal(workPosition, Assert.Single(engine.CreateSnapshot().Actors).Position);
     }
 
     private static SimulationEngine CreateEngine(int initialWoodStock) =>

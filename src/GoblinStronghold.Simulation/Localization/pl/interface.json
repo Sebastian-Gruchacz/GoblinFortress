@@ -219,7 +219,7 @@
       "field-camp": "Obozowisko 2×2: wskaż lewy górny narożnik • koszt 6 drewna • zawiera skład prowiantu • PPM lub Esc anuluje",
       "goblin-hut": "Chata 3×3: wskaż lewy górny narożnik • koszt 8 drewna • daje {0} miejsc i podnosi cel populacji • PPM lub Esc anuluje",
       "goblin-compost": "Budowa plemiennego zagłębienia kompostowego: wskaż odkryte, wolne pole • koszt 2 sitowia • przyjmuje odzyskane ciała do pączkowania ze zwłok • PPM lub Esc anuluje",
-      "wooden-watchtower": "Budowa drewnianej wieży strażniczej 2×2: wskaż lewy górny narożnik • koszt 8 drewna • odkrywa teren w promieniu 7 pól • jeszcze bez wejścia • PPM lub Esc anuluje",
+      "wooden-watchtower": "Budowa drewnianej wieży strażniczej 2×2: wskaż lewy górny narożnik • koszt 8 drewna • 2 stanowiska z podwójnym zasięgiem wzroku i ataków dystansowych • wbudowana drabina, 2 posłania i mały skład żywności • PPM lub Esc anuluje",
       "reed-sleeping-mat": "Budowa trzcinowego posłania: wskaż wolne dostępne pole • koszt 2 sitowia • zadaszone posłania są preferowane • PPM lub Esc anuluje",
       "wooden-wall": "Budowa drewnianej ściany: {0} • przeciągnij LPM od początku do końca • 2 drewna/segment • blokuje przejście • PPM lub Esc anuluje",
       "stone-wall": "Budowa kamiennego muru: {0} • przeciągnij LPM od początku do końca • 2 jednostki kamienia/segment • wymaga narzędzia poziomu 1 • PPM lub Esc anuluje",
@@ -249,6 +249,7 @@
       "fell-trees": "Praca: przeciągnij obszar wyrębu • pozostaną konkretne drzewa i martwe pnie • PPM lub Esc anuluje",
       "quarry-boulders": "Praca: przeciągnij obszar wydobycia • pozostaną konkretne głazy • wymaga narzędzia poziomu 2 • PPM lub Esc anuluje",
       "mine-rock": "Praca: przeciągnij obszar wykopu • nieznane pola pozostaną w planie aż front kopania je odsłoni • ziemia i piasek wymagają narzędzia ziemnego poziomu 1; skała narzędzia górniczego poziomu 2 lub 3 • PPM lub Esc anuluje",
+      "strip-floor": "Praca: przeciągnij po podłogach, aby je zerwać • gobliny pracują z bezpiecznej sąsiedniej kratki • usunięcie ostatniego podparcia tworzy otwarty szyb • PPM lub Esc anuluje",
       "carve-ramp-down": "Praca: kliknij odkrytą podłogę, aby wykuć zamknięte schody o poziom w dół • wymaga narzędzia poziomu 2 • PPM lub Esc anuluje",
       "carve-ramp-up": "Praca: kliknij odkrytą podłogę jaskini, aby wykuć zamknięte schody o poziom w górę • wymaga narzędzia poziomu 2 • PPM lub Esc anuluje",
       "hunt-animals": "Polowanie: przeciągnij obszar • pozostaną konkretne zwierzęta • PPM lub Esc anuluje",
@@ -306,6 +307,8 @@
       "quarry-boulder-working": "rozbija głaz kilofem ({0})",
       "mine-rock-travel": "idzie wykonywać wykop → {0}",
       "mine-rock-working": "kopie w gruncie ({0})",
+      "strip-floor-travel": "idzie zerwać podłogę → {0}",
+      "strip-floor-working": "zrywa podłogę ({0})",
       "carve-ramp-travel": "idzie wykuć schody → {0}",
       "carve-ramp-working": "wykuwa pochylnię ({0})",
       "tend-bud-travel": "idzie opiekować się pąkiem → {0}",
@@ -319,7 +322,9 @@
       "recover-corpse-collect": "idzie po zwłoki → {0}",
       "recover-corpse-return": "niesie zwłoki do obozu → {0}",
       "consume-corpse-travel": "idzie pożreć zwłoki → {0}",
-      "consume-corpse-working": "pożera zwłoki ({0})"
+      "consume-corpse-working": "pożera zwłoki ({0})",
+      "watchtower-travel": "idzie na stanowisko w wieży → {0}",
+      "watchtower-guarding": "pełni wartę na {0}"
     },
     "actor-job-kinds": {
       "dismantling": "rozbiórki",
@@ -348,7 +353,8 @@
       "LootRaid": "plądrowania",
       "RecoverRaidCorpse": "przenoszenia zwłok",
       "ConsumeRaidCorpse": "pożerania zwłok",
-      "DismantleConstruction": "rozbiórki"
+      "DismantleConstruction": "rozbiórki",
+      "GuardWatchtower": "służby w wieży"
     },
     "actor-job-phases": {
       "None": "brak",
@@ -446,10 +452,12 @@
       "dismantle-structure": "rozbiórka konstrukcji",
       "dismantle-storage": "rozbiórka magazynu",
       "stairs-down": "schody w dół",
-      "stairs-up": "schody w górę"
+      "stairs-up": "schody w górę",
+      "strip-floor": "zrywanie podłogi"
     },
     "work-feedback": {
       "tunnel-preview": "Planowany obszar tunelu: {0} pól; nieznane komórki będą rozstrzygane wraz z odsłanianiem.",
+      "strip-floor-preview": "Podłogi wybrane do zerwania: {0}.",
       "ramp-fluid": "Nie można wykuć schodów: po drugiej stronie jest {0}.",
       "ramp-valid": "Zamknięte schody połączą tę kolumnę na sąsiednich poziomach.",
       "ramp-invalid": "Kliknij poprawną, odkrytą podłogę z miejscem na schody na sąsiednim poziomie.",
@@ -460,6 +468,7 @@
       "create-failed": "Nie można utworzyć tego zlecenia na wskazanym obszarze.",
       "clear-ordered": "Usunięto cele pracy oraz {0} zleceń budowy przecinających zaznaczenie.",
       "tunnel-ordered": "Zlecono obszar tunelu; dispatcher będzie udostępniał kolejne ściany wraz z postępem kopania.",
+      "strip-floor-ordered": "Zlecono zrywanie podłóg; gobliny będą pracować z bezpiecznych sąsiednich kratek.",
       "ramp-down-ordered": "Zlecono wykucie zamkniętych schodów na poziom niżej.",
       "ramp-up-ordered": "Zlecono wykucie zamkniętych schodów na poziom wyżej.",
       "clean-blood-ordered": "Zlecono sprzątanie zaznaczonych plam i brudu.",
@@ -483,7 +492,7 @@
       "clearing": "Karczowanie roślinności",
       "logging": "Wyrąb drzew",
       "quarrying": "Rozbijanie głazów",
-      "mining": "Kopanie w skale",
+      "mining": "Drążenie terenu i zrywanie podłóg",
       "ramp-carving": "Drążenie pochylni",
       "scouting": "Zwiad",
       "hunting": "Polowanie na zwierzęta",
@@ -521,7 +530,7 @@
       "standing-torch-ordered": "Zlecono wolnostojącą pochodnię • koszt 1 drewna",
       "standing-torch-invalid": "Wolnostojąca pochodnia wymaga wolnego, dostępnego pola.",
       "goblin-compost-ordered": "Zlecono plemienne zagłębienie kompostowe • koszt 2 sitowia",
-      "wooden-watchtower-ordered": "Zlecono drewnianą wieżę strażniczą • koszt 8 drewna • promień obserwacji 7",
+      "wooden-watchtower-ordered": "Zlecono drewnianą wieżę strażniczą • koszt 8 drewna • dwa stanowiska, posłania i mały skład żywności",
       "reed-sleeping-mat-ordered": "Zlecono trzcinowe posłanie • koszt 2 sitowia • jedno miejsce do spania",
       "reed-sleeping-mat-invalid": "Posłanie wymaga wolnego dostępnego pola bez innego elementu wyposażenia.",
       "primitive-workshop-ordered": "Zlecono prymitywny warsztat • koszt 4 drewna",
@@ -722,7 +731,7 @@
       "field-camp": "Obozowisko wypadowe\nKoszt: 6 drewna",
       "goblin-hut": "Chata goblinów\nKoszt: 8 drewna • zwiększa pojemność plemienia",
       "goblin-compost": "Plemienne zagłębienie kompostowe\nKoszt: 2 sitowia • miejsce pączkowania ze zwłok",
-      "wooden-watchtower": "Drewniana wieża strażnicza 2×2\nKoszt: 8 drewna • promień obserwacji 7 • jeszcze bez wejścia",
+      "wooden-watchtower": "Drewniana wieża strażnicza 2×2\nKoszt: 8 drewna • 2 strażników • podwójny zasięg wzroku i ataków dystansowych na górnym stanowisku • wbudowana drabina • 2 posłania • cel/pojemność żywności 6/12",
       "reed-sleeping-mat": "Trzcinowe posłanie\nKoszt: 2 sitowia • jedno rezerwowane miejsce do spania • zadaszone miejsca są preferowane",
       "wooden-floor": "Drewniana podłoga / strop\nMoże przykrywać pustą przestrzeń • koszt: 1 drewno za pole",
       "stone-floor": "Kamienna posadzka / strop\nMoże przykrywać pustą przestrzeń • koszt: 1 kamień za pole • wymaga narzędzia poziomu 1",
@@ -751,6 +760,7 @@
       "fell-trees": "Wyrąb drzew i pni\nWymaga goblina z siekierą",
       "quarry-boulders": "Rozbij głazy\nWymaga narzędzia poziomu 2",
       "mine-rock": "Wykop grunt\nZiemia i piasek: narzędzie ziemne poziomu 1; skała: górnicze poziomu 2 lub 3",
+      "strip-floor": "Zerwij podłogę\nUsuwa podłogi konstrukcyjne i naturalne; może utworzyć niebezpieczny szyb",
       "carve-ramp-down": "Wykuj schody w dół\nZamknięte połączenie w jednej kratce; wymaga narzędzia poziomu 2",
       "carve-ramp-up": "Wykuj schody w górę\nZamknięte połączenie w jednej kratce; wymaga narzędzia poziomu 2",
       "hunt-animals": "Poluj na zwierzęta\nPrzeciągnij obszar; pozostaną konkretne cele",
@@ -1314,6 +1324,17 @@
       "confirm-dismantle-text": "Rozebrać tę konstrukcję?\n\nPowiązane zlecenia warsztatu zostaną anulowane, a ich dostarczone materiały wrócą na ziemię.",
       "cancel-construction-confirm": "Anuluj budowę",
       "dismantle-confirm": "Rozbierz"
+    },
+    "watchtower": {
+      "title": "Wieża strażnicza",
+      "summary": "Strażnicy: {0}/2 • żywność: {1}/{2} • górne stanowisko: {3}\nPrzypisani strażnicy wracają po jedzeniu, piciu lub odpoczynku. Na stanowisku mają podwójny zasięg wzroku oraz broni dystansowej i podobnych czarów. Wieża ma dwa posłania, ale nie ma zbiornika na wodę.",
+      "guard-row": "{0} • zdrowie {1}",
+      "assigned-other-tower": "Już przypisany do innej wieży strażniczej",
+      "open-food-storage": "Otwórz skład żywności",
+      "close": "Zamknij",
+      "capacity-reached": "Do wieży można przypisać najwyżej dwóch strażników.",
+      "assigned": "Goblin został przypisany do służby w wieży.",
+      "unassigned": "Goblin został zwolniony ze służby w wieży."
     },
     "context-feedback": {
       "raid-recalled": "Zlecono odwołanie trwającego najazdu.",

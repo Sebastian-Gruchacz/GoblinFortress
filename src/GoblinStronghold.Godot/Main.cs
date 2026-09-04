@@ -15,6 +15,7 @@ using GoblinStronghold.GodotClient.UI.Actors;
 using GoblinStronghold.GodotClient.UI.Animals;
 using GoblinStronghold.GodotClient.UI.MainMenu;
 using GoblinStronghold.GodotClient.UI.Windows;
+using GoblinStronghold.GodotClient.UI.Watchtowers;
 using GoblinStronghold.GodotClient.UI.WorldPlanning;
 using GoblinStronghold.GodotClient.UI.WorldRendering;
 using GoblinStronghold.GodotClient.Application.Profiles;
@@ -108,6 +109,7 @@ public partial class Main : Node
     private readonly HashSet<EntityId> _raidDraftIds = [];
     private bool _updatingRaidSelection;
     private GridPosition? _raidDraftRallyPoint;
+    private WatchtowerWindow _watchtowerWindow = null!;
     private bool _isRaidTargetMode;
     private int _raidTargetRadius = SimulationEngine.DefaultRaidTargetRadius;
     private PopupMenu _worldContextMenu = null!;
@@ -300,6 +302,7 @@ public partial class Main : Node
         FellTrees,
         QuarryBoulders,
         MineRock,
+        StripFloor,
         CarveRampDown,
         CarveRampUp,
         HuntAnimals,
@@ -770,6 +773,7 @@ public partial class Main : Node
         AddChild(_workTypePriorityWindow);
         CreateLogisticsWindow();
         CreateRaidWindow();
+        CreateWatchtowerWindow();
         CreateWorkshopWindow();
         CreateWorldContextMenu();
         CreateUnitOrderMenu();
@@ -2226,6 +2230,7 @@ public partial class Main : Node
         _goblinRosterWindow.Hide();
         _statisticsWindow.Hide();
         _raidWindow.Hide();
+        _watchtowerWindow.Hide();
         _worldContextMenu.Hide();
         _raidDraftIds.Clear();
         _raidDraftRallyPoint = null;
@@ -2491,6 +2496,10 @@ public partial class Main : Node
             Ui("action-tiles", "mine-rock"),
             () => SelectWorkMode((long)WorkMode.MineRock),
             GameShortcutId.MineRock);
+        _terrainPlanningMenu.AddRootTool(
+            _pickaxeIcon,
+            Ui("action-tiles", "strip-floor"),
+            () => SelectWorkMode((long)WorkMode.StripFloor));
         _terrainPlanningMenu.AddRootTool(
             CreateBadgedIcon(_pickaxeIcon, CreateDirectionBadgeIcon(upward: false)),
             Ui("action-tiles", "carve-ramp-down"),
@@ -3589,6 +3598,7 @@ public partial class Main : Node
             WorkMode.FellTrees => Ui("work-prompts", "fell-trees"),
             WorkMode.QuarryBoulders => Ui("work-prompts", "quarry-boulders"),
             WorkMode.MineRock => Ui("work-prompts", "mine-rock"),
+            WorkMode.StripFloor => Ui("work-prompts", "strip-floor"),
             WorkMode.CarveRampDown => Ui("work-prompts", "carve-ramp-down"),
             WorkMode.CarveRampUp => Ui("work-prompts", "carve-ramp-up"),
             WorkMode.HuntAnimals => Ui("work-prompts", "hunt-animals"),
@@ -4374,6 +4384,8 @@ public partial class Main : Node
             _inspector.Text = _workMode switch
             {
                 WorkMode.MineRock => UiFormat("work-feedback", "tunnel-preview", cells.Count),
+                WorkMode.StripFloor => UiFormat(
+                    "work-feedback", "strip-floor-preview", cells.Count),
                 WorkMode.CarveRampDown or WorkMode.CarveRampUp
                     when cells.Count == 0 && _engine.World.TryGetRampDestinationFluid(
                         candidates[0],
@@ -4551,6 +4563,7 @@ public partial class Main : Node
                 "work-feedback", "clear-ordered", cancelledConstructionOrders),
             WorkMode.MineRock =>
                 Ui("work-feedback", "tunnel-ordered"),
+            WorkMode.StripFloor => Ui("work-feedback", "strip-floor-ordered"),
             WorkMode.CarveRampDown => Ui("work-feedback", "ramp-down-ordered"),
             WorkMode.CarveRampUp => Ui("work-feedback", "ramp-up-ordered"),
             WorkMode.CleanBlood => Ui("work-feedback", "clean-blood-ordered"),
@@ -4745,6 +4758,7 @@ public partial class Main : Node
         WorkMode.FellTrees => WorkDesignationKind.FellTree,
         WorkMode.QuarryBoulders => WorkDesignationKind.QuarryBoulder,
         WorkMode.MineRock => WorkDesignationKind.MineRock,
+        WorkMode.StripFloor => WorkDesignationKind.StripFloor,
         WorkMode.CarveRampDown => WorkDesignationKind.CarveRampDown,
         WorkMode.CarveRampUp => WorkDesignationKind.CarveRampUp,
         WorkMode.HuntAnimals => WorkDesignationKind.HuntAnimal,
@@ -4769,6 +4783,7 @@ public partial class Main : Node
         WorkDesignationKind.FellTree => WorkMode.FellTrees,
         WorkDesignationKind.QuarryBoulder => WorkMode.QuarryBoulders,
         WorkDesignationKind.MineRock => WorkMode.MineRock,
+        WorkDesignationKind.StripFloor => WorkMode.StripFloor,
         WorkDesignationKind.CarveRampDown => WorkMode.CarveRampDown,
         WorkDesignationKind.CarveRampUp => WorkMode.CarveRampUp,
         WorkDesignationKind.HuntAnimal => WorkMode.HuntAnimals,
@@ -5296,7 +5311,14 @@ public partial class Main : Node
         {
             SelectActor(EntityId.None);
         }
-        if (actors.Length == 0 && zones.Length > 0)
+        var clickedWatchtower = objects.FirstOrDefault(item =>
+            item.Kind == WorldObjectKind.WoodenWatchtower &&
+            item.Owner == WorldObjectOwner.GoblinTribe);
+        if (actors.Length == 0 && clickedWatchtower is not null)
+        {
+            ShowWatchtowerWindow(clickedWatchtower);
+        }
+        else if (actors.Length == 0 && zones.Length > 0)
         {
             ShowStorageDetails(zones[0]);
         }
@@ -5850,6 +5872,10 @@ public partial class Main : Node
         if (_raidWindow.Visible)
         {
             UpdateRaidWindowSummary(snapshot);
+        }
+        if (_watchtowerWindow.Visible)
+        {
+            _watchtowerWindow.Refresh(snapshot);
         }
         if (_plannerWindow.Visible)
         {
@@ -8201,6 +8227,8 @@ public partial class Main : Node
             targets.Any(target => target.Id == actor.Job.SourceStackId),
         WorkDesignationKind.MineRock => actor.Job.Kind == ActorJobKind.MineRock &&
             targets.Any(target => target.Id == actor.Job.SourceStackId),
+        WorkDesignationKind.StripFloor => actor.Job.Kind == ActorJobKind.StripFloor &&
+            targets.Any(target => target.Id == actor.Job.SourceStackId),
         WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
             actor.Job.Kind == ActorJobKind.CarveRamp &&
             targets.Any(target => target.Id == actor.Job.SourceStackId),
@@ -8239,7 +8267,7 @@ public partial class Main : Node
             return "wstrzymane: brak siekiery";
         }
         if (kind is WorkDesignationKind.MineRock or WorkDesignationKind.CarveRampDown or
-            WorkDesignationKind.CarveRampUp)
+            WorkDesignationKind.CarveRampUp or WorkDesignationKind.StripFloor)
         {
             return DescribeMiningReadiness(living, kind, targets);
         }
@@ -8320,6 +8348,12 @@ public partial class Main : Node
                 ? _engine.Map.GetRockCell(target)
                 : null;
         }
+        if (kind == WorkDesignationKind.StripFloor)
+        {
+            return _engine.World.CanStripFloor(target)
+                ? _engine.World.GetFloorStrippingCell(target)
+                : null;
+        }
 
         var carveDown = kind == WorkDesignationKind.CarveRampDown;
         var available = carveDown
@@ -8339,6 +8373,7 @@ public partial class Main : Node
         WorkDesignationKind.FellTree => "wyrąb",
         WorkDesignationKind.QuarryBoulder => "rozbijanie głazów",
         WorkDesignationKind.MineRock => "wydobycie skały",
+        WorkDesignationKind.StripFloor => Ui("work-order-kinds", "strip-floor"),
         WorkDesignationKind.CarveRampDown => Ui("work-order-kinds", "stairs-down"),
         WorkDesignationKind.CarveRampUp => Ui("work-order-kinds", "stairs-up"),
         WorkDesignationKind.Scout => "zwiad",
@@ -9246,6 +9281,10 @@ public partial class Main : Node
                         {
                             ShowRaidWindow(worldObject.Anchor);
                         }
+                        else if (worldObject.Kind == WorldObjectKind.WoodenWatchtower)
+                        {
+                            ShowWatchtowerWindow(worldObject);
+                        }
                         else if (_engine.World.TryGetWorkshopKind(worldObject.Anchor, out _))
                         {
                             ShowWorkshopDetails(worldObject.Anchor);
@@ -9486,6 +9525,43 @@ public partial class Main : Node
             ? UiFormat("context-feedback", "camp-empty", camp.Anchor)
             : UiFormat("context-feedback", "camp-goblins-selected",
                 occupants.Length, camp.Anchor);
+    }
+
+    private void CreateWatchtowerWindow()
+    {
+        _watchtowerWindow = new WatchtowerWindow(
+            Ui,
+            DescribeJob,
+            CreateWoodenWatchtowerIcon());
+        _watchtowerWindow.GuardSelectionChanged += (watchtowerId, actorId, enabled) =>
+        {
+            _engine.QueueCommand(SimulationCommand.ConfigureWatchtowerGuard(
+                _engine.CurrentTick.Next(),
+                _commandSequence++,
+                watchtowerId,
+                actorId,
+                enabled));
+            if (_speed == 0)
+            {
+                _inspector.Text += Ui("context-feedback", "after-resume");
+            }
+        };
+        _watchtowerWindow.FoodStorageRequested += storageId =>
+        {
+            var storage = _latestSnapshot.StorageZones.FirstOrDefault(item =>
+                item.Id == storageId);
+            if (storage.Id != EntityId.None)
+            {
+                ShowStorageDetails(storage);
+            }
+        };
+        _watchtowerWindow.FeedbackRequested += feedback => _inspector.Text = feedback;
+        AddChild(_watchtowerWindow);
+    }
+
+    private void ShowWatchtowerWindow(WorldObjectSnapshot watchtower)
+    {
+        _watchtowerWindow.ShowWatchtower(_latestSnapshot, watchtower.Id);
     }
 
     private void CreateRaidWindow()

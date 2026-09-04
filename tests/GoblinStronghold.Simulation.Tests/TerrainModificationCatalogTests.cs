@@ -13,10 +13,11 @@ public sealed class TerrainModificationCatalogTests
     [Fact]
     public void CatalogDefinesEveryCurrentTerrainModification()
     {
-        Assert.Equal(3, TerrainModificationCatalog.All.Count);
+        Assert.Equal(4, TerrainModificationCatalog.All.Count);
         Assert.Equal(
             [
                 WorkDesignationKind.MineRock,
+                WorkDesignationKind.StripFloor,
                 WorkDesignationKind.CarveRampDown,
                 WorkDesignationKind.CarveRampUp,
             ],
@@ -41,6 +42,9 @@ public sealed class TerrainModificationCatalogTests
         Assert.Equal(
             WorldToolPlacementMode.Area,
             TerrainModificationCatalog.Get(WorkDesignationKind.MineRock).PlacementMode);
+        Assert.Equal(
+            WorldToolPlacementMode.Area,
+            TerrainModificationCatalog.Get(WorkDesignationKind.StripFloor).PlacementMode);
         Assert.Equal(
             WorldToolPlacementMode.Point,
             TerrainModificationCatalog.Get(WorkDesignationKind.CarveRampDown).PlacementMode);

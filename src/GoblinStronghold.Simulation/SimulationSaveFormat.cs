@@ -24,7 +24,9 @@ public static class SimulationSaveFormat
     public const int ConstructionToolLevelsMigrationVersion = 82;
     public const int ConstructionToolFunctionsMigrationVersion = 83;
     public const int GoblinManaMigrationVersion = 84;
-    public const int CurrentVersion = 85;
+    public const int WatchtowerDutyMigrationVersion = 85;
+    public const int FloorStrippingMigrationVersion = 86;
+    public const int CurrentVersion = 87;
 
     public static bool IsLoadableVersion(int version) =>
         version is SurfaceGrimeMigrationVersion or
@@ -42,6 +44,8 @@ public static class SimulationSaveFormat
             ConstructionToolLevelsMigrationVersion or
             ConstructionToolFunctionsMigrationVersion or
             GoblinManaMigrationVersion or
+            WatchtowerDutyMigrationVersion or
+            FloorStrippingMigrationVersion or
             CurrentVersion;
 }
 
@@ -73,6 +77,8 @@ internal static class SimulationSaveReader
                 $"{SimulationSaveFormat.ConstructionToolLevelsMigrationVersion} and " +
                 $"{SimulationSaveFormat.ConstructionToolFunctionsMigrationVersion} and " +
                 $"{SimulationSaveFormat.GoblinManaMigrationVersion} and " +
+                $"{SimulationSaveFormat.WatchtowerDutyMigrationVersion} and " +
+                $"{SimulationSaveFormat.FloorStrippingMigrationVersion} and " +
                 $"{SimulationSaveFormat.CurrentVersion}.");
         }
 
@@ -135,6 +141,14 @@ internal static class SimulationSaveReader
         if (save.FormatVersion == SimulationSaveFormat.GoblinManaMigrationVersion)
         {
             MigrateGoblinMana(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.WatchtowerDutyMigrationVersion)
+        {
+            MigrateWatchtowerDuty(save);
+        }
+        if (save.FormatVersion == SimulationSaveFormat.FloorStrippingMigrationVersion)
+        {
+            MigrateFloorStripping(save);
         }
 
         return save;
@@ -266,6 +280,18 @@ internal static class SimulationSaveReader
         {
             actor.Mana = 0;
         }
+        save.FormatVersion = SimulationSaveFormat.WatchtowerDutyMigrationVersion;
+    }
+
+    private static void MigrateWatchtowerDuty(SimulationSaveModel save)
+    {
+        save.WatchtowerPosts.Clear();
+        save.FormatVersion = SimulationSaveFormat.FloorStrippingMigrationVersion;
+    }
+
+    private static void MigrateFloorStripping(SimulationSaveModel save)
+    {
+        save.StrippedFloorSurfaces.Clear();
         save.FormatVersion = SimulationSaveFormat.CurrentVersion;
     }
 

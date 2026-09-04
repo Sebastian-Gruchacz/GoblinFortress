@@ -21,7 +21,7 @@ public static class WorkTypePriorityCatalog
         Define("clearing", WorkDesignationKind.UprootBerryBush),
         Define("logging", WorkDesignationKind.FellTree),
         Define("quarrying", WorkDesignationKind.QuarryBoulder),
-        Define("mining", WorkDesignationKind.MineRock),
+        Define("mining", WorkDesignationKind.MineRock, WorkDesignationKind.StripFloor),
         Define("ramp-carving", WorkDesignationKind.CarveRampDown,
             WorkDesignationKind.CarveRampUp),
         Define("scouting", WorkDesignationKind.Scout),

@@ -17,20 +17,33 @@ public static class GoblinSleepingPlacePolicy
         ArgumentNullException.ThrowIfNull(isTerrainTraversable);
         ArgumentNullException.ThrowIfNull(isOpenToSky);
 
-        var allSleepingMats = worldObjects
+        var sleepingMats = worldObjects
             .Where(worldObject =>
                 worldObject.Owner == WorldObjectOwner.GoblinTribe &&
-                worldObject.Kind == WorldObjectKind.ReedSleepingMat &&
-                isTerrainTraversable(worldObject.Anchor))
-            .Select(worldObject => worldObject.Anchor)
-            .ToHashSet();
+                worldObject.Kind is WorldObjectKind.ReedSleepingMat or
+                    WorldObjectKind.WoodenWatchtower)
+            .SelectMany(worldObject => worldObject.GetAbsoluteParts()
+                .Where(item => item.Part.Kind == WorldObjectPartKind.SleepingMat)
+                .Select(item => (item.Position,
+                    IsBuiltIn: worldObject.Kind == WorldObjectKind.WoodenWatchtower)))
+            .Where(item => isTerrainTraversable(item.Position))
+            .ToArray();
+        var allSleepingMats = sleepingMats.Select(item => item.Position).ToHashSet();
         var availableSleepingMats = allSleepingMats
             .Where(position => !reservedSleepingMats.Contains(position))
             .ToArray();
+        var builtInSleepingMats = sleepingMats
+            .Where(item => item.IsBuiltIn)
+            .Select(item => item.Position)
+            .ToHashSet();
 
         return new GoblinSleepingPlaceOptions(
-            availableSleepingMats.Where(position => !isOpenToSky(position)).ToHashSet(),
-            availableSleepingMats.Where(isOpenToSky).ToHashSet(),
+            availableSleepingMats
+                .Where(position => builtInSleepingMats.Contains(position) || !isOpenToSky(position))
+                .ToHashSet(),
+            availableSleepingMats
+                .Where(position => !builtInSleepingMats.Contains(position) && isOpenToSky(position))
+                .ToHashSet(),
             shelterFloorCells
                 .Where(isTerrainTraversable)
                 .Where(position => !allSleepingMats.Contains(position))

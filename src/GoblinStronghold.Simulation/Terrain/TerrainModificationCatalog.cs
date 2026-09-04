@@ -48,6 +48,7 @@ public static class TerrainModificationCatalog
         WorkDesignationKind.MineRock,
         WorkDesignationKind.CarveRampDown,
         WorkDesignationKind.CarveRampUp,
+        WorkDesignationKind.StripFloor,
     ];
     private static readonly Lazy<CatalogState> State = new(Load);
 
@@ -196,7 +197,8 @@ public static class TerrainModificationCatalog
 
         foreach (var definition in definitions)
         {
-            var expectedPlacement = definition.LegacyDesignation == WorkDesignationKind.MineRock
+            var expectedPlacement = definition.LegacyDesignation is
+                WorkDesignationKind.MineRock or WorkDesignationKind.StripFloor
                 ? WorldToolPlacementMode.Area
                 : WorldToolPlacementMode.Point;
             if (definition.PlacementMode != expectedPlacement)

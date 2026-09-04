@@ -124,6 +124,7 @@ public sealed partial class SimulationEngine
             var range = hasSling
                 ? Definitions.RangedCombat.SlingRange
                 : Definitions.RangedCombat.ThrownStoneRange;
+            range = ResolveGoblinRangedRange(goblin, range);
             var isMelee = distance <= 1;
             var isRanged = !isMelee && goblin.PersonalStoneAmmo > 0 && distance <= range;
             if (!isMelee && !isRanged)

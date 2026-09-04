@@ -4,6 +4,7 @@ using GoblinStronghold.Simulation.ContentPacks;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Map.Generation;
 using GoblinStronghold.Simulation.Resources;
+using GoblinStronghold.Simulation.Watchtowers;
 
 namespace GoblinStronghold.Simulation;
 
@@ -35,6 +36,8 @@ public enum ActorJobKind : byte
     RecoverRaidCorpse = 23,
     ConsumeRaidCorpse = 24,
     DismantleConstruction = 25,
+    GuardWatchtower = 26,
+    StripFloor = 27,
 }
 
 public readonly record struct GoblinBudSnapshot(
@@ -560,6 +563,7 @@ public sealed class SimulationSnapshot
         GridPosition raidRallyPoint,
         EntityId[] raidPartyIds,
         bool raidRosterConfigured,
+        WatchtowerPostSnapshot[] watchtowerPosts,
         GridPosition raidTarget,
         int raidTargetRadius,
         RaidDirective raidDirectives,
@@ -607,6 +611,7 @@ public sealed class SimulationSnapshot
         RaidRallyPoint = raidRallyPoint;
         RaidPartyIds = new ReadOnlyCollection<EntityId>(raidPartyIds);
         RaidRosterConfigured = raidRosterConfigured;
+        WatchtowerPosts = new ReadOnlyCollection<WatchtowerPostSnapshot>(watchtowerPosts);
         RaidPlan = new RaidPlanSnapshot(
             raidRallyPoint,
             raidTarget,
@@ -683,6 +688,8 @@ public sealed class SimulationSnapshot
     public IReadOnlyList<EntityId> RaidPartyIds { get; }
 
     public bool RaidRosterConfigured { get; }
+
+    public IReadOnlyList<WatchtowerPostSnapshot> WatchtowerPosts { get; }
 
     public RaidPlanSnapshot RaidPlan { get; }
 

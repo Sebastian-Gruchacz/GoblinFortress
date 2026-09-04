@@ -103,6 +103,9 @@ internal static class ActorJobTextPresenter
         ActorJobKind.MineRock when job.Phase == ActorJobPhase.Traveling =>
             Format(locale, "mine-rock-travel", job.Target),
         ActorJobKind.MineRock => Format(locale, "mine-rock-working", job.RemainingWorkTicks),
+        ActorJobKind.StripFloor when job.Phase == ActorJobPhase.Traveling =>
+            Format(locale, "strip-floor-travel", job.Target),
+        ActorJobKind.StripFloor => Format(locale, "strip-floor-working", job.RemainingWorkTicks),
         ActorJobKind.CarveRamp when job.Phase == ActorJobPhase.Traveling =>
             Format(locale, "carve-ramp-travel", job.Target),
         ActorJobKind.CarveRamp => Format(locale, "carve-ramp-working", job.RemainingWorkTicks),
@@ -125,6 +128,9 @@ internal static class ActorJobTextPresenter
             Format(locale, "consume-corpse-travel", job.Target),
         ActorJobKind.ConsumeRaidCorpse =>
             Format(locale, "consume-corpse-working", job.RemainingWorkTicks),
+        ActorJobKind.GuardWatchtower when job.Phase == ActorJobPhase.Traveling =>
+            Format(locale, "watchtower-travel", job.Target),
+        ActorJobKind.GuardWatchtower => Format(locale, "watchtower-guarding", job.Target),
         _ => Text(locale, "idle"),
     };
 

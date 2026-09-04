@@ -219,7 +219,7 @@
       "field-camp": "2×2 field camp: select the upper-left corner • cost 6 wood • includes provision storage • RMB or Esc cancels",
       "goblin-hut": "3×3 hut: select the upper-left corner • cost 8 wood • provides {0} places and raises the population target • RMB or Esc cancels",
       "goblin-compost": "Build a tribal compost hollow: select an explored open cell • cost 2 reeds • receives recovered bodies for corpse-origin budding • RMB or Esc cancels",
-      "wooden-watchtower": "Build a 2×2 wooden watchtower: select the upper-left corner • cost 8 wood • reveals terrain within 7 cells • not walkable yet • RMB or Esc cancels",
+      "wooden-watchtower": "Build a 2×2 wooden watchtower: select the upper-left corner • cost 8 wood • 2 guard posts with doubled sight and ranged reach • built-in ladder, 2 beds and a small food store • RMB or Esc cancels",
       "reed-sleeping-mat": "Build a reed sleeping mat: select a free accessible cell • cost 2 reeds • covered mats are preferred • RMB or Esc cancels",
       "wooden-wall": "Build a wooden wall: {0} • drag LMB from start to end • 2 wood/segment • blocks movement • RMB or Esc cancels",
       "stone-wall": "Build a stone wall: {0} • drag LMB from start to end • 2 units of stone/segment • requires tool level 1 • RMB or Esc cancels",
@@ -249,6 +249,7 @@
       "fell-trees": "Work: drag a logging area • individual trees and dead trunks will remain as targets • RMB or Esc cancels",
       "quarry-boulders": "Work: drag a quarrying area • individual boulders will remain as targets • requires tool level 2 • RMB or Esc cancels",
       "mine-rock": "Work: drag an excavation area • unknown cells remain planned until the digging front reveals them • soil and sand require an earthmoving tool level 1; rock requires a mining tool level 2 or 3 • RMB or Esc cancels",
+      "strip-floor": "Work: drag over floors to remove them • goblins work from a safe adjacent cell • removing the last support creates an open shaft • RMB or Esc cancels",
       "carve-ramp-down": "Work: click an explored floor to carve enclosed stairs one level down • requires tool level 2 • RMB or Esc cancels",
       "carve-ramp-up": "Work: click an explored cave floor to carve enclosed stairs one level up • requires tool level 2 • RMB or Esc cancels",
       "hunt-animals": "Hunting: drag an area • individual animals will remain as targets • RMB or Esc cancels",
@@ -306,6 +307,8 @@
       "quarry-boulder-working": "breaking a boulder with a pickaxe ({0})",
       "mine-rock-travel": "going to excavate terrain → {0}",
       "mine-rock-working": "excavating terrain ({0})",
+      "strip-floor-travel": "going to strip a floor → {0}",
+      "strip-floor-working": "stripping a floor ({0})",
       "carve-ramp-travel": "going to carve stairs → {0}",
       "carve-ramp-working": "carving a ramp ({0})",
       "tend-bud-travel": "going to tend a bud → {0}",
@@ -319,7 +322,9 @@
       "recover-corpse-collect": "going to recover a corpse → {0}",
       "recover-corpse-return": "carrying a corpse back to camp → {0}",
       "consume-corpse-travel": "going to consume a corpse → {0}",
-      "consume-corpse-working": "consuming a corpse ({0})"
+      "consume-corpse-working": "consuming a corpse ({0})",
+      "watchtower-travel": "going to watchtower post → {0}",
+      "watchtower-guarding": "standing watch at {0}"
     },
     "actor-job-kinds": {
       "dismantling": "dismantling",
@@ -348,7 +353,8 @@
       "LootRaid": "looting",
       "RecoverRaidCorpse": "recovering a corpse",
       "ConsumeRaidCorpse": "consuming a corpse",
-      "DismantleConstruction": "dismantling"
+      "DismantleConstruction": "dismantling",
+      "GuardWatchtower": "watchtower duty"
     },
     "actor-job-phases": {
       "None": "none",
@@ -446,10 +452,12 @@
       "dismantle-structure": "structure dismantling",
       "dismantle-storage": "storage dismantling",
       "stairs-down": "stairs down",
-      "stairs-up": "stairs up"
+      "stairs-up": "stairs up",
+      "strip-floor": "floor stripping"
     },
     "work-feedback": {
       "tunnel-preview": "Planned tunnel area: {0} cells; unknown cells will be resolved as they are revealed.",
+      "strip-floor-preview": "Floors selected for removal: {0}.",
       "ramp-fluid": "Cannot carve stairs: there is {0} on the other side.",
       "ramp-valid": "The enclosed stairs will connect this column across adjacent levels.",
       "ramp-invalid": "Click a valid, explored floor with room for stairs on the adjacent level.",
@@ -460,6 +468,7 @@
       "create-failed": "This order cannot be created in the selected area.",
       "clear-ordered": "Removed work targets and {0} construction order(s) intersecting the selection.",
       "tunnel-ordered": "Tunnel area ordered; the dispatcher will expose successive walls as mining advances.",
+      "strip-floor-ordered": "Floor removal ordered; goblins will work from adjacent safe cells.",
       "ramp-down-ordered": "Ordered enclosed stairs to the level below.",
       "ramp-up-ordered": "Ordered enclosed stairs to the level above.",
       "clean-blood-ordered": "Ordered cleaning of the selected stains and dirt.",
@@ -483,7 +492,7 @@
       "clearing": "Clear vegetation",
       "logging": "Fell trees",
       "quarrying": "Break boulders",
-      "mining": "Mine rock",
+      "mining": "Excavate terrain and strip floors",
       "ramp-carving": "Carve ramps",
       "scouting": "Scout",
       "hunting": "Hunt animals",
@@ -521,7 +530,7 @@
       "standing-torch-ordered": "Standing torch ordered • cost 1 wood",
       "standing-torch-invalid": "A standing torch needs a free traversable cell.",
       "goblin-compost-ordered": "Tribal compost hollow ordered • cost 2 reeds",
-      "wooden-watchtower-ordered": "Wooden watchtower ordered • cost 8 wood • observation radius 7",
+      "wooden-watchtower-ordered": "Wooden watchtower ordered • cost 8 wood • two guard posts, beds and small food store",
       "reed-sleeping-mat-ordered": "Reed sleeping mat ordered • cost 2 reeds • one sleeping place",
       "reed-sleeping-mat-invalid": "A sleeping mat needs a free accessible cell without another fixture.",
       "primitive-workshop-ordered": "Primitive workshop ordered • cost 4 wood",
@@ -722,7 +731,7 @@
       "field-camp": "Field camp\nCost: 6 wood",
       "goblin-hut": "Goblin hut\nCost: 8 wood • increases tribe capacity",
       "goblin-compost": "Tribal compost hollow\nCost: 2 reeds • corpse-origin budding site",
-      "wooden-watchtower": "Wooden watchtower 2×2\nCost: 8 wood • observation radius 7 • not walkable yet",
+      "wooden-watchtower": "Wooden watchtower 2×2\nCost: 8 wood • 2 guards • doubled sight and ranged reach at the upper post • built-in ladder • 2 beds • food target/capacity 6/12",
       "reed-sleeping-mat": "Reed sleeping mat\nCost: 2 reeds • one reserved sleeping place • covered spots are preferred",
       "wooden-floor": "Wooden floor / ceiling\nCan cover open space • cost: 1 wood per cell",
       "stone-floor": "Stone floor / ceiling\nCan cover open space • cost: 1 stone per cell • requires tool level 1",
@@ -751,6 +760,7 @@
       "fell-trees": "Fell trees and trunks\nRequires a goblin with an axe",
       "quarry-boulders": "Break boulders\nRequires tool level 2",
       "mine-rock": "Excavate terrain\nSoil and sand: earthmoving level 1; rock: mining level 2 or 3",
+      "strip-floor": "Strip floor\nRemoves constructed and natural floors; may create a dangerous open shaft",
       "carve-ramp-down": "Carve stairs down\nA closed one-cell connection; requires tool level 2",
       "carve-ramp-up": "Carve stairs up\nA closed one-cell connection; requires tool level 2",
       "hunt-animals": "Hunt animals\nDrag an area; individual targets will remain",
@@ -1314,6 +1324,17 @@
       "confirm-dismantle-text": "Dismantle this structure?\n\nAssociated workshop orders will be cancelled and their delivered materials will return to the ground.",
       "cancel-construction-confirm": "Cancel construction",
       "dismantle-confirm": "Dismantle"
+    },
+    "watchtower": {
+      "title": "Watchtower",
+      "summary": "Guards: {0}/2 • food: {1}/{2} • upper post: {3}\nAssigned guards return after eating, drinking or resting. While at the post, their sight and ranged weapon or spell reach are doubled. The tower includes two beds but no water storage.",
+      "guard-row": "{0} • health {1}",
+      "assigned-other-tower": "Already assigned to another watchtower",
+      "open-food-storage": "Open food storage",
+      "close": "Close",
+      "capacity-reached": "A watchtower can have at most two assigned guards.",
+      "assigned": "Goblin assigned to watchtower duty.",
+      "unassigned": "Goblin removed from watchtower duty."
     },
     "context-feedback": {
       "raid-recalled": "Raid recall ordered.",

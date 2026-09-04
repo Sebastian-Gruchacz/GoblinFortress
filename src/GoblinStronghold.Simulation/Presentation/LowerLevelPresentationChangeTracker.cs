@@ -292,6 +292,10 @@ public static class LowerLevelPresentationObservationFactory
             new PresentationTopologyObservation(
                 Hash(3, passage.Upper, passage.Lower),
                 [passage.Upper, passage.Lower])));
+        result.AddRange(world.StrippedFloorSurfaces.Select(position =>
+            new PresentationTopologyObservation(
+                Hash(4, position),
+                [position, position with { Z = position.Z - 1 }])));
         return result.OrderBy(item => item.Id).ToArray();
     }
 

@@ -49,6 +49,7 @@ public static class TerrainModificationTargetPolicy
                 world.IsSolidRock(target) ||
                 world.IsTerrainRampIntact(target) ||
                 world.TryGetFluid(target, out _, out _),
+            WorkDesignationKind.StripFloor => world.CanStripFloor(target),
             WorkDesignationKind.CarveRampDown => rampDestination is { } lower
                 ? world.CanCarveRampDown(target, lower)
                 : world.CanCarveRampDown(target),
@@ -69,6 +70,8 @@ public static class TerrainModificationTargetPolicy
             (world.Baseline.IsRockPosition(position) || world.IsTerrainRampIntact(position)) &&
             (visibility.Get(position) == CellVisibility.Unknown ||
              world.IsSolidRock(position) || world.IsTerrainRampIntact(position)),
+        WorkDesignationKind.StripFloor =>
+            visibility.Get(position) != CellVisibility.Unknown && world.CanStripFloor(position),
         WorkDesignationKind.CarveRampDown =>
             visibility.Get(position) != CellVisibility.Unknown && world.CanCarveRampDown(position),
         WorkDesignationKind.CarveRampUp =>

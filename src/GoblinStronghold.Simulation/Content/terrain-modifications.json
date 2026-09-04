@@ -30,6 +30,25 @@
       }
     },
     {
+      "id": "strip-floor",
+      "legacyDesignation": "StripFloor",
+      "placementMode": "Area",
+      "menuPath": ["terrain", "excavation"],
+      "work": {
+        "baseTicksMultiplier": 5,
+        "yield": {
+          "resource": "Stone",
+          "variant": "None",
+          "variantFromRock": true,
+          "minimumQuantity": 1,
+          "maximumQuantityExclusive": 2,
+          "minimumBuildingExperience": 4,
+          "buildingExperiencePerUnit": 1,
+          "deposits": []
+        }
+      }
+    },
+    {
       "id": "carve-ramp-down",
       "legacyDesignation": "CarveRampDown",
       "placementMode": "Point",

@@ -223,9 +223,10 @@ public sealed partial class SimulationEngine
             return 1;
         }
 
-        return actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling)
+        var range = actor.Equipment.HasFlag(PersonalEquipment.PrimitiveSling)
             ? Definitions.RangedCombat.SlingRange
             : Definitions.RangedCombat.ThrownStoneRange;
+        return ResolveGoblinRangedRange(actor, range);
     }
 
     private IEnumerable<GridPosition> GetHuntApproachPositions(

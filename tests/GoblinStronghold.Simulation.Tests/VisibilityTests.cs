@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Civilizations;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Visibility;
+using GoblinStronghold.Simulation.Watchtowers;
 using Xunit;
 
 namespace GoblinStronghold.Simulation.Tests;
@@ -26,7 +27,7 @@ public sealed class VisibilityTests
     }
 
     [Fact]
-    public void WoodenWatchtowerProvidesTheFocusedTribalObservationRadius()
+    public void EmptyWoodenWatchtowerDoesNotObserveTerrain()
     {
         var shelter = new WorldObjectSnapshot(
             new WorldObjectId(1),
@@ -54,11 +55,34 @@ public sealed class VisibilityTests
             [shelter, watchtower, foreignWatchtower],
             shelterVisionRadius: 3);
 
-        Assert.Equal(2, observers.Count);
-        Assert.Contains((shelter.Anchor, 3), observers);
-        Assert.Contains(
-            (watchtower.Anchor, GoblinStructureObserverPolicy.WoodenWatchtowerVisionRadius),
-            observers);
+        Assert.Equal([(shelter.Anchor, 3)], observers);
+    }
+
+    [Fact]
+    public void AssignedGuardOnlyReceivesWatchtowerBonusOnTheUpperPlatform()
+    {
+        var watchtower = new WorldObjectSnapshot(
+            new WorldObjectId(2),
+            WorldObjectKind.WoodenWatchtower,
+            WorldObjectOwner.GoblinTribe,
+            new GridPosition(8, 9),
+            CardinalOrientation.North,
+            [
+                new(new GridPosition(0, 0, 1), SpatialOccupancyChannel.Surface,
+                    WorldObjectPartKind.WatchtowerPlatform),
+                new(new GridPosition(1, 0, 1), SpatialOccupancyChannel.Surface,
+                    WorldObjectPartKind.WatchtowerPlatform),
+            ]);
+        var guard = new EntityId(7);
+        var post = WatchtowerDutyPolicy.GetDutyPositions(watchtower)[0];
+
+        Assert.True(WatchtowerDutyPolicy.IsGuardAtPost(guard, post, watchtower, [guard]));
+        Assert.False(WatchtowerDutyPolicy.IsGuardAtPost(
+            guard, watchtower.Anchor, watchtower, [guard]));
+        Assert.False(WatchtowerDutyPolicy.IsGuardAtPost(
+            new EntityId(8), post, watchtower, [guard]));
+        Assert.Equal(2, WatchtowerDutyPolicy.VisionRangeMultiplier);
+        Assert.Equal(2, WatchtowerDutyPolicy.RangedAttackRangeMultiplier);
     }
 
     [Fact]

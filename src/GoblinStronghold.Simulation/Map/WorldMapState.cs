@@ -31,6 +31,7 @@ public enum WorldChangeKind : byte
     StructureDismantled = 11,
     SeasonalFoodChanged = 12,
     CaveFloraHarvested = 13,
+    FloorStripped = 14,
 }
 
 public readonly record struct PlantPatchSnapshot(
@@ -59,6 +60,7 @@ public sealed class WorldMapState
     private readonly HashSet<GridPosition> _excavatedTerrainRamps;
     private readonly HashSet<VerticalPassage> _excavatedVerticalPassages;
     private readonly HashSet<GridPosition> _harvestedCaveFlora;
+    private readonly HashSet<GridPosition> _strippedFloorSurfaces;
     private HashSet<GridPosition> _generatedWaterSources;
     private HashSet<GridPosition> _connectedWaterCells;
     private bool _connectedWaterActivated;
@@ -75,6 +77,7 @@ public sealed class WorldMapState
         IEnumerable<GridPosition>? excavatedTerrainRamps = null,
         IEnumerable<VerticalPassage>? excavatedVerticalPassages = null,
         IEnumerable<GridPosition>? harvestedCaveFlora = null,
+        IEnumerable<GridPosition>? strippedFloorSurfaces = null,
         bool connectedWaterActivated = true)
     {
         Baseline = baseline;
@@ -86,6 +89,7 @@ public sealed class WorldMapState
         _excavatedTerrainRamps = excavatedTerrainRamps?.ToHashSet() ?? [];
         _excavatedVerticalPassages = excavatedVerticalPassages?.ToHashSet() ?? [];
         _harvestedCaveFlora = harvestedCaveFlora?.ToHashSet() ?? [];
+        _strippedFloorSurfaces = strippedFloorSurfaces?.ToHashSet() ?? [];
         _generatedWaterSources = ConnectedWaterPolicy.FindGeneratedSources(Baseline);
         _connectedWaterActivated = connectedWaterActivated;
         _connectedWaterCells = connectedWaterActivated
@@ -131,6 +135,8 @@ public sealed class WorldMapState
 
     public IReadOnlyCollection<GridPosition> HarvestedCaveFlora => _harvestedCaveFlora;
 
+    public IReadOnlyCollection<GridPosition> StrippedFloorSurfaces => _strippedFloorSurfaces;
+
     public IReadOnlyCollection<GridPosition> ConnectedWaterCells => _connectedWaterCells;
 
     public bool ConnectedWaterActivated => _connectedWaterActivated;
@@ -149,6 +155,13 @@ public sealed class WorldMapState
     public IReadOnlyList<VerticalPassage> CreateVerticalPassageSnapshot() =>
         Baseline.VerticalPassages
             .Concat(_excavatedVerticalPassages)
+            .Concat(_strippedFloorSurfaces
+                .Where(position => position.Z > Baseline.MinimumWorldLevel)
+                .Select(position => new VerticalPassage(
+                    position,
+                    position with { Z = position.Z - 1 },
+                    VerticalPassageKind.CaveMouth)))
+            .Distinct()
             .OrderBy(passage => passage.Upper.Z)
             .ThenBy(passage => passage.Upper.Y)
             .ThenBy(passage => passage.Upper.X)
@@ -225,6 +238,7 @@ public sealed class WorldMapState
         IEnumerable<GridPosition>? excavatedTerrainRamps = null,
         IEnumerable<VerticalPassage>? excavatedVerticalPassages = null,
         IEnumerable<GridPosition>? harvestedCaveFlora = null,
+        IEnumerable<GridPosition>? strippedFloorSurfaces = null,
         bool connectedWaterActivated = false)
     {
         ArgumentNullException.ThrowIfNull(baseline);
@@ -245,9 +259,11 @@ public sealed class WorldMapState
             .Select(NormalizeLegacyExcavatedPassage)
             .ToArray() ?? [];
         var harvestedFlora = harvestedCaveFlora?.ToArray() ?? [];
+        var strippedFloors = strippedFloorSurfaces?.ToArray() ?? [];
         var lowestSavedLevel = excavated
             .Concat(passages.SelectMany(passage => new[] { passage.Upper, passage.Lower }))
             .Concat(harvestedFlora)
+            .Concat(strippedFloors)
             .Concat(restoredWorldObjects.SelectMany(worldObject =>
                 worldObject.GetAbsoluteParts().Select(part => part.Position)))
             .Select(position => position.Z)
@@ -337,6 +353,12 @@ public sealed class WorldMapState
         {
             throw new InvalidDataException("The save contains invalid harvested cave flora.");
         }
+        if (strippedFloors.Distinct().Count() != strippedFloors.Length ||
+            strippedFloors.Any(position =>
+                !CanRestoreStrippedFloor(baseline, excavated, position)))
+        {
+            throw new InvalidDataException("The save contains invalid stripped floor surfaces.");
+        }
         if (allPassages.SelectMany(passage => new[] { passage.Upper, passage.Lower })
             .GroupBy(position => position)
             .Any(group => group.Count() > 1))
@@ -355,6 +377,7 @@ public sealed class WorldMapState
             excavatedRamps,
             passages,
             harvestedFlora,
+            strippedFloors,
             connectedWaterActivated);
     }
 
@@ -445,6 +468,19 @@ public sealed class WorldMapState
         }
 
         var target = _worldObjects[id];
+        if (target.Kind is WorldObjectKind.WoodenFloor or WorldObjectKind.StoneFloor)
+        {
+            foreach (var floorPosition in target.GetAbsoluteParts()
+                         .Where(part => part.Part.Kind == WorldObjectPartKind.Floor)
+                         .Select(part => part.Position))
+            {
+                if (Baseline.TryGetInitialGeometry(floorPosition, out var replacedGeometry) &&
+                    replacedGeometry.IsSupported || _excavatedCaveCells.Contains(floorPosition))
+                {
+                    _strippedFloorSurfaces.Add(floorPosition);
+                }
+            }
+        }
         var removedIds = new HashSet<WorldObjectId> { id };
         if (target.Kind is WorldObjectKind.WoodenWall or WorldObjectKind.StoneWall or
                 WorldObjectKind.WoodenDoorFrame or WorldObjectKind.StoneDoorFrame)
@@ -557,7 +593,9 @@ public sealed class WorldMapState
         var solidIsTraversable = !_occupancy.TryGetValue(
                    new SpatialOccupancyKey(position, SpatialOccupancyChannel.Solid),
                    out var claim) ||
-               claim.PartKind == WorldObjectPartKind.Door;
+               claim.PartKind == WorldObjectPartKind.Door ||
+               claim.PartKind == WorldObjectPartKind.WatchtowerSupport &&
+               HasLadderFixture(position);
         var fixtureIsReachable = !_occupancy.TryGetValue(
                    new SpatialOccupancyKey(position, SpatialOccupancyChannel.Fixture),
                    out var fixtureClaim) ||
@@ -574,6 +612,8 @@ public sealed class WorldMapState
     public bool IsTerrainReachable(GridPosition position) =>
         HasConstructedSurface(position)
             ? IsMaterialSurfaceReachable(position)
+            : _strippedFloorSurfaces.Contains(position)
+            ? false
             : Baseline.IsTerrainSurfacePosition(position)
             ? IsMaterialSurfaceReachable(position)
             : IsExcavatedHillReachable(position) ||
@@ -584,8 +624,8 @@ public sealed class WorldMapState
 
     public bool IsOpenUnsupportedVolume(GridPosition position) =>
         Baseline.TryGetInitialGeometry(position, out var geometry) &&
-        !geometry.IsSolid &&
-        !geometry.IsSupported &&
+        (!geometry.IsSolid || _excavatedCaveCells.Contains(position)) &&
+        (!geometry.IsSupported || _strippedFloorSurfaces.Contains(position)) &&
         !HasConstructedSurface(position) &&
         !TryGetOccupancyClaim(position, SpatialOccupancyChannel.Solid, out _);
 
@@ -603,7 +643,8 @@ public sealed class WorldMapState
             return true;
         }
 
-        var naturalBlocker = Baseline.TryGetInitialGeometry(upper, out var geometry) &&
+        var naturalBlocker = !_strippedFloorSurfaces.Contains(upper) &&
+            Baseline.TryGetInitialGeometry(upper, out var geometry) &&
             (geometry.IsSolid || geometry.IsSupported);
         return !naturalBlocker &&
             !HasConstructedSurface(upper) &&
@@ -630,7 +671,8 @@ public sealed class WorldMapState
                 return false;
             }
 
-            if (Baseline.TryGetInitialGeometry(above, out var geometry) &&
+            if (!_strippedFloorSurfaces.Contains(above) &&
+                Baseline.TryGetInitialGeometry(above, out var geometry) &&
                 geometry.IsSupported &&
                 !HasOpenVerticalPassageBetween(above, above with { Z = z - 1 }))
             {
@@ -709,6 +751,11 @@ public sealed class WorldMapState
 
     private bool IsMaterialSurfaceReachable(GridPosition position)
     {
+        if (_strippedFloorSurfaces.Contains(position) && !HasConstructedSurface(position))
+        {
+            return false;
+        }
+
         if (!Baseline.TryGetInitialGeometry(position, out var geometry))
         {
             return false;
@@ -737,7 +784,9 @@ public sealed class WorldMapState
                 position,
                 SpatialOccupancyChannel.Solid,
                 out var solidClaim) ||
-            solidClaim.PartKind == WorldObjectPartKind.Door;
+            solidClaim.PartKind == WorldObjectPartKind.Door ||
+            solidClaim.PartKind == WorldObjectPartKind.WatchtowerSupport &&
+            HasLadderFixture(position);
         var fixtureIsReachable = !TryGetOccupancyClaim(
                 position,
                 SpatialOccupancyChannel.Fixture,
@@ -758,6 +807,13 @@ public sealed class WorldMapState
             SpatialOccupancyChannel.Fixture,
             out var fixtureClaim) &&
             fixtureClaim.PartKind == WorldObjectPartKind.ClosedDoorLeaf;
+
+    private bool HasLadderFixture(GridPosition position) =>
+        TryGetOccupancyClaim(
+            position,
+            SpatialOccupancyChannel.Fixture,
+            out var fixtureClaim) &&
+        fixtureClaim.PartKind == WorldObjectPartKind.Ladder;
 
     private bool TryGetOccupancyClaim(
         GridPosition position,
@@ -835,6 +891,7 @@ public sealed class WorldMapState
 
     private bool IsSubterraneanReachable(GridPosition position) =>
         Baseline.IsCavePosition(position) &&
+        !_strippedFloorSurfaces.Contains(position) &&
         !TryGetFluid(position, out _, out _) &&
         (Baseline.GetCaveCell(position).IsOpen || _excavatedCaveCells.Contains(position)) &&
         IsSpatiallyReachable(position);
@@ -842,6 +899,7 @@ public sealed class WorldMapState
     private bool IsExcavatedHillReachable(GridPosition position) =>
         Baseline.IsHillMassPosition(position) &&
         _excavatedCaveCells.Contains(position) &&
+        !_strippedFloorSurfaces.Contains(position) &&
         IsSpatiallyReachable(position);
 
     public IEnumerable<GridPosition> GetTerrainNeighbors(
@@ -1407,29 +1465,63 @@ public sealed class WorldMapState
         _worldObjects.Values.Any(worldObject =>
             worldObject.Kind is WorldObjectKind.WoodenRamp or WorldObjectKind.StoneRamp &&
                 (worldObject.Anchor == position || GetConstructedRampUpper(worldObject) == position) ||
-            worldObject.Kind == WorldObjectKind.WoodenLadder &&
-                (worldObject.Anchor == position || GetConstructedLadderUpper(worldObject) == position));
+            TryGetConstructedLadderEndpoints(worldObject, out var lower, out var upper) &&
+                (lower == position || upper == position));
 
     private bool TryGetConstructedLadderDestination(
         GridPosition position,
         out GridPosition destination)
     {
-        var ladder = _worldObjects.Values.FirstOrDefault(worldObject =>
-            worldObject.Kind == WorldObjectKind.WoodenLadder &&
-            (worldObject.Anchor == position || GetConstructedLadderUpper(worldObject) == position));
-        if (ladder is null)
+        foreach (var worldObject in _worldObjects.Values)
         {
-            destination = default;
+            if (!TryGetConstructedLadderEndpoints(worldObject, out var lower, out var upper))
+            {
+                continue;
+            }
+            if (position == lower)
+            {
+                destination = upper;
+                return true;
+            }
+            if (position == upper)
+            {
+                destination = lower;
+                return true;
+            }
+        }
+
+        destination = default;
+        return false;
+    }
+
+    private static bool TryGetConstructedLadderEndpoints(
+        WorldObjectSnapshot worldObject,
+        out GridPosition lower,
+        out GridPosition upper)
+    {
+        var ladderPart = worldObject.Parts.FirstOrDefault(part =>
+            part.Kind == WorldObjectPartKind.Ladder);
+        if (ladderPart.Kind != WorldObjectPartKind.Ladder)
+        {
+            lower = default;
+            upper = default;
             return false;
         }
 
-        var upper = GetConstructedLadderUpper(ladder);
-        destination = position == ladder.Anchor ? upper : ladder.Anchor;
+        lower = new GridPosition(
+            worldObject.Anchor.X + ladderPart.RelativePosition.X,
+            worldObject.Anchor.Y + ladderPart.RelativePosition.Y,
+            worldObject.Anchor.Z + ladderPart.RelativePosition.Z);
+        upper = worldObject.Orientation switch
+        {
+            CardinalOrientation.North => lower with { Y = lower.Y - 1, Z = lower.Z + 1 },
+            CardinalOrientation.East => lower with { X = lower.X + 1, Z = lower.Z + 1 },
+            CardinalOrientation.South => lower with { Y = lower.Y + 1, Z = lower.Z + 1 },
+            CardinalOrientation.West => lower with { X = lower.X - 1, Z = lower.Z + 1 },
+            _ => throw new InvalidOperationException("The constructed ladder has no orientation."),
+        };
         return true;
     }
-
-    private static GridPosition GetConstructedLadderUpper(WorldObjectSnapshot ladder) =>
-        GetConstructedRampUpper(ladder);
 
     private static CardinalOrientation DirectionFrom(
         GridPosition lower,
@@ -1476,6 +1568,11 @@ public sealed class WorldMapState
         _occupancy.Add(
             new SpatialOccupancyKey(position, SpatialOccupancyChannel.FloorCover),
             new SpatialOccupancyClaim(id, WorldObjectPartKind.Floor));
+        if (Baseline.TryGetInitialGeometry(position, out var replacedGeometry) &&
+            replacedGeometry.IsSupported || _excavatedCaveCells.Contains(position))
+        {
+            _strippedFloorSurfaces.Add(position);
+        }
         if (position.Z == 0)
         {
             _plantPatches.Remove(GetIndex(Baseline, position));
@@ -2112,6 +2209,18 @@ public sealed class WorldMapState
                 SpatialOccupancyChannel.Surface,
                 WorldObjectPartKind.WatchtowerPlatform));
         }
+        parts.Add(new(
+            new GridPosition(0, 0, 1),
+            SpatialOccupancyChannel.Fixture,
+            WorldObjectPartKind.SleepingMat));
+        parts.Add(new(
+            new GridPosition(1, 0, 1),
+            SpatialOccupancyChannel.Fixture,
+            WorldObjectPartKind.SleepingMat));
+        parts.Add(new(
+            new GridPosition(0, 1),
+            SpatialOccupancyChannel.Fixture,
+            WorldObjectPartKind.Ladder));
         var worldObject = new WorldObjectSnapshot(
             id,
             WorldObjectKind.WoodenWatchtower,
@@ -2754,6 +2863,125 @@ public sealed class WorldMapState
          GetCardinalWorldNeighbors(position).Any(IsTerrainTraversable)) ||
         CanExcavateTerrainRamp(position);
 
+    public bool CanStripFloor(GridPosition position)
+    {
+        if (!Baseline.IsWorldPosition(position))
+        {
+            return false;
+        }
+
+        var floor = GetStandaloneFloorAt(position);
+        if (floor is not null)
+        {
+            return floor.Owner == WorldObjectOwner.GoblinTribe;
+        }
+
+        if (_strippedFloorSurfaces.Contains(position))
+        {
+            return false;
+        }
+
+        return IsTerrainTraversable(position) &&
+            GetWorldObjectsAt(position).Count == 0 &&
+            GetPlantPatch(position) is null &&
+            (Baseline.TryGetInitialGeometry(position, out var geometry) &&
+                geometry.IsSupported ||
+             _excavatedCaveCells.Contains(position));
+    }
+
+    public CaveCell GetFloorStrippingCell(GridPosition position)
+    {
+        if (GetStandaloneFloorAt(position) is not null)
+        {
+            return new CaveCell(RockKind.Sandstone, CaveCellKind.Floor);
+        }
+
+        if (Baseline.TryGetInitialGeometry(position, out var geometry) &&
+            geometry.LooseMaterial != LooseMaterialKind.None)
+        {
+            return new CaveCell(
+                RockKind.Sandstone,
+                CaveCellKind.SolidRock,
+                LooseMaterial: geometry.LooseMaterial);
+        }
+
+        if (Baseline.IsTerrainSurfacePosition(position) &&
+            Baseline.GetColumnCell(position).Terrain == TerrainKind.Sand)
+        {
+            return new CaveCell(
+                RockKind.Sandstone,
+                CaveCellKind.SolidRock,
+                LooseMaterial: LooseMaterialKind.Sand);
+        }
+
+        return Baseline.GetRockCell(position);
+    }
+
+    internal bool TryStripFloor(
+        GridPosition position,
+        SimulationTick tick,
+        out ResourceKind resource,
+        out ResourceVariant variant,
+        out WorldChangeEvent change)
+    {
+        if (!CanStripFloor(position))
+        {
+            resource = default;
+            variant = default;
+            change = default;
+            return false;
+        }
+
+        var floor = GetStandaloneFloorAt(position);
+        if (floor is not null)
+        {
+            resource = floor.Kind == WorldObjectKind.WoodenFloor
+                ? ResourceKind.Wood
+                : ResourceKind.Stone;
+            variant = floor.MaterialVariant;
+            change = DismantleWorldObject(floor.Id, tick);
+            return true;
+        }
+
+        _strippedFloorSurfaces.Add(position);
+        var material = Baseline.TryGetInitialGeometry(position, out var geometry) &&
+            geometry.LooseMaterial != LooseMaterialKind.None
+                ? geometry.LooseMaterial
+                : Baseline.IsTerrainSurfacePosition(position) &&
+                    Baseline.GetColumnCell(position).Terrain == TerrainKind.Sand
+                    ? LooseMaterialKind.Sand
+                    : LooseMaterialKind.None;
+        (resource, variant) = material switch
+        {
+            LooseMaterialKind.Soil => (ResourceKind.Earth, ResourceVariant.Soil),
+            LooseMaterialKind.Sand => (ResourceKind.Sand, ResourceVariant.Sand),
+            _ => (ResourceKind.Stone, StoneVariant(Baseline.GetRockCell(position).Rock)),
+        };
+        change = CreateChange(tick, WorldChangeKind.FloorStripped, position, 1);
+        return true;
+    }
+
+    private WorldObjectSnapshot? GetStandaloneFloorAt(GridPosition position) =>
+        GetWorldObjectsAt(position).FirstOrDefault(worldObject =>
+            worldObject.Kind is WorldObjectKind.WoodenFloor or WorldObjectKind.StoneFloor &&
+            worldObject.GetAbsoluteParts().Any(part => part.Position == position));
+
+    private static bool CanRestoreStrippedFloor(
+        GeneratedMap baseline,
+        IReadOnlyCollection<GridPosition> excavated,
+        GridPosition position) =>
+        baseline.IsWorldPosition(position) &&
+        (baseline.TryGetInitialGeometry(position, out var geometry) && geometry.IsSupported ||
+         excavated.Contains(position));
+
+    private static ResourceVariant StoneVariant(RockKind rock) => rock switch
+    {
+        RockKind.Granite => ResourceVariant.Granite,
+        RockKind.Basalt => ResourceVariant.Basalt,
+        RockKind.Obsidian => ResourceVariant.Obsidian,
+        _ => ResourceVariant.Sandstone,
+    };
+
     internal bool TryExcavateRock(
         GridPosition position,
         SimulationTick tick,
@@ -3086,6 +3314,41 @@ public sealed class WorldMapState
                 worldObject.MaterialVariant);
         }
 
+        if (worldObject.Kind == WorldObjectKind.WoodenWatchtower)
+        {
+            var missingParts = new[]
+                {
+                    new WorldObjectPartSnapshot(
+                        new GridPosition(0, 0, 1),
+                        SpatialOccupancyChannel.Fixture,
+                        WorldObjectPartKind.SleepingMat),
+                    new WorldObjectPartSnapshot(
+                        new GridPosition(1, 0, 1),
+                        SpatialOccupancyChannel.Fixture,
+                        WorldObjectPartKind.SleepingMat),
+                    new WorldObjectPartSnapshot(
+                        new GridPosition(0, 1),
+                        SpatialOccupancyChannel.Fixture,
+                        WorldObjectPartKind.Ladder),
+                }
+                .Where(expected => !worldObject.Parts.Any(part =>
+                    part.RelativePosition == expected.RelativePosition &&
+                    part.Channel == expected.Channel &&
+                    part.Kind == expected.Kind))
+                .ToArray();
+            if (missingParts.Length > 0)
+            {
+                worldObject = new WorldObjectSnapshot(
+                    worldObject.Id,
+                    worldObject.Kind,
+                    worldObject.Owner,
+                    worldObject.Anchor,
+                    worldObject.Orientation,
+                    worldObject.Parts.Concat(missingParts),
+                    worldObject.MaterialVariant);
+            }
+        }
+
         if (worldObject.Kind != WorldObjectKind.WoodenLadder ||
             worldObject.Parts.Count == 1)
         {
@@ -3410,7 +3673,8 @@ public sealed class WorldMapState
         if (kind is WorldChangeKind.StructureBuilt or WorldChangeKind.TreeFelled or
             WorldChangeKind.StumpHarvested or WorldChangeKind.DoorToggled or
             WorldChangeKind.BoulderQuarried or WorldChangeKind.RockExcavated or
-            WorldChangeKind.RampExcavated or WorldChangeKind.StructureDismantled)
+            WorldChangeKind.RampExcavated or WorldChangeKind.StructureDismantled or
+            WorldChangeKind.FloorStripped)
         {
             TopologyVersion = checked(TopologyVersion + 1);
         }

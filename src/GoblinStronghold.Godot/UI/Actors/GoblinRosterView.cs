@@ -280,6 +280,7 @@ public sealed class GoblinRosterView
         ActorJobKind.FellTree => "♣",
         ActorJobKind.QuarryBoulder => "◆",
         ActorJobKind.MineRock => "⛏",
+        ActorJobKind.StripFloor => "⌑",
         ActorJobKind.CarveRamp => "⇅",
         ActorJobKind.TendBud => "♧",
         ActorJobKind.HuntAnimal => "⚔",

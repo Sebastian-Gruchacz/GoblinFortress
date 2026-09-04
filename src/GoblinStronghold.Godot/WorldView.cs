@@ -3148,6 +3148,7 @@ public partial class WorldView : Node2D
                 WorkDesignationKind.GatherStone => new Color(0.62f, 0.7f, 0.76f, 0.8f),
                 WorkDesignationKind.QuarryBoulder => new Color(0.75f, 0.82f, 0.88f, 0.9f),
                 WorkDesignationKind.MineRock => new Color(0.9f, 0.62f, 0.2f, 0.92f),
+                WorkDesignationKind.StripFloor => new Color(0.86f, 0.48f, 0.2f, 0.9f),
                 WorkDesignationKind.CarveRampDown => new Color(0.3f, 0.66f, 0.95f, 0.94f),
                 WorkDesignationKind.CarveRampUp => new Color(0.96f, 0.74f, 0.3f, 0.94f),
                 WorkDesignationKind.Scout => new Color(0.38f, 0.78f, 0.94f, 0.68f),
@@ -3380,7 +3381,8 @@ public partial class WorldView : Node2D
         tool = job switch
         {
             ActorJobKind.FellTree or ActorJobKind.ClearVegetation => WorkTool.Axe,
-            ActorJobKind.QuarryBoulder or ActorJobKind.MineRock or ActorJobKind.CarveRamp =>
+            ActorJobKind.QuarryBoulder or ActorJobKind.MineRock or ActorJobKind.StripFloor or
+                ActorJobKind.CarveRamp =>
                 WorkTool.Pickaxe,
             ActorJobKind.BuildConstruction or ActorJobKind.DismantleConstruction or
                 ActorJobKind.Craft => WorkTool.Hammer,
@@ -4244,6 +4246,7 @@ public partial class WorldView : Node2D
             ActorJobKind.FellTree => UiIcon.FellTree,
             ActorJobKind.QuarryBoulder => UiIcon.Work,
             ActorJobKind.MineRock => UiIcon.Work,
+            ActorJobKind.StripFloor => UiIcon.Work,
             ActorJobKind.CarveRamp => UiIcon.Work,
             ActorJobKind.TendBud => UiIcon.GatherFood,
             ActorJobKind.HuntAnimal => UiIcon.Expedition,

@@ -82,7 +82,7 @@ public sealed partial class SimulationEngine
         var reservedFellingDesignations = _actors.Values
             .Where(actor => actor.JobKind is ActorJobKind.FellTree or ActorJobKind.QuarryBoulder or
                 ActorJobKind.MineRock or ActorJobKind.CarveRamp or ActorJobKind.HuntAnimal or
-                ActorJobKind.CleanBlood)
+                ActorJobKind.CleanBlood or ActorJobKind.StripFloor)
             .Select(actor => actor.SourceStackId)
             .Where(id => id != EntityId.None)
             .ToHashSet();
@@ -223,6 +223,11 @@ public sealed partial class SimulationEngine
                 {
                     // A persistent personal order resumes after food, water and rest interruptions.
                 }
+                else if (HasWatchtowerDuty(actor.Id))
+                {
+                    // Assigned guards return to their platform after personal needs and direct orders.
+                    TryPlanWatchtowerDuty(actor);
+                }
                 else if (CurrentTick.Value < actor.DispatcherSuspendedUntilTick)
                 {
                     // Personal needs and direct orders remain active while public work is paused.
@@ -360,6 +365,9 @@ public sealed partial class SimulationEngine
                 case ActorJobKind.MineRock:
                     UpdateMineRockJob(actor);
                     break;
+                case ActorJobKind.StripFloor:
+                    UpdateStripFloorJob(actor);
+                    break;
                 case ActorJobKind.CarveRamp:
                     UpdateCarveRampJob(actor);
                     break;
@@ -398,6 +406,9 @@ public sealed partial class SimulationEngine
                     break;
                 case ActorJobKind.Collapsed:
                     UpdateCollapsedJob(actor);
+                    break;
+                case ActorJobKind.GuardWatchtower:
+                    UpdateWatchtowerDutyJob(actor);
                     break;
             }
             var activeDuration = System.Diagnostics.Stopwatch.GetTimestamp() - stageStartedAt;
@@ -561,6 +572,7 @@ public sealed partial class SimulationEngine
             var rangedRange = hasSling
                 ? Definitions.RangedCombat.SlingRange
                 : Definitions.RangedCombat.ThrownStoneRange;
+            rangedRange = ResolveGoblinRangedRange(actor, rangedRange);
             if (distance <= 1 || actor.PersonalStoneAmmo > 0 && distance <= rangedRange)
             {
                 return true;
@@ -784,6 +796,9 @@ public sealed partial class SimulationEngine
             ("mine-rock", ScoreWork(WorkDesignationKind.MineRock,
                     actor.WorkPreferences.Building, specialist: true), 9,
                 () => TryPlanMineRockJob(actor, reservedFellingDesignations)),
+            ("strip-floor", ScoreWork(WorkDesignationKind.StripFloor,
+                    actor.WorkPreferences.Building, specialist: true), 9,
+                () => TryPlanStripFloorJob(actor, reservedFellingDesignations)),
             ("carve-ramp", ScoreWorkPriorities(rampWorkTypePriority, rampPriority,
                     actor.WorkPreferences.Building, specialist: true), 10,
                 () => TryPlanCarveRampJob(actor, reservedFellingDesignations)),
@@ -1402,6 +1417,7 @@ public sealed partial class SimulationEngine
             .Where(candidate => candidate.Id != actor.Id && candidate.Health > 0 &&
                 candidate.JobKind == ActorJobKind.Rest)
             .Select(candidate => candidate.JobTarget)
+            .Concat(GetWatchtowerBedsReservedFor(actor.Id))
             .ToHashSet();
         var sleepingPlaces = GoblinSleepingPlacePolicy.CreateOptions(
             worldObjects,
@@ -1691,6 +1707,22 @@ public sealed partial class SimulationEngine
                 BeginTerrainWork(
                     actor,
                     CreateTerrainWorkAssignment(miningDesignation, target, route));
+                return true;
+            case ActorJobKind.StripFloor:
+                var floorDesignation = _workDesignations.Values
+                    .Where(item => item.Kind == WorkDesignationKind.StripFloor &&
+                        !item.IsSuspended &&
+                        CanActorStripFloor(actor, item.Target) &&
+                        AreCardinalNeighbors(target, item.Target))
+                    .OrderBy(item => item.Id)
+                    .FirstOrDefault();
+                if (floorDesignation == default)
+                {
+                    return false;
+                }
+                BeginTerrainWork(
+                    actor,
+                    CreateTerrainWorkAssignment(floorDesignation, target, route));
                 return true;
             case ActorJobKind.CarveRamp:
                 var rampDesignation = _workDesignations.Values
@@ -2951,6 +2983,82 @@ public sealed partial class SimulationEngine
         CompleteTerrainWork(actor, designation);
     }
 
+    private bool TryPlanStripFloorJob(
+        ActorState actor,
+        ISet<EntityId> reservedDesignations)
+    {
+        if (!actor.KnownSkills.HasFlag(GoblinSkill.Building))
+        {
+            return false;
+        }
+
+        var activeFloorTargets = _actors.Values
+            .Where(candidate => candidate.JobKind == ActorJobKind.StripFloor &&
+                candidate.SourceStackId != EntityId.None)
+            .Select(candidate => _workDesignations.GetValueOrDefault(candidate.SourceStackId).Target)
+            .ToHashSet();
+        var candidates = _workDesignations.Values
+            .Where(designation => designation.Kind == WorkDesignationKind.StripFloor &&
+                !designation.IsSuspended &&
+                !reservedDesignations.Contains(designation.Id) &&
+                !_actors.Values.Any(occupant =>
+                    occupant.Id != actor.Id && occupant.Position == designation.Target) &&
+                CanActorStripFloor(actor, designation.Target))
+            .SelectMany(designation => World.GetCardinalWorldNeighbors(designation.Target)
+                .Where(position => FloorStrippingSafetyPolicy.IsSafeWorkPosition(
+                    World,
+                    position,
+                    designation.Target,
+                    activeFloorTargets))
+                .Select(position => new TerrainWorkCandidate(
+                    designation.Id,
+                    position,
+                    designation.Priority,
+                    ManhattanDistance(actor.Position, position))));
+        var plan = TerrainWorkCandidateSelector.SelectFirstReachableByEstimate(
+            candidates,
+            MaximumPublicWorkRouteCandidatesPerPlanningTick,
+            position => FindTribePath(actor.Position, position));
+        if (plan is null)
+        {
+            return false;
+        }
+
+        var designation = _workDesignations[plan.Value.DesignationId];
+        return TryBeginTerrainWork(
+            actor,
+            CreateTerrainWorkAssignment(designation, plan.Value),
+            reservedDesignations);
+    }
+
+    private void UpdateStripFloorJob(ActorState actor)
+    {
+        if (!_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
+            designation.Kind != WorkDesignationKind.StripFloor ||
+            designation.IsSuspended ||
+            !CanActorStripFloor(actor, designation.Target) ||
+            !AreCardinalNeighbors(actor.JobTarget, designation.Target))
+        {
+            actor.ClearJob();
+            return;
+        }
+
+        if (actor.JobPhase == ActorJobPhase.Traveling)
+        {
+            AdvanceTravel(actor);
+        }
+        if (actor.JobPhase != ActorJobPhase.Working)
+        {
+            return;
+        }
+
+        actor.RemainingWorkTicks--;
+        if (actor.RemainingWorkTicks <= 0)
+        {
+            CompleteTerrainWork(actor, designation);
+        }
+    }
+
     private bool TryPlanCarveRampJob(
         ActorState actor,
         ISet<EntityId> reservedDesignations)
@@ -3042,6 +3150,10 @@ public sealed partial class SimulationEngine
             }
             StoreTerrainYield(result.OutputPosition, result.Yield);
             GainBuildingExperience(actor, result.Yield.BuildingExperience);
+            if (designation.Kind == WorkDesignationKind.StripFloor)
+            {
+                ResolveUnsupportedOccupants([designation.Target]);
+            }
         }
 
         _workDesignations.Remove(designation.Id);
@@ -3966,6 +4078,19 @@ public sealed partial class SimulationEngine
                 TryDismantleStorageZone(campStorage.Id, publishEvent: false);
             }
         }
+        if (worldObject.Kind == WorldObjectKind.WoodenWatchtower &&
+            _watchtowerPosts.Remove(worldObject.Id, out var post))
+        {
+            TryDismantleStorageZone(post.FoodStorageId, publishEvent: false);
+            foreach (var guardId in post.GuardIds)
+            {
+                if (_actors.TryGetValue(guardId, out var guard) &&
+                    guard.JobKind == ActorJobKind.GuardWatchtower)
+                {
+                    guard.ClearJob();
+                }
+            }
+        }
 
         _undeliveredWorldChanges.Add(World.DismantleWorldObject(id, CurrentTick));
         foreach (var position in worldObject.GetAbsoluteParts()
@@ -4002,6 +4127,7 @@ public sealed partial class SimulationEngine
             foreach (var occupant in _actors.Values.Where(candidate =>
                          candidate.Position == position).ToArray())
             {
+                var fallenLevels = position.Z - landing.Z;
                 occupant.Position = landing;
                 occupant.ClearJob();
                 if (occupant.CarriedCorpseId != EntityId.None &&
@@ -4009,6 +4135,11 @@ public sealed partial class SimulationEngine
                 {
                     carriedCorpse.Position = landing;
                 }
+                ApplyTraumaDamage(
+                    occupant,
+                    Terrain.FallDamagePolicy.GetDamage(
+                        fallenLevels,
+                        GetEffectiveMaximumHealth(occupant)));
             }
 
             foreach (var stack in _itemStacks.Values.Where(candidate =>
@@ -5328,6 +5459,9 @@ public sealed partial class SimulationEngine
                 case ActorJobKind.MineRock:
                     ValidateLoadedMineRockJob(actor);
                     break;
+                case ActorJobKind.StripFloor:
+                    ValidateLoadedStripFloorJob(actor);
+                    break;
                 case ActorJobKind.CarveRamp:
                     ValidateLoadedCarveRampJob(actor);
                     break;
@@ -5590,6 +5724,21 @@ public sealed partial class SimulationEngine
         }
     }
 
+    private void ValidateLoadedStripFloorJob(ActorState actor)
+    {
+        if (actor.JobStage != ActorJobStage.None ||
+            actor.CarriedStackId != EntityId.None ||
+            actor.DestinationZoneId != EntityId.None ||
+            actor.ReservedQuantity != 0 ||
+            !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
+            designation.Kind != WorkDesignationKind.StripFloor ||
+            !CanActorStripFloor(actor, designation.Target) ||
+            !AreCardinalNeighbors(actor.JobTarget, designation.Target))
+        {
+            throw new InvalidDataException("The save contains an invalid floor-stripping job.");
+        }
+    }
+
     private void ValidateLoadedCarveRampJob(ActorState actor)
     {
         if (actor.JobStage != ActorJobStage.None ||
@@ -5845,6 +5994,7 @@ public sealed partial class SimulationEngine
             ActorJobKind.FellTree => GetFellTreeWorkTicks(),
             ActorJobKind.QuarryBoulder => GetQuarryBoulderWorkTicks(),
             ActorJobKind.MineRock => GetMineRockWorkTicks(actor),
+            ActorJobKind.StripFloor => GetStripFloorWorkTicks(actor),
             ActorJobKind.CarveRamp => GetCarveRampWorkTicks(actor),
             ActorJobKind.SupplyConstruction => Definitions.HaulHandlingTicks,
             ActorJobKind.BuildConstruction when
@@ -6017,6 +6167,7 @@ public sealed partial class SimulationEngine
         ActorJobKind.FellTree => GetFellTreeWorkTicks(),
         ActorJobKind.QuarryBoulder => GetQuarryBoulderWorkTicks(),
         ActorJobKind.MineRock => GetMineRockWorkTicks(actor),
+        ActorJobKind.StripFloor => GetStripFloorWorkTicks(actor),
         ActorJobKind.CarveRamp => GetCarveRampWorkTicks(actor),
         ActorJobKind.SupplyConstruction => Definitions.HaulHandlingTicks,
         ActorJobKind.BuildConstruction when
@@ -6038,6 +6189,7 @@ public sealed partial class SimulationEngine
         ActorJobKind.LootRaid => Definitions.HaulHandlingTicks,
         ActorJobKind.RecoverRaidCorpse => Definitions.HaulHandlingTicks,
         ActorJobKind.ConsumeRaidCorpse => Definitions.EatWorkTicks,
+        ActorJobKind.GuardWatchtower => int.MaxValue,
         _ => throw new InvalidOperationException("An idle actor cannot begin work."),
     };
 
@@ -6062,6 +6214,20 @@ public sealed partial class SimulationEngine
             actor.SourceStackId,
             out var designation)
                 ? GetTerrainExcavationCell(definition, designation.Target)
+                : new CaveCell(RockKind.Obsidian, CaveCellKind.SolidRock);
+        return TerrainWorkPolicy.GetWorkTicks(
+            definition,
+            excavationCell,
+            Definitions.ForageWorkTicks);
+    }
+
+    private int GetStripFloorWorkTicks(ActorState actor)
+    {
+        var definition = TerrainModificationCatalog.Get(WorkDesignationKind.StripFloor);
+        var excavationCell = _workDesignations.TryGetValue(
+            actor.SourceStackId,
+            out var designation)
+                ? World.GetFloorStrippingCell(designation.Target)
                 : new CaveCell(RockKind.Obsidian, CaveCellKind.SolidRock);
         return TerrainWorkPolicy.GetWorkTicks(
             definition,
@@ -6125,6 +6291,7 @@ public sealed partial class SimulationEngine
         WorkDesignationKind.MineRock => Map.IsRockPosition(target)
             ? Map.GetRockCell(target)
             : new CaveCell(RockKind.Sandstone, CaveCellKind.SolidRock),
+        WorkDesignationKind.StripFloor => World.GetFloorStrippingCell(target),
         WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
             rampDestination is { } destination
                 ? World.GetRampExcavationCell(
@@ -6169,6 +6336,12 @@ public sealed partial class SimulationEngine
             TerrainModificationCatalog.Get(WorkDesignationKind.MineRock),
             target);
 
+    private bool CanActorStripFloor(ActorState actor, GridPosition target) =>
+        CanActorPerformTerrainWork(
+            actor,
+            TerrainModificationCatalog.Get(WorkDesignationKind.StripFloor),
+            target);
+
     private bool CanActorCarveRamp(
         ActorState actor,
         WorkDesignationSnapshot designation) =>
@@ -6195,10 +6368,11 @@ public sealed partial class SimulationEngine
 
     private bool IsRestLocation(GridPosition position) =>
         World.GetWorldObjectsAt(position).Any(worldObject =>
-            GoblinShelterPolicy.IsShelter(worldObject) &&
             worldObject.GetAbsoluteParts().Any(item =>
                 item.Position == position &&
-                item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door));
+                (item.Part.Kind == WorldObjectPartKind.SleepingMat ||
+                 GoblinShelterPolicy.IsShelter(worldObject) &&
+                 item.Part.Kind is WorldObjectPartKind.Floor or WorldObjectPartKind.Door)));
 
     private int GetReservedItemQuantity(EntityId stackId, ActorState consumingActor)
     {

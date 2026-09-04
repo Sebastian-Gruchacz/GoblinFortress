@@ -71,6 +71,13 @@ internal static class TerrainWorkYieldPolicy
                     actorId,
                     tick,
                     designationId),
+            WorkDesignationKind.StripFloor => CreateRampYield(
+                definition.Work.Yield,
+                material.Rock,
+                worldSeed,
+                actorId,
+                tick,
+                designationId),
             _ => throw new ArgumentException(
                 $"Terrain modification '{definition.Id}' has no yield policy.",
                 nameof(definition)),

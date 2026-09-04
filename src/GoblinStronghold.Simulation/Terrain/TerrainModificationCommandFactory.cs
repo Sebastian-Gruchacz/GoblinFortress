@@ -17,6 +17,8 @@ public static class TerrainModificationCommandFactory
         {
             WorkDesignationKind.MineRock =>
                 SimulationCommand.DesignateRockMining(executeAt, sequence, start, end),
+            WorkDesignationKind.StripFloor =>
+                SimulationCommand.DesignateFloorStripping(executeAt, sequence, start, end),
             WorkDesignationKind.CarveRampDown =>
                 SimulationCommand.DesignateRampDown(
                     executeAt,

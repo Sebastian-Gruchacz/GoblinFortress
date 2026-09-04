@@ -53,6 +53,15 @@ internal static class TerrainWorkExecutionService
                 actorId,
                 tick,
                 designationId),
+            WorkDesignationKind.StripFloor => TryStripFloor(
+                definition,
+                world,
+                target,
+                actorPosition,
+                worldSeed,
+                actorId,
+                tick,
+                designationId),
             WorkDesignationKind.CarveRampDown => TryCarveRamp(
                 definition,
                 world,
@@ -104,6 +113,38 @@ internal static class TerrainWorkExecutionService
                 actorId,
                 tick,
                 designationId));
+    }
+
+    private static TerrainWorkExecutionResult? TryStripFloor(
+        TerrainModificationDefinition definition,
+        WorldMapState world,
+        GridPosition target,
+        GridPosition actorPosition,
+        WorldSeed worldSeed,
+        EntityId actorId,
+        SimulationTick tick,
+        EntityId designationId)
+    {
+        var material = world.GetFloorStrippingCell(target);
+        if (!world.TryStripFloor(target, tick, out var resource, out var variant, out var change))
+        {
+            return null;
+        }
+
+        var generated = TerrainWorkYieldPolicy.Create(
+            definition,
+            material,
+            worldSeed,
+            actorId,
+            tick,
+            designationId);
+        var quantity = generated.Stacks.Sum(stack => stack.Quantity);
+        return new TerrainWorkExecutionResult(
+            change,
+            actorPosition,
+            new TerrainWorkYield(
+                [new TerrainYieldStack(resource, variant, quantity)],
+                generated.BuildingExperience));
     }
 
     private static TerrainWorkExecutionResult? TryCarveRamp(

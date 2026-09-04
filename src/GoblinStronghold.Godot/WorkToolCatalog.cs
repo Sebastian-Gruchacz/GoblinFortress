@@ -64,6 +64,8 @@ internal static class WorkToolCatalog
             new(new Color(0.84f, 0.9f, 0.96f, 0.96f), 1.5f, 2f),
         WorkDesignationKind.MineRock =>
             new(new Color(1f, 0.7f, 0.24f, 0.96f), 1.5f, 2f),
+        WorkDesignationKind.StripFloor =>
+            new(new Color(0.92f, 0.5f, 0.2f, 0.94f), 2f, 2f),
         WorkDesignationKind.CarveRampDown =>
             new(new Color(0.34f, 0.76f, 1f, 0.98f), 1.5f, 2f),
         WorkDesignationKind.CarveRampUp =>

@@ -62,6 +62,8 @@ internal sealed class SimulationSaveModel
 
     public bool RaidRosterConfigured { get; set; }
 
+    public List<WatchtowerPostSaveModel> WatchtowerPosts { get; set; } = [];
+
     public int RaidTargetX { get; set; }
 
     public int RaidTargetY { get; set; }
@@ -89,6 +91,8 @@ internal sealed class SimulationSaveModel
     public List<VerticalPassageSaveModel> ExcavatedVerticalPassages { get; set; } = [];
 
     public List<GridPositionSaveModel> HarvestedCaveFlora { get; set; } = [];
+
+    public List<GridPositionSaveModel> StrippedFloorSurfaces { get; set; } = [];
 
     public bool ConnectedWaterActivated { get; set; }
 
@@ -123,6 +127,15 @@ internal sealed class SimulationSaveModel
     public List<EventSaveModel> UndeliveredEvents { get; set; } = [];
 
     public List<WorldChangeSaveModel> UndeliveredWorldChanges { get; set; } = [];
+}
+
+internal sealed class WatchtowerPostSaveModel
+{
+    public ulong WatchtowerId { get; set; }
+
+    public ulong FoodStorageId { get; set; }
+
+    public List<ulong> GuardIds { get; set; } = [];
 }
 
 internal sealed class CorpseSaveModel

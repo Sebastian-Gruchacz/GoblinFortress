@@ -347,11 +347,15 @@ undefined until it has a distinct role from primitive fire drying.
   The freestanding fire basket likewise uses `StandingTorchPainter` and maps to
   the existing wall-torch light definition without inheriting its directional
   wall-facing occlusion.
-- Passive settlement observation now routes through
-  `Visibility/GoblinStructureObserverPolicy`. Existing shelters retain their
-  civilization-defined radius, while the first wooden watchtower contributes a
-  focused radius-7 observer without adding a structure-kind branch to
-  `SimulationEngine.UpdateVisibility`.
+- Passive settlement observation routes through
+  `Visibility/GoblinStructureObserverPolicy`, while staffed watchtowers use the
+  focused `Watchtowers/WatchtowerDutyPolicy`. Existing shelters retain their
+  civilization-defined radius; an empty watchtower no longer reveals terrain.
+  Up to two assigned guards return to its upper platform after personal needs
+  and receive doubled personal vision and ranged reach only while at the post.
+  Its built-in ladder uses the shared constructed vertical-navigation edge.
+  Persistent assignment and the built-in food-store link live behind the
+  watchtower boundary instead of adding tower state to actors or world objects.
 
 #### Active slice lighting and lower-level presentation cache
 

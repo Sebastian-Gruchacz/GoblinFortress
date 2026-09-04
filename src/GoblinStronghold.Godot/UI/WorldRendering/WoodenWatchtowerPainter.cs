@@ -51,6 +51,32 @@ internal static class WoodenWatchtowerPainter
                 canvas.DrawCircle(corner, 3f, palette.Shadow);
                 canvas.DrawCircle(corner, 1.5f, palette.Highlight);
             }
+            var ladder = watchtower.GetAbsoluteParts().FirstOrDefault(item =>
+                item.Part.Kind == WorldObjectPartKind.Ladder);
+            if (ladder.Part.Kind == WorldObjectPartKind.Ladder)
+            {
+                var ladderOrigin = new Vector2(
+                    ladder.Position.X * TileSize,
+                    ladder.Position.Y * TileSize);
+                canvas.DrawLine(
+                    ladderOrigin + new Vector2(6f, 2f),
+                    ladderOrigin + new Vector2(6f, 18f),
+                    palette.Highlight,
+                    2f);
+                canvas.DrawLine(
+                    ladderOrigin + new Vector2(14f, 2f),
+                    ladderOrigin + new Vector2(14f, 18f),
+                    palette.Highlight,
+                    2f);
+                for (var y = 5f; y <= 15f; y += 5f)
+                {
+                    canvas.DrawLine(
+                        ladderOrigin + new Vector2(6f, y),
+                        ladderOrigin + new Vector2(14f, y),
+                        palette.Edge,
+                        2f);
+                }
+            }
             return;
         }
 

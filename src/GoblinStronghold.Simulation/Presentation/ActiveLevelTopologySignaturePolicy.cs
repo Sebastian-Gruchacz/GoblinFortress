@@ -14,7 +14,8 @@ public static class ActiveLevelTopologySignaturePolicy
         signature = AddPositions(signature, 1, world.ExcavatedCaveCells, activeLevel);
         signature = AddPositions(signature, 2, world.ExcavatedTerrainRamps, activeLevel);
         signature = AddPositions(signature, 3, world.HarvestedCaveFlora, activeLevel);
-        signature = Add(signature, 4);
+        signature = AddPositions(signature, 4, world.StrippedFloorSurfaces, activeLevel);
+        signature = Add(signature, 5);
         foreach (var passage in world.CreateVerticalPassageSnapshot()
                      .Where(passage =>
                          passage.Upper.Z == activeLevel ||

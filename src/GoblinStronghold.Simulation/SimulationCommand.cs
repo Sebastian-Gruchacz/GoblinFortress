@@ -61,6 +61,7 @@ public enum SimulationCommandKind
     ConfigureRepeatingCraftingOrder = 53,
     ConfigureWorkTypePriority = 54,
     DesignateHuntArea = 55,
+    ConfigureWatchtowerGuard = 56,
 }
 
 public enum DismantleTargetKind : byte
@@ -1086,6 +1087,23 @@ public readonly record struct SimulationCommand(
             ResourceKind.Any,
             Amount: (int)WorkDesignationKind.MineRock);
 
+    public static SimulationCommand DesignateFloorStripping(
+        SimulationTick executeAt,
+        ulong sequence,
+        GridPosition start,
+        GridPosition end) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.DesignateWork,
+            EntityId.None,
+            EntityId.None,
+            start,
+            end,
+            default,
+            ResourceKind.Any,
+            Amount: (int)WorkDesignationKind.StripFloor);
+
     public static SimulationCommand DesignateRampDown(
         SimulationTick executeAt,
         ulong sequence,
@@ -1707,6 +1725,24 @@ public readonly record struct SimulationCommand(
             SimulationCommandKind.ConfigureRaidMember,
             actor,
             EntityId.None,
+            default,
+            default,
+            default,
+            ResourceKind.Any,
+            Amount: selected ? 1 : 0);
+
+    public static SimulationCommand ConfigureWatchtowerGuard(
+        SimulationTick executeAt,
+        ulong sequence,
+        WorldObjectId watchtower,
+        EntityId actor,
+        bool selected) =>
+        new(
+            executeAt,
+            sequence,
+            SimulationCommandKind.ConfigureWatchtowerGuard,
+            actor,
+            new EntityId(watchtower.Value),
             default,
             default,
             default,

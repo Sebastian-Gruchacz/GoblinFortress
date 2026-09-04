@@ -6,6 +6,7 @@ public enum TerrainKind : byte
     Mud = 2,
     ShallowWater = 3,
     DeepWater = 4,
+    Sand = 5,
 }
 
 public enum TerrainRampDirection : byte

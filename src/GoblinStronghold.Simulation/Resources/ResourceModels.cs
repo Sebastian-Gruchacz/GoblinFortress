@@ -17,6 +17,8 @@ public enum ResourceKind : byte
     Equipment = 10,
     Materials = 11,
     Water = 12,
+    Earth = 13,
+    Sand = 14,
 }
 
 public enum FoodKind : byte
@@ -82,6 +84,9 @@ public enum ResourceVariant : byte
     Lichen = 44,
     Mana = 45,
     EquipmentWoodenHammer = 46,
+    Soil = 47,
+    EquipmentWoodenShovel = 48,
+    Sand = 49,
 }
 
 public enum ItemLocationKind : byte
@@ -139,7 +144,10 @@ public enum StorageResourceFilter : ushort
     Equipment = 1 << 9,
     Materials = 1 << 10,
     Water = 1 << 11,
-    SolidGoods = Food | Wood | Reeds | Stone | Bone | Coal | Ore | Hide | Equipment | Materials,
+    Earth = 1 << 12,
+    Sand = 1 << 13,
+    SolidGoods = Food | Wood | Reeds | Stone | Bone | Coal | Ore | Hide | Equipment | Materials |
+        Earth | Sand,
     All = SolidGoods | Vegetation | Water,
 }
 

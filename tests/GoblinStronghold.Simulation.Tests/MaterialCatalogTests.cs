@@ -6,6 +6,26 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class MaterialCatalogTests
 {
     [Fact]
+    public void SoilIsAPhysicalConstructionMaterialDugWithAFirstLevelShovel()
+    {
+        var soil = MaterialCatalog.Get(ResourceVariant.Soil);
+
+        Assert.Equal(ResourceKind.Earth, soil.ResourceKind);
+        Assert.Equal(MaterialType.Soil, soil.MaterialType);
+        Assert.Contains(MaterialUse.Construction, soil.Uses);
+        Assert.Equal(MaterialAcquisitionStrategy.Digging, soil.Acquisition.Strategy);
+        Assert.Equal(MaterialToolKind.Shovel, soil.Acquisition.RequiredTool);
+        Assert.Equal(1, soil.Acquisition.MinimumToolLevel);
+
+        var sand = MaterialCatalog.Get(ResourceVariant.Sand);
+        Assert.Equal(ResourceKind.Sand, sand.ResourceKind);
+        Assert.Equal(MaterialType.Sand, sand.MaterialType);
+        Assert.Contains(MaterialUse.Construction, sand.Uses);
+        Assert.Equal(MaterialAcquisitionStrategy.Digging, sand.Acquisition.Strategy);
+        Assert.Equal(MaterialToolKind.Shovel, sand.Acquisition.RequiredTool);
+    }
+
+    [Fact]
     public void CatalogContainsEveryGeneratedNaturalMaterialVariant()
     {
         ResourceVariant[] expected =

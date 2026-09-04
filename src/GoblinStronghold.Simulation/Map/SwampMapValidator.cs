@@ -198,7 +198,9 @@ public static class SwampMapValidator
         var expectedLevelCount = map.GeneratorVersion >= 13
             ? Math.Max(
                 SwampMapGenerator.MinimumInitialCaveLevelCount,
-                -map.MinimumTerrainLevel)
+                map.GeneratorVersion >= 18
+                    ? -map.MinimumTerrainLevel - 1
+                    : -map.MinimumTerrainLevel)
             : 2;
         if (map.CaveLevelCount != expectedLevelCount || map.CaveEntrances.Count == 0)
         {
@@ -240,7 +242,7 @@ public static class SwampMapValidator
                         return;
                     }
 
-                    if (cell.IsOpen &&
+                    if (cell.IsOpen && map.IsTerrainTraversable(position) &&
                         (deepestGeneratedFloor is null || z < deepestGeneratedFloor.Value.Z))
                     {
                         deepestGeneratedFloor = position;

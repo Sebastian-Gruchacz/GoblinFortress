@@ -28,6 +28,7 @@ public enum EquipmentSlot : byte
     Cloak = 20,
     Legs = 21,
     Feet = 22,
+    EarthmovingTool = 23,
 }
 
 public readonly record struct EquipmentItemDefinition(
@@ -116,6 +117,8 @@ public static class EquipmentCatalog
             ResourceVariant.EquipmentReinforcedPickaxe, 5, 160),
         new(PersonalEquipment.WoodenHammer, EquipmentSlot.ConstructionTool,
             ResourceVariant.EquipmentWoodenHammer, 3, 90),
+        new(PersonalEquipment.WoodenShovel, EquipmentSlot.EarthmovingTool,
+            ResourceVariant.EquipmentWoodenShovel, 3, 70),
         new(PersonalEquipment.FightingStick, EquipmentSlot.MeleeWeapon,
             ResourceVariant.EquipmentFightingStick, 2, 80),
         new(PersonalEquipment.StoneClub, EquipmentSlot.MeleeWeapon,

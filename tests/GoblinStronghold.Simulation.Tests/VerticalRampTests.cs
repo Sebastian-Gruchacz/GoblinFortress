@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using Xunit;
@@ -6,6 +7,42 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class VerticalRampTests
 {
+    [Fact]
+    public void LegacySameColumnExcavatedRampLoadsAsEnclosedStairs()
+    {
+        var seed = new WorldSeed(0x4C45474143595354UL);
+        var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 30);
+        var upper =
+            (from y in Enumerable.Range(0, map.Height)
+             from x in Enumerable.Range(0, map.Width)
+             let candidate = new GridPosition(x, y, -1)
+             where engine.World.CanCarveRampDown(candidate)
+             select candidate).First();
+        Assert.True(engine.World.TryCarveVerticalRamp(
+            upper,
+            carveDown: true,
+            SimulationTick.Zero,
+            out _,
+            out _));
+        var save = JsonNode.Parse(engine.Save())!.AsObject();
+        Assert.Single(save["excavatedVerticalPassages"]!.AsArray())!["kind"] =
+            (int)VerticalPassageKind.ExcavatedRamp;
+
+        var restored = SimulationEngine.Load(
+            save.ToJsonString(),
+            SimulationDefinitions.Foundation);
+
+        Assert.Equal(
+            VerticalPassageKind.ExcavatedStairs,
+            Assert.Single(restored.World.ExcavatedVerticalPassages).Kind);
+    }
+
     [Fact]
     public void DirectionalRampDesignationPreservesItsSlopeAcrossSaveLoad()
     {
@@ -64,7 +101,7 @@ public sealed class VerticalRampTests
     }
 
     [Fact]
-    public void RampCanBeCarvedBelowTheFormerLevelMinusTwoBoundary()
+    public void StairsCanBeCarvedBelowTheFormerLevelMinusTwoBoundary()
     {
         var seed = new WorldSeed(0x4445455052414D50UL);
         var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
@@ -91,6 +128,10 @@ public sealed class VerticalRampTests
             out _));
 
         Assert.Contains(lower, engine.World.ExcavatedCaveCells);
+        Assert.Contains(engine.World.ExcavatedVerticalPassages, passage =>
+            passage.Upper == upper && passage.Lower == lower &&
+            passage.Kind == VerticalPassageKind.ExcavatedStairs);
+        Assert.False(engine.World.HasOpenVerticalSightLine(upper, lower));
         Assert.NotNull(engine.Navigation.FindPath(upper, lower));
         Assert.Equal(-3, map.DeepestCaveLevel);
 
@@ -177,7 +218,7 @@ public sealed class VerticalRampTests
     }
 
     [Fact]
-    public void GoblinCarvesRampDownAndTheNewRouteSurvivesSaveLoad()
+    public void GoblinCarvesStairsDownAndTheNewRouteSurvivesSaveLoad()
     {
         var seed = new WorldSeed(0x52414D50444F574EUL);
         var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
@@ -220,11 +261,11 @@ public sealed class VerticalRampTests
 
         Assert.Contains(engine.World.ExcavatedVerticalPassages, passage =>
             passage.Upper == target && passage.Lower == lower &&
-            passage.Kind == VerticalPassageKind.ExcavatedRamp);
+            passage.Kind == VerticalPassageKind.ExcavatedStairs);
         Assert.Contains(lower, engine.World.ExcavatedCaveCells);
         Assert.NotNull(engine.Navigation.FindPath(target, lower));
         Assert.Contains(engine.CreateSnapshot().ItemStacks, stack =>
-            stack.Resource == ResourceKind.Stone &&
+            stack.Resource is ResourceKind.Stone or ResourceKind.Earth or ResourceKind.Sand &&
             stack.Location == ItemLocation.OnGround(target));
 
         var restored = SimulationEngine.Load(engine.Save(), SimulationDefinitions.Foundation);
@@ -237,25 +278,42 @@ public sealed class VerticalRampTests
     [Fact]
     public void GoblinCanCarveRampUpFromADeeperCaveFloor()
     {
-        var seed = new WorldSeed(0x52414D505550UL);
-        var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
-        var engine = SimulationEngine.Create(
-            seed,
-            SimulationDefinitions.Foundation,
-            map,
-            initialGoblinCount: 1,
-            initialFoodStock: 30);
+        SimulationEngine? selectedEngine = null;
+        GridPosition target = default;
+        for (ulong seedValue = 1; seedValue <= 64 && selectedEngine is null; seedValue++)
+        {
+            var seed = new WorldSeed(seedValue);
+            var candidateEngine = SimulationEngine.Create(
+                seed,
+                SimulationDefinitions.Foundation,
+                SwampMapGenerator.Generate(seed, width: 48, height: 48),
+                initialGoblinCount: 1,
+                initialFoodStock: 30);
+            var candidateActor = Assert.Single(candidateEngine.CreateSnapshot().Actors);
+            var candidateTarget =
+                (from level in Enumerable.Range(
+                        2,
+                        Math.Max(0, candidateEngine.Map.CaveLevelCount - 1))
+                 from y in Enumerable.Range(0, candidateEngine.Map.Height)
+                 from x in Enumerable.Range(0, candidateEngine.Map.Width)
+                 let candidate = new GridPosition(x, y, -level)
+                 where candidateEngine.World.CanCarveRampUp(candidate)
+                 let route = candidateEngine.Navigation.FindPath(
+                     candidateActor.Position,
+                     candidate)
+                 where route is not null
+                 orderby route.Count
+                 select (GridPosition?)candidate).FirstOrDefault();
+            if (candidateTarget is { } found)
+            {
+                selectedEngine = candidateEngine;
+                target = found;
+            }
+        }
+
+        var engine = selectedEngine ?? throw new InvalidOperationException(
+            "The deterministic generator samples contained no reachable ramp-up target.");
         var actor = Assert.Single(engine.CreateSnapshot().Actors);
-        var target =
-            (from level in Enumerable.Range(2, Math.Max(0, map.CaveLevelCount - 1))
-             from y in Enumerable.Range(0, map.Height)
-             from x in Enumerable.Range(0, map.Width)
-             let candidate = new GridPosition(x, y, -level)
-             where engine.World.CanCarveRampUp(candidate)
-             let route = engine.Navigation.FindPath(actor.Position, candidate)
-             where route is not null
-             orderby route.Count
-             select candidate).First();
 
         engine.QueueCommand(SimulationCommand.Move(
             new SimulationTick(1), sequence: 1, actor.Id, target));

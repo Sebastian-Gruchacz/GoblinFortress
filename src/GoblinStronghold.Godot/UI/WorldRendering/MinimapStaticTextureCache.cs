@@ -117,6 +117,7 @@ internal sealed class MinimapStaticTextureCache : IDisposable
             {
                 TerrainKind.SolidGround => new Color("668b4d"),
                 TerrainKind.Mud => new Color("4f5838"),
+                TerrainKind.Sand => new Color("b69a66"),
                 TerrainKind.ShallowWater => new Color("4b8890"),
                 TerrainKind.DeepWater => new Color("28536d"),
                 _ => Colors.Magenta,
@@ -126,11 +127,12 @@ internal sealed class MinimapStaticTextureCache : IDisposable
         if (engine.Map.IsCavePosition(position))
         {
             var cell = engine.Map.GetCaveCell(position);
-            if (cell.Fluid == CellFluidKind.Lava)
+            if (engine.World.TryGetFluid(position, out var fluid, out _) &&
+                fluid == CellFluidKind.Lava)
             {
                 return new Color("b94a22");
             }
-            if (cell.Fluid == CellFluidKind.Water)
+            if (fluid == CellFluidKind.Water)
             {
                 return new Color("28536d");
             }

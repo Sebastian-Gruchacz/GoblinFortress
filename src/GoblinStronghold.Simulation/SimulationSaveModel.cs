@@ -90,6 +90,8 @@ internal sealed class SimulationSaveModel
 
     public List<GridPositionSaveModel> HarvestedCaveFlora { get; set; } = [];
 
+    public bool ConnectedWaterActivated { get; set; }
+
     public HumanVillageSaveModel HumanVillage { get; set; } = new();
 
     public List<Map.CellVisibility> Visibility { get; set; } = [];

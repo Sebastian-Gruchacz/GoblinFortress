@@ -78,6 +78,9 @@ public sealed class CraftingTests
             EquipmentSlot.FellingTool,
             EquipmentCatalog.FindDefinition(PersonalEquipment.WoodenAxe)!.Value.Slot);
         Assert.Equal(
+            EquipmentSlot.EarthmovingTool,
+            EquipmentCatalog.FindDefinition(PersonalEquipment.WoodenShovel)!.Value.Slot);
+        Assert.Equal(
             EquipmentSlot.MeleeWeapon,
             EquipmentCatalog.FindDefinition(PersonalEquipment.StoneClub)!.Value.Slot);
         Assert.Equal(
@@ -90,13 +93,14 @@ public sealed class CraftingTests
     {
         Assert.Equal(1, ToolCapabilityCatalog.GetLevel(PersonalEquipment.WoodenHammer));
         Assert.Equal(1, ToolCapabilityCatalog.GetLevel(PersonalEquipment.WoodenAxe));
+        Assert.Equal(1, ToolCapabilityCatalog.GetLevel(PersonalEquipment.WoodenShovel));
         Assert.Equal(2, ToolCapabilityCatalog.GetLevel(PersonalEquipment.PrimitivePickaxe));
         Assert.Equal(3, ToolCapabilityCatalog.GetLevel(PersonalEquipment.ReinforcedPickaxe));
         Assert.Equal(ToolFunction.Construction,
             ToolCapabilityCatalog.GetFunctions(PersonalEquipment.WoodenHammer));
         Assert.Equal(ToolFunction.Felling,
             ToolCapabilityCatalog.GetFunctions(PersonalEquipment.WoodenAxe));
-        Assert.Equal(ToolFunction.Mining,
+        Assert.Equal(ToolFunction.Mining | ToolFunction.Earthmoving,
             ToolCapabilityCatalog.GetFunctions(PersonalEquipment.PrimitivePickaxe));
         Assert.True(EquipmentCatalog.IsUpgrade(
             PersonalEquipment.WoodenHammer,
@@ -140,6 +144,18 @@ public sealed class CraftingTests
             PersonalEquipment.PrimitivePickaxe,
             ToolFunction.Mining,
             minimumLevel: 2));
+        Assert.True(ToolCapabilityCatalog.MeetsRequirement(
+            PersonalEquipment.WoodenShovel,
+            ToolFunction.Earthmoving,
+            minimumLevel: 1));
+        Assert.False(ToolCapabilityCatalog.MeetsRequirement(
+            PersonalEquipment.WoodenShovel,
+            ToolFunction.Mining,
+            minimumLevel: 1));
+        Assert.True(ToolCapabilityCatalog.MeetsRequirement(
+            PersonalEquipment.PrimitivePickaxe,
+            ToolFunction.Earthmoving,
+            minimumLevel: 1));
     }
 
     [Fact]
@@ -166,6 +182,11 @@ public sealed class CraftingTests
             settings.WoodenAxeDamageBonus,
             EquipmentCombatPolicy.GetBestMeleeDamageBonus(
                 PersonalEquipment.BoneKnife | PersonalEquipment.WoodenAxe,
+                settings));
+        Assert.Equal(
+            settings.WoodenShovelDamageBonus,
+            EquipmentCombatPolicy.GetBestMeleeDamageBonus(
+                PersonalEquipment.BoneKnife | PersonalEquipment.WoodenShovel,
                 settings));
     }
 

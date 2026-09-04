@@ -28,13 +28,23 @@ public enum CaveCellKind : byte
     Ramp = 3,
 }
 
+public enum LooseMaterialKind : byte
+{
+    None = 0,
+    Soil = 1,
+    Sand = 2,
+}
+
 public readonly record struct CaveCell(
     RockKind Rock,
     CaveCellKind Kind,
     MineralDepositKind Deposit = MineralDepositKind.None,
-    CellFluidKind Fluid = CellFluidKind.None)
+    CellFluidKind Fluid = CellFluidKind.None,
+    LooseMaterialKind LooseMaterial = LooseMaterialKind.None)
 {
     public bool IsOpen => Kind is CaveCellKind.Floor or CaveCellKind.Ramp;
+
+    public bool IsLooseMaterial => !IsOpen && LooseMaterial != LooseMaterialKind.None;
 }
 
 public enum VerticalPassageKind : byte
@@ -42,6 +52,7 @@ public enum VerticalPassageKind : byte
     CaveMouth = 1,
     NaturalRamp = 2,
     ExcavatedRamp = 3,
+    ExcavatedStairs = 4,
 }
 
 public readonly record struct VerticalPassage(

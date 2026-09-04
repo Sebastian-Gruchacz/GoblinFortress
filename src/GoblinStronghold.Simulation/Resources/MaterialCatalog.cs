@@ -20,6 +20,8 @@ public enum MaterialType : byte
     Venom = 10,
     Silk = 11,
     Chitin = 12,
+    Soil = 13,
+    Sand = 14,
 }
 
 public enum MaterialAcquisitionStrategy : byte
@@ -30,6 +32,7 @@ public enum MaterialAcquisitionStrategy : byte
     Mining = 4,
     Butchering = 5,
     Processing = 6,
+    Digging = 7,
 }
 
 public enum MaterialToolKind : byte
@@ -38,6 +41,7 @@ public enum MaterialToolKind : byte
     Axe = 1,
     Pickaxe = 2,
     Knife = 3,
+    Shovel = 4,
 }
 
 public enum MaterialProcessingStrategy : byte
@@ -407,6 +411,8 @@ public static class MaterialCatalog
         MaterialType.PlantFiber => resource == ResourceKind.Reeds,
         MaterialType.Bone => resource == ResourceKind.Bone,
         MaterialType.Hide => resource == ResourceKind.Hide,
+        MaterialType.Soil => resource == ResourceKind.Earth,
+        MaterialType.Sand => resource == ResourceKind.Sand,
         MaterialType.Venom or MaterialType.Silk or MaterialType.Chitin =>
             resource == ResourceKind.Materials,
         _ => false,

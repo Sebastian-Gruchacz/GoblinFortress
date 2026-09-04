@@ -50,6 +50,24 @@ public sealed class TerrainWorkPolicyTests
     }
 
     [Fact]
+    public void ShovelMovesLooseMaterialButCannotMineRock()
+    {
+        var soil = new CaveCell(
+            RockKind.Sandstone,
+            CaveCellKind.SolidRock,
+            LooseMaterial: LooseMaterialKind.Soil);
+        var rock = new CaveCell(RockKind.Sandstone, CaveCellKind.SolidRock);
+
+        Assert.True(ExcavationCapabilityPolicy.CanExcavate(
+            soil, PersonalEquipment.WoodenShovel, buildingExperience: 0));
+        Assert.False(ExcavationCapabilityPolicy.CanExcavate(
+            rock, PersonalEquipment.WoodenShovel, buildingExperience: 1000));
+        Assert.True(ExcavationCapabilityPolicy.CanExcavate(
+            soil, PersonalEquipment.PrimitivePickaxe, buildingExperience: 0));
+        Assert.Equal(1, ExcavationCapabilityPolicy.WorkMultiplier(soil));
+    }
+
+    [Fact]
     public void AssignmentIsCompleteBeforeActorMutation()
     {
         var route = new[] { new GridPosition(2, 3, -1) };

@@ -1,5 +1,7 @@
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Map.Generation;
+using GoblinStronghold.Simulation.Map.Hydrology;
 using GoblinStronghold.Simulation.Resources;
 using System.Text.Json.Nodes;
 using Xunit;
@@ -8,6 +10,167 @@ namespace GoblinStronghold.Simulation.Tests;
 
 public sealed class WorldMapStateTests
 {
+    [Fact]
+    public void CurrentRiverSpillsDownIntoAdjacentSurfaceBasin()
+    {
+        var seed = new WorldSeed(4_718_262_470_390_704_995UL);
+        var map = SwampMapGenerator.Generate(
+            LocationGenerationRequest.CreateDefault(seed, 128, 128) with
+            {
+                RoadMode = RoadGenerationMode.ThroughRoad,
+            });
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 8);
+        var source = new GridPosition(15, 98, 0);
+        var basin = new GridPosition(16, 98, -1);
+
+        Assert.Equal(TerrainKind.DeepWater, map.GetColumnCell(source).Terrain);
+        Assert.True(map.IsTerrainSurfacePosition(basin));
+        Assert.True(engine.World.TryGetFluid(basin, out var fluid, out var depthLevels));
+        Assert.Equal(CellFluidKind.Water, fluid);
+        Assert.Equal(1, depthLevels);
+        Assert.Contains(basin, engine.World.ConnectedWaterCells);
+    }
+
+    [Fact]
+    public void InitialNaturalContentRespectsSurfaceSubstrateAndFlooding()
+    {
+        var seed = new WorldSeed(4_718_262_470_390_704_995UL);
+        var map = SwampMapGenerator.Generate(
+            LocationGenerationRequest.CreateDefault(seed, 128, 128) with
+            {
+                RoadMode = RoadGenerationMode.ThroughRoad,
+            });
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 8);
+
+        Assert.DoesNotContain(engine.World.CreatePlantSnapshot(), patch =>
+            patch.Kind == PlantKind.MushroomCluster &&
+            map.GetColumnCell(patch.Position).Terrain == TerrainKind.Sand);
+        Assert.DoesNotContain(engine.World.CreatePlantSnapshot(), patch =>
+            engine.World.ConnectedWaterCells.Contains(patch.Position));
+        Assert.All(
+            engine.World.CreateWorldObjectSnapshot().Where(worldObject =>
+                worldObject.Owner == WorldObjectOwner.Nature &&
+                (worldObject.Kind is WorldObjectKind.Tree or
+                    WorldObjectKind.DeadTreeStump or WorldObjectKind.Boulder)),
+            worldObject =>
+            {
+                Assert.True(map.IsTerrainSurfacePosition(worldObject.Anchor));
+                Assert.DoesNotContain(worldObject.Anchor, engine.World.ConnectedWaterCells);
+            });
+        foreach (var position in Enumerable.Range(0, map.Height)
+                     .SelectMany(y => Enumerable.Range(0, map.Width)
+                         .Select(x => map.GetTerrainSurfacePosition(new GridPosition(x, y))))
+                     .Where(position => position.Z < 0))
+        {
+            Assert.False(engine.World.TryGetCaveFlora(position, out _));
+        }
+    }
+
+    [Fact]
+    public void BreachingLegacyRiverBedFloodsConnectedLevelAndSurvivesLoad()
+    {
+        SimulationEngine? engine = null;
+        GridPosition breach = default;
+        for (ulong seedValue = 1; seedValue <= 128 && engine is null; seedValue++)
+        {
+            var seed = new WorldSeed(seedValue);
+            var candidate = SimulationEngine.Create(
+                seed,
+                SimulationDefinitions.Foundation,
+                SwampMapGenerator.Generate(seed, 64, 64, generatorVersion: 17),
+                initialGoblinCount: 1,
+                initialFoodStock: 8);
+            for (var y = 1; y < candidate.Map.Height - 1 && engine is null; y++)
+            {
+                for (var x = 1; x < candidate.Map.Width - 1; x++)
+                {
+                    var column = candidate.Map.GetColumnCell(new GridPosition(x, y));
+                    var target = new GridPosition(x, y, column.FloorLevel);
+                    if (column is { Terrain: TerrainKind.DeepWater, FloorLevel: -1 } &&
+                        candidate.World.CanExcavateRock(target))
+                    {
+                        engine = candidate;
+                        breach = target;
+                        break;
+                    }
+                }
+            }
+        }
+
+        var floodedEngine = engine ?? throw new InvalidOperationException(
+            "The deterministic generator samples contained no reachable legacy river bed.");
+        Assert.False(floodedEngine.World.TryGetFluid(breach, out _, out _));
+
+        Assert.True(floodedEngine.World.TryExcavateRock(
+            breach,
+            floodedEngine.CurrentTick,
+            out _,
+            out _,
+            out _));
+
+        Assert.True(floodedEngine.World.TryGetFluid(
+            breach,
+            out var fluid,
+            out var depthLevels));
+        Assert.Equal(CellFluidKind.Water, fluid);
+        Assert.Equal(1, depthLevels);
+        Assert.Contains(breach, floodedEngine.World.ConnectedWaterCells);
+        Assert.Contains(
+            floodedEngine.World.GetCardinalWorldNeighbors(breach),
+            neighbor => floodedEngine.World.TryGetFluid(neighbor, out var neighborFluid, out _) &&
+                neighborFluid == CellFluidKind.Water);
+        var escape = FloodEscapePolicy.FindNearestDryPosition(
+            floodedEngine.World,
+            breach);
+        Assert.NotNull(escape);
+        Assert.True(floodedEngine.World.IsTerrainTraversable(escape.Value));
+
+        var legacyRestored = WorldMapState.Restore(
+            floodedEngine.Map,
+            floodedEngine.World.Version,
+            floodedEngine.World.CreatePlantSnapshot(),
+            floodedEngine.World.CreateWorldObjectSnapshot(),
+            floodedEngine.World.ExcavatedCaveCells,
+            floodedEngine.World.ExcavatedTerrainRamps,
+            floodedEngine.World.ExcavatedVerticalPassages,
+            floodedEngine.World.HarvestedCaveFlora);
+        Assert.False(legacyRestored.ConnectedWaterActivated);
+        Assert.False(legacyRestored.TryGetFluid(breach, out _, out _));
+
+        var restored = WorldMapState.Restore(
+            floodedEngine.Map,
+            floodedEngine.World.Version,
+            floodedEngine.World.CreatePlantSnapshot(),
+            floodedEngine.World.CreateWorldObjectSnapshot(),
+            floodedEngine.World.ExcavatedCaveCells,
+            floodedEngine.World.ExcavatedTerrainRamps,
+            floodedEngine.World.ExcavatedVerticalPassages,
+            floodedEngine.World.HarvestedCaveFlora,
+            connectedWaterActivated: true);
+        Assert.True(restored.TryGetFluid(breach, out fluid, out depthLevels));
+        Assert.Equal(CellFluidKind.Water, fluid);
+        Assert.Equal(1, depthLevels);
+        Assert.Equal(
+            floodedEngine.World.ConnectedWaterCells
+                .OrderBy(position => position.Z)
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X),
+            restored.ConnectedWaterCells
+                .OrderBy(position => position.Z)
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X));
+    }
+
     [Fact]
     public void SharedNearestDestinationTreeServesSeveralStartsFromOneSearch()
     {
@@ -331,7 +494,7 @@ public sealed class WorldMapStateTests
         Assert.NotEmpty(stumps);
         Assert.All(stumps, stump =>
         {
-            Assert.Equal(TerrainKind.Mud, map.GetCell(stump.Anchor).Terrain);
+            Assert.Equal(TerrainKind.Mud, map.GetColumnCell(stump.Anchor).Terrain);
             Assert.True(stump.Anchor.X <= map.Width * 0.42 || stump.Anchor.Y >= map.Height * 0.64);
             Assert.False(engine.World.IsSurfaceTraversable(stump.Anchor));
             Assert.False(engine.World.IsTerrainTraversable(

@@ -24,6 +24,12 @@ public sealed class ConstructionRemovalTests
 
         var sites = engine.CreateSnapshot().ConstructionSites.ToArray();
         Assert.Equal(4, sites.Length);
+        Assert.All(sites, site => Assert.NotEqual(EntityId.None, site.OrderId));
+        Assert.Single(sites.Select(site => site.OrderId).Distinct());
+        Assert.Equal([0, 1, 2, 3], sites
+            .OrderBy(site => site.SequenceIndex)
+            .Select(site => site.SequenceIndex)
+            .ToArray());
         engine.QueueCommand(SimulationCommand.CancelConstruction(
             new SimulationTick(2),
             sequence: 2,
@@ -35,6 +41,31 @@ public sealed class ConstructionRemovalTests
         Assert.Contains(engine.DrainEvents(), simulationEvent =>
             simulationEvent.Kind == SimulationEventKind.ConstructionCancelled &&
             simulationEvent.Amount == 4);
+    }
+
+    [Fact]
+    public void ConstructionDiagnosticReportsPlacementInvalidatedAfterPlanning()
+    {
+        var engine = CreateEngine(initialWoodStock: 1);
+        var position = FindFloorRectangle(engine, width: 1, height: 1)[0];
+        engine.QueueCommand(SimulationCommand.BuildWoodenFloor(
+            new SimulationTick(1),
+            sequence: 1,
+            position,
+            position,
+            ResourceVariant.OakWood));
+        engine.AdvanceTicks(1);
+        var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
+
+        engine.World.BuildFloor(
+            position,
+            engine.CurrentTick.Next(),
+            stone: false,
+            ResourceVariant.OakWood);
+
+        Assert.Equal(
+            ConstructionReadinessState.InvalidPlacement,
+            engine.InspectConstructionReadiness(site.Id).State);
     }
 
     [Fact]

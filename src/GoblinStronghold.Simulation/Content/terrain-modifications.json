@@ -32,7 +32,7 @@
     {
       "id": "carve-ramp-down",
       "legacyDesignation": "CarveRampDown",
-      "placementMode": "DirectionalConnection",
+      "placementMode": "Point",
       "menuPath": ["terrain", "excavation"],
       "work": {
         "baseTicksMultiplier": 12,
@@ -51,7 +51,7 @@
     {
       "id": "carve-ramp-up",
       "legacyDesignation": "CarveRampUp",
-      "placementMode": "DirectionalConnection",
+      "placementMode": "Point",
       "menuPath": ["terrain", "excavation"],
       "work": {
         "baseTicksMultiplier": 12,

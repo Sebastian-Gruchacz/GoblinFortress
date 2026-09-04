@@ -52,6 +52,33 @@ public sealed class TerrainWorkYieldPolicyTests
         Assert.Equal(Math.Max(20, stack.Quantity * 3), yield.BuildingExperience);
     }
 
+    [Theory]
+    [InlineData(LooseMaterialKind.Soil, ResourceKind.Earth, ResourceVariant.Soil)]
+    [InlineData(LooseMaterialKind.Sand, ResourceKind.Sand, ResourceVariant.Sand)]
+    public void ExcavatingLooseStrataProducesItsPhysicalMaterial(
+        LooseMaterialKind material,
+        ResourceKind resource,
+        ResourceVariant variant)
+    {
+        var yield = TerrainWorkYieldPolicy.Create(
+            TerrainModificationCatalog.Get(WorkDesignationKind.MineRock),
+            new CaveCell(
+                RockKind.Sandstone,
+                CaveCellKind.SolidRock,
+                MineralDepositKind.None,
+                LooseMaterial: material),
+            new WorldSeed(123),
+            new EntityId(7),
+            new SimulationTick(11),
+            new EntityId(19));
+
+        var stack = Assert.Single(yield.Stacks);
+        Assert.Equal(resource, stack.Resource);
+        Assert.Equal(variant, stack.Variant);
+        Assert.InRange(stack.Quantity, 1, 3);
+        Assert.Equal(Math.Max(12, stack.Quantity * 2), yield.BuildingExperience);
+    }
+
     [Fact]
     public void SameInputsProduceTheSameYield()
     {

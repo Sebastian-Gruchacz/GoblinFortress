@@ -1,6 +1,7 @@
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Workshops;
+using GoblinStronghold.Simulation.Construction;
 
 namespace GoblinStronghold.Simulation;
 
@@ -136,6 +137,7 @@ public enum CraftingRecipeKind : byte
     BrewRootAndBerryMedicine = 26,
     BrewLichenAndMushroomMana = 27,
     WoodenHammer = 28,
+    WoodenShovel = 29,
 }
 
 public readonly record struct SimulationCommand(
@@ -797,7 +799,7 @@ public readonly record struct SimulationCommand(
             upper,
             ConstructionKind.WoodenLadder,
             ResourceKind.Wood,
-            Amount: 2,
+            Amount: 1,
             MaterialVariant: materialVariant);
 
     public static SimulationCommand BuildStoneDoorFrame(
@@ -821,7 +823,8 @@ public readonly record struct SimulationCommand(
     public static SimulationCommand BuildWallTorch(
         SimulationTick executeAt,
         ulong sequence,
-        GridPosition position) =>
+        GridPosition position,
+        CardinalOrientation? preferredSide = null) =>
         new(
             executeAt,
             sequence,
@@ -829,7 +832,9 @@ public readonly record struct SimulationCommand(
             EntityId.None,
             EntityId.None,
             position,
-            position,
+            preferredSide is { } side
+                ? WallTorchPlacementPolicy.CreateHandle(position, side)
+                : position,
             ConstructionKind.WallTorch,
             ResourceKind.Wood,
             Amount: 1);

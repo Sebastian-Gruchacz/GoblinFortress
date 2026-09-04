@@ -24,16 +24,41 @@ internal static class TerrainWorkYieldPolicy
         WorldSeed worldSeed,
         EntityId actorId,
         SimulationTick tick,
+        EntityId designationId) => Create(
+        definition,
+        new CaveCell(rock, CaveCellKind.SolidRock, deposit),
+        worldSeed,
+        actorId,
+        tick,
+        designationId);
+
+    public static TerrainWorkYield Create(
+        TerrainModificationDefinition definition,
+        CaveCell material,
+        WorldSeed worldSeed,
+        EntityId actorId,
+        SimulationTick tick,
         EntityId designationId)
     {
         ArgumentNullException.ThrowIfNull(definition);
+
+        if (material.IsLooseMaterial)
+        {
+            return CreateLooseMaterialYield(
+                definition.Work.Yield,
+                material.LooseMaterial,
+                worldSeed,
+                actorId,
+                tick,
+                designationId);
+        }
 
         return definition.LegacyDesignation switch
         {
             WorkDesignationKind.MineRock => CreateMiningYield(
                 definition.Work.Yield,
-                rock,
-                deposit,
+                material.Rock,
+                material.Deposit,
                 worldSeed,
                 actorId,
                 tick,
@@ -41,7 +66,7 @@ internal static class TerrainWorkYieldPolicy
             WorkDesignationKind.CarveRampDown or WorkDesignationKind.CarveRampUp =>
                 CreateRampYield(
                     definition.Work.Yield,
-                    rock,
+                    material.Rock,
                     worldSeed,
                     actorId,
                     tick,
@@ -50,6 +75,35 @@ internal static class TerrainWorkYieldPolicy
                 $"Terrain modification '{definition.Id}' has no yield policy.",
                 nameof(definition)),
         };
+    }
+
+    private static TerrainWorkYield CreateLooseMaterialYield(
+        TerrainYieldDefinition yieldDefinition,
+        LooseMaterialKind material,
+        WorldSeed worldSeed,
+        EntityId actorId,
+        SimulationTick tick,
+        EntityId designationId)
+    {
+        var quantity = DeterministicRandom.NextInt(
+            worldSeed,
+            RandomDomain.Stone,
+            actorId,
+            tick,
+            sampleKey: designationId.Value,
+            minimumInclusive: yieldDefinition.MinimumQuantity,
+            maximumExclusive: yieldDefinition.MaximumQuantityExclusive);
+        var (resource, variant) = material switch
+        {
+            LooseMaterialKind.Soil => (ResourceKind.Earth, ResourceVariant.Soil),
+            LooseMaterialKind.Sand => (ResourceKind.Sand, ResourceVariant.Sand),
+            _ => throw new ArgumentOutOfRangeException(nameof(material)),
+        };
+        return new TerrainWorkYield(
+            [new TerrainYieldStack(resource, variant, quantity)],
+            Math.Max(
+                yieldDefinition.MinimumBuildingExperience,
+                quantity * yieldDefinition.BuildingExperiencePerUnit));
     }
 
     private static TerrainWorkYield CreateMiningYield(

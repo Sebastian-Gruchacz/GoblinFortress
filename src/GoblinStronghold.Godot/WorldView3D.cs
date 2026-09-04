@@ -687,6 +687,7 @@ public partial class WorldView3D : Node3D
     {
         TerrainKind.SolidGround => new Color(0.23f + (cell.Fertility / 900f), 0.38f + (cell.Fertility / 650f), 0.18f, 1f),
         TerrainKind.Mud => new Color(0.25f, 0.205f, 0.12f, 1f).Lerp(new Color(0.17f, 0.25f, 0.16f), cell.Fertility / 255f),
+        TerrainKind.Sand => new Color(0.67f, 0.55f, 0.34f, 1f),
         TerrainKind.ShallowWater => new Color(0.18f, 0.28f, 0.21f, 1f),
         TerrainKind.DeepWater => new Color(0.055f, 0.12f, 0.16f, 1f),
         _ => Colors.Magenta,

@@ -245,6 +245,7 @@ public enum PersonalEquipment : ushort
     ReinforcedPickaxe = 1 << 10,
     WoodenBucket = 1 << 11,
     WoodenHammer = 1 << 12,
+    WoodenShovel = 1 << 13,
 }
 
 public sealed class PersonalFoodContentsSnapshot : IReadOnlyList<FoodKind>,

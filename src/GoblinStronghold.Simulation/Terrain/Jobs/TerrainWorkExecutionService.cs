@@ -89,7 +89,7 @@ internal static class TerrainWorkExecutionService
         SimulationTick tick,
         EntityId designationId)
     {
-        if (!world.TryExcavateRock(target, tick, out var rock, out var deposit, out var change))
+        if (!world.TryExcavateNaturalSolid(target, tick, out var material, out var change))
         {
             return null;
         }
@@ -99,8 +99,7 @@ internal static class TerrainWorkExecutionService
             world.IsTerrainTraversable(target) ? target : actorPosition,
             TerrainWorkYieldPolicy.Create(
                 definition,
-                rock,
-                deposit,
+                material,
                 worldSeed,
                 actorId,
                 tick,
@@ -119,18 +118,19 @@ internal static class TerrainWorkExecutionService
         EntityId designationId)
     {
         var carved = rampDestination is { } destination
-            ? world.TryCarveRamp(
+            ? world.TryCarveNaturalRamp(
                 carveDown ? target : destination,
                 carveDown ? destination : target,
                 carveDown,
                 tick,
-                out var rock,
+                out var material,
                 out var change)
-            : world.TryCarveVerticalRamp(
-                target,
+            : world.TryCarveNaturalRamp(
+                carveDown ? target : target with { Z = target.Z + 1 },
+                carveDown ? target with { Z = target.Z - 1 } : target,
                 carveDown,
                 tick,
-                out rock,
+                out material,
                 out change);
         if (!carved)
         {
@@ -142,8 +142,7 @@ internal static class TerrainWorkExecutionService
             target,
             TerrainWorkYieldPolicy.Create(
                 definition,
-                rock,
-                MineralDepositKind.None,
+                material with { Deposit = MineralDepositKind.None },
                 worldSeed,
                 actorId,
                 tick,

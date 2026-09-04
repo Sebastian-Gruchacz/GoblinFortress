@@ -48,8 +48,12 @@ internal sealed class ActiveLevelLightMap : IDisposable
         var animationFrame = hasFlicker
             ? (long)Math.Floor(animationElapsed * 12d)
             : 0L;
+        var visibilitySignature = ActiveLevelVisibilitySignaturePolicy.Create(
+            level,
+            new PresentationCellBounds(minimumX, minimumY, maximumX, maximumY),
+            position => snapshot.GetVisibility(position, engine.Map.Width));
         var cacheKey = new RenderCacheKey(
-            snapshot.Tick.Value,
+            visibilitySignature,
             engine.World.TopologyVersion,
             level,
             minimumX,
@@ -78,25 +82,22 @@ internal sealed class ActiveLevelLightMap : IDisposable
                 emitters.Select(emitter => emitter.Position.Y).Append(minimumY).Min(),
                 emitters.Select(emitter => emitter.Position.X + 1).Append(maximumX).Max(),
                 emitters.Select(emitter => emitter.Position.Y + 1).Append(maximumY).Max());
+        var raster = LightContributionRasterizer.Rasterize(
+            level,
+            minimumX,
+            minimumY,
+            maximumX,
+            maximumY,
+            emitters,
+            blockers,
+            animationElapsed);
         for (var localY = 0; localY < cellHeight; localY++)
         {
             for (var localX = 0; localX < cellWidth; localX++)
             {
                 var position = new GridPosition(minimumX + localX, minimumY + localY, level);
-                var remainingDarkness = 1f;
-                foreach (var emitter in emitters)
-                {
-                    var definition = LightEmitterCatalog.Get(emitter.Handle.DefinitionId);
-                    var phase = (animationElapsed / 6d) * Math.Tau * 7d +
-                        (emitter.Handle.InstanceId % 997UL) * 0.173d;
-                    var flicker = 1f - definition.FlickerAmount +
-                        definition.FlickerAmount * (0.5f + 0.5f * MathF.Sin((float)phase));
-                    var contribution = LightOcclusionPolicy.CalculateSoftContribution(
-                        emitter with { Intensity = emitter.Intensity * flicker },
-                        position,
-                        blockers);
-                    remainingDarkness *= 1f - Math.Clamp(contribution, 0f, 1f);
-                }
+                var remainingDarkness = raster.RemainingDarkness[
+                    (localY * cellWidth) + localX];
 
                 var visibility = snapshot.GetVisibility(position, engine.Map.Width);
                 var darkVisionMultiplier =
@@ -132,7 +133,7 @@ internal sealed class ActiveLevelLightMap : IDisposable
 
         _cells = checked(_cells + (long)cellWidth * cellHeight);
         _emitterEvaluations = checked(
-            _emitterEvaluations + ((long)cellWidth * cellHeight * emitters.Count));
+            _emitterEvaluations + raster.EmitterEvaluations);
         _renderCacheKey = cacheKey;
         _builds.Record(startedAt);
         return _texture;
@@ -184,7 +185,7 @@ internal sealed class ActiveLevelLightMap : IDisposable
     }
 
     private readonly record struct RenderCacheKey(
-        long Tick,
+        ulong VisibilitySignature,
         ulong TopologyVersion,
         int Level,
         int MinimumX,

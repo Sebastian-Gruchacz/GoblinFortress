@@ -118,10 +118,6 @@ internal sealed class LowerLevelPresentationState : IDisposable
         double currentSeconds,
         double baseIntervalSeconds)
     {
-        SynchronizeInvalidations(engine, snapshot);
-        _nextTextureRebuildSeconds = Math.Min(
-            _nextTextureRebuildSeconds,
-            currentSeconds);
         var key = new SynchronizationKey(
             engine.World.TopologyVersion,
             activeLevel,
@@ -133,7 +129,12 @@ internal sealed class LowerLevelPresentationState : IDisposable
             {
                 return false;
             }
+            if (_exposure.VisibleChunks.Count == 0)
+            {
+                return false;
+            }
 
+            SynchronizeInvalidations(engine, snapshot);
             var actorsChanged = _actors.Synchronize(
                 snapshot,
                 _exposure,
@@ -158,6 +159,15 @@ internal sealed class LowerLevelPresentationState : IDisposable
         _exposure = plan.Exposure;
         _workload = plan.Workload;
         _cache.SynchronizeExposure(_exposure);
+        if (_exposure.VisibleChunks.Count == 0)
+        {
+            _actors.Reset();
+            _verticalLights.Reset();
+            _synchronizationKey = key;
+            return true;
+        }
+
+        SynchronizeInvalidations(engine, snapshot);
         RebuildTextures(
             engine,
             snapshot,
@@ -210,19 +220,6 @@ internal sealed class LowerLevelPresentationState : IDisposable
 
         texture = null!;
         return false;
-    }
-
-    public IReadOnlyList<LowerLevelActorMarker> GetOpeningActors(
-        GridPosition upperPosition)
-    {
-        if (!_openingDestinations.TryGetValue(upperPosition, out var lowerPosition))
-        {
-            return [];
-        }
-
-        return _actors.Markers
-            .Where(actor => actor.Position == lowerPosition)
-            .ToArray();
     }
 
     public void Dispose() => _textures.Dispose();

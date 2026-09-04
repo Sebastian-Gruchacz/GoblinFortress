@@ -65,7 +65,7 @@ public sealed class TerrainWorkExecutionServiceTests
     }
 
     [Fact]
-    public void RampExecutionReturnsPassageChangeAndStoneAtTheOrigin()
+    public void RampExecutionReturnsPassageChangeAndExcavatedMaterialAtTheOrigin()
     {
         var engine = CreateEngine();
         var target =
@@ -89,7 +89,12 @@ public sealed class TerrainWorkExecutionServiceTests
         Assert.Equal(WorldChangeKind.RampExcavated, result.WorldChange.Kind);
         Assert.Equal(target, result.OutputPosition);
         var stack = Assert.Single(result.Yield.Stacks);
-        Assert.Equal(ResourceKind.Stone, stack.Resource);
+        Assert.Contains(stack.Resource, new[]
+        {
+            ResourceKind.Stone,
+            ResourceKind.Earth,
+            ResourceKind.Sand,
+        });
         Assert.Contains(engine.World.ExcavatedVerticalPassages, passage =>
             passage.Upper == target && passage.Lower == target with { Z = -2 });
     }

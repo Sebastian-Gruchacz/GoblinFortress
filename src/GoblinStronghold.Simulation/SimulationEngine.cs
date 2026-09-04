@@ -431,7 +431,8 @@ public sealed partial class SimulationEngine
                 new GridPosition(model.LowerX, model.LowerY, model.LowerZ),
                 model.Kind)),
             save.HarvestedCaveFlora.Select(model =>
-                new GridPosition(model.X, model.Y, model.Z)));
+                new GridPosition(model.X, model.Y, model.Z)),
+            save.ConnectedWaterActivated);
         engine.Navigation = new NavigationPathService(engine.World);
         engine.LoadBloodStains(save.BloodStains);
         var surfaceGrime = save.SurfaceGrime.Select(model =>
@@ -954,6 +955,15 @@ public sealed partial class SimulationEngine
             throw new ArgumentException($"Construction site {siteId} does not exist.", nameof(siteId));
         }
 
+        if (!CanPlaceConstruction(
+                site.Kind,
+                site.Anchor,
+                site.End,
+                site.GetFootprint()))
+        {
+            return CreateDiagnostic(ConstructionReadinessState.InvalidPlacement);
+        }
+
         var constructionReservations = CreateConstructionReservations();
         var inTransit = constructionReservations.GetValueOrDefault(site.Id);
         if (HasGroundStackInConstructionFootprint(site))
@@ -1322,6 +1332,7 @@ public sealed partial class SimulationEngine
                     Y = position.Y,
                     Z = position.Z,
                 }).ToList(),
+            ConnectedWaterActivated = World.ConnectedWaterActivated,
             HumanVillage = _humanVillage.CreateSaveModel(),
             Visibility = Visibility.CreateSnapshot().ToList(),
             Actors = _actors.Values.Select(ToSaveModel).ToList(),
@@ -1640,6 +1651,7 @@ public sealed partial class SimulationEngine
         {
             Append(canonical, position);
         }
+        Append(canonical, World.ConnectedWaterActivated ? 1 : 0);
 
         var humanVillage = _humanVillage.CreateSnapshot();
         Append(canonical, humanVillage.PolityId.Value);
@@ -2084,7 +2096,7 @@ public sealed partial class SimulationEngine
                 actorPolityId != CorePolityIds.PlayerTribe ||
                 !HasOnlyKnownFlags(actorModel.KnownSkills, GoblinSkill.Building) ||
                 !HasOnlyKnownFlags(actorModel.KnownTraits, GoblinTrait.Fastidious) ||
-                !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.WoodenHammer) ||
+                !HasOnlyKnownFlags(actorModel.Equipment, PersonalEquipment.WoodenShovel) ||
                 actorModel.ForagingExperience < 0 ||
                 actorModel.HaulingExperience < 0 ||
                 actorModel.BuildingExperience < 0 ||
@@ -2540,7 +2552,7 @@ public sealed partial class SimulationEngine
                 (model.RequiredToolFunction == ToolFunction.None
                     ? model.MinimumToolLevel != 0
                     : model.MinimumToolLevel < 1) ||
-                !HasOnlyKnownFlags(model.RequiredEquipment, PersonalEquipment.WoodenHammer))
+                !HasOnlyKnownFlags(model.RequiredEquipment, PersonalEquipment.WoodenShovel))
             {
                 throw new InvalidDataException("The save contains an invalid construction site.");
             }
@@ -4863,7 +4875,25 @@ public sealed partial class SimulationEngine
                         placement.End,
                         [placement.Anchor]) &&
                     !_constructionSites.Values.Any(site =>
-                        site.GetFootprint().Contains(placement.Anchor)))
+                        ConstructionSitePlacementPolicy.Conflicts(
+                            placement.Kind,
+                            placement.Anchor,
+                            placement.End,
+                            [placement.Anchor],
+                            site.Kind,
+                            site.Anchor,
+                            site.End,
+                            site.GetFootprint())) &&
+                    !placements.Any(selected =>
+                        ConstructionSitePlacementPolicy.Conflicts(
+                            placement.Kind,
+                            placement.Anchor,
+                            placement.End,
+                            [placement.Anchor],
+                            selected.Kind,
+                            selected.Anchor,
+                            selected.End,
+                            [selected.Anchor])))
                 {
                     placements.Add(placement);
                 }
@@ -4880,7 +4910,15 @@ public sealed partial class SimulationEngine
                      command.EndPosition,
                      footprint) ||
                  _constructionSites.Values.Any(site =>
-                     site.GetFootprint().Intersect(footprint).Any()))
+                     ConstructionSitePlacementPolicy.Conflicts(
+                         command.Construction,
+                         command.Position,
+                         command.EndPosition,
+                         footprint,
+                         site.Kind,
+                         site.Anchor,
+                         site.End,
+                         site.GetFootprint())))
         {
             return false;
         }
@@ -5260,10 +5298,15 @@ public sealed partial class SimulationEngine
                 experience = 8;
                 break;
             case ConstructionKind.WallTorch:
+                WallTorchPlacementPolicy.TryResolvePreferredSide(
+                    site.Anchor,
+                    site.End,
+                    out var wallTorchSide);
                 _undeliveredWorldChanges.Add(World.BuildWallTorch(
                     site.Anchor,
                     CurrentTick,
-                    site.DeliveredVariant));
+                    site.DeliveredVariant,
+                    wallTorchSide));
                 completedTarget = EntityId.None;
                 experience = 5;
                 break;
@@ -6248,7 +6291,10 @@ public sealed partial class SimulationEngine
                 }
 
                 if (command.Construction == ConstructionKind.WallTorch &&
-                    (command.Position != command.EndPosition ||
+                    (!WallTorchPlacementPolicy.TryResolvePreferredSide(
+                         command.Position,
+                         command.EndPosition,
+                         out _) ||
                      command.Amount != 1))
                 {
                     throw new ArgumentException("Wall-torch construction is invalid.", nameof(command));
@@ -7491,6 +7537,7 @@ public sealed partial class SimulationEngine
                 <= ResourceVariant.EquipmentWoodenSpear or
             ResourceVariant.EquipmentReinforcedPickaxe or
             ResourceVariant.EquipmentWoodenHammer or
+            ResourceVariant.EquipmentWoodenShovel or
             ResourceVariant.EquipmentWoodenBarrel or
             ResourceVariant.EquipmentWoodenBox or
             ResourceVariant.EquipmentWoodenChest or
@@ -7501,6 +7548,8 @@ public sealed partial class SimulationEngine
             ResourceVariant.SpiderVenom or ResourceVariant.SpiderSilk or
             ResourceVariant.SpiderChitin,
         ResourceKind.Water => variant == ResourceVariant.None,
+        ResourceKind.Earth => variant == ResourceVariant.Soil,
+        ResourceKind.Sand => variant == ResourceVariant.Sand,
         _ => variant == ResourceVariant.None,
     };
 

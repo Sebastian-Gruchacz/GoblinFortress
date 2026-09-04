@@ -8,7 +8,7 @@ public static class SwampMapGenerator
     public static readonly ContentId DefaultProfileId =
         ContentId.Parse("core:demo-swamp-frontier");
 
-    public const int CurrentVersion = 16;
+    public const int CurrentVersion = 18;
     public const int MinimumSaveCompatibleVersion = 14;
     public const int MinimumInitialCaveLevelCount = 2;
     public static int DefaultDimension => DefaultProfile.DefaultDimension;
@@ -95,6 +95,10 @@ public static class SwampMapGenerator
                 request.RiverMode,
                 profile);
         }
+        if (generatorVersion >= 17 && request.RiverMode != RiverGenerationMode.Absent)
+        {
+            ApplyRiverbankSand(cells, seed, width, height);
+        }
 
         var goblinSpawn = generatorVersion >= 4
             ? CreateRegionalSettlementPosition(
@@ -166,7 +170,11 @@ public static class SwampMapGenerator
         SetCell(cells, width, humanVillage with { Y = humanVillage.Y + 1 }, CreateShallowWater());
         if (generatorVersion >= 4)
         {
-            SetCell(cells, width, new GridPosition(width - 1, height - 1), CreateDeepWater());
+            SetCell(
+                cells,
+                width,
+                new GridPosition(width - 1, height - 1),
+                CreateDeepWater(generatorVersion >= 18 ? (sbyte)-2 : (sbyte)-1));
         }
         var surfaceRoutes = SurfaceRouteGenerator.Apply(
             cells,
@@ -323,7 +331,9 @@ public static class SwampMapGenerator
 
         if (riverDistance <= riverHalfWidth)
         {
-            return CreateShallowWater();
+            return generatorVersion >= 18
+                ? CreateDeepWater()
+                : CreateShallowWater();
         }
 
         var leftSwamp = Math.Clamp(
@@ -582,9 +592,13 @@ public static class SwampMapGenerator
                         sampleKey: 24_000);
                     cells[index] = cell with
                     {
-                        FloorLevel = depthNoise > relief.DeepFloorThreshold
-                            ? (sbyte)-2
-                            : (sbyte)-1,
+                        FloorLevel = generatorVersion >= 18
+                            ? depthNoise > relief.DeepFloorThreshold
+                                ? (sbyte)-3
+                                : (sbyte)-2
+                            : depthNoise > relief.DeepFloorThreshold
+                                ? (sbyte)-2
+                                : (sbyte)-1,
                     };
                     continue;
                 }
@@ -789,8 +803,13 @@ public static class SwampMapGenerator
         int generatorVersion,
         IReadOnlyList<CaveMacroFeatureLayout> caveMacroFeatures)
     {
+        var deepestTerrainFloor = -surfaceCells.Min(cell => cell.FloorLevel);
         var depthLevels = generatorVersion >= 13
-            ? Math.Max(MinimumInitialCaveLevelCount, -surfaceCells.Min(cell => cell.FloorLevel))
+            ? Math.Max(
+                MinimumInitialCaveLevelCount,
+                generatorVersion >= 18
+                    ? deepestTerrainFloor - 1
+                    : deepestTerrainFloor)
             : 2;
         var cellCount = checked(width * height);
         var caveCells = new CaveCell[checked(cellCount * depthLevels)];
@@ -801,16 +820,28 @@ public static class SwampMapGenerator
                 for (var x = 0; x < width; x++)
                 {
                     var position = new GridPosition(x, y, -levelIndex - 1);
-                    caveCells[(levelIndex * cellCount) + (y * width) + x] =
-                        ApplyCaveMacroFeatures(
-                            GenerateSolidCaveCell(
+                    var generated = GenerateSolidCaveCell(
                                 seed,
                                 width,
                                 height,
                                 x,
                                 y,
                                 levelIndex,
-                                generatorVersion),
+                                generatorVersion);
+                    if (generatorVersion >= 17 && generated.Kind == CaveCellKind.SolidRock)
+                    {
+                        generated = generated with
+                        {
+                            LooseMaterial = SurfaceStratumPolicy.Select(
+                                seed,
+                                position,
+                                surfaceCells[(y * width) + x],
+                                IsReliefSlope(surfaceCells, width, height, x, y)),
+                        };
+                    }
+                    caveCells[(levelIndex * cellCount) + (y * width) + x] =
+                        ApplyCaveMacroFeatures(
+                            generated,
                             position,
                             caveMacroFeatures);
                 }
@@ -870,7 +901,8 @@ public static class SwampMapGenerator
             width,
             height,
             generatorVersion);
-        CarveCaveChamber(caveCells, width, height, firstRoom, radiusX: 2, radiusY: 2);
+        CarveCaveChamber(
+            caveCells, surfaceCells, width, height, firstRoom, 2, 2, generatorVersion);
         CarveCaveCorridor(
             caveCells,
             surfaceCells,
@@ -879,7 +911,8 @@ public static class SwampMapGenerator
             firstRoom,
             secondRoom,
             generatorVersion);
-        CarveCaveChamber(caveCells, width, height, secondRoom, radiusX: 3, radiusY: 2);
+        CarveCaveChamber(
+            caveCells, surfaceCells, width, height, secondRoom, 3, 2, generatorVersion);
         CarveCaveCorridor(
             caveCells,
             surfaceCells,
@@ -888,26 +921,38 @@ public static class SwampMapGenerator
             secondRoom,
             descent,
             generatorVersion);
-        CarveCaveChamber(caveCells, width, height, descent, radiusX: 2, radiusY: 3);
+        CarveCaveChamber(
+            caveCells, surfaceCells, width, height, descent, 2, 3, generatorVersion);
 
         var deepStart = descent with { Z = -2 };
-        var deepMiddle = ClampCavePosition(
-            deepStart with
-            {
-                X = deepStart.X - (spanX * horizontalSign),
-                Y = deepStart.Y + (spanY * verticalSign),
-            },
+        var deepMiddle = FindAvailableCavePosition(
+            surfaceCells,
+            ClampCavePosition(
+                deepStart with
+                {
+                    X = deepStart.X - (spanX * horizontalSign),
+                    Y = deepStart.Y + (spanY * verticalSign),
+                },
+                width,
+                height),
             width,
-            height);
-        var deepEnd = ClampCavePosition(
-            deepMiddle with
-            {
-                X = deepMiddle.X - (spanX * horizontalSign),
-                Y = deepMiddle.Y + (3 * verticalSign),
-            },
+            height,
+            generatorVersion);
+        var deepEnd = FindAvailableCavePosition(
+            surfaceCells,
+            ClampCavePosition(
+                deepMiddle with
+                {
+                    X = deepMiddle.X - (spanX * horizontalSign),
+                    Y = deepMiddle.Y + (3 * verticalSign),
+                },
+                width,
+                height),
             width,
-            height);
-        CarveCaveChamber(caveCells, width, height, deepStart, radiusX: 2, radiusY: 2);
+            height,
+            generatorVersion);
+        CarveCaveChamber(
+            caveCells, surfaceCells, width, height, deepStart, 2, 2, generatorVersion);
         CarveCaveCorridor(
             caveCells,
             surfaceCells,
@@ -916,7 +961,8 @@ public static class SwampMapGenerator
             deepStart,
             deepMiddle,
             generatorVersion);
-        CarveCaveChamber(caveCells, width, height, deepMiddle, radiusX: 3, radiusY: 2);
+        CarveCaveChamber(
+            caveCells, surfaceCells, width, height, deepMiddle, 3, 2, generatorVersion);
         CarveCaveCorridor(
             caveCells,
             surfaceCells,
@@ -925,7 +971,8 @@ public static class SwampMapGenerator
             deepMiddle,
             deepEnd,
             generatorVersion);
-        CarveCaveChamber(caveCells, width, height, deepEnd, radiusX: 3, radiusY: 3);
+        CarveCaveChamber(
+            caveCells, surfaceCells, width, height, deepEnd, 3, 3, generatorVersion);
 
         SetCaveKind(caveCells, width, height, firstRoom, CaveCellKind.Ramp);
         SetCaveKind(caveCells, width, height, descent, CaveCellKind.Ramp);
@@ -1387,11 +1434,13 @@ public static class SwampMapGenerator
 
     private static void CarveCaveChamber(
         CaveCell[] cells,
+        MapCell[] surfaceCells,
         int width,
         int height,
         GridPosition center,
         int radiusX,
-        int radiusY)
+        int radiusY,
+        int generatorVersion)
     {
         for (var y = center.Y - radiusY; y <= center.Y + radiusY; y++)
         {
@@ -1399,13 +1448,19 @@ public static class SwampMapGenerator
             {
                 var normalizedX = (x - center.X) / (double)radiusX;
                 var normalizedY = (y - center.Y) / (double)radiusY;
-                if ((normalizedX * normalizedX) + (normalizedY * normalizedY) <= 1.18d)
+                var position = new GridPosition(x, y, center.Z);
+                if ((normalizedX * normalizedX) + (normalizedY * normalizedY) <= 1.18d &&
+                    (generatorVersion < 18 || !IsCaveColumnBlocked(
+                        surfaceCells,
+                        position,
+                        width,
+                        generatorVersion)))
                 {
                     SetCaveKind(
                         cells,
                         width,
                         height,
-                        new GridPosition(x, y, center.Z),
+                        position,
                         CaveCellKind.Floor);
                 }
             }
@@ -1421,7 +1476,8 @@ public static class SwampMapGenerator
         GridPosition end,
         int generatorVersion)
     {
-        if (generatorVersion >= 10 && start.Z == -1 &&
+        if (generatorVersion >= 10 &&
+            (start.Z == -1 || generatorVersion >= 18) &&
             DirectCaveCorridorCrossesBlockedColumn(
                 surfaceCells,
                 width,
@@ -1540,13 +1596,27 @@ public static class SwampMapGenerator
         int width,
         int generatorVersion)
     {
-        if (generatorVersion < 10 || position.Z != -1)
+        var height = surfaceCells.Length / width;
+        if (position.X < 0 || position.X >= width ||
+            position.Y < 0 || position.Y >= height)
+        {
+            return true;
+        }
+        if (generatorVersion < 10 || position.Z >= 0)
         {
             return false;
         }
 
         var surface = surfaceCells[(position.Y * width) + position.X];
-        return surface.Terrain == TerrainKind.DeepWater && surface.FloorLevel <= -2;
+        if (generatorVersion < 18)
+        {
+            return position.Z == -1 &&
+                surface.Terrain == TerrainKind.DeepWater &&
+                surface.FloorLevel <= -2;
+        }
+        return surface.Terrain == TerrainKind.DeepWater &&
+            position.Z > surface.FloorLevel &&
+            position.Z < surface.SurfaceLevel;
     }
 
     private static void SetCaveKind(
@@ -1568,7 +1638,99 @@ public static class SwampMapGenerator
             Kind = kind,
             Deposit = MineralDepositKind.None,
             Fluid = CellFluidKind.None,
+            LooseMaterial = LooseMaterialKind.None,
         };
+    }
+
+    private static void ApplyRiverbankSand(
+        MapCell[] cells,
+        WorldSeed seed,
+        int width,
+        int height)
+    {
+        var source = cells.ToArray();
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var index = (y * width) + x;
+                var cell = source[index];
+                if (cell.Terrain is not (TerrainKind.SolidGround or TerrainKind.Mud))
+                {
+                    continue;
+                }
+
+                var waterDistance = DistanceToSurfaceWater(source, width, height, x, y, 2);
+                if (waterDistance == 0 || waterDistance > 2)
+                {
+                    continue;
+                }
+                if (waterDistance == 2 &&
+                    SurfaceStratumPolicy.Select(
+                        seed,
+                        new GridPosition(x, y, cell.SurfaceLevel - 1),
+                        cell with { Terrain = TerrainKind.Sand },
+                        IsReliefSlope(source, width, height, x, y)) != LooseMaterialKind.Sand)
+                {
+                    continue;
+                }
+
+                cells[index] = cell with
+                {
+                    Terrain = TerrainKind.Sand,
+                    Moisture = Math.Max((byte)28, cell.Moisture),
+                    Fertility = Math.Min(cell.Fertility, (byte)38),
+                    TraversalCost = 2,
+                };
+            }
+        }
+    }
+
+    private static int DistanceToSurfaceWater(
+        MapCell[] cells,
+        int width,
+        int height,
+        int x,
+        int y,
+        int maximumDistance)
+    {
+        for (var distance = 1; distance <= maximumDistance; distance++)
+        {
+            for (var offsetX = -distance; offsetX <= distance; offsetX++)
+            {
+                var offsetY = distance - Math.Abs(offsetX);
+                if (IsSurfaceWater(cells, width, height, x + offsetX, y + offsetY) ||
+                    offsetY != 0 && IsSurfaceWater(
+                        cells, width, height, x + offsetX, y - offsetY))
+                {
+                    return distance;
+                }
+            }
+        }
+        return maximumDistance + 1;
+    }
+
+    private static bool IsSurfaceWater(
+        MapCell[] cells,
+        int width,
+        int height,
+        int x,
+        int y) =>
+        x >= 0 && x < width && y >= 0 && y < height &&
+        cells[(y * width) + x].Terrain is TerrainKind.ShallowWater or TerrainKind.DeepWater;
+
+    internal static bool IsReliefSlope(
+        MapCell[] cells,
+        int width,
+        int height,
+        int x,
+        int y)
+    {
+        var level = cells[(y * width) + x].SurfaceLevel;
+        return x > 0 && cells[(y * width) + x - 1].SurfaceLevel != level ||
+            x + 1 < width && cells[(y * width) + x + 1].SurfaceLevel != level ||
+            y > 0 && cells[((y - 1) * width) + x].SurfaceLevel != level ||
+            y + 1 < height && cells[((y + 1) * width) + x].SurfaceLevel != level;
     }
 
     private static int Distance(GridPosition left, GridPosition right) =>
@@ -1590,8 +1752,13 @@ public static class SwampMapGenerator
     private static MapCell CreateShallowWater() =>
         new(TerrainKind.ShallowWater, Moisture: 100, Fertility: 45, TraversalCost: 4);
 
-    private static MapCell CreateDeepWater() =>
-        new(TerrainKind.DeepWater, Moisture: 100, Fertility: 52, TraversalCost: 0, FloorLevel: -1);
+    private static MapCell CreateDeepWater(sbyte floorLevel = -1) =>
+        new(
+            TerrainKind.DeepWater,
+            Moisture: 100,
+            Fertility: 52,
+            TraversalCost: 0,
+            FloorLevel: floorLevel);
 
     private static void ValidateDimensions(
         int width,

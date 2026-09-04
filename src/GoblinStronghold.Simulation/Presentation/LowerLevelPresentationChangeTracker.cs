@@ -24,12 +24,18 @@ public readonly record struct PresentationPlantObservation(
     int Biomass,
     int Capacity);
 
+public readonly record struct PresentationFluidObservation(
+    GridPosition Position,
+    CellFluidKind Fluid,
+    int DepthLevels);
+
 public sealed record LowerLevelPresentationObservation(
     ulong TopologyVersion,
     IReadOnlyList<PresentationTopologyObservation> Topology,
     IReadOnlyList<PresentationStructureObservation> Structures,
     IReadOnlyList<PresentationPlantObservation> Plants,
-    IReadOnlyList<PresentationContaminationObservation> Contamination);
+    IReadOnlyList<PresentationContaminationObservation> Contamination,
+    IReadOnlyList<PresentationFluidObservation> Fluids);
 
 public readonly record struct PresentationChunkInvalidation(
     GridPosition Position,
@@ -46,6 +52,7 @@ public sealed class LowerLevelPresentationChangeTracker
     private Dictionary<WorldObjectId, PresentationStructureObservation> _structures = [];
     private Dictionary<GridPosition, PresentationPlantObservation> _plants = [];
     private Dictionary<GridPosition, PresentationContaminationObservation> _contamination = [];
+    private Dictionary<GridPosition, PresentationFluidObservation> _fluids = [];
     private bool _initialized;
 
     public void Reset()
@@ -55,6 +62,7 @@ public sealed class LowerLevelPresentationChangeTracker
         _structures.Clear();
         _plants.Clear();
         _contamination.Clear();
+        _fluids.Clear();
         _initialized = false;
     }
 
@@ -66,9 +74,16 @@ public sealed class LowerLevelPresentationChangeTracker
         var structures = observation.Structures.ToDictionary(item => item.Id);
         var plants = observation.Plants.ToDictionary(item => item.Position);
         var contamination = observation.Contamination.ToDictionary(item => item.Position);
+        var fluids = observation.Fluids.ToDictionary(item => item.Position);
         if (!_initialized)
         {
-            Capture(observation.TopologyVersion, topology, structures, plants, contamination);
+            Capture(
+                observation.TopologyVersion,
+                topology,
+                structures,
+                plants,
+                contamination,
+                fluids);
             return new PresentationInvalidationBatch(false, []);
         }
 
@@ -77,11 +92,19 @@ public sealed class LowerLevelPresentationChangeTracker
         AddStructureInvalidations(invalidations, _structures, structures);
         AddPlantInvalidations(invalidations, _plants, plants);
         AddContaminationInvalidations(invalidations, _contamination, contamination);
+        AddFluidInvalidations(invalidations, _fluids, fluids);
         var topologyChanged = observation.TopologyVersion != _topologyVersion;
         var hasKnownTopologyChange = invalidations.Values.Any(reason =>
             (reason & (PresentationChunkDirtyReason.Topology |
-                PresentationChunkDirtyReason.Structures)) != 0);
-        Capture(observation.TopologyVersion, topology, structures, plants, contamination);
+                PresentationChunkDirtyReason.Structures |
+                PresentationChunkDirtyReason.Fluids)) != 0);
+        Capture(
+            observation.TopologyVersion,
+            topology,
+            structures,
+            plants,
+            contamination,
+            fluids);
         return new PresentationInvalidationBatch(
             topologyChanged && !hasKnownTopologyChange,
             invalidations
@@ -97,13 +120,15 @@ public sealed class LowerLevelPresentationChangeTracker
         Dictionary<ulong, PresentationTopologyObservation> topology,
         Dictionary<WorldObjectId, PresentationStructureObservation> structures,
         Dictionary<GridPosition, PresentationPlantObservation> plants,
-        Dictionary<GridPosition, PresentationContaminationObservation> contamination)
+        Dictionary<GridPosition, PresentationContaminationObservation> contamination,
+        Dictionary<GridPosition, PresentationFluidObservation> fluids)
     {
         _topologyVersion = topologyVersion;
         _topology = topology;
         _structures = structures;
         _plants = plants;
         _contamination = contamination;
+        _fluids = fluids;
         _initialized = true;
     }
 
@@ -193,6 +218,24 @@ public sealed class LowerLevelPresentationChangeTracker
         }
     }
 
+    private static void AddFluidInvalidations(
+        IDictionary<GridPosition, PresentationChunkDirtyReason> invalidations,
+        IReadOnlyDictionary<GridPosition, PresentationFluidObservation> previous,
+        IReadOnlyDictionary<GridPosition, PresentationFluidObservation> current)
+    {
+        foreach (var position in previous.Keys.Union(current.Keys))
+        {
+            previous.TryGetValue(position, out var oldFluid);
+            current.TryGetValue(position, out var newFluid);
+            if (oldFluid == newFluid)
+            {
+                continue;
+            }
+
+            AddReason(invalidations, position, PresentationChunkDirtyReason.Fluids);
+        }
+    }
+
     private static IEnumerable<GridPosition> PreviousAndCurrentPositions(
         IReadOnlyDictionary<ulong, PresentationTopologyObservation> previous,
         IReadOnlyDictionary<ulong, PresentationTopologyObservation> current,
@@ -225,7 +268,16 @@ public static class LowerLevelPresentationObservationFactory
             snapshot.WorldObjects.Select(worldObject => CreateStructure(world, worldObject))
                 .ToArray(),
             CreatePlants(world, snapshot),
-            CreateContamination(snapshot));
+            CreateContamination(snapshot),
+            world.ConnectedWaterCells
+                .OrderBy(position => position.Z)
+                .ThenBy(position => position.Y)
+                .ThenBy(position => position.X)
+                .Select(position => new PresentationFluidObservation(
+                    position,
+                    CellFluidKind.Water,
+                    DepthLevels: 1))
+                .ToArray());
     }
 
     private static IReadOnlyList<PresentationTopologyObservation> CreateTopology(

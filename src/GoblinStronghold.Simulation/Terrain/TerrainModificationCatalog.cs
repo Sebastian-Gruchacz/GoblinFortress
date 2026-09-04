@@ -198,7 +198,7 @@ public static class TerrainModificationCatalog
         {
             var expectedPlacement = definition.LegacyDesignation == WorkDesignationKind.MineRock
                 ? WorldToolPlacementMode.Area
-                : WorldToolPlacementMode.DirectionalConnection;
+                : WorldToolPlacementMode.Point;
             if (definition.PlacementMode != expectedPlacement)
             {
                 throw new InvalidOperationException(

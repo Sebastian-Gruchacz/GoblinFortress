@@ -243,6 +243,9 @@ public sealed class VisibilityTests
         Assert.Empty(hidden);
         Assert.Equal([(passage.Lower, 1)], visible);
         Assert.Empty(WorldVisibilityPolicy.SelectAdjacentLayerDiscoveries(
+            [passage with { Kind = VerticalPassageKind.ExcavatedStairs }],
+            _ => CellVisibility.Visible));
+        Assert.Empty(WorldVisibilityPolicy.SelectAdjacentLayerDiscoveries(
             [],
             _ => CellVisibility.Visible));
     }

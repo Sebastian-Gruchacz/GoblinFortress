@@ -36,16 +36,16 @@ public sealed class TerrainModificationCatalogTests
     }
 
     [Fact]
-    public void MiningAndCarvedRampsKeepDifferentPlacementGestures()
+    public void MiningAndCarvedStairsKeepDifferentPlacementGestures()
     {
         Assert.Equal(
             WorldToolPlacementMode.Area,
             TerrainModificationCatalog.Get(WorkDesignationKind.MineRock).PlacementMode);
         Assert.Equal(
-            WorldToolPlacementMode.DirectionalConnection,
+            WorldToolPlacementMode.Point,
             TerrainModificationCatalog.Get(WorkDesignationKind.CarveRampDown).PlacementMode);
         Assert.Equal(
-            WorldToolPlacementMode.DirectionalConnection,
+            WorldToolPlacementMode.Point,
             TerrainModificationCatalog.Get(WorkDesignationKind.CarveRampUp).PlacementMode);
     }
 
@@ -89,8 +89,8 @@ public sealed class TerrainModificationCatalogTests
 
     [Theory]
     [InlineData(WorkDesignationKind.MineRock, 3, 2, -1)]
-    [InlineData(WorkDesignationKind.CarveRampDown, 3, 2, -2)]
-    [InlineData(WorkDesignationKind.CarveRampUp, 3, 2, 0)]
+    [InlineData(WorkDesignationKind.CarveRampDown, 2, 2, -2)]
+    [InlineData(WorkDesignationKind.CarveRampUp, 2, 2, 0)]
     public void CommandFactoryPreservesLegacyCommandContract(
         WorkDesignationKind kind,
         int expectedEndX,
@@ -99,7 +99,9 @@ public sealed class TerrainModificationCatalogTests
     {
         var executeAt = new SimulationTick(17);
         var start = new GridPosition(2, 2, -1);
-        var end = new GridPosition(3, 2, -1);
+        var end = kind == WorkDesignationKind.MineRock
+            ? new GridPosition(3, 2, -1)
+            : start;
 
         var command = TerrainModificationCommandFactory.CreateDesignation(
             TerrainModificationCatalog.Get(kind),

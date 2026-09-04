@@ -487,9 +487,9 @@
       "footprint": "Single",
       "requiredResource": "Wood",
       "quantityMode": "Fixed",
-      "materialQuantity": 2,
-      "retainsMaterialIdentity": true,
-      "workTicks": 40
+        "materialQuantity": 1,
+        "retainsMaterialIdentity": true,
+        "workTicks": 20
     },
     {
       "id": "cooking-fire",

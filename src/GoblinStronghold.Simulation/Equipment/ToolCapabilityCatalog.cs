@@ -7,6 +7,7 @@ public enum ToolFunction : byte
     Construction = 1 << 0,
     Mining = 1 << 1,
     Felling = 1 << 2,
+    Earthmoving = 1 << 3,
 }
 
 public readonly record struct ToolCapabilityDefinition(
@@ -20,8 +21,11 @@ public static class ToolCapabilityCatalog
     [
         new(PersonalEquipment.WoodenHammer, 1, ToolFunction.Construction),
         new(PersonalEquipment.WoodenAxe, 1, ToolFunction.Felling),
-        new(PersonalEquipment.PrimitivePickaxe, 2, ToolFunction.Mining),
-        new(PersonalEquipment.ReinforcedPickaxe, 3, ToolFunction.Mining),
+        new(PersonalEquipment.WoodenShovel, 1, ToolFunction.Earthmoving),
+        new(PersonalEquipment.PrimitivePickaxe, 2,
+            ToolFunction.Mining | ToolFunction.Earthmoving),
+        new(PersonalEquipment.ReinforcedPickaxe, 3,
+            ToolFunction.Mining | ToolFunction.Earthmoving),
     ];
 
     public static IReadOnlyList<ToolCapabilityDefinition> All => Definitions;

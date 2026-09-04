@@ -464,9 +464,13 @@ caches.
   changes into position-scoped chunk invalidation. Unknown topology changes
   retain a safe full-cache fallback, while unchanged snapshots do no work and
   dirty chunks still rebuild from the lowest affected level upward.
-- [ ] Route future mutable-fluid events through the same invalidation contract.
-  Current underground water and lava belong to immutable generated map
-  geometry, so there is no runtime fluid mutation source to register yet.
+- [x] Route derived breach-water changes through the same invalidation contract.
+  Excavation now rebuilds a deterministic same-level connection from generated
+  water volumes into open subterranean cells. The presentation observer marks
+  every newly flooded cell with the fluid dirty reason; the derived set is
+  rebuilt from generated geometry and saved excavations rather than serialized.
+  Finite volumes, vertical flow and constructed hydraulic barriers remain a
+  later mutable-fluid stage.
 - [x] Add a low-cadence, position-quantized overlay for lower-level moving
   actors. Render compact silhouettes without interpolation and only inside the
   exact currently exposed opening above them. Lower geometry, visibility

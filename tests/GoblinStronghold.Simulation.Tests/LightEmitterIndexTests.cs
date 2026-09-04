@@ -9,6 +9,71 @@ namespace GoblinStronghold.Simulation.Tests;
 public sealed class LightEmitterIndexTests
 {
     [Fact]
+    public void ContributionRasterMatchesBruteForceWhileSkippingDistantEmitters()
+    {
+        var emitters = new[]
+        {
+            new LightEmitterSnapshot(
+                new LightEmitterHandle(LightEmitterCatalog.LavaId, 17),
+                new GridPosition(3, 4, -6),
+                RadiusCells: 2.8f,
+                Intensity: 0.78f),
+            new LightEmitterSnapshot(
+                new LightEmitterHandle(LightEmitterCatalog.CaveGlowcapId, 29),
+                new GridPosition(13, 10, -6),
+                RadiusCells: 2.2f,
+                Intensity: 0.36f),
+        };
+        var blockers = new HashSet<GridPosition>
+        {
+            new(4, 4, -6),
+            new(12, 10, -6),
+        };
+        const int width = 20;
+        const int height = 16;
+        const double animationElapsed = 1.75d;
+
+        var raster = LightContributionRasterizer.Rasterize(
+            level: -6,
+            minimumX: 0,
+            minimumY: 0,
+            maximumX: width,
+            maximumY: height,
+            emitters,
+            blockers,
+            animationElapsed);
+
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var expected = 1f;
+                foreach (var emitter in emitters)
+                {
+                    var definition = LightEmitterCatalog.Get(emitter.Handle.DefinitionId);
+                    var phase = (animationElapsed / 6d) * Math.Tau * 7d +
+                        (emitter.Handle.InstanceId % 997UL) * 0.173d;
+                    var flicker = 1f - definition.FlickerAmount +
+                        definition.FlickerAmount *
+                        (0.5f + 0.5f * MathF.Sin((float)phase));
+                    var contribution = LightOcclusionPolicy.CalculateSoftContribution(
+                        emitter with { Intensity = emitter.Intensity * flicker },
+                        new GridPosition(x, y, -6),
+                        blockers);
+                    expected *= 1f - Math.Clamp(contribution, 0f, 1f);
+                }
+
+                Assert.Equal(
+                    (double)expected,
+                    raster.RemainingDarkness[(y * width) + x],
+                    precision: 5);
+            }
+        }
+
+        Assert.True(raster.EmitterEvaluations < (long)width * height * emitters.Length / 2);
+    }
+
+    [Fact]
     public void GoblinDarkVisionBrightensOnlyVisibleCellsOnTheActiveLevel()
     {
         var active = new GridPosition(4, 5, -3);

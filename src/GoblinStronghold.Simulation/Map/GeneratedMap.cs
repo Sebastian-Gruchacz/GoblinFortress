@@ -152,9 +152,11 @@ public sealed class GeneratedMap
 
         if (IsHillMassPosition(position))
         {
+            var hill = GetHillMassCell(position);
             geometry = new InitialCellGeometry(
                 CellVolumeKind.Solid,
-                GetHillMassCell(position).Rock);
+                hill.Rock,
+                LooseMaterial: hill.LooseMaterial);
             return true;
         }
 
@@ -165,7 +167,8 @@ public sealed class GeneratedMap
             {
                 CaveCellKind.SolidRock => new InitialCellGeometry(
                     CellVolumeKind.Solid,
-                    cave.Rock),
+                    cave.Rock,
+                    LooseMaterial: cave.LooseMaterial),
                 CaveCellKind.Ramp => new InitialCellGeometry(
                     CellVolumeKind.Open,
                     Support: CellSupportKind.NaturalRamp),
@@ -240,7 +243,7 @@ public sealed class GeneratedMap
         }
 
         var cell = GetColumnCell(position);
-        return cell.Terrain == TerrainKind.SolidGround &&
+        return cell.Terrain is TerrainKind.SolidGround or TerrainKind.Sand &&
             position.Z >= 0 && position.Z < cell.SurfaceLevel;
     }
 
@@ -252,7 +255,7 @@ public sealed class GeneratedMap
         }
 
         var cell = GetColumnCell(position);
-        return cell.Terrain is TerrainKind.SolidGround or TerrainKind.Mud &&
+        return cell.Terrain is TerrainKind.SolidGround or TerrainKind.Mud or TerrainKind.Sand &&
             position.Z >= 0 && position.Z < cell.SurfaceLevel;
     }
 
@@ -283,7 +286,19 @@ public sealed class GeneratedMap
             ((ulong)(uint)position.Y * 0xC2B2AE3D27D4EB4FUL) ^
             ((ulong)(uint)position.Z * 0x165667B19E3779F9UL);
         var rock = (sample & 0x07UL) < 3UL ? RockKind.Granite : RockKind.Sandstone;
-        return new CaveCell(rock, CaveCellKind.SolidRock, MineralDepositKind.None);
+        var looseMaterial = GeneratorVersion >= 17
+            ? SurfaceStratumPolicy.Select(
+                Seed,
+                position,
+                GetColumnCell(position),
+                SwampMapGenerator.IsReliefSlope(
+                    _cells, Width, Height, position.X, position.Y))
+            : LooseMaterialKind.None;
+        return new CaveCell(
+            rock,
+            CaveCellKind.SolidRock,
+            MineralDepositKind.None,
+            LooseMaterial: looseMaterial);
     }
 
     public bool IsRockPosition(GridPosition position) =>
@@ -362,18 +377,33 @@ public sealed class GeneratedMap
         return addedPassages;
     }
 
-    private CaveCell GenerateCaveCell(GridPosition position) =>
-        SwampMapGenerator.ApplyCaveMacroFeatures(
-            SwampMapGenerator.GenerateSolidCaveCell(
+    private CaveCell GenerateCaveCell(GridPosition position)
+    {
+        var generated = SwampMapGenerator.GenerateSolidCaveCell(
                 Seed,
                 Width,
                 Height,
                 position.X,
                 position.Y,
                 -position.Z - 1,
-                GeneratorVersion),
+                GeneratorVersion);
+        if (GeneratorVersion >= 17 && generated.Kind == CaveCellKind.SolidRock)
+        {
+            generated = generated with
+            {
+                LooseMaterial = SurfaceStratumPolicy.Select(
+                    Seed,
+                    position,
+                    GetColumnCell(position),
+                    SwampMapGenerator.IsReliefSlope(
+                        _cells, Width, Height, position.X, position.Y)),
+            };
+        }
+        return SwampMapGenerator.ApplyCaveMacroFeatures(
+            generated,
             position,
             _caveMacroFeatures);
+    }
 
     private void AddVerticalPassage(VerticalPassage passage)
     {
@@ -690,15 +720,18 @@ public sealed class GeneratedMap
         }
         if (GeneratorVersion >= 6)
         {
-            Span<byte> caveBuffer = stackalloc byte[4];
+            Span<byte> caveBuffer = stackalloc byte[5];
             foreach (var caveCell in _caveCells)
             {
                 caveBuffer[0] = (byte)caveCell.Rock;
                 caveBuffer[1] = (byte)caveCell.Kind;
                 caveBuffer[2] = (byte)caveCell.Deposit;
                 caveBuffer[3] = (byte)caveCell.Fluid;
-                hash.AppendData(GeneratorVersion >= 14
+                caveBuffer[4] = (byte)caveCell.LooseMaterial;
+                hash.AppendData(GeneratorVersion >= 17
                     ? caveBuffer
+                    : GeneratorVersion >= 14
+                        ? caveBuffer[..4]
                     : GeneratorVersion >= 8
                         ? caveBuffer[..3]
                         : caveBuffer[..2]);
@@ -714,7 +747,7 @@ public sealed class GeneratedMap
         }
         if (GeneratorVersion >= 9)
         {
-            Span<byte> hillRockBuffer = stackalloc byte[1];
+            Span<byte> hillRockBuffer = stackalloc byte[2];
             for (var y = 0; y < Height; y++)
             {
                 for (var x = 0; x < Width; x++)
@@ -723,14 +756,18 @@ public sealed class GeneratedMap
                     for (var z = 0; z < cell.SurfaceLevel; z++)
                     {
                         var position = new GridPosition(x, y, z);
-                        if (!IsHillRockPosition(position))
+                        if (!IsHillMassPosition(position))
                         {
                             continue;
                         }
 
                         AppendPosition(hash, position);
-                        hillRockBuffer[0] = (byte)GetHillRockCell(position).Rock;
-                        hash.AppendData(hillRockBuffer);
+                        var hill = GetHillMassCell(position);
+                        hillRockBuffer[0] = (byte)hill.Rock;
+                        hillRockBuffer[1] = (byte)hill.LooseMaterial;
+                        hash.AppendData(GeneratorVersion >= 17
+                            ? hillRockBuffer
+                            : hillRockBuffer[..1]);
                     }
                 }
             }

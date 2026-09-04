@@ -71,6 +71,7 @@ public static class PresentationSlicePlanner
             isActiveLevelDiscovered,
             isVerticalViewBlocked);
         var passages = verticalPassages
+            .Where(VerticalPassageOpennessPolicy.IsOpen)
             .Where(passage =>
                 passage.Upper.Z <= request.ActiveLevel &&
                 request.VisibleBounds.Contains(passage.Upper) &&

@@ -3,6 +3,7 @@ using GoblinStronghold.Simulation.Contamination;
 using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Map.Generation;
+using GoblinStronghold.Simulation.Map.Hydrology;
 using GoblinStronghold.Simulation.Resources;
 using GoblinStronghold.Simulation.Shelter;
 using GoblinStronghold.Simulation.Terrain;
@@ -1676,10 +1677,6 @@ public sealed partial class SimulationEngine
                 BeginJobLeg(actor, route, GetQuarryBoulderWorkTicks());
                 return true;
             case ActorJobKind.MineRock:
-                if (!MiningCapabilityPolicy.HasPickaxe(actor.Equipment))
-                {
-                    return false;
-                }
                 var miningDesignation = _workDesignations.Values
                     .Where(item => item.Kind == WorkDesignationKind.MineRock &&
                         !item.IsSuspended &&
@@ -1696,10 +1693,6 @@ public sealed partial class SimulationEngine
                     CreateTerrainWorkAssignment(miningDesignation, target, route));
                 return true;
             case ActorJobKind.CarveRamp:
-                if (!MiningCapabilityPolicy.HasPickaxe(actor.Equipment))
-                {
-                    return false;
-                }
                 var rampDesignation = _workDesignations.Values
                     .Where(item => item.Kind is WorkDesignationKind.CarveRampDown or
                             WorkDesignationKind.CarveRampUp &&
@@ -2894,8 +2887,7 @@ public sealed partial class SimulationEngine
         ActorState actor,
         ISet<EntityId> reservedDesignations)
     {
-        if (!MiningCapabilityPolicy.HasPickaxe(actor.Equipment) ||
-            !actor.KnownSkills.HasFlag(GoblinSkill.Building))
+        if (!actor.KnownSkills.HasFlag(GoblinSkill.Building))
         {
             return false;
         }
@@ -2930,8 +2922,7 @@ public sealed partial class SimulationEngine
 
     private void UpdateMineRockJob(ActorState actor)
     {
-        if (!MiningCapabilityPolicy.HasPickaxe(actor.Equipment) ||
-            !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
+        if (!_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
             designation.Kind != WorkDesignationKind.MineRock ||
             designation.IsSuspended ||
             !CanActorMineRock(actor, designation.Target) ||
@@ -2964,8 +2955,7 @@ public sealed partial class SimulationEngine
         ActorState actor,
         ISet<EntityId> reservedDesignations)
     {
-        if (!MiningCapabilityPolicy.HasPickaxe(actor.Equipment) ||
-            !actor.KnownSkills.HasFlag(GoblinSkill.Building))
+        if (!actor.KnownSkills.HasFlag(GoblinSkill.Building))
         {
             return false;
         }
@@ -2998,8 +2988,7 @@ public sealed partial class SimulationEngine
 
     private void UpdateCarveRampJob(ActorState actor)
     {
-        if (!MiningCapabilityPolicy.HasPickaxe(actor.Equipment) ||
-            !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
+        if (!_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
             designation.Kind is not (WorkDesignationKind.CarveRampDown or
                 WorkDesignationKind.CarveRampUp) ||
             designation.IsSuspended ||
@@ -3033,6 +3022,7 @@ public sealed partial class SimulationEngine
         ActorState actor,
         WorkDesignationSnapshot designation)
     {
+        var floodedCellCount = World.ConnectedWaterCells.Count;
         var result = TerrainWorkExecutionService.TryExecute(
             TerrainModificationCatalog.Get(designation.Kind),
             World,
@@ -3046,6 +3036,10 @@ public sealed partial class SimulationEngine
         if (result is not null)
         {
             _undeliveredWorldChanges.Add(result.WorldChange);
+            if (World.ConnectedWaterCells.Count != floodedCellCount)
+            {
+                ResolveFloodedOccupants();
+            }
             StoreTerrainYield(result.OutputPosition, result.Yield);
             GainBuildingExperience(actor, result.Yield.BuildingExperience);
         }
@@ -3053,6 +3047,64 @@ public sealed partial class SimulationEngine
         _workDesignations.Remove(designation.Id);
         Publish(SimulationEventKind.WorkDesignationRemoved, actor.Id, designation.Id, 0);
         actor.ClearJob();
+    }
+
+    private void ResolveFloodedOccupants()
+    {
+        foreach (var occupant in _actors.Values.Where(candidate =>
+                     World.TryGetFluid(candidate.Position, out var fluid, out _) &&
+                     fluid == CellFluidKind.Water).ToArray())
+        {
+            if (FloodEscapePolicy.FindNearestDryPosition(World, occupant.Position) is not
+                { } landing)
+            {
+                continue;
+            }
+
+            occupant.Position = landing;
+            occupant.ClearJob();
+            if (occupant.CarriedCorpseId != EntityId.None &&
+                _corpses.TryGetValue(occupant.CarriedCorpseId, out var carriedCorpse))
+            {
+                carriedCorpse.Position = landing;
+            }
+        }
+
+        foreach (var animal in _animals.Values.Where(candidate =>
+                     World.TryGetFluid(candidate.Position, out var fluid, out _) &&
+                     fluid == CellFluidKind.Water).ToArray())
+        {
+            if (FloodEscapePolicy.FindNearestDryPosition(World, animal.Position) is { } landing)
+            {
+                animal.Position = landing;
+            }
+        }
+
+        foreach (var stack in _itemStacks.Values.Where(candidate =>
+                     candidate.Location.Kind == ItemLocationKind.Ground &&
+                     World.TryGetFluid(
+                         candidate.Location.Position,
+                         out var fluid,
+                         out _) &&
+                     fluid == CellFluidKind.Water).ToArray())
+        {
+            if (FloodEscapePolicy.FindNearestDryPosition(
+                    World,
+                    stack.Location.Position) is { } landing)
+            {
+                MoveItemStack(stack, ItemLocation.OnGround(landing));
+            }
+        }
+
+        foreach (var corpse in _corpses.Values.Where(candidate =>
+                     World.TryGetFluid(candidate.Position, out var fluid, out _) &&
+                     fluid == CellFluidKind.Water).ToArray())
+        {
+            if (FloodEscapePolicy.FindNearestDryPosition(World, corpse.Position) is { } landing)
+            {
+                corpse.Position = landing;
+            }
+        }
     }
 
     private Dictionary<EntityId, int> CreateConstructionReservations()
@@ -5529,7 +5581,6 @@ public sealed partial class SimulationEngine
             actor.CarriedStackId != EntityId.None ||
             actor.DestinationZoneId != EntityId.None ||
             actor.ReservedQuantity != 0 ||
-            !MiningCapabilityPolicy.HasPickaxe(actor.Equipment) ||
             !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
             designation.Kind != WorkDesignationKind.MineRock ||
             !CanActorMineRock(actor, designation.Target) ||
@@ -5545,7 +5596,6 @@ public sealed partial class SimulationEngine
             actor.CarriedStackId != EntityId.None ||
             actor.DestinationZoneId != EntityId.None ||
             actor.ReservedQuantity != 0 ||
-            !MiningCapabilityPolicy.HasPickaxe(actor.Equipment) ||
             !_workDesignations.TryGetValue(actor.SourceStackId, out var designation) ||
             designation.Kind is not (WorkDesignationKind.CarveRampDown or
                 WorkDesignationKind.CarveRampUp) ||

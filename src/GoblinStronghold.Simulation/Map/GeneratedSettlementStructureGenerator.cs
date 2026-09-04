@@ -127,7 +127,11 @@ internal static class GeneratedSettlementStructureGenerator
                     continue;
                 }
 
-                AddBoulder(objects, reservedCells, new WorldObjectId(nextId++), position);
+                AddBoulder(
+                    objects,
+                    reservedCells,
+                    new WorldObjectId(nextId++),
+                    map.GetTerrainSurfacePosition(position));
             }
         }
 
@@ -149,7 +153,11 @@ internal static class GeneratedSettlementStructureGenerator
             .FirstOrDefault();
         if (fallback != default)
         {
-            AddBoulder(objects, reservedCells, new WorldObjectId(nextId++), fallback);
+            AddBoulder(
+                objects,
+                reservedCells,
+                new WorldObjectId(nextId++),
+                map.GetTerrainSurfacePosition(fallback));
         }
     }
 
@@ -212,7 +220,12 @@ internal static class GeneratedSettlementStructureGenerator
                     continue;
                 }
 
-                AddTree(objects, reservedCells, map, new WorldObjectId(nextId++), position);
+                AddTree(
+                    objects,
+                    reservedCells,
+                    map,
+                    new WorldObjectId(nextId++),
+                    map.GetTerrainSurfacePosition(position));
             }
         }
 
@@ -232,7 +245,11 @@ internal static class GeneratedSettlementStructureGenerator
                     continue;
                 }
 
-                AddStump(objects, reservedCells, new WorldObjectId(nextId++), position);
+                AddStump(
+                    objects,
+                    reservedCells,
+                    new WorldObjectId(nextId++),
+                    map.GetTerrainSurfacePosition(position));
             }
         }
     }

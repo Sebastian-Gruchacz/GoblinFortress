@@ -26,7 +26,8 @@ public static class CaveFloraGenerator
         ArgumentNullException.ThrowIfNull(map);
         flora = default;
         if (position.Z is >= 0 or < DeepestFloraLevel ||
-            !map.IsCavePosition(position))
+            !map.IsCavePosition(position) ||
+            map.IsTerrainSurfacePosition(position))
         {
             return false;
         }

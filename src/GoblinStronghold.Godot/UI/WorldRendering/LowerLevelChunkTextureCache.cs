@@ -33,8 +33,9 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
     public const int MaximumRebuildsPerFrame = 2;
 
     private readonly Dictionary<PresentationChunkKey, CachedChunk> _chunks = [];
-    private readonly Dictionary<TerrainSprite, Image> _surfaceTiles = [];
-    private readonly Dictionary<(RockKind Rock, bool IsOpen), Image> _caveTiles = [];
+    private readonly Dictionary<(TerrainSprite Sprite, TerrainKind Terrain), Image> _surfaceTiles = [];
+    private readonly Dictionary<(RockKind Rock, bool IsOpen, LooseMaterialKind LooseMaterial), Image>
+        _caveTiles = [];
     private readonly TimedPresentationOperationCounter _rebuildBatches = new();
     private Image? _terrainAtlas;
     private Image? _caveAtlas;
@@ -500,6 +501,32 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
                 }
                 parts.Add(new LowerLevelStaticStructurePart(worldObject, part));
             }
+
+            if (worldObject.Kind == WorldObjectKind.WoodenLadder &&
+                level == anchor.Z + 1 &&
+                !worldObject.Parts.Any(part => part.RelativePosition.Z == 1))
+            {
+                var upperOffset = worldObject.Orientation switch
+                {
+                    CardinalOrientation.North => new GridPosition(0, -1, 1),
+                    CardinalOrientation.East => new GridPosition(1, 0, 1),
+                    CardinalOrientation.South => new GridPosition(0, 1, 1),
+                    CardinalOrientation.West => new GridPosition(-1, 0, 1),
+                    _ => default,
+                };
+                var upper = Add(anchor, upperOffset);
+                if (!result.TryGetValue(upper, out var parts))
+                {
+                    parts = [];
+                    result.Add(upper, parts);
+                }
+                parts.Add(new LowerLevelStaticStructurePart(
+                    worldObject,
+                    new WorldObjectPartSnapshot(
+                        upperOffset,
+                        SpatialOccupancyChannel.Fixture,
+                        WorldObjectPartKind.Ladder)));
+            }
         }
         return result;
     }
@@ -519,17 +546,29 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         GridPosition position,
         IReadOnlySet<GridPosition> livingTrees)
     {
-        if (position.Z >= 0)
+        if (engine.Map.IsTerrainSurfacePosition(position))
         {
-            var cell = engine.Map.GetColumnCell(position);
-            return cell.SurfaceLevel == position.Z
-                ? GetSurfaceTile(
-                    cell.Terrain,
+            var surface = engine.Map.GetColumnCell(position);
+            return engine.World.TryGetFluid(position, out var surfaceFluid, out _)
+                ? surfaceFluid == CellFluidKind.Lava
+                    ? GetLavaTile()
+                    : GetSurfaceTile(
+                        TerrainKind.DeepWater,
+                        position,
+                        livingTrees,
+                        engine.Map.Width,
+                        engine.Map.Height)
+                : GetSurfaceTile(
+                    surface.Terrain,
                     position,
                     livingTrees,
                     engine.Map.Width,
-                    engine.Map.Height)
-                : null;
+                    engine.Map.Height);
+        }
+
+        if (position.Z >= 0)
+        {
+            return null;
         }
 
         if (!engine.Map.IsCavePosition(position))
@@ -549,8 +588,10 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         }
 
         var cave = engine.Map.GetCaveCell(position);
-        return GetCaveTile(cave.Rock, cave.IsOpen ||
-            engine.World.ExcavatedCaveCells.Contains(position));
+        return GetCaveTile(
+            cave.Rock,
+            cave.IsOpen || engine.World.ExcavatedCaveCells.Contains(position),
+            cave.LooseMaterial);
     }
 
     private Image GetSurfaceTile(
@@ -568,6 +609,7 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
                     : TerrainSprite.DeciduousForestFloor,
             TerrainKind.SolidGround => TerrainSprite.Meadow,
             TerrainKind.Mud => TerrainSprite.BogGround,
+            TerrainKind.Sand => TerrainSprite.BogGround,
             TerrainKind.ShallowWater when IsSwampWater(
                 position.X, position.Y, mapWidth, mapHeight) =>
                 TerrainSprite.MuddyWaterA,
@@ -575,7 +617,8 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
             TerrainKind.DeepWater => TerrainSprite.DeepWaterA,
             _ => throw new ArgumentOutOfRangeException(nameof(terrain), terrain, null),
         };
-        if (_surfaceTiles.TryGetValue(sprite, out var tile))
+        var key = (sprite, terrain);
+        if (_surfaceTiles.TryGetValue(key, out var tile))
         {
             return tile;
         }
@@ -583,7 +626,11 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         tile = ExtractScaledTile(
             _terrainAtlas!,
             TerrainSprites.GetRegionFromImage(_terrainAtlas!, sprite));
-        _surfaceTiles.Add(sprite, tile);
+        if (terrain == TerrainKind.Sand)
+        {
+            ApplyCaveShade(tile, new Color(0.72f, 0.58f, 0.34f, 0.62f));
+        }
+        _surfaceTiles.Add(key, tile);
         return tile;
     }
 
@@ -613,9 +660,12 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
     private static bool IsConiferPatch(int x, int y) =>
         unchecked((((x / 7) * 73_856_093) ^ ((y / 7) * 19_349_663)) & 3) == 0;
 
-    private Image GetCaveTile(RockKind rock, bool isOpen)
+    private Image GetCaveTile(
+        RockKind rock,
+        bool isOpen,
+        LooseMaterialKind looseMaterial = LooseMaterialKind.None)
     {
-        var key = (rock, isOpen);
+        var key = (rock, isOpen, looseMaterial);
         if (_caveTiles.TryGetValue(key, out var tile))
         {
             return tile;
@@ -628,6 +678,14 @@ internal sealed class LowerLevelChunkTextureCache : IDisposable
         if (!isOpen)
         {
             Darken(tile, 0.48f);
+            if (looseMaterial != LooseMaterialKind.None)
+            {
+                ApplyCaveShade(
+                    tile,
+                    looseMaterial == LooseMaterialKind.Sand
+                        ? new Color(0.70f, 0.54f, 0.30f, 0.72f)
+                        : new Color(0.34f, 0.22f, 0.12f, 0.78f));
+            }
         }
         _caveTiles.Add(key, tile);
         return tile;

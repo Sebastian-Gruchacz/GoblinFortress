@@ -36,6 +36,7 @@ public enum ConstructionReadinessState : byte
     WaitingForBuilder = 7,
     Building = 8,
     AwaitingSiteClearance = 9,
+    InvalidPlacement = 10,
 }
 
 public readonly record struct ConstructionReadinessDiagnostic(
@@ -60,6 +61,35 @@ public sealed class ConstructionSiteSnapshot
         int totalWorkTicks,
         ConstructionCapabilityRequirements capabilities,
         StoragePriority priority)
+        : this(
+            id,
+            kind,
+            anchor,
+            end,
+            footprint,
+            materials,
+            remainingWorkTicks,
+            totalWorkTicks,
+            capabilities,
+            priority,
+            EntityId.None,
+            0)
+    {
+    }
+
+    internal ConstructionSiteSnapshot(
+        EntityId id,
+        ConstructionKind kind,
+        GridPosition anchor,
+        GridPosition end,
+        IReadOnlyList<GridPosition> footprint,
+        IReadOnlyList<ConstructionMaterialSnapshot> materials,
+        int remainingWorkTicks,
+        int totalWorkTicks,
+        ConstructionCapabilityRequirements capabilities,
+        StoragePriority priority,
+        EntityId orderId,
+        int sequenceIndex)
     {
         Id = id;
         Kind = kind;
@@ -71,6 +101,8 @@ public sealed class ConstructionSiteSnapshot
         TotalWorkTicks = totalWorkTicks;
         Capabilities = capabilities;
         Priority = priority;
+        OrderId = orderId;
+        SequenceIndex = sequenceIndex;
     }
 
     public EntityId Id { get; }
@@ -92,6 +124,10 @@ public sealed class ConstructionSiteSnapshot
     public ConstructionCapabilityRequirements Capabilities { get; }
 
     public StoragePriority Priority { get; }
+
+    public EntityId OrderId { get; }
+
+    public int SequenceIndex { get; }
 
     public bool HasAllMaterials => Materials.All(material => material.MissingQuantity == 0);
 }
@@ -183,7 +219,9 @@ internal sealed class ConstructionSiteState(
         RemainingWorkTicks,
         TotalWorkTicks,
         Capabilities,
-        Priority);
+        Priority,
+        OrderId,
+        SequenceIndex);
 }
 
 internal static class ConstructionBlueprintCatalog

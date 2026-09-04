@@ -26,6 +26,7 @@ public static class WorldVisibilityPolicy
         ArgumentNullException.ThrowIfNull(visibilityAt);
 
         return passages
+            .Where(VerticalPassageOpennessPolicy.IsOpen)
             .SelectMany(passage => GetDiscoveries(passage, visibilityAt))
             .Distinct()
             .OrderByDescending(item => item.Position.Z)

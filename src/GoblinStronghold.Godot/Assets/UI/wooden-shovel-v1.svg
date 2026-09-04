@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="handle" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e0a45a"/>
+      <stop offset="1" stop-color="#70401f"/>
+    </linearGradient>
+    <linearGradient id="blade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#aeb5b7"/>
+      <stop offset="1" stop-color="#596063"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#24150d" stroke-width="10" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M116 91 L138 91 L138 204 Q138 220 127 220 Q116 220 116 204 Z" fill="url(#handle)"/>
+    <path d="M92 31 Q92 20 103 20 L151 20 Q162 20 162 31 L162 54 Q162 65 151 65 L103 65 Q92 65 92 54 Z M103 34 L151 34 L151 51 L103 51 Z" fill="url(#handle)" fill-rule="evenodd"/>
+    <path d="M88 184 Q127 166 166 184 L157 230 Q154 243 141 246 L113 246 Q100 243 97 230 Z" fill="url(#blade)"/>
+    <path d="M103 205 Q127 195 151 205" fill="none" stroke="#d4d9da" stroke-width="6"/>
+  </g>
+</svg>

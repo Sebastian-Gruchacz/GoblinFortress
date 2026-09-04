@@ -382,7 +382,7 @@ public sealed class SwampMapGeneratorTests
     }
 
     [Fact]
-    public void ShallowsAreWadeableButDeepWaterDropsToTheLowerLevel()
+    public void ShallowsAreWadeableButDeepWaterOccupiesLowerLevels()
     {
         var map = SwampMapGenerator.Generate(new WorldSeed(456), width: 64, height: 64);
         var shallows = Enumerable.Range(0, map.Height)
@@ -409,6 +409,27 @@ public sealed class SwampMapGeneratorTests
         {
             Assert.False(cell.IsTraversable);
             Assert.False(cell.HasFloorAtSurface);
+            Assert.InRange(cell.FloorLevel, (sbyte)-3, (sbyte)-2);
+            Assert.InRange(cell.WaterDepthLevels, 2, 3);
+        });
+    }
+
+    [Fact]
+    public void PreviousRiverVersionRetainsItsOneOrTwoLevelWaterDepth()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(456),
+            width: 64,
+            height: 64,
+            generatorVersion: 17);
+        var deepWater = Positions(map)
+            .Select(map.GetColumnCell)
+            .Where(cell => cell.Terrain == TerrainKind.DeepWater)
+            .ToArray();
+
+        Assert.NotEmpty(deepWater);
+        Assert.All(deepWater, cell =>
+        {
             Assert.InRange(cell.FloorLevel, (sbyte)-2, (sbyte)-1);
             Assert.InRange(cell.WaterDepthLevels, 1, 2);
         });
@@ -594,6 +615,10 @@ public sealed class SwampMapGeneratorTests
             Assert.True(lowerWater.IsSupported);
             Assert.Equal(1, lowerWater.FluidDepthLevels);
         }
+        Assert.True(map.TryGetInitialGeometry(
+            deepColumn with { Z = -1 },
+            out var riverVolume));
+        Assert.Equal(CellFluidKind.Water, riverVolume.Fluid);
     }
 
     [Fact]
@@ -623,13 +648,16 @@ public sealed class SwampMapGeneratorTests
             .SelectMany(level => Enumerable.Range(0, map.Height)
                 .SelectMany(y => Enumerable.Range(0, map.Width)
                     .Select(x => new GridPosition(x, y, -level))))
-            .Where(position => map.GetCaveCell(position).IsOpen)
+            .Where(position =>
+                map.GetCaveCell(position).IsOpen && map.IsTerrainTraversable(position))
             .OrderBy(position => position.Z)
             .First();
         var path = map.FindTerrainPath(map.CaveEntrances.Single(), deepestGeneratedFloor);
 
         Assert.Equal(
-            Math.Max(SwampMapGenerator.MinimumInitialCaveLevelCount, -map.MinimumTerrainLevel),
+            Math.Max(
+                SwampMapGenerator.MinimumInitialCaveLevelCount,
+                -map.MinimumTerrainLevel - 1),
             map.CaveLevelCount);
         Assert.Equal(-map.CaveLevelCount, map.DeepestCaveLevel);
         Assert.Equal(-2, deepestGeneratedFloor.Z);
@@ -780,6 +808,96 @@ public sealed class SwampMapGeneratorTests
         Assert.False(map.IsWithin(new GridPosition(0, map.Height)));
         Assert.False(map.IsWithin(new GridPosition(0, 0, Z: 1)));
         Assert.Throws<ArgumentOutOfRangeException>(() => map.GetCell(new GridPosition(0, 0, Z: 1)));
+    }
+
+    [Fact]
+    public void CurrentGeneratorBuildsSurfaceSoilAboveRockAtDifferentElevations()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x534F494C4C415945UL),
+            width: 96,
+            height: 96);
+        var dryColumns = Positions(map)
+            .Where(position => map.GetColumnCell(position).Terrain is
+                TerrainKind.SolidGround or TerrainKind.Mud)
+            .ToArray();
+
+        foreach (var surfaceLevel in dryColumns
+                     .Select(position => map.GetColumnCell(position).SurfaceLevel)
+                     .Where(level => level is >= -1 and <= 1)
+                     .Distinct())
+        {
+            Assert.Contains(dryColumns, column =>
+            {
+                var surface = map.GetColumnCell(column).SurfaceLevel;
+                if (surface != surfaceLevel)
+                {
+                    return false;
+                }
+                var below = column with { Z = surface - 1 };
+                return map.IsRockPosition(below) &&
+                    map.GetRockCell(below).LooseMaterial == LooseMaterialKind.Soil;
+            });
+        }
+
+        Assert.Contains(dryColumns, column =>
+        {
+            var surface = map.GetColumnCell(column).SurfaceLevel;
+            var core = column with { Z = surface - 3 };
+            return map.IsRockPosition(core) &&
+                map.GetRockCell(core).LooseMaterial == LooseMaterialKind.None;
+        });
+    }
+
+    [Fact]
+    public void CurrentGeneratorCreatesSandyRiverbanksAndSubsurfaceLenses()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x53414E4442414E4BUL),
+            width: 96,
+            height: 96);
+        var banks = Positions(map)
+            .Where(position => map.GetColumnCell(position).Terrain == TerrainKind.Sand)
+            .ToArray();
+
+        Assert.NotEmpty(banks);
+        Assert.All(banks, bank => Assert.True(map.GetColumnCell(bank).IsTraversable));
+        Assert.Contains(banks, bank => map.GetCardinalNeighbors(bank).Any(neighbor =>
+            map.GetColumnCell(neighbor).Terrain is
+                TerrainKind.ShallowWater or TerrainKind.DeepWater));
+        Assert.Contains(banks, bank =>
+        {
+            var surface = map.GetColumnCell(bank).SurfaceLevel;
+            var below = bank with { Z = surface - 1 };
+            return map.IsRockPosition(below) &&
+                map.GetRockCell(below).LooseMaterial == LooseMaterialKind.Sand;
+        });
+        Assert.Contains(
+            Enumerable.Range(1, map.CaveLevelCount)
+                .SelectMany(depth => Positions(map).Select(column => column with { Z = -depth })),
+            position => map.GetCaveCell(position) is
+            {
+                Kind: CaveCellKind.SolidRock,
+                LooseMaterial: LooseMaterialKind.Sand,
+            } && map.GetColumnCell(position).SurfaceLevel - position.Z >= 3);
+    }
+
+    [Fact]
+    public void PreviousGeneratorVersionKeepsLegacyRockWithoutLooseStrataOrSand()
+    {
+        var map = SwampMapGenerator.Generate(
+            new WorldSeed(0x4C45474143593136UL),
+            width: 64,
+            height: 64,
+            generatorVersion: 16);
+
+        Assert.DoesNotContain(
+            Positions(map),
+            position => map.GetColumnCell(position).Terrain == TerrainKind.Sand);
+        Assert.DoesNotContain(
+            Enumerable.Range(1, map.CaveLevelCount)
+                .SelectMany(depth => Positions(map).Select(column => column with { Z = -depth })),
+            position => map.GetCaveCell(position).LooseMaterial != LooseMaterialKind.None);
     }
 
     [Theory]

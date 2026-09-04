@@ -16,6 +16,7 @@ public static class EquipmentCombatPolicy
         Consider(PersonalEquipment.PrimitivePickaxe, settings.PrimitivePickaxeDamageBonus);
         Consider(PersonalEquipment.ReinforcedPickaxe, settings.ReinforcedPickaxeDamageBonus);
         Consider(PersonalEquipment.WoodenHammer, settings.WoodenHammerDamageBonus);
+        Consider(PersonalEquipment.WoodenShovel, settings.WoodenShovelDamageBonus);
         return best;
 
         void Consider(PersonalEquipment item, int damageBonus)

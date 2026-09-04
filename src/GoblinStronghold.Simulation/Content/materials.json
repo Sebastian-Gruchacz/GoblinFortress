@@ -90,6 +90,26 @@
       "palette": { "edge": "#432B20", "keyColors": ["#6D4632", "#9A6748", "#C38F69"] }
     },
     {
+      "id": "soil", "resourceKind": "Earth", "variant": "Soil",
+      "materialType": "Soil",
+      "unitWeight": 1.45, "strength": 18, "hardness": 8, "durability": 30,
+      "flexibility": 10, "value": 4, "acquisitionDifficulty": 8,
+      "occurrence": { "climates": ["any"], "minimumDepthBelowSurface": 0, "maximumDepthBelowSurface": 2 },
+      "acquisition": { "strategy": "Digging", "requiredTool": "Shovel", "minimumToolLevel": 1, "minimumSkillLevel": 0, "workMultiplier": 1 },
+      "uses": ["Construction"],
+      "palette": { "edge": "#3A2A1D", "keyColors": ["#60452C", "#8B673E", "#B18A55"] }
+    },
+    {
+      "id": "sand", "resourceKind": "Sand", "variant": "Sand",
+      "materialType": "Sand",
+      "unitWeight": 1.6, "strength": 6, "hardness": 4, "durability": 12,
+      "flexibility": 4, "value": 5, "acquisitionDifficulty": 7,
+      "occurrence": { "climates": ["riverbank", "shallow-underground"], "minimumDepthBelowSurface": 0, "maximumDepthBelowSurface": 10 },
+      "acquisition": { "strategy": "Digging", "requiredTool": "Shovel", "minimumToolLevel": 1, "minimumSkillLevel": 0, "workMultiplier": 1 },
+      "uses": ["Construction"],
+      "palette": { "edge": "#665238", "keyColors": ["#9A8058", "#C5A875", "#E1C991"] }
+    },
+    {
       "id": "sandstone", "resourceKind": "Stone", "variant": "Sandstone",
       "materialType": "Stone",
       "unitWeight": 2.15, "strength": 38, "hardness": 32, "durability": 40,

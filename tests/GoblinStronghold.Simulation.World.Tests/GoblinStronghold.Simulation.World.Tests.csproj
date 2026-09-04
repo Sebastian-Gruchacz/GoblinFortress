@@ -22,6 +22,7 @@
     <Compile Include="..\GoblinStronghold.Simulation.Tests\VerticalRampTests.cs" Link="VerticalRampTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\VisibilityTests.cs" Link="VisibilityTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\WallEnclosureAnalysisTests.cs" Link="WallEnclosureAnalysisTests.cs" />
+    <Compile Include="..\GoblinStronghold.Simulation.Tests\WallTorchPlacementPolicyTests.cs" Link="WallTorchPlacementPolicyTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\WorldMapStateTests.cs" Link="WorldMapStateTests.cs" />
     <Compile Include="..\GoblinStronghold.Simulation.Tests\WorldAmbientLightPolicyTests.cs" Link="WorldAmbientLightPolicyTests.cs" />
   </ItemGroup>

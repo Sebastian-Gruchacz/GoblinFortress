@@ -108,7 +108,8 @@ public sealed record GoblinPrimitiveEquipmentSettings(
     int WoodenAxeDamageBonus,
     int PrimitivePickaxeDamageBonus,
     int ReinforcedPickaxeDamageBonus,
-    int WoodenHammerDamageBonus);
+    int WoodenHammerDamageBonus,
+    int WoodenShovelDamageBonus);
 
 public sealed record GoblinAgingSettings(
     int HealthyYears,
@@ -643,7 +644,8 @@ public sealed class SimulationDefinitions
             WoodenAxeDamageBonus: 100,
             PrimitivePickaxeDamageBonus: 110,
             ReinforcedPickaxeDamageBonus: 160,
-            WoodenHammerDamageBonus: 90);
+            WoodenHammerDamageBonus: 90,
+            WoodenShovelDamageBonus: 70);
         Aging = new(
             HealthyYears: 5,
             DeclineMinimumSeasons: 1,

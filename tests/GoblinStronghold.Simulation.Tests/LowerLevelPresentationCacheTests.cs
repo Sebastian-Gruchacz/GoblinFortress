@@ -169,6 +169,25 @@ public sealed class LowerLevelPresentationCacheTests
     }
 
     [Fact]
+    public void SlicePlannerDoesNotTreatEnclosedStairsAsAnOpening()
+    {
+        var bounds = new PresentationCellBounds(0, 0, 16, 16);
+        var stairs = new VerticalPassage(
+            new GridPosition(4, 4, 0),
+            new GridPosition(4, 4, -1),
+            VerticalPassageKind.ExcavatedStairs);
+
+        var plan = PresentationSlicePlanner.Create(
+            new PresentationSliceRequest(0, bounds),
+            (_, _) => 0,
+            [stairs]);
+
+        Assert.Empty(plan.VerticalPassages);
+        Assert.Empty(plan.OpeningDestinations);
+        Assert.False(plan.Exposure.IsContinuouslyExposed(stairs.Lower));
+    }
+
+    [Fact]
     public void SlicePlannerUsesTheRequestedChunkSize()
     {
         var bounds = new PresentationCellBounds(0, 0, 20, 20);
@@ -640,6 +659,28 @@ public sealed class LowerLevelPresentationCacheTests
     }
 
     [Fact]
+    public void ChangeTrackerInvalidatesEachNewlyFloodedCellAsFluid()
+    {
+        var tracker = new LowerLevelPresentationChangeTracker();
+        var first = new GridPosition(6, 7, -1);
+        var second = new GridPosition(7, 7, -1);
+        tracker.Synchronize(Observation(topologyVersion: 8));
+
+        var changes = tracker.Synchronize(Observation(
+            topologyVersion: 9,
+            fluids:
+            [
+                new PresentationFluidObservation(first, CellFluidKind.Water, 1),
+                new PresentationFluidObservation(second, CellFluidKind.Water, 1),
+            ]));
+
+        Assert.False(changes.RequiresFullInvalidation);
+        Assert.Equal([first, second], changes.Invalidations.Select(item => item.Position));
+        Assert.All(changes.Invalidations, item =>
+            Assert.Equal(PresentationChunkDirtyReason.Fluids, item.Reason));
+    }
+
+    [Fact]
     public void RetainedInvalidationDoesNotCreateUnseenChunks()
     {
         var cache = new LowerLevelPresentationCacheState();
@@ -740,10 +781,12 @@ public sealed class LowerLevelPresentationCacheTests
         IReadOnlyList<PresentationTopologyObservation>? topology = null,
         IReadOnlyList<PresentationStructureObservation>? structures = null,
         IReadOnlyList<PresentationPlantObservation>? plants = null,
-        IReadOnlyList<PresentationContaminationObservation>? contamination = null) => new(
+        IReadOnlyList<PresentationContaminationObservation>? contamination = null,
+        IReadOnlyList<PresentationFluidObservation>? fluids = null) => new(
         topologyVersion,
         topology ?? [],
         structures ?? [],
         plants ?? [],
-        contamination ?? []);
+        contamination ?? [],
+        fluids ?? []);
 }

@@ -1,6 +1,7 @@
 using Godot;
 using GoblinStronghold.Simulation;
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Presentation;
 
 namespace GoblinStronghold.GodotClient.UI.WorldRendering;
 
@@ -26,8 +27,16 @@ internal sealed class ActiveLevelFogMap : IDisposable
         int maximumY,
         Func<GridPosition, CellVisibility> getVisibility)
     {
+        var bounds = new PresentationCellBounds(
+            minimumX,
+            minimumY,
+            maximumX,
+            maximumY);
         var key = new RenderCacheKey(
-            snapshot.Tick.Value,
+            ActiveLevelVisibilitySignaturePolicy.Create(
+                level,
+                bounds,
+                getVisibility),
             topologyVersion,
             level,
             minimumX,
@@ -102,7 +111,7 @@ internal sealed class ActiveLevelFogMap : IDisposable
     }
 
     private readonly record struct RenderCacheKey(
-        long Tick,
+        ulong VisibilitySignature,
         ulong TopologyVersion,
         int Level,
         int MinimumX,

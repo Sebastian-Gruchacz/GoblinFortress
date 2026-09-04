@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using GoblinStronghold.Simulation;
+using GoblinStronghold.Simulation.Construction;
 using GoblinStronghold.Simulation.Equipment;
 using GoblinStronghold.Simulation.Map;
 using GoblinStronghold.Simulation.Resources;
@@ -694,8 +695,12 @@ public sealed class SimulationEngineTests
             .GetVisibility(placement.Wall, map.Width)
             .IsDiscovered());
 
+        Assert.True(WallTorchPlacementPolicy.TryResolvePreferredSide(
+            placement.Wall,
+            placement.Access,
+            out var preferredSide));
         engine.QueueCommand(SimulationCommand.BuildWallTorch(
-            engine.CurrentTick.Next(), sequence: 2, placement.Wall));
+            engine.CurrentTick.Next(), sequence: 2, placement.Wall, preferredSide));
         engine.AdvanceTicks(1);
 
         var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
@@ -710,7 +715,7 @@ public sealed class SimulationEngineTests
         Assert.Equal(engine.ComputeStateHash(), restored.ComputeStateHash());
         var torch = Assert.Single(engine.World.GetWorldObjectsAt(placement.Wall), worldObject =>
             worldObject.Kind == WorldObjectKind.WallTorch);
-        Assert.True(Enum.IsDefined(torch.Orientation));
+        Assert.Equal(preferredSide, torch.Orientation);
         Assert.Equal(WorldObjectPartKind.WallTorch, Assert.Single(torch.Parts).Kind);
         Assert.True(engine.World.IsSolidCaveRock(placement.Wall));
         Assert.False(engine.World.CanBuildWallTorch(placement.Wall));

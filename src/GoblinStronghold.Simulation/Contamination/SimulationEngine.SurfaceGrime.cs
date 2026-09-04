@@ -26,7 +26,8 @@ public sealed partial class SimulationEngine
 
         if (Map.IsTerrainSurfacePosition(position))
         {
-            return Map.GetColumnCell(position).Terrain is TerrainKind.SolidGround or TerrainKind.Mud;
+            return Map.GetColumnCell(position).Terrain is TerrainKind.SolidGround or TerrainKind.Mud or
+                TerrainKind.Sand;
         }
 
         return position.Z < 0 && World.IsTerrainTraversable(position);

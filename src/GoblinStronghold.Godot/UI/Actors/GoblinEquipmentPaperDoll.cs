@@ -119,7 +119,8 @@ public sealed partial class GoblinEquipmentPaperDoll : VBoxContainer
         AddEquipmentRow(
             (EquipmentSlot.FellingTool, DollGlyph.Axe),
             (EquipmentSlot.ConstructionTool, DollGlyph.Hammer),
-            (EquipmentSlot.MiningTool, DollGlyph.Pickaxe));
+            (EquipmentSlot.MiningTool, DollGlyph.Pickaxe),
+            (EquipmentSlot.EarthmovingTool, DollGlyph.Shovel));
         var lowerBody = CreateRow();
         _provisions = CreateSlot(DollGlyph.Provisions);
         lowerBody.AddChild(_provisions.Root);
@@ -263,7 +264,7 @@ public sealed partial class GoblinEquipmentPaperDoll : VBoxContainer
 internal enum DollGlyph : byte
 {
     Head, Cloak, Ring, Amulet, Bow, Ammunition, Torso, Sword,
-    Axe, Hammer, Pickaxe, Provisions, Legs, Water, Feet,
+    Axe, Hammer, Pickaxe, Shovel, Provisions, Legs, Water, Feet,
 }
 
 internal sealed partial class EquipmentSlotGlyph : Control
@@ -312,6 +313,11 @@ internal sealed partial class EquipmentSlotGlyph : Control
             case DollGlyph.Pickaxe:
                 Line(0, 15, 0, -10, 3);
                 DrawArc(P(0, -7), 14f * scale, MathF.PI, MathF.Tau, 18, Ink, 3f * scale, true);
+                break;
+            case DollGlyph.Shovel:
+                Line(0, 15, 0, -8, 3);
+                DrawPolyline([P(-8, -8), P(0, -16), P(8, -8), P(6, 2), P(0, 7),
+                    P(-6, 2), P(-8, -8)], Ink, 2.5f * scale, true);
                 break;
             case DollGlyph.Provisions:
                 Circle(0, 2, 11); Line(-3, -9, 4, -15); break;

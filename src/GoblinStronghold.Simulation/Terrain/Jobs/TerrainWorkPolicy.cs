@@ -25,7 +25,7 @@ internal static class TerrainWorkPolicy
         {
             WorkDesignationKind.MineRock =>
                 world.CanExcavateRock(target) &&
-                MiningCapabilityPolicy.CanMine(
+                ExcavationCapabilityPolicy.CanExcavate(
                     world.Baseline.IsRockPosition(target)
                         ? world.Baseline.GetRockCell(target)
                         : new CaveCell(RockKind.Sandstone, CaveCellKind.SolidRock),
@@ -109,7 +109,7 @@ internal static class TerrainWorkPolicy
 
         return checked(
             baseWorkTicks * definition.Work.BaseTicksMultiplier *
-            MiningCapabilityPolicy.WorkMultiplier(excavationCell.Rock));
+            ExcavationCapabilityPolicy.WorkMultiplier(excavationCell));
     }
 
     private static bool CanCarveRamp(
@@ -126,7 +126,7 @@ internal static class TerrainWorkPolicy
             : rampDestination is { } upper
                 ? world.CanCarveRampUp(target, upper)
                 : world.CanCarveRampUp(target)) &&
-        MiningCapabilityPolicy.CanMine(
+        ExcavationCapabilityPolicy.CanExcavate(
             rampDestination is { } destination
                 ? world.GetRampExcavationCell(target, destination, carveDown)
                 : world.GetRampExcavationCell(target, carveDown),

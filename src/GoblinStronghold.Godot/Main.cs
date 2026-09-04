@@ -3622,7 +3622,7 @@ public partial class Main : Node
         }
 
         if (_buildMode is BuildMode.WoodenRamp or BuildMode.StoneRamp or
-            BuildMode.WoodenLadder)
+            BuildMode.WoodenLadder or BuildMode.WallTorch)
         {
             _linearBuildStart = cell;
             _isDraggingLinearBuild = true;
@@ -3631,7 +3631,7 @@ public partial class Main : Node
         }
 
         if (_buildMode is BuildMode.WoodenDoorFrame or BuildMode.StoneDoorFrame or
-            BuildMode.WoodenDoor or BuildMode.WallTorch or BuildMode.GoblinCompost or
+            BuildMode.WoodenDoor or BuildMode.GoblinCompost or
             BuildMode.ReedSleepingMat or BuildMode.StandingTorch or
             BuildMode.PrimitiveWorkshop or BuildMode.CookingFire or
             BuildMode.FittedWorkshop or
@@ -3669,8 +3669,6 @@ public partial class Main : Node
                 BuildMode.StoneDoorFrame => SimulationCommand.BuildStoneDoorFrame(
                     _engine.CurrentTick.Next(), _commandSequence++, cell,
                     _selectedConstructionMaterial),
-                BuildMode.WallTorch => SimulationCommand.BuildWallTorch(
-                    _engine.CurrentTick.Next(), _commandSequence++, cell),
                 BuildMode.StandingTorch => SimulationCommand.BuildStandingTorch(
                     _engine.CurrentTick.Next(), _commandSequence++, cell),
                 BuildMode.GoblinCompost => SimulationCommand.BuildGoblinCompost(
@@ -3704,8 +3702,6 @@ public partial class Main : Node
                     Ui("construction-feedback", "wooden-door-frame-ordered"),
                 BuildMode.StoneDoorFrame =>
                     Ui("construction-feedback", "stone-door-frame-ordered"),
-                BuildMode.WallTorch =>
-                    Ui("construction-feedback", "wall-torch-ordered"),
                 BuildMode.StandingTorch =>
                     Ui("construction-feedback", "standing-torch-ordered"),
                 BuildMode.GoblinCompost =>
@@ -3791,6 +3787,11 @@ public partial class Main : Node
         if (_buildMode == BuildMode.WoodenLadder)
         {
             FinishDirectionalLadderConstruction(end, screenPosition);
+            return;
+        }
+        if (_buildMode == BuildMode.WallTorch)
+        {
+            FinishDirectionalWallTorchConstruction(end, screenPosition);
             return;
         }
         if (!IsBuildableLayerCell(end) || end.Z != _linearBuildStart.Z)
@@ -3971,6 +3972,35 @@ public partial class Main : Node
         UpdateBuildPreview(screenPosition);
     }
 
+    private void FinishDirectionalWallTorchConstruction(
+        GridPosition dragEnd,
+        Vector2 screenPosition)
+    {
+        if (dragEnd == _linearBuildStart ||
+            !WallTorchPlacementPolicy.TryResolvePreferredSide(
+                _linearBuildStart,
+                dragEnd,
+                out var side) ||
+            !_engine.Visibility.Get(_linearBuildStart).IsDiscovered() ||
+            !_engine.World.CanBuildWallTorch(_linearBuildStart))
+        {
+            _inspector.Text = Ui("construction-feedback", "wall-torch-direction-invalid");
+            UpdateBuildPreview(screenPosition);
+            return;
+        }
+
+        _engine.QueueCommand(SimulationCommand.BuildWallTorch(
+            _engine.CurrentTick.Next(),
+            _commandSequence++,
+            _linearBuildStart,
+            side));
+        _inspector.Text = UiFormat(
+            "construction-feedback",
+            "wall-torch-ordered",
+            DescribeRampDirection(_linearBuildStart, dragEnd));
+        UpdateBuildPreview(screenPosition);
+    }
+
     private void UpdateBuildPreview(Vector2 screenPosition)
     {
         var cell = ScreenToVisibleCell(screenPosition);
@@ -3995,6 +4025,7 @@ public partial class Main : Node
             BuildMode.WoodenRamp or BuildMode.StoneRamp or BuildMode.WoodenLadder
                 when _isDraggingLinearBuild =>
                 [_linearBuildStart, cell],
+            BuildMode.WallTorch when _isDraggingLinearBuild => [_linearBuildStart],
             BuildMode.FieldCamp => GetAreaCells(cell, cell with { X = cell.X + 1, Y = cell.Y + 1 }),
             BuildMode.GoblinHut => GetAreaCells(cell, cell with { X = cell.X + 2, Y = cell.Y + 2 }),
             BuildMode.WoodenWatchtower =>
@@ -4005,7 +4036,16 @@ public partial class Main : Node
         {
             cells = GetPlaceableFloorCells(cells);
         }
-        _worldView.SetConstructionPreview(cells, IsConstructionPreviewValid(cells));
+        var previewValid = _buildMode == BuildMode.WallTorch && _isDraggingLinearBuild
+            ? cell != _linearBuildStart &&
+              WallTorchPlacementPolicy.TryResolvePreferredSide(
+                  _linearBuildStart,
+                  cell,
+                  out _) &&
+              _engine.Visibility.Get(_linearBuildStart).IsDiscovered() &&
+              _engine.World.CanBuildWallTorch(_linearBuildStart)
+            : IsConstructionPreviewValid(cells);
+        _worldView.SetConstructionPreview(cells, previewValid);
         if (_isDraggingLinearBuild)
         {
             _inspector.Text = _buildMode switch
@@ -4033,6 +4073,18 @@ public partial class Main : Node
                     TryResolveDiscoveredLadderDrag(_linearBuildStart, cell, out _)
                         ? Ui("construction-feedback", "ladder-preview-valid")
                         : Ui("construction-feedback", "ladder-direction-invalid"),
+                BuildMode.WallTorch =>
+                    cell != _linearBuildStart &&
+                    WallTorchPlacementPolicy.TryResolvePreferredSide(
+                        _linearBuildStart,
+                        cell,
+                        out _) &&
+                    _engine.World.CanBuildWallTorch(_linearBuildStart)
+                        ? UiFormat(
+                            "construction-feedback",
+                            "wall-torch-preview-valid",
+                            DescribeRampDirection(_linearBuildStart, cell))
+                        : Ui("construction-feedback", "wall-torch-direction-invalid"),
                 BuildMode.StorageArea when _resizingStorageAreaId != EntityId.None =>
                     UiFormat("construction-feedback", "storage-resize-preview",
                         _resizingStorageAreaId, cells.Count),
@@ -4291,7 +4343,7 @@ public partial class Main : Node
                 out var destination);
             _worldView.SetWorkPreview(
                 ToDesignationKind(_workMode),
-                valid ? [_workAreaStart, cell] : []);
+                valid ? [_workAreaStart] : []);
             _inspector.Text = valid
                 ? Ui("work-feedback", "ramp-valid")
                 : _engine.World.TryGetRampDestinationFluid(destination, out var fluid)
@@ -4490,9 +4542,13 @@ public partial class Main : Node
             _inspector.Text = Ui("work-feedback", "create-failed");
             return;
         }
+        var cancelledConstructionOrders = _workMode == WorkMode.Clear
+            ? CancelConstructionOrdersInArea(_workAreaStart, end)
+            : 0;
         _inspector.Text = _workMode switch
         {
-            WorkMode.Clear => Ui("work-feedback", "clear-ordered"),
+            WorkMode.Clear => UiFormat(
+                "work-feedback", "clear-ordered", cancelledConstructionOrders),
             WorkMode.MineRock =>
                 Ui("work-feedback", "tunnel-ordered"),
             WorkMode.CarveRampDown => Ui("work-feedback", "ramp-down-ordered"),
@@ -4508,6 +4564,28 @@ public partial class Main : Node
         UpdateWorkPreview(screenPosition);
     }
 
+    private int CancelConstructionOrdersInArea(GridPosition first, GridPosition second)
+    {
+        var selectedCells = GetAreaCells(first, second).ToHashSet();
+        var representatives = _latestSnapshot.ConstructionSites
+            .Where(site => site.Footprint.Any(selectedCells.Contains))
+            .GroupBy(site => site.OrderId != EntityId.None ? site.OrderId : site.Id)
+            .Select(group => group
+                .OrderBy(site => site.SequenceIndex)
+                .ThenBy(site => site.Id)
+                .First())
+            .ToArray();
+        foreach (var site in representatives)
+        {
+            SubmitCommand(SimulationCommand.CancelConstruction(
+                _engine.CurrentTick.Next(),
+                _commandSequence++,
+                site.Id));
+        }
+
+        return representatives.Length;
+    }
+
     private bool TryResolveCarvedRampDrag(
         GridPosition dragStart,
         GridPosition dragEnd,
@@ -4515,23 +4593,22 @@ public partial class Main : Node
         out GridPosition destination)
     {
         origin = dragStart;
-        destination = dragEnd;
+        destination = dragStart with
+        {
+            Z = dragStart.Z + (_workMode == WorkMode.CarveRampDown ? -1 : 1),
+        };
         if (dragStart.Z != dragEnd.Z ||
-            Math.Abs(dragEnd.X - dragStart.X) + Math.Abs(dragEnd.Y - dragStart.Y) != 1)
+            dragStart.X != dragEnd.X ||
+            dragStart.Y != dragEnd.Y)
         {
             return false;
         }
 
-        destination = dragEnd with
-        {
-            Z = dragStart.Z + (_workMode == WorkMode.CarveRampDown ? -1 : 1),
-        };
         var destinationCanBeGenerated = _workMode == WorkMode.CarveRampDown &&
             destination.Z == _engine.Map.MinimumWorldLevel - 1 &&
             _engine.Map.IsColumnWithin(destination);
         if ((!IsBuildableLayerCell(destination) && !destinationCanBeGenerated) ||
-            !IsDiscoveredConstructionCell(dragStart) ||
-            !IsDiscoveredConstructionCell(dragEnd))
+            !IsDiscoveredConstructionCell(dragStart))
         {
             return false;
         }
@@ -5107,9 +5184,12 @@ public partial class Main : Node
                 var caveCell = _engine.Map.GetCaveCell(levelPosition);
                 var passages = _engine.World.CreateVerticalPassageSnapshot()
                     .Where(passage => passage.Upper == levelPosition || passage.Lower == levelPosition)
-                    .Select(passage => Ui("passages", passage.Kind == VerticalPassageKind.CaveMouth
-                        ? "cave-mouth"
-                        : "ramp-between-levels"))
+                    .Select(passage => Ui("passages", passage.Kind switch
+                    {
+                        VerticalPassageKind.CaveMouth => "cave-mouth",
+                        VerticalPassageKind.ExcavatedStairs => "stairs-between-levels",
+                        _ => "ramp-between-levels",
+                    }))
                     .ToArray();
                 SelectActor(EntityId.None);
                 var excavated = _engine.World.ExcavatedCaveCells.Contains(levelPosition);
@@ -5123,12 +5203,12 @@ public partial class Main : Node
                 var caveFlora = _engine.World.TryGetCaveFlora(levelPosition, out var flora)
                     ? Ui("cave-flora", flora.Kind.ToString())
                     : null;
-                _inspector.Text = $"{levelPosition} • {DescribeCaveRock(caveCell.Rock)} • " +
+                _inspector.Text = $"{levelPosition} • {DescribeNaturalMaterial(caveCell)} • " +
                     caveKind + DescribeCaveFluid(caveCell.Fluid) +
                     (caveFlora is null ? string.Empty : $" • {caveFlora}") +
                     (excavated ? string.Empty : DescribeMineralDeposit(caveCell.Deposit)) +
                     (caveCell.Kind == CaveCellKind.SolidRock
-                        ? DescribeMiningRequirement(caveCell.Rock)
+                        ? DescribeExcavationRequirement(caveCell)
                         : string.Empty) +
                     (passages.Length == 0 ? string.Empty : $" • {string.Join(", ", passages)}") +
                     (displayedWorldObjects.Length == 0
@@ -5465,6 +5545,14 @@ public partial class Main : Node
 
     private string DescribeCaveRock(RockKind rock) => Ui("cave-rocks", rock.ToString());
 
+    private static string DescribeNaturalMaterial(CaveCell cell) => cell.LooseMaterial switch
+    {
+        LooseMaterialKind.Soil => DescribeResourceVariant(ResourceVariant.Soil),
+        LooseMaterialKind.Sand => DescribeResourceVariant(ResourceVariant.Sand),
+        _ => TranslationCatalog.Get(
+            _currentLocale, "interface", "cave-rocks", cell.Rock.ToString()),
+    };
+
     private string DescribeCaveKind(CaveCellKind kind) => Ui("cave-kinds", kind.ToString());
 
     private string DescribeCaveFluid(CellFluidKind fluid) => fluid switch
@@ -5541,9 +5629,10 @@ public partial class Main : Node
             : ToolFunction.None;
         var toolDescriptionKey = toolFunction switch
         {
-            ToolFunction.Construction => "construction-tool-level",
-            ToolFunction.Mining => "mining-tool-level",
-            ToolFunction.Felling => "felling-tool-level",
+            _ when toolFunction.HasFlag(ToolFunction.Mining) => "mining-tool-level",
+            _ when toolFunction.HasFlag(ToolFunction.Construction) => "construction-tool-level",
+            _ when toolFunction.HasFlag(ToolFunction.Felling) => "felling-tool-level",
+            _ when toolFunction.HasFlag(ToolFunction.Earthmoving) => "earthmoving-tool-level",
             _ => "tool-level",
         };
         return toolLevel > 0
@@ -5574,6 +5663,10 @@ public partial class Main : Node
             ? UiFormat("mining", "requirement-with-level", tool, requiredLevel)
             : UiFormat("mining", "requirement", tool);
     }
+
+    private string DescribeExcavationRequirement(CaveCell cell) => cell.IsLooseMaterial
+        ? UiFormat("mining", "earthmoving-requirement", Ui("mining", "shovel"))
+        : DescribeMiningRequirement(cell.Rock);
 
     private string DescribeStoragePriority(StoragePriority priority) =>
         Ui("storage-priorities", priority.ToString());
@@ -5690,6 +5783,8 @@ public partial class Main : Node
             Ui("construction-site", "no-capable-builder"),
         ConstructionReadinessState.NoReachableBuilder =>
             Ui("construction-site", "no-reachable-builder"),
+        ConstructionReadinessState.InvalidPlacement =>
+            Ui("construction-site", "invalid-placement"),
         ConstructionReadinessState.WaitingForBuilder =>
             UiFormat("construction-site", "waiting-for-builder",
                 diagnostic.CapableBuilderCount),
@@ -7053,6 +7148,15 @@ public partial class Main : Node
                 DescribeResource(ResourceKind.Wood), 2),
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds),
                 DescribeResource(ResourceKind.Reeds), 1));
+        AddWorkshopRecipeButton(recipes, CraftingRecipeKind.WoodenShovel,
+            ResourceThumbnails.LoadWoodenShovelIcon(),
+            DescribeCraftingRecipe(CraftingRecipeKind.WoodenShovel),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Wood),
+                DescribeResource(ResourceKind.Wood), 2),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Stone),
+                DescribeResource(ResourceKind.Stone), 1),
+            (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Reeds),
+                DescribeResource(ResourceKind.Reeds), 1));
         AddWorkshopRecipeButton(recipes, CraftingRecipeKind.BoneKnife,
             ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.BoneKnife), "Kościany nóż",
             (ItemIcons.CreateTexture(_itemIconAtlas, ItemIcon.Bone), "Kość", 1));
@@ -7442,7 +7546,7 @@ public partial class Main : Node
         {
             ResourceKind.Wood, ResourceKind.Stone, ResourceKind.Reeds,
             ResourceKind.Bone, ResourceKind.Hide, ResourceKind.Coal,
-            ResourceKind.Ore, ResourceKind.Materials,
+            ResourceKind.Ore, ResourceKind.Materials, ResourceKind.Earth, ResourceKind.Sand,
         }.Select(resource => $"{DescribeResource(resource)} " +
             snapshot.ItemStacks.Where(stack => stack.Resource == resource)
                 .Sum(stack => stack.Quantity));
@@ -7804,6 +7908,8 @@ public partial class Main : Node
         ResourceKind.Hide,
         ResourceKind.Equipment,
         ResourceKind.Materials,
+        ResourceKind.Earth,
+        ResourceKind.Sand,
     ];
 
     private static StorageResourceFilter ToStorageResourceFilter(ResourceKind resource) =>
@@ -8233,8 +8339,8 @@ public partial class Main : Node
         WorkDesignationKind.FellTree => "wyrąb",
         WorkDesignationKind.QuarryBoulder => "rozbijanie głazów",
         WorkDesignationKind.MineRock => "wydobycie skały",
-        WorkDesignationKind.CarveRampDown => "pochylnia w dół",
-        WorkDesignationKind.CarveRampUp => "pochylnia w górę",
+        WorkDesignationKind.CarveRampDown => Ui("work-order-kinds", "stairs-down"),
+        WorkDesignationKind.CarveRampUp => Ui("work-order-kinds", "stairs-up"),
         WorkDesignationKind.Scout => "zwiad",
         WorkDesignationKind.HuntAnimal => "polowanie",
         WorkDesignationKind.CleanBlood => "sprzątanie krwi",

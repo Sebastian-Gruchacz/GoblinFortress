@@ -171,7 +171,8 @@ public sealed class GoblinRosterView
         PopulateEquipmentStrip(
             row.Tools,
             actor.Loadout.Items.Where(item => item.Slot is EquipmentSlot.ConstructionTool or
-                EquipmentSlot.MiningTool or EquipmentSlot.FellingTool),
+                EquipmentSlot.MiningTool or EquipmentSlot.FellingTool or
+                EquipmentSlot.EarthmovingTool),
             _text("tools-empty"));
         PopulateEquipmentStrip(
             row.Weapons,

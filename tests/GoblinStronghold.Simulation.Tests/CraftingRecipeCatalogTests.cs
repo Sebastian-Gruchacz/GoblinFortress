@@ -138,6 +138,27 @@ public sealed class CraftingRecipeCatalogTests
     }
 
     [Fact]
+    public void WoodenShovelIsCraftedAtPrimitiveWorkshopForEarthmoving()
+    {
+        var shovel = CraftingRecipeCatalog.Get(CraftingRecipeKind.WoodenShovel);
+
+        Assert.Equal(WorkshopKind.PrimitiveWorkshop, shovel.Workshop);
+        Assert.Equal(
+            [
+                new CraftingMaterialRequirement(ResourceKind.Wood, ResourceVariant.None, 2),
+                new CraftingMaterialRequirement(ResourceKind.Stone, ResourceVariant.None, 1),
+                new CraftingMaterialRequirement(ResourceKind.Reeds, ResourceVariant.None, 1),
+            ],
+            shovel.Materials);
+        Assert.Equal(
+            new CraftingOutputDefinition(
+                ResourceKind.Equipment,
+                ResourceVariant.EquipmentWoodenShovel,
+                1),
+            shovel.Output);
+    }
+
+    [Fact]
     public void CookingFireConsumesRawMeatAndWoodAndProducesCookedMeat()
     {
         var recipe = CraftingRecipeCatalog.Get(CraftingRecipeKind.CookRawMeat);

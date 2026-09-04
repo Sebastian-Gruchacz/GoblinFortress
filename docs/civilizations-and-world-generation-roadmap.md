@@ -253,6 +253,21 @@ domain generator.
   navigation, visibility, rendering, and save size.
 - [x] Add optional road generation with map-edge endpoints and junctions.
 - [ ] Add road bridges selected after river generation.
+- [x] Give generator-v18 rivers a real channel volume at level -1 and a deeper
+  core reaching level -2; deeper pools use the same three-level geometry.
+  Generator-v17 saves retain their original river bed and derive any breach
+  flooding from their saved excavation topology.
+- [ ] Generate underground rivers and lake outlets as connected multi-level
+  features, with explicit springs plus map-edge river inflow and outflow acting
+  as stable source and sink boundaries.
+- [ ] Add finite volume, vertical falls, pressure, flow cadence, drainage,
+  evaporation, pumps, gates, channels and other constructed hydraulic controls
+  as one conservative mutable-fluid system rather than independent wet-cell
+  effects.
+- [ ] After Early Access, model bend-dependent sediment deposition: broader
+  sand bars on the outside of selected meanders, matching inner-bank erosion,
+  islands, and local channel migration. Keep this cosmetic/geological pass
+  subordinate to deterministic crossings and settlement-access validation.
 - [ ] Add weighted ecology by climate and location character.
 - [ ] Add sparse ruins and reserve their footprints before vegetation and loose
   resources are placed.

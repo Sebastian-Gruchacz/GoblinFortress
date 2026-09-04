@@ -275,11 +275,11 @@ public sealed class CivilizationCatalog : ICivilizationCatalog
             generation.TraitSampleKeys.Count ||
         !HasOnlyKnownFlags(
             generation.GuaranteedEquipment,
-            PersonalEquipment.WoodenHammer) ||
+            PersonalEquipment.WoodenShovel) ||
         generation.GuaranteedEquipment == PersonalEquipment.None ||
         !HasOnlyKnownFlags(
             generation.OptionalEquipment,
-            PersonalEquipment.WoodenHammer) ||
+            PersonalEquipment.WoodenShovel) ||
         generation.OptionalEquipment == PersonalEquipment.None ||
         (generation.GuaranteedEquipment & generation.OptionalEquipment) != 0 ||
         generation.OptionalEquipmentRollMaximumExclusive < 1 ||

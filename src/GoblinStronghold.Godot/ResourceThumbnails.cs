@@ -9,9 +9,13 @@ internal static class ResourceThumbnails
     private const int FoodRows = 2;
     private const string FoodAtlasPath = "res://Assets/UI/food-icons-v1.png";
     private const string WoodenHammerIconPath = "res://Assets/UI/wooden-hammer-v1.svg";
+    private const string WoodenShovelIconPath = "res://Assets/UI/wooden-shovel-v1.svg";
 
     public static Texture2D LoadWoodenHammerIcon() =>
         TextureResources.LoadRequired(WoodenHammerIconPath, "wooden hammer icon");
+
+    public static Texture2D LoadWoodenShovelIcon() =>
+        TextureResources.LoadRequired(WoodenShovelIconPath, "wooden shovel icon");
 
     public static Texture2D? TryLoadFoodAtlas()
     {
@@ -97,6 +101,11 @@ internal static class ResourceThumbnails
             return LoadWoodenHammerIcon();
         }
 
+        if (variant == ResourceVariant.EquipmentWoodenShovel)
+        {
+            return LoadWoodenShovelIcon();
+        }
+
         var spiderMaterialIcon = variant switch
         {
             ResourceVariant.SpiderVenom => ItemIcon.PrimitiveWaterskin,
@@ -112,7 +121,8 @@ internal static class ResourceThumbnails
         }
 
         if (variant != ResourceVariant.None &&
-            resource is (ResourceKind.Stone or ResourceKind.Ore or ResourceKind.Materials) &&
+            resource is (ResourceKind.Stone or ResourceKind.Ore or ResourceKind.Materials or
+                ResourceKind.Earth or ResourceKind.Sand) &&
             MaterialCatalog.TryGet(variant, out _))
         {
             return paletteTextures.Get(

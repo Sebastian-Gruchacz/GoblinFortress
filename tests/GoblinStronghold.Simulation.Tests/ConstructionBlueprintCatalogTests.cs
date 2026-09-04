@@ -203,9 +203,11 @@ public sealed class ConstructionBlueprintCatalogTests
 
         Assert.Equal(WorldToolPlacementMode.DirectionalConnection, definition.PlacementMode);
         Assert.Equal(ResourceKind.Wood, definition.RequiredResource);
-        Assert.Equal(2, definition.GetRequiredQuantity(1));
+        Assert.Equal(1, definition.GetRequiredQuantity(1));
+        Assert.Equal(20, definition.GetWorkTicks(1));
         Assert.True(definition.RetainsMaterialIdentity);
         Assert.Equal(ConstructionKind.WoodenLadder, command.Construction);
+        Assert.Equal(1, command.Amount);
         Assert.Equal(lower, command.Position);
         Assert.Equal(upper, command.EndPosition);
         Assert.Equal(ResourceVariant.OakWood, command.MaterialVariant);

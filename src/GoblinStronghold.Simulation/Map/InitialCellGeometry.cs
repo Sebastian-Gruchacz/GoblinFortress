@@ -31,7 +31,8 @@ public readonly record struct InitialCellGeometry(
     TerrainKind? Cover = null,
     CellFluidKind Fluid = CellFluidKind.None,
     int FluidDepthLevels = 0,
-    TerrainRampDirection RampDirection = TerrainRampDirection.None)
+    TerrainRampDirection RampDirection = TerrainRampDirection.None,
+    LooseMaterialKind LooseMaterial = LooseMaterialKind.None)
 {
     public bool IsSolid => Volume == CellVolumeKind.Solid;
 

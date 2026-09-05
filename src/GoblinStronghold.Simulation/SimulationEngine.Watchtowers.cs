@@ -137,8 +137,39 @@ public sealed partial class SimulationEngine
         return true;
     }
 
+    private bool TryPlanWatchtowerFoodSupply(
+        ActorState actor,
+        Dictionary<EntityId, int> sourceReservations,
+        Dictionary<EntityId, int> destinationReservations)
+    {
+        foreach (var post in _watchtowerPosts.Values.OrderBy(post => post.WatchtowerId))
+        {
+            if (!_storageZones.TryGetValue(post.FoodStorageId, out var storage) ||
+                GetStoredQuantity(storage.Id) +
+                    destinationReservations.GetValueOrDefault(storage.Id) >=
+                    storage.DesiredQuantity)
+            {
+                continue;
+            }
+
+            if (TryPlanHaulCollection(
+                    actor,
+                    sourceReservations,
+                    destinationReservations,
+                    requiredDestination: storage.Id))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool HasWatchtowerDuty(EntityId actorId) =>
         _watchtowerPosts.Values.Any(post => post.GuardIds.Contains(actorId));
+
+    private bool IsWatchtowerFoodStorage(EntityId storageId) =>
+        _watchtowerPosts.Values.Any(post => post.FoodStorageId == storageId);
 
     private IReadOnlySet<GridPosition> GetWatchtowerBedsReservedFor(EntityId actorId)
     {

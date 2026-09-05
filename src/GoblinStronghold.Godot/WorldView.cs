@@ -1568,11 +1568,12 @@ public partial class WorldView : Node2D
     {
         var center = CellCenter(position);
         var passages = _engine.World.CreateVerticalPassageSnapshot();
-        if (passages.Any(passage =>
-                passage.Kind == VerticalPassageKind.ExcavatedStairs &&
-                (passage.Lower == position || passage.Upper == position)))
+        var enclosedStairs = passages.FirstOrDefault(passage =>
+            passage.Kind == VerticalPassageKind.ExcavatedStairs &&
+            (passage.Lower == position || passage.Upper == position));
+        if (enclosedStairs != default)
         {
-            DrawEnclosedStairs(center);
+            DrawEnclosedStairs(center, connectsUp: enclosedStairs.Lower == position);
             return;
         }
 
@@ -1594,14 +1595,20 @@ public partial class WorldView : Node2D
         }
     }
 
-    private void DrawEnclosedStairs(Vector2 center)
+    private void DrawEnclosedStairs(Vector2 center, bool connectsUp)
     {
         var shadow = new Color(0.035f, 0.04f, 0.04f, 0.58f);
         var edge = new Color("9aa8b3");
+        var direction = connectsUp ? -1f : 1f;
+        var directionColor = connectsUp ? new Color("d8b36a") : new Color("7394ad");
         DrawArc(center, 6.5f, 0f, Mathf.Tau, 20, shadow, 1.2f);
         DrawArc(center, 5.5f, -Mathf.Pi * 0.8f, Mathf.Pi * 0.8f, 18, edge, 1.4f);
         DrawArc(center, 3.5f, Mathf.Pi * 0.2f, Mathf.Pi * 1.8f, 14, edge.Darkened(0.18f), 1.2f);
         DrawLine(center + new Vector2(-4f, 3f), center + new Vector2(4f, -3f), edge, 1.2f);
+        var tip = center + new Vector2(0f, 2.5f * direction);
+        var wingY = -1.4f * direction;
+        DrawLine(tip, tip + new Vector2(-2.4f, wingY), directionColor, 1.8f);
+        DrawLine(tip, tip + new Vector2(2.4f, wingY), directionColor, 1.8f);
     }
 
     private void DrawTerrainRelief(int x, int y, MapCell cell, bool drawSlopeOverlay)

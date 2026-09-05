@@ -855,7 +855,7 @@ public sealed partial class SimulationEngine
             .Select(source => new
             {
                 Source = source,
-                Available = GetAvailableSourceQuantity(source, sourceReservations),
+                Available = GetAvailableSourceQuantity(source, sourceReservations, zone),
             })
             .Where(candidate => candidate.Available > 0)
             .ToArray();
@@ -1088,16 +1088,32 @@ public sealed partial class SimulationEngine
 
     private int GetAvailableSourceQuantity(
         ItemStackState source,
-        IReadOnlyDictionary<EntityId, int> sourceReservations)
+        IReadOnlyDictionary<EntityId, int> sourceReservations,
+        StorageZoneState? destination = null)
     {
-        var protectedAtSource = source.Location.Kind == ItemLocationKind.StorageZone &&
-            _storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone)
-                ? Math.Max(0, sourceZone.DesiredQuantity -
-                    (GetStoredQuantity(sourceZone.Id) - source.Quantity))
-                : 0;
         return Math.Max(
             0,
-            source.Quantity - protectedAtSource - sourceReservations.GetValueOrDefault(source.Id));
+            source.Quantity - GetProtectedSourceQuantity(source, destination) -
+            sourceReservations.GetValueOrDefault(source.Id));
+    }
+
+    private int GetProtectedSourceQuantity(
+        ItemStackState source,
+        StorageZoneState? destination = null)
+    {
+        if (source.Location.Kind != ItemLocationKind.StorageZone ||
+            !_storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone) ||
+            destination is not null && WatchtowerDutyPolicy.CanDrawBelowSourceTarget(
+                source.Resource,
+                IsWatchtowerFoodStorage(sourceZone.Id),
+                IsWatchtowerFoodStorage(destination.Id)))
+        {
+            return 0;
+        }
+
+        return Math.Max(
+            0,
+            sourceZone.DesiredQuantity - (GetStoredQuantity(sourceZone.Id) - source.Quantity));
     }
 
     public IReadOnlyList<SimulationEvent> DrainEvents()

@@ -70,6 +70,34 @@ public partial class Main
         SetWindowTitle("GoblinRosterWindow", "windows", "tribe");
         SetWindowTitle("StatisticsWindow", "windows", "statistics");
         SetWindowTitle("StorageDetails", "windows", "storage-settings");
+        SetText<Label>("StorageDetails/Margin/Controls/MineralFilters/Label",
+            "storage-details", "mineral-filter-label");
+        SetTooltip("StorageDetails/Margin/Controls/MineralFilters",
+            "storage-details", "mineral-filter-tooltip");
+        SetText<CheckButton>(
+            "StorageDetails/Margin/Controls/MineralFilters/Choices/Sandstone",
+            "storage-details", "sandstone");
+        SetText<CheckButton>(
+            "StorageDetails/Margin/Controls/MineralFilters/Choices/Granite",
+            "storage-details", "granite");
+        SetText<CheckButton>(
+            "StorageDetails/Margin/Controls/MineralFilters/Choices/Coal",
+            "storage-details", "coal");
+        SetText<CheckButton>(
+            "StorageDetails/Margin/Controls/MineralFilters/Choices/IronOre",
+            "storage-details", "iron-ore");
+        SetText<CheckButton>("StorageDetails/Margin/Controls/PullLoose",
+            "storage-details", "request-deliveries");
+        SetText<Label>("StorageDetails/Margin/Controls/TargetRow/Label",
+            "storage-details", "target-quantity");
+        SetText<Label>("StorageDetails/Margin/Controls/PriorityRow/Label",
+            "storage-details", "local-priority-label");
+        SetText<Label>("StorageDetails/Margin/Controls/GlobalPriorityRow/Label",
+            "storage-details", "global-priority-label");
+        SetText<Label>("StorageDetails/Margin/Controls/HaulerRow/Label",
+            "storage-details", "hauler-label");
+        SetText<Label>("StorageDetails/Margin/Controls/SourceRow/Label",
+            "storage-details", "source-label");
         SetWindowTitle("ConstructionDetails", "windows", "construction-site");
         SetText<Button>("StorageDetails/Margin/Controls/Apply", "common", "apply");
         SetText<Button>("ConstructionDetails/Margin/Controls/Apply", "common", "apply");

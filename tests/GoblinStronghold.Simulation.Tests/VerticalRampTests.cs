@@ -101,6 +101,43 @@ public sealed class VerticalRampTests
     }
 
     [Fact]
+    public void EnclosedStairsCanBeCarvedThroughAConstructedFloor()
+    {
+        var seed = new WorldSeed(0x464C4F4F52535452UL);
+        var map = SwampMapGenerator.Generate(seed, width: 48, height: 48);
+        var engine = SimulationEngine.Create(
+            seed,
+            SimulationDefinitions.Foundation,
+            map,
+            initialGoblinCount: 1,
+            initialFoodStock: 30);
+        var upper =
+            (from y in Enumerable.Range(0, map.Height)
+             from x in Enumerable.Range(0, map.Width)
+             let candidate = new GridPosition(x, y, -1)
+             where engine.World.CanCarveRampDown(candidate) &&
+                   engine.World.CanBuildFloors([candidate])
+             select candidate).First();
+        engine.World.BuildFloor(
+            upper,
+            SimulationTick.Zero,
+            stone: false,
+            ResourceVariant.OakWood);
+
+        Assert.True(engine.World.CanCarveRampDown(upper));
+        Assert.True(engine.World.TryCarveVerticalRamp(
+            upper,
+            carveDown: true,
+            SimulationTick.Zero,
+            out _,
+            out _));
+        Assert.True(engine.World.HasConstructedFloorSurface(upper));
+        Assert.Contains(engine.World.ExcavatedVerticalPassages, passage =>
+            passage.Upper == upper &&
+            passage.Kind == VerticalPassageKind.ExcavatedStairs);
+    }
+
+    [Fact]
     public void StairsCanBeCarvedBelowTheFormerLevelMinusTwoBoundary()
     {
         var seed = new WorldSeed(0x4445455052414D50UL);

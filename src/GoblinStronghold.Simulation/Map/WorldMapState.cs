@@ -3062,8 +3062,8 @@ public sealed class WorldMapState
             CanOpenCaveLevelForRamp(lower) &&
             !HasVerticalPassageAt(upper) &&
             !HasVerticalPassageAt(lower) &&
-            GetWorldObjectsAt(upper).Count == 0 &&
-            GetWorldObjectsAt(lower).Count == 0;
+            !HasStairBlockingWorldObjectAt(upper) &&
+            !HasStairBlockingWorldObjectAt(lower);
     }
 
     public bool CanCarveRampUp(GridPosition lower)
@@ -3081,9 +3081,14 @@ public sealed class WorldMapState
             upperCanBeOpened &&
             !HasVerticalPassageAt(lower) &&
             !HasVerticalPassageAt(upper) &&
-            GetWorldObjectsAt(lower).Count == 0 &&
-            (upper.Z < 0 || GetWorldObjectsAt(upper).Count == 0);
+            !HasStairBlockingWorldObjectAt(lower) &&
+            (upper.Z < 0 || !HasStairBlockingWorldObjectAt(upper));
     }
+
+    private bool HasStairBlockingWorldObjectAt(GridPosition position) =>
+        GetWorldObjectsAt(position).Any(worldObject =>
+            worldObject.GetAbsoluteParts().Any(part =>
+                part.Position == position && part.Part.Kind != WorldObjectPartKind.Floor));
 
     private bool CanOpenCaveLevelForRamp(GridPosition position)
     {

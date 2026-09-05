@@ -188,6 +188,17 @@ public sealed class ConstructionRemovalTests
         var actorPositions = engine.CreateSnapshot().Actors
             .Select(actor => actor.Position)
             .ToHashSet();
+        engine.QueueCommand(SimulationCommand.CreateStorageZone(
+            engine.CurrentTick.Next(),
+            sequence: 1,
+            engine.Map.GoblinSpawn,
+            ResourceKind.Food,
+            capacity: 12));
+        AdvanceUntil(engine, () => engine.CreateSnapshot().StorageZones
+            .Any(zone => zone.Position == engine.Map.GoblinSpawn && zone.StoredQuantity == 12));
+        var protectedFoodStorage = engine.CreateSnapshot().StorageZones
+            .Single(zone => zone.Position == engine.Map.GoblinSpawn);
+        Assert.Equal(12, protectedFoodStorage.DesiredQuantity);
         var position = Enumerable.Range(0, engine.Map.Width - 1)
             .SelectMany(x => Enumerable.Range(0, engine.Map.Height - 1)
                 .Select(y => new GridPosition(x, y)))
@@ -204,7 +215,7 @@ public sealed class ConstructionRemovalTests
             });
 
         engine.QueueCommand(SimulationCommand.BuildWoodenWatchtower(
-            engine.CurrentTick.Next(), sequence: 1, position));
+            engine.CurrentTick.Next(), sequence: 2, position));
         engine.AdvanceTicks(1);
 
         var site = Assert.Single(engine.CreateSnapshot().ConstructionSites);
@@ -265,6 +276,9 @@ public sealed class ConstructionRemovalTests
         AdvanceUntil(engine, () => engine.CreateSnapshot().StorageZones
             .Single(zone => zone.Id == post.FoodStorageId).StoredQuantity > 0,
             maximumTicks: 2_000);
+        var stockedTowerSnapshot = engine.CreateSnapshot();
+        Assert.True(stockedTowerSnapshot.StorageZones
+            .Single(zone => zone.Id == protectedFoodStorage.Id).StoredQuantity < 12);
         var secondPosition = Enumerable.Range(0, engine.Map.Width - 1)
             .SelectMany(x => Enumerable.Range(0, engine.Map.Height - 1)
                 .Select(y => new GridPosition(x, y)))

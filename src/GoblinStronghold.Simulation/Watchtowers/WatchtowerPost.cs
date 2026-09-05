@@ -1,4 +1,5 @@
 using GoblinStronghold.Simulation.Map;
+using GoblinStronghold.Simulation.Resources;
 
 namespace GoblinStronghold.Simulation.Watchtowers;
 
@@ -15,6 +16,14 @@ public static class WatchtowerDutyPolicy
     public const int RangedAttackRangeMultiplier = 2;
     public const int FoodStorageCapacity = 12;
     public const int FoodStorageTarget = 6;
+
+    public static bool CanDrawBelowSourceTarget(
+        ResourceKind resource,
+        bool sourceIsWatchtowerStorage,
+        bool destinationIsWatchtowerStorage) =>
+        resource == ResourceKind.Food &&
+        destinationIsWatchtowerStorage &&
+        !sourceIsWatchtowerStorage;
 
     public static IReadOnlyList<GridPosition> GetDutyPositions(WorldObjectSnapshot watchtower)
     {

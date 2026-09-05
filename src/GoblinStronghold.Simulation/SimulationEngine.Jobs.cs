@@ -259,6 +259,13 @@ public sealed partial class SimulationEngine
                 {
                     // A named hauler services assigned stockpiles before public settlement work.
                 }
+                else if (TryPlanWatchtowerFoodSupply(
+                             actor,
+                             reservedSourceQuantities,
+                             reservedDestinationQuantities))
+                {
+                    // Built-in guard provisions are finite service work, ahead of public jobs.
+                }
                 else if ((GetWorkTypePriority(WorkDesignationKind.Scout) >= StoragePriority.High ||
                           GetWorkDesignationPriority(WorkDesignationKind.Scout) >= StoragePriority.High) &&
                          activeExplorers < GoblinSpatialBehavior.MaximumExplorers &&
@@ -4294,16 +4301,7 @@ public sealed partial class SimulationEngine
                      (stack.Resource != ResourceKind.Water ||
                       actor.Equipment.HasFlag(PersonalEquipment.WoodenBucket))))
         {
-            var protectedAtSource = source.Location.Kind == ItemLocationKind.StorageZone &&
-                _storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone)
-                    ? Math.Max(0, sourceZone.DesiredQuantity -
-                        (GetStored(sourceZone.Id) - source.Quantity))
-                    : 0;
-            var availableSource = Math.Max(
-                0,
-                source.Quantity - protectedAtSource -
-                    sourceReservations.GetValueOrDefault(source.Id));
-            if (availableSource <= 0)
+            if (source.Quantity - sourceReservations.GetValueOrDefault(source.Id) <= 0)
             {
                 continue;
             }
@@ -4355,6 +4353,14 @@ public sealed partial class SimulationEngine
             {
                 if (source.Location.Kind == ItemLocationKind.StorageZone &&
                     source.Location.OwnerId == zone.Id)
+                {
+                    continue;
+                }
+                var availableSource = GetAvailableSourceQuantity(
+                    source,
+                    sourceReservations,
+                    zone);
+                if (availableSource <= 0)
                 {
                     continue;
                 }
@@ -4812,12 +4818,8 @@ public sealed partial class SimulationEngine
                 return false;
             }
 
-            var protectedAtSource = source.Location.Kind == ItemLocationKind.StorageZone &&
-                _storageZones.TryGetValue(source.Location.OwnerId, out var sourceZone)
-                    ? Math.Max(0, sourceZone.DesiredQuantity -
-                        (GetStoredQuantity(sourceZone.Id) - source.Quantity))
-                    : 0;
-            return source.Quantity - protectedAtSource >= actor.ReservedQuantity &&
+            return source.Quantity - GetProtectedSourceQuantity(source, zone) >=
+                actor.ReservedQuantity &&
                 CanStoreStack(zone, source, actor.ReservedQuantity);
         }
 

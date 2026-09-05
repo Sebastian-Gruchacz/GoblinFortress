@@ -5898,14 +5898,15 @@ public partial class Main : Node
 
         _storedResourcesSignature = signature;
         var total = snapshot.ResourceInventory.Sum(item => item.StoredQuantity);
-        _storedResourcesSummary.Text =
-            $"Fizyczna zawartość {snapshot.StorageZones.Count} magazynów • razem {total:N0} szt.";
+        _storedResourcesSummary.Text = UiFormat(
+            "resource-reports", "stored-summary",
+            snapshot.StorageZones.Count, total);
         RebuildResourceGrid(
             _storedResourcesGrid,
             snapshot,
             item => item.StoredQuantity,
             breakdown,
-            "w magazynach",
+            "stored-location",
             _storedResourcesDetailed.ButtonPressed);
     }
 
@@ -5923,14 +5924,14 @@ public partial class Main : Node
 
         _looseResourcesSignature = signature;
         var total = snapshot.ResourceInventory.Sum(item => item.KnownLooseQuantity);
-        _looseResourcesSummary.Text =
-            $"Znane towary leżące na ziemi • razem {total:N0} szt. • osobna pula dla tragarzy.";
+        _looseResourcesSummary.Text = UiFormat(
+            "resource-reports", "loose-summary", total);
         RebuildResourceGrid(
             _looseResourcesGrid,
             snapshot,
             item => item.KnownLooseQuantity,
             breakdown,
-            "na ziemi",
+            "ground-location",
             _looseResourcesDetailed.ButtonPressed);
     }
 
@@ -5939,7 +5940,7 @@ public partial class Main : Node
         SimulationSnapshot snapshot,
         Func<ResourceInventorySnapshot, int> quantitySelector,
         IReadOnlyList<ResourceBreakdownTotal> breakdown,
-        string location,
+        string locationKey,
         bool detailed)
     {
         foreach (var child in grid.GetChildren())
@@ -6008,7 +6009,9 @@ public partial class Main : Node
                     total.FoodKind,
                     total.Variant,
                     total.Quantity,
-                    $"{name}: {total.Quantity:N0} szt. {location}");
+                    UiFormat(
+                        "resource-reports", "quantity-at-location",
+                        name, total.Quantity, Ui("resource-reports", locationKey)));
             }
             return;
         }
@@ -6025,7 +6028,7 @@ public partial class Main : Node
                     item,
                     quantity,
                     breakdown,
-                    location));
+                    locationKey));
         }
     }
 
@@ -6069,9 +6072,12 @@ public partial class Main : Node
         ResourceInventorySnapshot item,
         int quantity,
         IReadOnlyList<ResourceBreakdownTotal> breakdown,
-        string location)
+        string locationKey)
     {
-        var tooltip = $"{DescribeResource(item.Resource)}: {quantity:N0} szt. {location}";
+        var tooltip = UiFormat(
+            "resource-reports", "quantity-at-location",
+            DescribeResource(item.Resource), quantity,
+            Ui("resource-reports", locationKey));
         var details = breakdown
             .Where(total => total.Resource == item.Resource)
             .Select(total =>
@@ -6081,7 +6087,9 @@ public partial class Main : Node
                     : total.Variant != ResourceVariant.None
                         ? DescribeResourceVariant(total.Variant)
                         : DescribeResource(item.Resource);
-                return $"{name}: {total.Quantity:N0}";
+                return UiFormat(
+                    "resource-reports", "quantity",
+                    name, total.Quantity);
             })
             .ToArray();
         return details.Length == 0
@@ -6143,68 +6151,84 @@ public partial class Main : Node
         var explored = snapshot.Visibility.Count(state => state != CellVisibility.Unknown);
         var stored = snapshot.ResourceInventory.Sum(item => item.StoredQuantity);
         var loose = snapshot.ResourceInventory.Sum(item => item.KnownLooseQuantity);
-        _statisticsText.Text =
-            $"Plemię: {snapshot.Actors.Count} • pąki {snapshot.GoblinBuds.Count}\n" +
-            $"Żywność: {needs.FoodUnits}/{needs.ExpectedDailyFoodUnits} szt. " +
-            $"(zapas / przewidywana doba)\n" +
-            $"Miejsca do spania: {needs.ShelterCapacity}/{snapshot.Actors.Count}\n" +
-            $"Magazyny: {needs.StoredUnits}/{needs.StorageCapacity} • " +
-            $"luźne towary {needs.KnownLooseUnits}\n" +
-            $"Wilgotne miejsca lęgowe: {needs.SuitableMoistSites}\n" +
-            $"Zdrowi robotnicy: {needs.HealthyWorkers}/{snapshot.Actors.Count} • " +
-            $"otwarte prace {needs.WorkDemand}\n" +
-            $"Rozmnażanie: {DescribeReproductionReadiness(needs.Reproduction)}\n" +
-            $"Wrogość wsi: {needs.HumanHostility}/100\n\n" +
-            $"Zwierzęta: zające {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.MarshHare)} " +
-            $"• dziki {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.SwampBoar)} " +
-            $"• pająki jaskiniowe {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.CaveSpider)} " +
-            $"• głębinowce {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.DeepCrawler)} " +
-            $"• żmije magmowe {snapshot.Animals.Count(animal => animal.Kind == AnimalKind.MagmaWyrm)}\n" +
-            $"Magazyny: {snapshot.StorageZones.Count} • towary {stored:N0}\n" +
-            $"Znane luźne towary: {loose:N0}\n" +
-            $"Budowy: {snapshot.ConstructionSites.Count}\n" +
-            $"Zlecenia terenowe: {snapshot.WorkDesignations.Count}\n" +
-            $"Odkryta mapa: {explored:N0}/{snapshot.Visibility.Count:N0}\n\n" +
-            $"Ticki: {metrics.TicksExecuted:N0}\n" +
-            $"Ostatni tick: {metrics.LastTickDuration.TotalMilliseconds:N3} ms\n" +
-            $"Średni tick: {averageTickMilliseconds:N3} ms\n" +
-            $"Etapy: świat {stages.World.TotalMilliseconds:N2} • prace " +
-            $"{stages.ActorJobs.TotalMilliseconds:N2} • zwierzęta " +
-            $"{stages.Animals.TotalMilliseconds:N2} • ludzie " +
-            $"{stages.HumanVillage.TotalMilliseconds:N2} • widoczność " +
-            $"{stages.Visibility.TotalMilliseconds:N2} ms\n" +
-            $"Prace: planowanie {jobs.IdlePlanning.TotalMilliseconds:N2} • aktywne " +
-            $"{jobs.ActiveJobs.TotalMilliseconds:N2} • potrzeby " +
-            $"{jobs.NeedInterrupts.TotalMilliseconds:N2} ms\n" +
-            $"Aktywne stacki: {metrics.ItemStacks:N0}\n" +
-            $"Obiekty świata: {metrics.WorldObjects:N0}\n" +
-            $"Ścieżki: {navigation.Searches:N0}/{navigation.Requests:N0} wyszukań " +
-            $"• cache {cacheHitRate:N1}% ({navigation.CachedRoutes:N0})";
+        _statisticsText.Text = string.Join("\n\n",
+            UiFormat(
+                "statistics-report", "tribe",
+                snapshot.Actors.Count,
+                snapshot.GoblinBuds.Count,
+                needs.FoodUnits,
+                needs.ExpectedDailyFoodUnits,
+                needs.ShelterCapacity,
+                needs.StoredUnits,
+                needs.StorageCapacity,
+                needs.KnownLooseUnits,
+                needs.SuitableMoistSites,
+                needs.HealthyWorkers,
+                needs.WorkDemand,
+                DescribeReproductionReadiness(needs.Reproduction),
+                needs.HumanHostility),
+            UiFormat(
+                "statistics-report", "world",
+                snapshot.Animals.Count(animal => animal.Kind == AnimalKind.MarshHare),
+                snapshot.Animals.Count(animal => animal.Kind == AnimalKind.SwampBoar),
+                snapshot.Animals.Count(animal => animal.Kind == AnimalKind.CaveSpider),
+                snapshot.Animals.Count(animal => animal.Kind == AnimalKind.DeepCrawler),
+                snapshot.Animals.Count(animal => animal.Kind == AnimalKind.MagmaWyrm),
+                snapshot.StorageZones.Count,
+                stored,
+                loose,
+                snapshot.ConstructionSites.Count,
+                snapshot.WorkDesignations.Count,
+                explored,
+                snapshot.Visibility.Count),
+            UiFormat(
+                "statistics-report", "performance",
+                metrics.TicksExecuted,
+                metrics.LastTickDuration.TotalMilliseconds,
+                averageTickMilliseconds,
+                stages.World.TotalMilliseconds,
+                stages.ActorJobs.TotalMilliseconds,
+                stages.Animals.TotalMilliseconds,
+                stages.HumanVillage.TotalMilliseconds,
+                stages.Visibility.TotalMilliseconds,
+                jobs.IdlePlanning.TotalMilliseconds,
+                jobs.ActiveJobs.TotalMilliseconds,
+                jobs.NeedInterrupts.TotalMilliseconds,
+                metrics.ItemStacks,
+                metrics.WorldObjects,
+                navigation.Searches,
+                navigation.Requests,
+                cacheHitRate,
+                navigation.CachedRoutes));
     }
 
-    private static string DescribeReproductionReadiness(
+    private string DescribeReproductionReadiness(
         GoblinReproductionReadinessSnapshot readiness) => readiness.Kind switch
     {
         GoblinReproductionReadinessKind.Ready =>
-            $"gotowe ({readiness.AvailableFood}/{readiness.RequiredFood} żywności, " +
-            $"rodzice {readiness.EligibleParents}, miejsca {readiness.SuitableMoistSites})",
+            UiFormat("statistics-report", "reproduction-ready",
+                readiness.AvailableFood, readiness.RequiredFood,
+                readiness.EligibleParents, readiness.SuitableMoistSites),
         GoblinReproductionReadinessKind.InsufficientFood =>
-            $"za mało dostępnej żywności ({readiness.AvailableFood}/{readiness.RequiredFood})",
+            UiFormat("statistics-report", "reproduction-food",
+                readiness.AvailableFood, readiness.RequiredFood),
         GoblinReproductionReadinessKind.InsufficientShelter =>
-            "brak wolnego miejsca w schronieniu",
+            Ui("statistics-report", "reproduction-shelter"),
         GoblinReproductionReadinessKind.InsufficientAdultPopulation =>
-            "za mało dorosłych goblinów do samoistnego pączkowania",
+            Ui("statistics-report", "reproduction-adults"),
         GoblinReproductionReadinessKind.UnsafeConditions =>
-            "trwa wyprawa — warunki nie są bezpieczne",
+            Ui("statistics-report", "reproduction-unsafe"),
         GoblinReproductionReadinessKind.JuvenileCapacityReached =>
-            "plemię wychowuje już maksymalną liczbę młodzików",
-        GoblinReproductionReadinessKind.NoMoistSpace => "brak wolnego wilgotnego miejsca w chacie",
+            Ui("statistics-report", "reproduction-juveniles"),
+        GoblinReproductionReadinessKind.NoMoistSpace =>
+            Ui("statistics-report", "reproduction-moist-space"),
         GoblinReproductionReadinessKind.NoEligibleParent =>
-            "brak wolnego, zdrowego, najedzonego i wypoczętego rodzica",
+            Ui("statistics-report", "reproduction-parent"),
         GoblinReproductionReadinessKind.BudWaitingForCare =>
-            $"pąk czeka na opiekuna ({readiness.UntendedBuds})",
-        GoblinReproductionReadinessKind.BudBeingTended => "opiekun zajmuje się pąkiem",
-        _ => "stan nieznany",
+            UiFormat("statistics-report", "reproduction-waiting", readiness.UntendedBuds),
+        GoblinReproductionReadinessKind.BudBeingTended =>
+            Ui("statistics-report", "reproduction-tended"),
+        _ => Ui("statistics-report", "reproduction-unknown"),
     };
 
     private static string DescribeAnimal(AnimalSnapshot animal) =>
@@ -6327,17 +6351,26 @@ public partial class Main : Node
         var assignedHauler = snapshot.Actors.FirstOrDefault(actor =>
             actor.Id == zone.AssignedHaulerId);
         var haulerDescription = assignedHauler.Id == EntityId.None
-            ? "publiczny dispatcher"
+            ? Ui("storage-details", "hauler-public")
             : $"{assignedHauler.Name} ({assignedHauler.Id})";
         var sourceZone = snapshot.StorageZones.FirstOrDefault(candidate =>
             candidate.Id == zone.SourceStorageZoneId);
         var sourceDescription = sourceZone.Id == EntityId.None
-            ? "teren i nadwyżki dowolnych składów"
+            ? Ui("storage-details", "source-any-surplus")
             : sourceZone.AcceptedResource == ResourceKind.Water
-                ? $"beczka {sourceZone.Id} przy {sourceZone.Position} " +
-                  $"({sourceZone.StoredQuantity}/{sourceZone.Capacity}, " +
-                  $"rezerwa {sourceZone.DesiredQuantity})"
-                : $"skład {sourceZone.Id} przy {sourceZone.Position}";
+                ? UiFormat(
+                    "storage-details",
+                    "source-water-barrel",
+                    sourceZone.Id,
+                    sourceZone.Position,
+                    sourceZone.StoredQuantity,
+                    sourceZone.Capacity,
+                    sourceZone.DesiredQuantity)
+                : UiFormat(
+                    "storage-details",
+                    "source-storage",
+                    sourceZone.Id,
+                    sourceZone.Position);
         var hasGlobalResourcePriority = zone.AcceptedResource is not (
             ResourceKind.Materials or ResourceKind.Any);
         var globalPriority = hasGlobalResourcePriority
@@ -6345,30 +6378,51 @@ public partial class Main : Node
                 .Single(priority => priority.Resource == zone.AcceptedResource)
                 .Priority
             : StoragePriority.Normal;
-        var mineralFilterDescription = zone.AcceptedResource == ResourceKind.Stone
-            ? $"Przyjmowany urobek: {DescribeMineralFilter(zone.MineralFilter)}.\n"
-            : string.Empty;
-        _storageSummary.Text = $"Obszar: {zone.StorageAreaId} • " +
-            (zone.LogisticsNetworkId == EntityId.None
-                ? "sieć Default\n"
-                : $"sieć {zone.LogisticsNetworkId}\n") +
-            $"Stan: {zone.StoredQuantity}/{zone.Capacity}\n" +
-            (zone.SeparatesItemTypes
-                ? $"Sloty rodzajowe: {zone.UsedTypeSlots}/{zone.TypeSlotCount}, " +
-                  $"stos do {zone.StackCapacity} szt.\n"
-                : string.Empty) +
-            mineralFilterDescription +
-            (zone.DesiredQuantity == 0
-                ? "Automatyczne dostawy wyłączone.\n"
-                : $"Żądanie dostawy do {zone.DesiredQuantity} szt.\n") +
-            $"Status dostaw: {DescribeStorageDelivery(delivery, assignedHauler)}\n" +
-            $"Transport: {haulerDescription}.\n" +
-            $"Źródło: {sourceDescription}.\n" +
-            $"Priorytet lokalny: {DescribeStoragePriority(zone.Priority)}.\n" +
-            (hasGlobalResourcePriority
-                ? $"Priorytet {DescribeResource(zone.AcceptedResource)} w plemieniu: " +
-                  $"{DescribeStoragePriority(globalPriority)}."
-                : "Priorytety materiałów są ustalane osobno dla każdego zasobu.");
+        var summaryLines = new List<string>
+        {
+            zone.LogisticsNetworkId == EntityId.None
+                ? UiFormat("storage-details", "summary-area-default-network", zone.StorageAreaId)
+                : UiFormat("storage-details", "summary-area-network",
+                    zone.StorageAreaId, zone.LogisticsNetworkId),
+            UiFormat("storage-details", "summary-state", zone.StoredQuantity, zone.Capacity),
+        };
+        if (zone.SeparatesItemTypes)
+        {
+            summaryLines.Add(UiFormat(
+                "storage-details",
+                "summary-type-slots",
+                zone.UsedTypeSlots,
+                zone.TypeSlotCount,
+                zone.StackCapacity));
+        }
+        if (zone.AcceptedResource == ResourceKind.Stone)
+        {
+            summaryLines.Add(UiFormat(
+                "storage-details",
+                "accepted-minerals",
+                DescribeMineralFilter(zone.MineralFilter)));
+        }
+        summaryLines.Add(zone.DesiredQuantity == 0
+            ? Ui("storage-details", "deliveries-disabled")
+            : UiFormat("storage-details", "deliveries-requested", zone.DesiredQuantity));
+        summaryLines.Add(UiFormat(
+            "storage-details",
+            "delivery-status",
+            DescribeStorageDelivery(delivery, assignedHauler)));
+        summaryLines.Add(UiFormat("storage-details", "transport", haulerDescription));
+        summaryLines.Add(UiFormat("storage-details", "source", sourceDescription));
+        summaryLines.Add(UiFormat(
+            "storage-details",
+            "local-priority",
+            DescribeStoragePriority(zone.Priority)));
+        summaryLines.Add(hasGlobalResourcePriority
+            ? UiFormat(
+                "storage-details",
+                "tribe-priority",
+                DescribeResource(zone.AcceptedResource),
+                DescribeStoragePriority(globalPriority))
+            : Ui("storage-details", "per-resource-priorities"));
+        _storageSummary.Text = string.Join('\n', summaryLines);
         if (_storageSettingsDirty)
         {
             return;
@@ -6397,7 +6451,7 @@ public partial class Main : Node
 
             _storageHauler.Clear();
             _storageHaulerActorIds.Clear();
-            _storageHauler.AddItem("Dowolny wolny goblin");
+            _storageHauler.AddItem(Ui("storage-details", "any-free-goblin"));
             _storageHaulerActorIds.Add(EntityId.None);
             foreach (var actor in snapshot.Actors.OrderBy(actor => actor.Id))
             {
@@ -6410,7 +6464,7 @@ public partial class Main : Node
 
             _storageSource.Clear();
             _storageSourceZoneIds.Clear();
-            _storageSource.AddItem("Dowolne źródło");
+            _storageSource.AddItem(Ui("storage-details", "any-source"));
             _storageSourceZoneIds.Add(EntityId.None);
             foreach (var candidate in snapshot.StorageZones
                          .Where(candidate => candidate.Id != zone.Id &&
@@ -6419,10 +6473,19 @@ public partial class Main : Node
                          .OrderBy(candidate => candidate.Id))
             {
                 _storageSource.AddItem(candidate.AcceptedResource == ResourceKind.Water
-                    ? $"Beczka {candidate.Id} • {candidate.Position} • " +
-                      $"{candidate.StoredQuantity}/{candidate.Capacity} • " +
-                      $"rezerwa {candidate.DesiredQuantity}"
-                    : $"Skład {candidate.Id} • {candidate.Position}");
+                    ? UiFormat(
+                        "storage-details",
+                        "source-choice-water-barrel",
+                        candidate.Id,
+                        candidate.Position,
+                        candidate.StoredQuantity,
+                        candidate.Capacity,
+                        candidate.DesiredQuantity)
+                    : UiFormat(
+                        "storage-details",
+                        "source-choice-storage",
+                        candidate.Id,
+                        candidate.Position));
                 _storageSourceZoneIds.Add(candidate.Id);
             }
 
@@ -6449,8 +6512,8 @@ public partial class Main : Node
             .ThenBy(group => group.Key.Variant)
             .ToArray();
         _storageContentsLabel.Text = groups.Length == 0
-            ? "Zawartość: pusty"
-            : $"Zawartość • {groups.Length} zajętych slotów:";
+            ? Ui("storage-details", "contents-empty")
+            : UiFormat("storage-details", "contents-used-slots", groups.Length);
         _storageContentsGrid.Visible = groups.Length > 0;
         foreach (var group in groups)
         {
@@ -6462,7 +6525,7 @@ public partial class Main : Node
             var tile = new PanelContainer
             {
                 CustomMinimumSize = new Vector2(138, 76),
-                TooltipText = $"{name}: {quantity:N0} szt.",
+                TooltipText = UiFormat("storage-details", "quantity-units", name, quantity),
             };
             var content = new VBoxContainer
             {
@@ -6499,14 +6562,17 @@ public partial class Main : Node
         }
     }
 
-    private static string DescribeStorageWindowTitle(StorageZoneSnapshot zone) =>
+    private string DescribeStorageWindowTitle(StorageZoneSnapshot zone) =>
         zone.ProviderKind switch
         {
-            StorageProviderKind.WaterBarrel => "▣ Beczka na wodę",
-            StorageProviderKind.WoodenBox => "□ Drewniana skrzynka",
-            StorageProviderKind.WoodenChest => "▤ Drewniana skrzynia",
-            StorageProviderKind.WoodenBulkBin => "▥ Drewniany zasobnik masowy",
-            _ => $"◇ Skład: {DescribeResource(zone.AcceptedResource)}",
+            StorageProviderKind.WaterBarrel => Ui("storage-details", "title-water-barrel"),
+            StorageProviderKind.WoodenBox => Ui("storage-details", "title-wooden-box"),
+            StorageProviderKind.WoodenChest => Ui("storage-details", "title-wooden-chest"),
+            StorageProviderKind.WoodenBulkBin => Ui("storage-details", "title-bulk-bin"),
+            _ => UiFormat(
+                "storage-details",
+                "title-storage",
+                DescribeResource(zone.AcceptedResource)),
         };
 
     private void MarkStorageSettingsDirty()
@@ -6517,30 +6583,32 @@ public partial class Main : Node
         }
     }
 
-    private static string DescribeStorageDelivery(
+    private string DescribeStorageDelivery(
         StorageDeliveryDiagnostic delivery,
         ActorSnapshot assignedHauler) => delivery.State switch
     {
-        StorageDeliveryState.Disabled => "wyłączone",
-        StorageDeliveryState.Satisfied => "cel osiągnięty",
+        StorageDeliveryState.Disabled => Ui("storage-details", "delivery-disabled"),
+        StorageDeliveryState.Satisfied => Ui("storage-details", "delivery-satisfied"),
         StorageDeliveryState.InTransit =>
-            $"w drodze {delivery.InTransitQuantity} szt. (brakuje {delivery.RequestedQuantity})",
-        StorageDeliveryState.NoAllowedSource => "brak dozwolonego źródła z tym zasobem",
+            UiFormat("storage-details", "delivery-in-transit",
+                delivery.InTransitQuantity, delivery.RequestedQuantity),
+        StorageDeliveryState.NoAllowedSource => Ui("storage-details", "delivery-no-source"),
         StorageDeliveryState.NoSurplus =>
-            $"źródła istnieją, ale nie mają nadwyżki (brakuje {delivery.RequestedQuantity})",
+            UiFormat("storage-details", "delivery-no-surplus", delivery.RequestedQuantity),
         StorageDeliveryState.DestinationBlocked =>
-            "brak wolnego slotu dla dostępnego rodzaju zasobu",
+            Ui("storage-details", "delivery-blocked"),
         StorageDeliveryState.NoReachableSource =>
-            $"nadwyżka {delivery.AvailableSourceQuantity} szt. istnieje, ale nie ma drogi",
-        StorageDeliveryState.NoAvailableHauler => "brak goblina mogącego obsłużyć dostawę",
+            UiFormat("storage-details", "delivery-no-route", delivery.AvailableSourceQuantity),
+        StorageDeliveryState.NoAvailableHauler => Ui("storage-details", "delivery-no-hauler"),
         StorageDeliveryState.NoAvailableTool =>
-            "brak dostępnego tragarza z drewnianym wiadrem",
+            Ui("storage-details", "delivery-no-tool"),
         StorageDeliveryState.AssignedHaulerBusy => assignedHauler.Id == EntityId.None
-            ? "przypisany tragarz jest zajęty"
-            : $"{assignedHauler.Name} jest zajęty: {DescribeJob(assignedHauler.Job)}",
+            ? Ui("storage-details", "delivery-assigned-busy")
+            : UiFormat("storage-details", "delivery-assigned-name-busy",
+                assignedHauler.Name, DescribeJob(assignedHauler.Job)),
         StorageDeliveryState.WaitingForHauler =>
-            $"oczekuje na tragarza; dostępne {delivery.AvailableSourceQuantity} szt.",
-        _ => "nieznany",
+            UiFormat("storage-details", "delivery-waiting", delivery.AvailableSourceQuantity),
+        _ => Ui("storage-details", "delivery-unknown"),
     };
 
     private void ApplyStorageSettings()
@@ -6627,43 +6695,58 @@ public partial class Main : Node
                 mineralFilter));
         }
         var haulerDescription = assignedHaulerId == EntityId.None
-            ? "dowolny wolny goblin"
+            ? Ui("storage-details", "settings-hauler-any")
             : snapshot.Actors.First(actor => actor.Id == assignedHaulerId).Name;
         var sourceDescription = sourceZoneId == EntityId.None
-            ? "dowolne źródło"
-            : $"skład {sourceZoneId}";
+            ? Ui("storage-details", "settings-source-any")
+            : UiFormat("storage-details", "settings-source-storage", sourceZoneId);
         _inspector.Text = desired == 0
-            ? $"Skład {zone.Id}: wyłączono automatyczne dostawy; transport: {haulerDescription}; źródło: {sourceDescription}; priorytet lokalny: {DescribeStoragePriority(priority)}; globalny: {DescribeStoragePriority(globalPriority)}."
-            : $"Skład {zone.Id}: żądaj zasobów do {desired}; transport: {haulerDescription}; źródło: {sourceDescription}; priorytet lokalny: {DescribeStoragePriority(priority)}; globalny: {DescribeStoragePriority(globalPriority)}.";
+            ? UiFormat(
+                "storage-details",
+                "settings-disabled",
+                zone.Id,
+                haulerDescription,
+                sourceDescription,
+                DescribeStoragePriority(priority),
+                DescribeStoragePriority(globalPriority))
+            : UiFormat(
+                "storage-details",
+                "settings-enabled",
+                zone.Id,
+                desired,
+                haulerDescription,
+                sourceDescription,
+                DescribeStoragePriority(priority),
+                DescribeStoragePriority(globalPriority));
     }
 
-    private static string DescribeMineralFilter(MineralStorageFilter filter)
+    private string DescribeMineralFilter(MineralStorageFilter filter)
     {
         if (filter == MineralStorageFilter.None)
         {
-            return "nic (dotychczasowa zawartość pozostaje)";
+            return Ui("storage-details", "mineral-none");
         }
         if (filter == MineralStorageFilter.All)
         {
-            return "wszystkie rodzaje";
+            return Ui("storage-details", "mineral-all");
         }
 
         var names = new List<string>(4);
         if (filter.HasFlag(MineralStorageFilter.Sandstone))
         {
-            names.Add("piaskowiec");
+            names.Add(Ui("storage-details", "sandstone"));
         }
         if (filter.HasFlag(MineralStorageFilter.Granite))
         {
-            names.Add("granit");
+            names.Add(Ui("storage-details", "granite"));
         }
         if (filter.HasFlag(MineralStorageFilter.Coal))
         {
-            names.Add("węgiel");
+            names.Add(Ui("storage-details", "coal"));
         }
         if (filter.HasFlag(MineralStorageFilter.IronOre))
         {
-            names.Add("ruda żelaza");
+            names.Add(Ui("storage-details", "iron-ore"));
         }
 
         return string.Join(", ", names);
@@ -7590,7 +7673,7 @@ public partial class Main : Node
         _logisticsWindow = new Window
         {
             Name = "LogisticsWindow",
-            Title = "Logistyka twierdzy",
+            Title = Ui("logistics", "title"),
             Size = new Vector2I(920, 700),
             MinSize = new Vector2I(680, 440),
             Unresizable = false,
@@ -7621,14 +7704,14 @@ public partial class Main : Node
         content.AddChild(_logisticsSummary);
         var createNetwork = new Button
         {
-            Text = "Utwórz sieć specjalistyczną",
+            Text = Ui("logistics", "create-network"),
             SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
         };
         createNetwork.Pressed += () =>
         {
             QueueLogisticsCommand(SimulationCommand.CreateLogisticsNetwork(
                 _engine.CurrentTick.Next(), _commandSequence++));
-            _inspector.Text = "Zlecono utworzenie nowej sieci logistycznej.";
+            _inspector.Text = Ui("logistics", "create-network-ordered");
         };
         content.AddChild(createNetwork);
         var scroll = new ScrollContainer
@@ -7640,7 +7723,11 @@ public partial class Main : Node
         _logisticsRows = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         _logisticsRows.AddThemeConstantOverride("separation", 10);
         scroll.AddChild(_logisticsRows);
-        var close = new Button { Text = "Zamknij", SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd };
+        var close = new Button
+        {
+            Text = Ui("logistics", "close"),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
+        };
         close.Pressed += _logisticsWindow.Hide;
         content.AddChild(close);
     }
@@ -7682,10 +7769,12 @@ public partial class Main : Node
             child.QueueFree();
         }
 
-        _logisticsSummary.Text =
-            $"Sieci: {snapshot.LogisticsNetworks.Count} • obszary: {snapshot.StorageAreas.Count} • " +
-            $"pojemniki i składy: {snapshot.StorageZones.Count}.\n" +
-            "Default automatycznie korzysta ze wszystkich dorosłych, którzy nie należą do sieci specjalistycznej.";
+        _logisticsSummary.Text = UiFormat(
+            "logistics",
+            "summary",
+            snapshot.LogisticsNetworks.Count,
+            snapshot.StorageAreas.Count,
+            snapshot.StorageZones.Count);
         foreach (var network in snapshot.LogisticsNetworks.OrderBy(network => network.Id))
         {
             var panel = new PanelContainer();
@@ -7697,18 +7786,26 @@ public partial class Main : Node
             section.AddChild(heading);
             heading.AddChild(new Label
             {
-                Text = network.IsDefault ? "Sieć domyślna" : $"Sieć {network.Id}",
+                Text = network.IsDefault
+                    ? Ui("logistics", "default-network")
+                    : UiFormat("logistics", "network", network.Id),
                 CustomMinimumSize = new Vector2(130, 0),
             });
             var name = new LineEdit
             {
-                Text = network.Name,
+                Text = network.IsDefault
+                    ? Ui("logistics", "default-network-name")
+                    : network.Name,
                 MaxLength = 40,
                 Editable = !network.IsDefault,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             };
             heading.AddChild(name);
-            var rename = new Button { Text = "Zmień nazwę", Disabled = network.IsDefault };
+            var rename = new Button
+            {
+                Text = Ui("logistics", "rename"),
+                Disabled = network.IsDefault,
+            };
             rename.Pressed += () =>
             {
                 if (!string.IsNullOrWhiteSpace(name.Text))
@@ -7722,20 +7819,22 @@ public partial class Main : Node
             {
                 var delete = new Button
                 {
-                    Text = "Usuń",
-                    TooltipText = "Obszary wrócą do sieci Default, a tragarze zostaną zwolnieni. Zawartość składów pozostanie bez zmian.",
+                    Text = Ui("logistics", "delete"),
+                    TooltipText = Ui("logistics", "delete-tooltip"),
                 };
                 delete.Pressed += () =>
                 {
                     QueueLogisticsCommand(SimulationCommand.DeleteLogisticsNetwork(
                         _engine.CurrentTick.Next(), _commandSequence++, network.Id));
-                    _inspector.Text =
-                        $"Zlecono usunięcie sieci {network.Name}. Składy wrócą do Default; towary pozostaną na miejscu.";
+                    _inspector.Text = UiFormat(
+                        "logistics",
+                        "delete-ordered",
+                        network.Name);
                 };
                 heading.AddChild(delete);
             }
 
-            section.AddChild(new Label { Text = "Przypisani tragarze:" });
+            section.AddChild(new Label { Text = Ui("logistics", "assigned-haulers") });
             var haulers = new HFlowContainer();
             section.AddChild(haulers);
             foreach (var actor in snapshot.Actors.Where(actor => !actor.IsJuvenile).OrderBy(actor => actor.Id))
@@ -7755,7 +7854,7 @@ public partial class Main : Node
                 haulers.AddChild(check);
             }
 
-            section.AddChild(new Label { Text = "Dozwolone źródła:" });
+            section.AddChild(new Label { Text = Ui("logistics", "allowed-sources") });
             var sources = new HFlowContainer();
             section.AddChild(sources);
             foreach (var zone in snapshot.StorageZones.OrderBy(zone => zone.Id))
@@ -7774,7 +7873,11 @@ public partial class Main : Node
         }
 
         _logisticsRows.AddChild(new HSeparator());
-        _logisticsRows.AddChild(new Label { Text = "Obszary i pojemniki", ThemeTypeVariation = "HeaderMedium" });
+        _logisticsRows.AddChild(new Label
+        {
+            Text = Ui("logistics", "areas-and-containers"),
+            ThemeTypeVariation = "HeaderMedium",
+        });
         foreach (var area in snapshot.StorageAreas.OrderBy(area => area.Id))
         {
             AddStorageAreaManagementRow(snapshot, area);
@@ -7794,17 +7897,17 @@ public partial class Main : Node
         section.AddChild(heading);
         heading.AddChild(new Label
         {
-            Text = $"Obszar {area.Id}",
+            Text = UiFormat("logistics", "area", area.Id),
             CustomMinimumSize = new Vector2(110, 0),
         });
         var name = new LineEdit
         {
-            Text = area.Name,
+            Text = DescribeStorageAreaName(snapshot, area),
             MaxLength = 40,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
         };
         heading.AddChild(name);
-        var rename = new Button { Text = "Zmień nazwę" };
+        var rename = new Button { Text = Ui("logistics", "rename") };
         rename.Pressed += () =>
         {
             if (!string.IsNullOrWhiteSpace(name.Text))
@@ -7833,28 +7936,37 @@ public partial class Main : Node
         heading.AddChild(networkChoice);
         section.AddChild(new Label
         {
-            Text = $"Pola: {area.Footprint.Count} • pojemność {area.StoredQuantity}/{area.Capacity}",
+            Text = UiFormat(
+                "logistics",
+                "area-capacity",
+                area.Footprint.Count,
+                area.StoredQuantity,
+                area.Capacity),
         });
         var actions = new HBoxContainer();
         section.AddChild(actions);
         var resize = new Button
         {
-            Text = "Zmień rozmiar",
-            TooltipText = "Wskaż nowy prostokąt. Nie można nakładać obszarów ani wykluczyć pola z istniejącym pojemnikiem.",
+            Text = Ui("logistics", "resize"),
+            TooltipText = Ui("logistics", "resize-tooltip"),
         };
-        resize.Pressed += () => BeginStorageAreaResize(area.Id, area.Name);
+        resize.Pressed += () => BeginStorageAreaResize(
+            area.Id,
+            DescribeStorageAreaName(snapshot, area));
         actions.AddChild(resize);
         var dissolve = new Button
         {
-            Text = "Rozwiąż obszar",
-            TooltipText = "Usuwa wspólny obszar. Pojemniki i zawartość pozostają jako bezpieczne składy jednopunktowe w tej samej sieci.",
+            Text = Ui("logistics", "dissolve"),
+            TooltipText = Ui("logistics", "dissolve-tooltip"),
         };
         dissolve.Pressed += () =>
         {
             QueueLogisticsCommand(SimulationCommand.DissolveStorageArea(
                 _engine.CurrentTick.Next(), _commandSequence++, area.Id));
-            _inspector.Text =
-                $"Zlecono rozwiązanie obszaru {area.Name}. Pojemniki i towary pozostaną na miejscu.";
+            _inspector.Text = UiFormat(
+                "logistics",
+                "dissolve-ordered",
+                DescribeStorageAreaName(snapshot, area));
         };
         actions.AddChild(dissolve);
 
@@ -7877,7 +7989,7 @@ public partial class Main : Node
             {
                 var filters = new HFlowContainer
                 {
-                    TooltipText = "Filtr dotyczy nowych dostaw; istniejąca zawartość nie jest niszczona.",
+                    TooltipText = Ui("logistics", "filter-tooltip"),
                 };
                 row.AddChild(filters);
                 foreach (var resource in SolidContainerFilterCategories)
@@ -7887,7 +7999,7 @@ public partial class Main : Node
                     {
                         Text = DescribeResource(resource),
                         ButtonPressed = zone.ResourceFilter.HasFlag(resourceFilter),
-                        TooltipText = "Włącz lub wyłącz tę kategorię dla przyszłych dostaw.",
+                        TooltipText = Ui("logistics", "filter-category-tooltip"),
                     };
                     check.Toggled += included => QueueLogisticsCommand(
                         SimulationCommand.ConfigureStorageFilterResource(
@@ -7903,7 +8015,10 @@ public partial class Main : Node
             {
                 provider.AddChild(new Label
                 {
-                    Text = $"filtr: {DescribeResource(zone.AcceptedResource)}",
+                    Text = UiFormat(
+                        "logistics",
+                        "filter",
+                        DescribeResource(zone.AcceptedResource)),
                 });
             }
         }
@@ -7919,8 +8034,28 @@ public partial class Main : Node
 
         _resizingStorageAreaId = areaId;
         _logisticsWindow.Hide();
-        _inspector.Text =
-            $"Zmiana rozmiaru {areaName}: przeciągnij nowy prostokąt do 256 pól • wszystkie pojemniki muszą pozostać wewnątrz • PPM lub Esc anuluje";
+        _inspector.Text = UiFormat("logistics", "resize-prompt", areaName);
+    }
+
+    private string DescribeStorageAreaName(
+        SimulationSnapshot snapshot,
+        StorageAreaSnapshot area)
+    {
+        if (snapshot.WatchtowerPosts.Any(post => snapshot.StorageZones.Any(zone =>
+                zone.Id == post.FoodStorageId && zone.StorageAreaId == area.Id)))
+        {
+            return UiFormat("logistics", "watchtower-storage-name", area.Id);
+        }
+        if (area.Name == $"Storage {area.Id.Value}")
+        {
+            return UiFormat("logistics", "automatic-storage-name", area.Id);
+        }
+        if (area.Name == $"Storage area {area.Id.Value}")
+        {
+            return UiFormat("logistics", "automatic-area-name", area.Id);
+        }
+
+        return area.Name;
     }
 
     private static readonly ResourceKind[] SolidContainerFilterCategories =
